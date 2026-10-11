@@ -2,6 +2,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import PhaserGame from '../components/PhaserGame';
 import { PlazaConnection } from '../plaza';
+import { loadChecker } from '../spellingData';
+import type { Misspelling } from '../spelling';
 import type { PlazaStatus } from '../plaza';
 import { readStudentSession } from '../studentAuth';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
@@ -29,6 +31,7 @@ export default function Game() {
   
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
+  const [spelling, setSpelling] = useState<Misspelling[]>([]); // words that stopped the last message
   const [whisperTo, setWhisperTo] = useState(''); // a classmate's id; empty means nearby chat
   const [classmates, setClassmates] = useState<{ id: string; name: string }[]>([]);
   const [connection, setConnection] = useState<PlazaConnection | null>(null);
@@ -73,13 +76,29 @@ export default function Game() {
 
   if (!state?.roomCode || !session) return null;
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim() || !connection) return;
+
+    // Every word must be English. Names of people in the Plaza are fine.
+    // If the dictionary cannot load, chat carries on rather than stopping.
+    try {
+      const names = [session.student.displayName, ...[...connection.players.values()].map(player => player.name)];
+      const problems = (await loadChecker())(chatInput, names);
+      setSpelling(problems);
+      if (problems.length) return;
+    } catch { /* offline dictionary: the teacher still reviews the message */ }
 
     // Send message to the server for moderation
     if (connection.send({ t: 'chat', text: chatInput, ...(whisperTo ? { to: whisperTo } : {}) })) setChatInput('');
     else setMessages(prev => [...prev, { sender: 'System Warning', text: 'Not connected. Try again in a moment.' }]);
+  };
+
+  // Swaps one word for a suggestion and takes it off the list.
+  const useSuggestion = (word: string, suggestion: string) => {
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    setChatInput(current => current.replace(new RegExp(`(?<![\\p{L}'’])${escaped}(?![\\p{L}'’])`, 'u'), suggestion));
+    setSpelling(current => current.filter(item => item.word !== word));
   };
 
   const handlePreventClipboard = (e: React.ClipboardEvent) => {
@@ -133,7 +152,18 @@ export default function Game() {
             ))}
           </div>
           
-          <form className="chat-input-wrapper" onSubmit={handleSendMessage}>
+          {spelling.length > 0 && <div className="spelling-help" role="alert">
+            <strong>Use English words only.</strong>
+            {spelling.map(item => <div key={item.word} className="spelling-word">
+              <span className="spelling-bad">{item.word}</span>
+              {item.suggestions.length ? <>
+                <span>try:</span>
+                {item.suggestions.map(suggestion => <button key={suggestion} type="button" className="spelling-fix"
+                  onClick={() => useSuggestion(item.word, suggestion)}>{suggestion}</button>)}
+              </> : <span>is not an English word. Try a different word.</span>}
+            </div>)}
+          </div>}
+          <form className="chat-input-wrapper" onSubmit={event => void handleSendMessage(event)}>
             <select
               className="chat-target"
               value={whisperTo}
@@ -149,7 +179,7 @@ export default function Game() {
               placeholder={whisperTo ? 'Whisper (your teacher can read it)...' : 'Message people nearby (teacher approves)...'}
               maxLength={200}
               value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
+              onChange={(e) => { setChatInput(e.target.value); if (!e.target.value) setSpelling([]); }}
               onCopy={handlePreventClipboard}
               onPaste={handlePreventClipboard}
               onCut={handlePreventClipboard}

@@ -109,7 +109,8 @@
 }
 
 .chat-input {
-  flex-grow: 1;
+  flex: 1 1 0;
+  min-width: 0; /* an input never shrinks below its default width, which overflowed the panel */
   padding: 10px 14px;
   border-radius: 8px;
   border: 1px solid #ddd;
@@ -124,6 +125,7 @@
 }
 
 .chat-send-btn {
+  flex: 0 0 auto;
   padding: 10px 16px;
   font-size: 0.95rem;
   border-radius: 8px;
@@ -168,9 +170,43 @@
 }
 
 .chat-target {
-  max-width: 9rem;
+  flex: 0 0 auto;
+  max-width: 7.5rem;
   padding: 0 0.4rem;
   border-radius: 8px;
   border: 1px solid rgba(0, 0, 0, 0.2);
   background: rgba(255, 255, 255, 0.9);
+}
+
+/* Words that are not English */
+.spelling-help {
+  padding: 0.5rem 0.75rem;
+  background: #fff3f0;
+  border-top: 1px solid #ffd5cc;
+  font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.spelling-word {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.spelling-bad {
+  font-weight: 700;
+  color: #FF5A5F;
+  text-decoration: line-through;
+}
+
+.spelling-fix {
+  padding: 0.1rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--primary);
+  background: white;
+  cursor: pointer;
+  font: inherit;
 }
