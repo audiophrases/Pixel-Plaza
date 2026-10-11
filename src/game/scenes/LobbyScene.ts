@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { renderAvatarSvg } from '../../utils/AvatarRenderer';
+import { AvatarFigure, FIGURE_BODY, FIGURE_TOP } from '../AvatarFigure';
 import type { PlazaConnection, PlazaEvent, PlazaPlayer } from '../../plaza';
 
 // Position updates go out at most this often; remote avatars glide between them.
@@ -11,6 +11,7 @@ export default class LobbyScene extends Phaser.Scene {
   private connection!: PlazaConnection;
 
   private playerEntities: { [id: string]: Phaser.GameObjects.Container } = {};
+  private figures: { [id: string]: AvatarFigure } = {};
   private localPlayerContainer?: Phaser.GameObjects.Container;
   private sent = { x: 0, y: 0 };
   private lastSent = 0;
@@ -104,27 +105,33 @@ export default class LobbyScene extends Phaser.Scene {
   private addPlayer(player: PlazaPlayer) {
     const isLocal = player.id === this.connection.selfId;
 
-    // Create nameplate
-    const nameText = this.add.text(0, -60, player.name, {
+    const container = this.add.container(player.x, player.y);
+    this.playerEntities[player.id] = container;
+    const figure = AvatarFigure.create(this, container, player.id, player);
+    if (figure) this.figures[player.id] = figure;
+    else {
+      // Fallback graphic if the avatar artwork has not loaded
+      container.add(this.add.rectangle(0, -16, 32, 64, isLocal ? 0xFF5A5F : 0x4285F4));
+    }
+
+    // Nameplate, above the tallest hat and drawn over the figure
+    const nameText = this.add.text(0, FIGURE_TOP - 12, player.name, {
       fontSize: '12px',
       fontFamily: '"Press Start 2P", cursive',
       color: '#ffffff',
       backgroundColor: 'rgba(0,0,0,0.5)',
       padding: { x: 4, y: 2 }
     }).setOrigin(0.5);
-
-    const container = this.add.container(player.x, player.y, [nameText]);
-    this.playerEntities[player.id] = container;
-    this.loadSvgToContainer(player.id, renderAvatarSvg(player), container, isLocal);
+    container.add(nameText);
 
     if (isLocal) {
       this.localPlayerContainer = container;
       this.sent = { x: player.x, y: player.y };
       this.physics.world.enable(this.localPlayerContainer);
       const body = this.localPlayerContainer.body as Phaser.Physics.Arcade.Body;
-      // Adjust body size to approximate the avatar
-      body.setSize(32, 64);
-      body.setOffset(-16, -32);
+      // Only the feet bump into things, so the head can pass in front of a wall
+      body.setSize(FIGURE_BODY.width, FIGURE_BODY.height);
+      body.setOffset(FIGURE_BODY.offsetX, FIGURE_BODY.offsetY);
       body.setCollideWorldBounds(true);
 
       // Collide with buildings/walls
@@ -141,11 +148,12 @@ export default class LobbyScene extends Phaser.Scene {
       container.destroy();
       delete this.playerEntities[id];
     }
-    this.textures.remove('avatar_' + id);
+    this.figures[id]?.destroy(); // after the container, which still shows its pictures
+    delete this.figures[id];
   }
 
   private showEmote(container: Phaser.GameObjects.Container, emote: string) {
-    const emoteText = this.add.text(0, -70, emote, {
+    const emoteText = this.add.text(0, FIGURE_TOP - 28, emote, {
       fontSize: '28px',
       fontFamily: 'sans-serif'
     }).setOrigin(0.5);
@@ -157,7 +165,7 @@ export default class LobbyScene extends Phaser.Scene {
 
     this.tweens.add({
       targets: emoteText,
-      y: -120,
+      y: FIGURE_TOP - 78,
       alpha: 0,
       duration: 2500,
       ease: 'Power2',
@@ -167,38 +175,13 @@ export default class LobbyScene extends Phaser.Scene {
     });
   }
 
-  private loadSvgToContainer(sessionId: string, svgStr: string, container: Phaser.GameObjects.Container, isLocal: boolean) {
-    if (!svgStr) {
-      // Fallback graphic if SVG fails to generate
-      const fallback = this.add.rectangle(0, -16, 32, 64, isLocal ? 0xFF5A5F : 0x4285F4);
-      container.add(fallback);
-      // Ensure name is always on top
-      container.bringToTop(container.list[0]);
-      return;
+  update(time: number) {
+    // Walk cycles, and whoever stands lower on the map is drawn in front.
+    for (const [id, container] of Object.entries(this.playerEntities)) {
+      this.figures[id]?.update(time);
+      container.setDepth(container.y);
     }
 
-    const textureKey = 'avatar_' + sessionId;
-    
-    // Create an Image object to load the data URI
-    const img = new Image();
-    // Use base64 encoding to avoid parsing issues with raw SVG strings in data URIs
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgStr)));
-    
-    img.onload = () => {
-      if (!this.textures.exists(textureKey)) {
-        this.textures.addImage(textureKey, img);
-      }
-      
-      const sprite = this.add.sprite(0, -16, textureKey);
-      sprite.setScale(0.8); // Adjust scale based on PinPlay viewBox
-      container.add(sprite);
-
-      // Re-sort container so nameplate is above sprite
-      container.bringToTop(container.list[0]);
-    };
-  }
-
-  update(time: number) {
     if (!this.cursors || !this.localPlayerContainer || !this.localPlayerContainer.body) return;
 
     const body = this.localPlayerContainer.body as Phaser.Physics.Arcade.Body;
