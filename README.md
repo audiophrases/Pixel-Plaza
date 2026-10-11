@@ -79,6 +79,16 @@ Once on the laptop: install Node.js and copy the project. The first time `classr
 
 The laptop's address is plain HTTP, so student sessions cross the school network unencrypted. Sign in to the teacher controls on the laptop itself (`localhost`), not from another device.
 
+## AI moderation (optional)
+
+With an OpenAI API key, every message, nearby or whisper, is checked by OpenAI's moderation endpoint (`omni-moderation-latest`, free to use) after the word filter and before it reaches the teacher.
+
+- **Flagged:** the student is asked to rewrite it. The teacher sees it as *blocked*, with the categories OpenAI gave, such as `harassment`.
+- **Clean:** goes to the teacher as before. Approval is still required.
+- **OpenAI not answering** (3 second limit): the message still goes to the teacher, marked *not checked by moderation*, so a bad connection never stops the class.
+
+Online: `npx wrangler secret put OPENAI_API_KEY`. On the teacher's laptop, add `OPENAI_API_KEY=...` to `.dev.vars`. Without a key nothing changes. Messages are sent to OpenAI to be checked, so mention it in your school's data notice.
+
 ## Costs
 
 The Workers free plan is enough for a class. The heaviest case, 30 students all walking non-stop for an hour, is about 54,000 of the 100,000 Durable Object requests the free plan allows each day. Position updates are capped at 10 a second per student (`SEND_EVERY_MS` in `src/game/scenes/LobbyScene.ts`), and outgoing messages are free.
@@ -107,7 +117,7 @@ npm test
 
 - The PIN is shared by the class and changes each lesson. PinPlay supplies each student's verified Google identity; this app depends on PinPlay's login and roster policy.
 - There is one plaza. Every class shares it, so open it for one class at a time.
-- The word and phrase filter catches only a small set of obvious cases. Teacher approval is the moderation gate. There is no dictionary enforcement or AI context review.
+- The word and phrase filter catches only a small set of obvious cases. Teacher approval is the moderation gate. With an `OPENAI_API_KEY` set, every message also goes through OpenAI's moderation first (see below); there is no dictionary enforcement.
 - Chat is nearby chat (heard by students within 350 map pixels of where the sender stood) or a whisper to one classmate. Both wait for teacher approval, and the teacher sees whispers too. Room decoration, items, and building interiors are not implemented.
 - On the map each avatar is a paper doll made from the same eight parts as the portrait: the head turns the way the student walks (the back of the head when walking away), the torso takes the shirt, and arms and legs swing as they walk. Pants and shoes are derived from the shirt choice, so the saved avatar format is unchanged. See `src/game/AvatarFigure.ts`.
 - Browser controls cannot reliably stop screenshots or external translation tools.

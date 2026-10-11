@@ -310,3 +310,66 @@ test("the class plays on the teacher's laptop; students sign in online and are s
         for (const dir of dirs) removeTemp(dir);
     }
 });
+
+test('OpenAI moderation blocks flagged messages and never holds up the rest', { timeout: 120000 }, async () => {
+    const seen = [];
+    const openai = http.createServer((req, res) => {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+            const { input } = JSON.parse(body);
+            seen.push({ url: req.url, auth: req.headers.authorization, input });
+            res.setHeader('content-type', 'application/json');
+            if (/outage/.test(input)) { res.statusCode = 500; return res.end('{}'); }
+            const flagged = /hate/.test(input);
+            res.end(JSON.stringify({ results: [{ flagged, categories: { harassment: flagged, violence: false } }] }));
+        });
+    });
+    await new Promise(resolve => openai.listen(0, '127.0.0.1', resolve));
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo,
+        { OPENAI_API_KEY: 'test-key', OPENAI_BASE_URL: `http://127.0.0.1:${openai.address().port}` });
+    let alex;
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        PIN = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body.pin;
+        alex = await enter(base, 'signed-a', null);
+        const entries = async () => (await api(base, '/api/teacher/status', { session })).body.entries;
+        const send = async text => {
+            await new Promise(resolve => setTimeout(resolve, 1600)); // chat rate limit
+            alex.send({ t: 'chat', text });
+            return alex.next(message => message.t === 'notice', `reply to "${text}"`);
+        };
+
+        // Flagged by OpenAI: the student is told to rewrite it, the teacher sees why.
+        const refused = await send('I hate you all');
+        assert.equal(refused.level, 'warning');
+        assert.match(refused.text, /rewrite/);
+        let entry = (await entries()).find(e => e.text === 'I hate you all');
+        assert.deepEqual([entry.status, entry.flag], ['blocked', 'harassment']);
+
+        // Clean: goes to the teacher as before, with no flag.
+        assert.match((await send('Nice to meet you')).text, /approval/);
+        entry = (await entries()).find(e => e.text === 'Nice to meet you');
+        assert.deepEqual([entry.status, entry.flag], ['pending', null]);
+
+        // OpenAI down: the teacher is still the gate, and is told the check did not happen.
+        assert.match((await send('outage please')).text, /approval/);
+        entry = (await entries()).find(e => e.text === 'outage please');
+        assert.deepEqual([entry.status, entry.flag], ['pending', 'moderation unavailable']);
+
+        // The local word filter still runs first, so OpenAI is not asked about it.
+        const before = seen.length;
+        assert.match((await send('what the shit')).text, /rewrite/);
+        assert.equal(seen.length, before);
+        assert.ok(seen.every(call => call.url === '/v1/moderations' && call.auth === 'Bearer test-key'));
+    } finally {
+        alex?.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => openai.close(resolve));
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});

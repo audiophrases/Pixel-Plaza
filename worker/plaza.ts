@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './index.ts';
 import type { PinPlayStudent } from './pinplay.ts';
+import { moderate } from './moderation.ts';
 import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 
 const TICKET_MS = 60_000;
@@ -28,7 +29,7 @@ export type TeacherAction =
 export type TeacherStatus = {
     open: boolean;
     pin: string | null; // students type it to join; new each time the class opens
-    entries: { id: string; studentKey: string; sender: string; target: string | null; text: string; timestamp: number; status: string }[];
+    entries: { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; text: string; timestamp: number; status: string }[];
     muted: string[];
     online: { studentKey: string; name: string }[];
 };
@@ -59,7 +60,7 @@ export class PlazaRoom extends DurableObject<Env> {
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
         // Older rooms predate nearby chat and whispers: their messages were for everyone.
         const chatColumns = this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('chat')").toArray().map(row => row.name);
-        for (const [column, type] of [['target_key', 'TEXT'], ['target_name', 'TEXT'], ['x', 'REAL'], ['y', 'REAL']]) {
+        for (const [column, type] of [['target_key', 'TEXT'], ['target_name', 'TEXT'], ['x', 'REAL'], ['y', 'REAL'], ['flag', 'TEXT']]) {
             if (!chatColumns.includes(column)) this.sql.exec(`ALTER TABLE chat ADD COLUMN ${column} ${type}`);
         }
         // Keepalive pings are answered without waking the room.
@@ -149,7 +150,7 @@ export class PlazaRoom extends DurableObject<Env> {
         return {
             open: this.isOpen(),
             pin: this.classPin(),
-            entries: this.sql.exec<TeacherStatus['entries'][number]>(`SELECT id, student_key AS studentKey, sender, target_name AS target, text,
+            entries: this.sql.exec<TeacherStatus['entries'][number]>(`SELECT id, student_key AS studentKey, sender, target_name AS target, flag, text,
                 ts AS timestamp, status FROM (
                     SELECT * FROM chat WHERE status = 'pending'
                     UNION SELECT * FROM (SELECT * FROM chat ORDER BY ts DESC LIMIT ?))
@@ -214,7 +215,7 @@ export class PlazaRoom extends DurableObject<Env> {
         } else if (data?.t === 'emote' && EMOTES.includes(data.emote)) {
             this.broadcast({ t: 'emote', id: seat.id, emote: data.emote });
         } else if (data?.t === 'chat') {
-            this.chat(ws, seat, data.text, data.to);
+            await this.chat(ws, seat, data.text, data.to);
         }
     }
 
@@ -282,11 +283,10 @@ export class PlazaRoom extends DurableObject<Env> {
         if (announce) this.systemChat(`${seat.name} left the Plaza.`, ws);
     }
 
-    private chat(ws: WebSocket, seat: Seat, value: unknown, to: unknown): void {
+    private async chat(ws: WebSocket, seat: Seat, value: unknown, to: unknown): Promise<void> {
         const reply = (level: 'info' | 'warning', text: string) => ws.send(JSON.stringify({ t: 'notice', level, text }));
-        if (!this.isOpen() || this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', seat.studentKey).toArray().length) {
-            return reply('warning', 'Chat is unavailable right now.');
-        }
+        const unavailable = () => !this.isOpen() || this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', seat.studentKey).toArray().length > 0;
+        if (unavailable()) return reply('warning', 'Chat is unavailable right now.');
         const now = Date.now();
         if (now - seat.lastChat < CHAT_GAP_MS) return reply('warning', 'Please wait before sending another message.');
         seat.lastChat = now;
@@ -301,11 +301,19 @@ export class PlazaRoom extends DurableObject<Env> {
         }
 
         // Blocked messages are kept too, so the teacher sees what was attempted.
-        const problem = chatProblem(value);
-        this.sql.exec(`INSERT INTO chat (id, student_key, sender, text, ts, status, target_key, target_name, x, y)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        let problem = chatProblem(value);
+        let flag: string | null = null;
+        if (!problem) {
+            const verdict = await moderate(value.trim(), this.env);
+            if (verdict.result === 'flagged') { problem = 'That message cannot be sent. Please rewrite it.'; flag = verdict.categories.join(', '); }
+            else if (verdict.result === 'unchecked') flag = 'moderation unavailable';
+            // The class may have closed or the student been muted while OpenAI answered.
+            if (unavailable()) return reply('warning', 'Chat is unavailable right now.');
+        }
+        this.sql.exec(`INSERT INTO chat (id, student_key, sender, text, ts, status, target_key, target_name, x, y, flag)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             crypto.randomUUID(), seat.studentKey, seat.name, value.trim().slice(0, 200), now, problem ? 'blocked' : 'pending',
-            target?.studentKey ?? null, target?.name ?? null, seat.x, seat.y);
+            target?.studentKey ?? null, target?.name ?? null, seat.x, seat.y, flag);
         this.sql.exec('DELETE FROM chat WHERE id NOT IN (SELECT id FROM chat ORDER BY ts DESC LIMIT ?)', CHAT_KEEP);
         reply(problem ? 'warning' : 'info', problem ?? 'Sent to your teacher for approval.');
     }
