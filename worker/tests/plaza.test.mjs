@@ -295,6 +295,14 @@ test("the class plays on the teacher's laptop; students sign in online and are s
         // The PinPlay session from online carries the student's name onto the laptop.
         const alex = await enter(laptop.base, 'signed-a', { skin: 1 });
         assert.equal(alex.me.name, 'Alex');
+
+        // On the laptop the server insists on English words, even if the page was bypassed.
+        alex.send({ t: 'chat', text: 'Hola amigos, I recieve it' });
+        const refused = await alex.next(message => message.t === 'notice', 'English-only notice');
+        assert.equal(refused.level, 'warning');
+        assert.match(refused.text, /English words only: Hola, recieve/);
+        alex.send({ t: 'chat', text: 'Hello friends, I receive it' });
+        assert.match((await alex.next(message => message.t === 'notice', 'accepted')).text, /approval/);
         alex.ws.close();
         await alex.closed;
 

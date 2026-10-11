@@ -95,7 +95,7 @@ Online: `npx wrangler secret put OPENAI_API_KEY`. On the teacher's laptop, add `
 Before a message is sent, every word is checked against an English dictionary (Hunspell `en_US`, in the student's browser). A word that is not English, whether another language or a spelling mistake, stops the message and shows the word with up to three suggestions to tap, such as *recieve* → *receive*, or *u* → *you*. Names of the students in the Plaza, laughter (*haha*), and chat words (*lol*, *ok*) are allowed, and accents do not matter (*cafe* and *café*).
 
 - It is a dictionary check, not a grammar check, and a few loanwords such as *amigo* are English words too.
-- It runs in the browser, so a student who tampers with the page could skip it. The teacher review and OpenAI check still apply to whatever is sent.
+- On the teacher's laptop (`npm run classroom`) the server checks again with the same dictionary, so tampering with the page does not skip it. The online site checks in the browser only. The teacher review and OpenAI check apply to whatever is sent.
 - The dictionary (about 200 KB compressed) loads when the Plaza opens. If it cannot load, chat carries on without the check.
 
 ## Costs
@@ -126,7 +126,7 @@ npm test
 
 - The PIN is shared by the class and changes each lesson. PinPlay supplies each student's verified Google identity; this app depends on PinPlay's login and roster policy.
 - There is one plaza. Every class shares it, so open it for one class at a time.
-- The word and phrase filter catches only a small set of obvious cases. Teacher approval is the moderation gate. With an `OPENAI_API_KEY` set, every message also goes through OpenAI's moderation first (see below); there is no server-side language check.
+- The word and phrase filter catches only a small set of obvious cases. Teacher approval is the moderation gate. With an `OPENAI_API_KEY` set, every message also goes through OpenAI's moderation first (see below); the server-side English check runs only on the teacher's laptop.
 - Chat is nearby chat (heard by students within 350 map pixels of where the sender stood) or a whisper to one classmate. Both wait for teacher approval, and the teacher sees whispers too. Room decoration, items, and building interiors are not implemented.
 - On the map each avatar is a paper doll made from the same eight parts as the portrait: the head turns the way the student walks (the back of the head when walking away), the torso takes the shirt, and arms and legs swing as they walk. Pants and shoes are derived from the shirt choice, so the saved avatar format is unchanged. See `src/game/AvatarFigure.ts`.
 - Browser controls cannot reliably stop screenshots or external translation tools.

@@ -306,6 +306,13 @@ export class PlazaRoom extends DurableObject<Env> {
         const reply = (level: 'info' | 'warning', text: string) => ws.send(JSON.stringify({ t: 'notice', level, text }));
         const unavailable = () => !this.isOpen() || this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', seat.studentKey).toArray().length > 0;
         if (unavailable()) return reply('warning', 'Chat is unavailable right now.');
+
+        // On the teacher's laptop every word must be English, whatever the page did.
+        if (typeof value === 'string' && this.env.LAN_URL) {
+            const { notEnglish } = await import('./english.ts');
+            const words = notEnglish(value, this.seats().map(other => other.name));
+            if (words.length) return reply('warning', `Use English words only: ${words.map(item => item.word).join(', ')}.`);
+        }
         const now = Date.now();
         if (now - seat.lastChat < CHAT_GAP_MS) return reply('warning', 'Please wait before sending another message.');
         seat.lastChat = now;

@@ -6,6 +6,9 @@
   "compatibility_date": "2026-09-01",
   "observability": { "enabled": true },
 
+  // The English dictionary the laptop checks chat against (worker/english.ts).
+  "rules": [{ "type": "Text", "globs": ["**/*.aff", "**/*.dic"], "fallthrough": true }],
+
   // The built app (npm run build). Only /api/* runs the Worker.
   "assets": {
     "directory": "./dist",
