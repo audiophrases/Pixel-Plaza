@@ -5,10 +5,9 @@ title Pixel Plaza - deploy
 
 where node >nul 2>nul || (echo Node.js is not installed. Get it from https://nodejs.org & pause & exit /b 1)
 
-if not exist node_modules (
-    echo Installing dependencies...
-    call npm ci || (echo. & echo Installing failed. & pause & exit /b 1)
-)
+rem Every time, so packages added by an update are installed too. Quick when nothing changed.
+echo Checking dependencies...
+call npm install --no-audit --no-fund --no-save || (echo. & echo Installing failed. Is this laptop online? & pause & exit /b 1)
 
 echo Deploying Pixel Plaza...
 call npm run deploy

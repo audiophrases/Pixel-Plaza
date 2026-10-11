@@ -11,10 +11,9 @@ if not exist .dev.vars (
     node scripts\setup-laptop.mjs || (pause & exit /b 1)
 )
 
-if not exist node_modules (
-    echo Installing dependencies...
-    call npm ci || (echo. & echo Installing failed. & pause & exit /b 1)
-)
+rem Every time, so packages added by an update are installed too. Quick when nothing changed.
+echo Checking dependencies...
+call npm install --no-audit --no-fund --no-save || (echo. & echo Installing failed. Is this laptop online? & pause & exit /b 1)
 
 rem Opens the teacher controls in the browser once the server answers.
 start "" /min powershell -NoProfile -WindowStyle Hidden -Command ^
