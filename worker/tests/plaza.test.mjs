@@ -330,7 +330,7 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
     const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
     const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo,
         { OPENAI_API_KEY: 'test-key', OPENAI_BASE_URL: `http://127.0.0.1:${openai.address().port}` });
-    let alex;
+    let alex, sam;
     try {
         const { base } = plaza;
         const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
@@ -365,8 +365,45 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
         assert.match((await send('what the shit')).text, /rewrite/);
         assert.equal(seen.length, before);
         assert.ok(seen.every(call => call.url === '/v1/moderations' && call.auth === 'Bearer test-key'));
+
+        // "Approve all" posts everything waiting, oldest first.
+        const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+        await api(base, '/api/teacher/approve-all', { session, body: {} });
+        const posted = [await alex.next(m => m.t === 'chat' && m.sender === 'Alex', 'first approved'),
+            await alex.next(m => m.t === 'chat' && m.sender === 'Alex', 'second approved')];
+        assert.deepEqual(posted.map(m => m.text), ['Nice to meet you', 'outage please']);
+        assert.ok(posted.every(m => typeof m.id === 'string'));
+        await alex.next(m => m.t === 'notice' && /approved/.test(m.text), 'approval notice');
+        await alex.next(m => m.t === 'notice' && /approved/.test(m.text), 'approval notice');
+        assert.equal((await entries()).filter(e => e.status === 'pending').length, 0);
+
+        // Review mode: what OpenAI cleared posts at once, with no teacher click.
+        const status = (await api(base, '/api/teacher/status', { session })).body;
+        assert.deepEqual([status.mode, status.moderation], ['approve', true]);
+        assert.equal((await api(base, '/api/teacher/mode', { session, body: { mode: 'review' } })).body.mode, 'review');
+        sam = await enter(base, 'signed-b', null);
+        await pause(1600);
+        alex.send({ t: 'chat', text: 'Good morning everyone' });
+        const live = await alex.next(m => m.t === 'chat' && m.text === 'Good morning everyone', 'instant post');
+        await sam.next(m => m.t === 'chat' && m.text === 'Good morning everyone', 'heard at once');
+        assert.equal((await entries()).find(e => e.text === 'Good morning everyone').status, 'approved');
+
+        // ...but not what OpenAI could not check, nor a whisper.
+        assert.match((await send('outage again')).text, /approval/);
+        await pause(1600);
+        alex.send({ t: 'chat', text: 'Psst, a whisper', to: sam.welcome.id });
+        assert.match((await alex.next(m => m.t === 'notice', 'whisper waits')).text, /approval/);
+        const waiting = (await entries()).filter(e => e.status === 'pending').map(e => e.text).sort();
+        assert.deepEqual(waiting, ['Psst, a whisper', 'outage again']);
+
+        // The teacher can take a posted message down; it leaves every screen.
+        await api(base, '/api/teacher/review', { session, body: { id: live.id, approve: false } });
+        assert.equal((await alex.next(m => m.t === 'retract', 'retract')).id, live.id);
+        assert.equal((await sam.next(m => m.t === 'retract', 'retract')).id, live.id);
+        assert.equal((await entries()).find(e => e.text === 'Good morning everyone').status, 'removed');
     } finally {
         alex?.ws.close();
+        sam?.ws.close();
         await plaza.stop();
         await new Promise(resolve => openai.close(resolve));
         await new Promise(resolve => pinPlay.close(resolve));

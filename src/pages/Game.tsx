@@ -13,6 +13,7 @@ interface GameState {
 }
 
 interface ChatMessage {
+  id?: string;
   sender: string;
   text: string;
   timestamp?: number;
@@ -48,7 +49,8 @@ export default function Game() {
         setClassmates(others.map(({ id, name }) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)));
         if (event.t === 'leave') setWhisperTo(current => (current === event.id ? '' : current));
       }
-      if (event.t === 'chat') say({ sender: event.sender, text: event.text, timestamp: event.ts, whisper: event.whisper, to: event.to });
+      if (event.t === 'chat') say({ id: event.id, sender: event.sender, text: event.text, timestamp: event.ts, whisper: event.whisper, to: event.to });
+      else if (event.t === 'retract') setMessages(prev => prev.filter(message => message.id !== event.id));
       else if (event.t === 'notice') say({ sender: event.level === 'warning' ? 'System Warning' : 'System', text: event.text });
     });
     const unwatch = plaza.onStatus(next => {

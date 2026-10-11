@@ -20,16 +20,24 @@ const CLOSE_REPLACED = 4009;   // the same student joined from another window
 // room hibernating between messages.
 type Seat = { id: string; studentKey: string; name: string; avatar: Avatar; x: number; y: number; lastChat: number; left?: boolean };
 
+// 'approve': every message waits for the teacher. 'review': nearby chat that OpenAI
+// cleared posts at once and the teacher reviews afterwards; whispers still wait.
+export type ChatMode = 'approve' | 'review';
+
 export type TeacherAction =
     | { kind: 'status' }
     | { kind: 'open'; open: boolean }
-    | { kind: 'review'; id: string; approve: boolean }
+    | { kind: 'review'; id: string; approve: boolean } // approve = false also takes down a message already posted
+    | { kind: 'approveAll' }
+    | { kind: 'mode'; mode: ChatMode }
     | { kind: 'mute'; studentKey: string; muted: boolean };
 
 export type TeacherStatus = {
     open: boolean;
     pin: string | null; // students type it to join; new each time the class opens
     entries: { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; text: string; timestamp: number; status: string }[];
+    mode: ChatMode;
+    moderation: boolean; // an OpenAI key is set, so 'review' mode can post anything
     muted: string[];
     online: { studentKey: string; name: string }[];
 };
@@ -141,6 +149,11 @@ export class PlazaRoom extends DurableObject<Env> {
         if (action.kind === 'review' && !this.review(action.id, action.approve)) {
             return { error: 'That message is no longer pending.', status: 400 };
         }
+        if (action.kind === 'approveAll') {
+            const pending = this.sql.exec<{ id: string }>("SELECT id FROM chat WHERE status = 'pending' ORDER BY ts").toArray();
+            for (const { id } of pending) this.review(id, true);
+        }
+        if (action.kind === 'mode') this.saveSetting('mode', action.mode);
         if (action.kind === 'mute') {
             if (action.muted) this.sql.exec('INSERT OR IGNORE INTO mutes (student_key) VALUES (?)', action.studentKey);
             else this.sql.exec('DELETE FROM mutes WHERE student_key = ?', action.studentKey);
@@ -155,6 +168,8 @@ export class PlazaRoom extends DurableObject<Env> {
                     SELECT * FROM chat WHERE status = 'pending'
                     UNION SELECT * FROM (SELECT * FROM chat ORDER BY ts DESC LIMIT ?))
                 ORDER BY ts DESC`, STATUS_HISTORY).toArray(),
+            mode: this.mode(),
+            moderation: !!this.env.OPENAI_API_KEY,
             muted: this.sql.exec<{ student_key: string }>('SELECT student_key FROM mutes').toArray().map(row => row.student_key),
             online: this.seats().map(seat => ({ studentKey: seat.studentKey, name: seat.name }))
         };
@@ -230,6 +245,10 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // ---------- Internals ----------
 
+    private mode(): ChatMode {
+        return this.setting('mode') === 'review' ? 'review' : 'approve';
+    }
+
     private isOpen(): boolean {
         return this.setting('open') === '1';
     }
@@ -303,42 +322,66 @@ export class PlazaRoom extends DurableObject<Env> {
         // Blocked messages are kept too, so the teacher sees what was attempted.
         let problem = chatProblem(value);
         let flag: string | null = null;
+        let cleared = false; // OpenAI looked at it and found nothing
         if (!problem) {
             const verdict = await moderate(value.trim(), this.env);
+            cleared = verdict.result === 'clean';
             if (verdict.result === 'flagged') { problem = 'That message cannot be sent. Please rewrite it.'; flag = verdict.categories.join(', '); }
             else if (verdict.result === 'unchecked') flag = 'moderation unavailable';
             // The class may have closed or the student been muted while OpenAI answered.
             if (unavailable()) return reply('warning', 'Chat is unavailable right now.');
         }
+        // Review mode posts only what OpenAI cleared, and never a whisper.
+        const posts = !problem && cleared && !target && this.mode() === 'review';
+        const entry = { id: crypto.randomUUID(), student_key: seat.studentKey, sender: seat.name, text: value.trim().slice(0, 200),
+            target_key: target?.studentKey ?? null, x: seat.x, y: seat.y };
         this.sql.exec(`INSERT INTO chat (id, student_key, sender, text, ts, status, target_key, target_name, x, y, flag)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            crypto.randomUUID(), seat.studentKey, seat.name, value.trim().slice(0, 200), now, problem ? 'blocked' : 'pending',
-            target?.studentKey ?? null, target?.name ?? null, seat.x, seat.y, flag);
+            entry.id, entry.student_key, entry.sender, entry.text, now, problem ? 'blocked' : posts ? 'approved' : 'pending',
+            entry.target_key, target?.name ?? null, entry.x, entry.y, flag);
         this.sql.exec('DELETE FROM chat WHERE id NOT IN (SELECT id FROM chat ORDER BY ts DESC LIMIT ?)', CHAT_KEEP);
-        reply(problem ? 'warning' : 'info', problem ?? 'Sent to your teacher for approval.');
+        if (posts) this.deliver(entry);
+        else reply(problem ? 'warning' : 'info', problem ?? 'Sent to your teacher for approval.');
     }
 
     private review(id: string, approve: boolean): boolean {
-        const entry = this.sql.exec<{ student_key: string; sender: string; text: string; status: string;
+        const entry = this.sql.exec<{ id: string; student_key: string; sender: string; text: string; status: string;
             target_key: string | null; x: number | null; y: number | null }>(
-            'SELECT student_key, sender, text, status, target_key, x, y FROM chat WHERE id = ?', id).toArray()[0];
-        if (!entry || entry.status !== 'pending') return false;
+            'SELECT id, student_key, sender, text, status, target_key, x, y FROM chat WHERE id = ?', id).toArray()[0];
+        if (!entry) return false;
+
+        // Taking down a message that already posted: it disappears from every screen.
+        if (entry.status === 'approved' && !approve) {
+            this.sql.exec("UPDATE chat SET status = 'removed' WHERE id = ?", id);
+            this.broadcast({ t: 'retract', id });
+            this.notify(entry.student_key, 'warning', 'Your teacher removed one of your messages.');
+            return true;
+        }
+        if (entry.status !== 'pending') return false;
+
         const approved = approve && this.isOpen();
         this.sql.exec('UPDATE chat SET status = ? WHERE id = ?', approved ? 'approved' : 'rejected', id);
         if (!approved) {
             this.notify(entry.student_key, 'info', 'Your message was not posted.');
             return true;
         }
+        const delivered = this.deliver(entry);
+        this.notify(entry.student_key, delivered ? 'info' : 'warning',
+            delivered ? 'Your message was approved.' : 'Your whisper was approved, but that student has left the Plaza.');
+        return true;
+    }
 
-        // A whisper goes to its two students, nearby chat to whoever stands within
-        // earshot of where the sender stood; the sender always sees their own.
+    // A whisper goes to its two students, nearby chat to whoever stands within
+    // earshot of where the sender stood; the sender always sees their own.
+    // False when a whisper had nobody to reach.
+    private deliver(entry: { id: string; student_key: string; sender: string; text: string; target_key: string | null; x: number | null; y: number | null }): boolean {
         const recipients = new Set([entry.student_key]);
         for (const seat of this.seats()) {
             const heard = entry.target_key !== null ? seat.studentKey === entry.target_key
                 : entry.x === null || entry.y === null || Math.hypot(seat.x - entry.x, seat.y - entry.y) <= HEARING_RANGE;
             if (heard) recipients.add(seat.studentKey);
         }
-        const message = JSON.stringify({ t: 'chat', sender: entry.sender, text: entry.text, ts: Date.now(),
+        const message = JSON.stringify({ t: 'chat', id: entry.id, sender: entry.sender, text: entry.text, ts: Date.now(),
             ...(entry.target_key !== null ? { whisper: true, to: this.sql.exec<{ name: string }>(
                 'SELECT name FROM students WHERE student_key = ?', entry.target_key).toArray()[0]?.name ?? 'a classmate' } : {}) });
         for (const studentKey of recipients) {
@@ -346,10 +389,7 @@ export class PlazaRoom extends DurableObject<Env> {
                 try { ws.send(message); } catch { /* closing */ }
             }
         }
-        const delivered = entry.target_key === null || recipients.size > 1;
-        this.notify(entry.student_key, delivered ? 'info' : 'warning',
-            delivered ? 'Your message was approved.' : 'Your whisper was approved, but that student has left the Plaza.');
-        return true;
+        return entry.target_key === null || recipients.size > 1;
     }
 
     // Closing rejects pending chat and stops new joins; students already in stay.
