@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './index.ts';
 import type { PinPlayStudent } from './pinplay.ts';
+import { checkGrammar } from './grammar.ts';
 import { moderate } from './moderation.ts';
 import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 
@@ -9,6 +10,7 @@ const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
 const CHAT_KEEP = 500;
 const STATUS_HISTORY = 100;
 const CHAT_GAP_MS = 1500;
+const CHECK_GAP_MS = 800; // grammar hints cost money: no more than one a student can read
 // Nearby chat reaches students within this many map pixels of where the sender stood.
 export const HEARING_RANGE = 350;
 
@@ -18,7 +20,7 @@ const CLOSE_REPLACED = 4009;   // the same student joined from another window
 
 // Per-socket state. It lives in the socket's attachment, so it survives the
 // room hibernating between messages.
-type Seat = { id: string; studentKey: string; name: string; avatar: Avatar; x: number; y: number; lastChat: number; left?: boolean };
+type Seat = { id: string; studentKey: string; name: string; avatar: Avatar; x: number; y: number; lastChat: number; lastCheck?: number; left?: boolean };
 
 // 'approve': every message waits for the teacher. 'review': nearby chat that OpenAI
 // cleared posts at once and the teacher reviews afterwards; whispers still wait.
@@ -35,7 +37,7 @@ export type TeacherAction =
 export type TeacherStatus = {
     open: boolean;
     pin: string | null; // students type it to join; new each time the class opens
-    entries: { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; text: string; timestamp: number; status: string }[];
+    entries: { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string }[];
     mode: ChatMode;
     moderation: boolean; // an OpenAI key is set, so 'review' mode can post anything
     muted: string[];
@@ -68,7 +70,7 @@ export class PlazaRoom extends DurableObject<Env> {
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
         // Older rooms predate nearby chat and whispers: their messages were for everyone.
         const chatColumns = this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('chat')").toArray().map(row => row.name);
-        for (const [column, type] of [['target_key', 'TEXT'], ['target_name', 'TEXT'], ['x', 'REAL'], ['y', 'REAL'], ['flag', 'TEXT']]) {
+        for (const [column, type] of [['target_key', 'TEXT'], ['target_name', 'TEXT'], ['x', 'REAL'], ['y', 'REAL'], ['flag', 'TEXT'], ['note', 'TEXT']]) {
             if (!chatColumns.includes(column)) this.sql.exec(`ALTER TABLE chat ADD COLUMN ${column} ${type}`);
         }
         // Keepalive pings are answered without waking the room.
@@ -163,7 +165,7 @@ export class PlazaRoom extends DurableObject<Env> {
         return {
             open: this.isOpen(),
             pin: this.classPin(),
-            entries: this.sql.exec<TeacherStatus['entries'][number]>(`SELECT id, student_key AS studentKey, sender, target_name AS target, flag, text,
+            entries: this.sql.exec<TeacherStatus['entries'][number]>(`SELECT id, student_key AS studentKey, sender, target_name AS target, flag, note, text,
                 ts AS timestamp, status FROM (
                     SELECT * FROM chat WHERE status = 'pending'
                     UNION SELECT * FROM (SELECT * FROM chat ORDER BY ts DESC LIMIT ?))
@@ -229,8 +231,14 @@ export class PlazaRoom extends DurableObject<Env> {
             this.broadcast({ t: 'move', id: seat.id, ...position }, ws);
         } else if (data?.t === 'emote' && EMOTES.includes(data.emote)) {
             this.broadcast({ t: 'emote', id: seat.id, emote: data.emote });
+        } else if (data?.t === 'check') {
+            await this.grammar(ws, seat, data.id, data.text);
         } else if (data?.t === 'chat') {
-            await this.chat(ws, seat, data.text, data.to);
+            // What the student did with a grammar hint, for the teacher to see.
+            const text = (value: unknown) => (typeof value === 'string' ? value.slice(0, 200) : null);
+            const note = text(data.was) ? `Used the suggestion. They wrote: "${text(data.was)}"`
+                : text(data.better) ? `Kept their own words. Suggested: "${text(data.better)}"` : null;
+            await this.chat(ws, seat, data.text, data.to, note);
         }
     }
 
@@ -302,7 +310,19 @@ export class PlazaRoom extends DurableObject<Env> {
         if (announce) this.systemChat(`${seat.name} left the Plaza.`, ws);
     }
 
-    private async chat(ws: WebSocket, seat: Seat, value: unknown, to: unknown): Promise<void> {
+    // A hint before sending, never a block: whatever goes wrong, the answer is "fine".
+    private async grammar(ws: WebSocket, seat: Seat, id: unknown, text: unknown): Promise<void> {
+        const now = Date.now();
+        let answer: Awaited<ReturnType<typeof checkGrammar>> = { ok: true };
+        if (typeof text === 'string' && now - (seat.lastCheck ?? 0) >= CHECK_GAP_MS && this.isOpen()) {
+            seat.lastCheck = now;
+            ws.serializeAttachment(seat);
+            answer = await checkGrammar(text, this.env);
+        }
+        try { ws.send(JSON.stringify({ t: 'checked', id, ...answer })); } catch { /* closing */ }
+    }
+
+    private async chat(ws: WebSocket, seat: Seat, value: unknown, to: unknown, note: string | null): Promise<void> {
         const reply = (level: 'info' | 'warning', text: string) => ws.send(JSON.stringify({ t: 'notice', level, text }));
         const unavailable = () => !this.isOpen() || this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', seat.studentKey).toArray().length > 0;
         if (unavailable()) return reply('warning', 'Chat is unavailable right now.');
@@ -342,10 +362,10 @@ export class PlazaRoom extends DurableObject<Env> {
         const posts = !problem && cleared && !target && this.mode() === 'review';
         const entry = { id: crypto.randomUUID(), student_key: seat.studentKey, sender: seat.name, text: value.trim().slice(0, 200),
             target_key: target?.studentKey ?? null, x: seat.x, y: seat.y };
-        this.sql.exec(`INSERT INTO chat (id, student_key, sender, text, ts, status, target_key, target_name, x, y, flag)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        this.sql.exec(`INSERT INTO chat (id, student_key, sender, text, ts, status, target_key, target_name, x, y, flag, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             entry.id, entry.student_key, entry.sender, entry.text, now, problem ? 'blocked' : posts ? 'approved' : 'pending',
-            entry.target_key, target?.name ?? null, entry.x, entry.y, flag);
+            entry.target_key, target?.name ?? null, entry.x, entry.y, flag, note);
         this.sql.exec('DELETE FROM chat WHERE id NOT IN (SELECT id FROM chat ORDER BY ts DESC LIMIT ?)', CHAT_KEEP);
         if (posts) this.deliver(entry);
         else reply(problem ? 'warning' : 'info', problem ?? 'Sent to your teacher for approval.');

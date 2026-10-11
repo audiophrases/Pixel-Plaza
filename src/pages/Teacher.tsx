@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './Teacher.css';
 
-type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; text: string; timestamp: number; status: string };
+type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
   open: boolean; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: { studentKey: string; name: string }[];
@@ -156,6 +156,7 @@ export default function Teacher() {
         {status.entries.map(entry => <article key={entry.id} className={`teacher-entry${entry === oldest ? ' teacher-oldest' : ''}`}>
           <div><strong>{entry.sender}</strong>{entry.target && <> → <strong>{entry.target}</strong> <em>(whisper)</em></>} <small>{new Date(entry.timestamp).toLocaleTimeString()} · {entry.status}</small></div>
           <p>{entry.text}</p>
+          {entry.note && <p className="teacher-note">Grammar hint: {entry.note}</p>}
           {entry.flag && <p className="teacher-flag">{entry.status === 'blocked' ? 'Blocked by moderation' : 'Not checked by moderation'}: {entry.flag}</p>}
           <div className="teacher-actions">
             {entry.status === 'pending' && <>

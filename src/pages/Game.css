@@ -210,3 +210,34 @@
   cursor: pointer;
   font: inherit;
 }
+
+/* A grammar hint: help, not a block */
+.grammar-help {
+  padding: 0.5rem 0.75rem;
+  background: #eefaf7;
+  border-top: 1px solid #c7ece4;
+  font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.grammar-fix {
+  font-weight: 700;
+  color: #007f73;
+}
+
+.grammar-why {
+  color: #555;
+}
+
+.grammar-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.grammar-actions .btn {
+  padding: 0.3rem 0.9rem;
+  font-size: 0.9rem;
+}

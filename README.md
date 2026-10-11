@@ -98,6 +98,17 @@ Before a message is sent, every word is checked against an English dictionary (H
 - On the teacher's laptop (`npm run classroom`) the server checks again with the same dictionary, so tampering with the page does not skip it. The online site checks in the browser only. The teacher review and OpenAI check apply to whatever is sent.
 - The dictionary (about 200 KB compressed) loads when the Plaza opens. If it cannot load, chat carries on without the check.
 
+## Grammar hints (optional)
+
+With the same `OPENAI_API_KEY`, a message that passes the dictionary check is also read by a small OpenAI chat model before it is sent. If it finds one clear mistake (verb form, article, plural, preposition, word order, a missing word) the student sees **Try this: *She goes to school every day.*** with a one-line reason in simple English and two buttons:
+
+- **Use this** sends the corrected sentence.
+- **Send mine** sends what they wrote.
+
+It never blocks. A message that looks fine, a short one (under 4 words), a slow answer (2 seconds), or any error means the message is simply sent. A student who turns hints down three times in a row is left alone for the next message. The queue shows the teacher a *Grammar hint* line for each message, saying whether the student used the suggestion or kept their own words.
+
+Each hint is one small API call (one message, a few hundred tokens), and a student gets at most one a second. The model is `gpt-4o-mini`; set `OPENAI_GRAMMAR_MODEL` in `.dev.vars` (or as a variable online) to use another. Set a monthly spending limit on the OpenAI account. Messages are sent to OpenAI to be checked, so mention it in your school's data notice.
+
 ## Costs
 
 The Workers free plan is enough for a class. The heaviest case, 30 students all walking non-stop for an hour, is about 54,000 of the 100,000 Durable Object requests the free plan allows each day. Position updates are capped at 10 a second per student (`SEND_EVERY_MS` in `src/game/scenes/LobbyScene.ts`), and outgoing messages are free.

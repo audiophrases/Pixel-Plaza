@@ -7,3 +7,5 @@ PINPLAY_API_URL=https://api.pinplay.win
 # Optional: also check every message with OpenAI's moderation. Online, set it with `npx wrangler secret put OPENAI_API_KEY`.
 # Without it, only the word filter and the teacher check messages.
 OPENAI_API_KEY=
+# Optional: the chat model that gives grammar hints (default gpt-4o-mini).
+# OPENAI_GRAMMAR_MODEL=

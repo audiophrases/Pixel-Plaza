@@ -418,3 +418,82 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
         removeTemp(persistTo);
     }
 });
+
+test('grammar hints advise, never block, and the teacher sees what the student chose', { timeout: 120000 }, async () => {
+    const calls = [];
+    const openai = http.createServer((req, res) => {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+            const request = JSON.parse(body);
+            res.setHeader('content-type', 'application/json');
+            if (req.url === '/v1/moderations') return res.end(JSON.stringify({ results: [{ flagged: false, categories: {} }] }));
+            const text = JSON.parse(request.messages[1].content).message;
+            calls.push({ auth: req.headers.authorization, model: request.model, text });
+            if (/broken/.test(text)) { res.statusCode = 500; return res.end('{}'); }
+            const wrong = /^She go /.test(text);
+            const result = wrong ? { ok: false, corrected: 'She goes to school every day', why: 'Use "goes" with "she".' } : { ok: true, corrected: '', why: '' };
+            res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(result) } }] }));
+        });
+    });
+    await new Promise(resolve => openai.listen(0, '127.0.0.1', resolve));
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo,
+        { OPENAI_API_KEY: 'test-key', OPENAI_BASE_URL: `http://127.0.0.1:${openai.address().port}`, OPENAI_GRAMMAR_MODEL: 'test-model' });
+    let alex;
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        PIN = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body.pin;
+        alex = await enter(base, 'signed-a', null);
+        const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+        const hint = async (id, text) => {
+            await pause(900); // one hint at a time
+            alex.send({ t: 'check', id, text });
+            return alex.next(message => message.t === 'checked' && message.id === id, `hint ${id}`);
+        };
+
+        // A clear mistake gets a suggestion and a reason in simple English.
+        const wrong = await hint('a', 'She go to school every day');
+        assert.deepEqual([wrong.ok, wrong.corrected, wrong.why], [false, 'She goes to school every day', 'Use "goes" with "she".']);
+        assert.deepEqual([calls[0].auth, calls[0].model], ['Bearer test-key', 'test-model']);
+
+        // Correct English, a short message and a broken checker are all simply fine.
+        assert.equal((await hint('b', 'I like to play games with you')).ok, true);
+        const before = calls.length;
+        assert.equal((await hint('c', 'hello there')).ok, true);
+        assert.equal(calls.length, before, 'short messages cost nothing');
+        assert.equal((await hint('d', 'this one is broken for sure')).ok, true);
+
+        // Asking again at once is not allowed to cost another call.
+        alex.send({ t: 'check', id: 'e1', text: 'She go to school every day' });
+        await alex.next(message => message.t === 'checked' && message.id === 'e1', 'first');
+        const spent = calls.length;
+        alex.send({ t: 'check', id: 'e2', text: 'She go to school every day' });
+        assert.equal((await alex.next(message => message.t === 'checked' && message.id === 'e2', 'second')).ok, true);
+        assert.equal(calls.length, spent);
+
+        // The message is sent either way; the teacher is told which the student chose.
+        await pause(1600);
+        alex.send({ t: 'chat', text: 'She go to school every day', better: 'She goes to school every day' });
+        assert.match((await alex.next(message => message.t === 'notice', 'kept')).text, /approval/);
+        await pause(1600);
+        alex.send({ t: 'chat', text: 'She goes to school every day', was: 'She go to school every day' });
+        assert.match((await alex.next(message => message.t === 'notice', 'used')).text, /approval/);
+        await pause(1600);
+        alex.send({ t: 'chat', text: 'No hint was involved here' });
+        await alex.next(message => message.t === 'notice', 'plain');
+        const entries = (await api(base, '/api/teacher/status', { session })).body.entries;
+        const note = text => entries.find(entry => entry.text === text).note;
+        assert.equal(note('She go to school every day'), 'Kept their own words. Suggested: "She goes to school every day"');
+        assert.equal(note('She goes to school every day'), 'Used the suggestion. They wrote: "She go to school every day"');
+        assert.equal(note('No hint was involved here'), null);
+    } finally {
+        alex?.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => openai.close(resolve));
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});

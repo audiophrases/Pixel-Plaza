@@ -1,6 +1,8 @@
 import type { AvatarConfig } from './utils/AvatarRenderer';
 
 export type PlazaPlayer = AvatarConfig & { id: string; name: string; x: number; y: number };
+// A hint on one chat message, from the server. Never a refusal.
+export type GrammarHint = { ok: true } | { ok: false; corrected: string; why: string };
 export type PlazaStatus = { state: 'connecting' | 'online' | 'reconnecting' | 'stopped'; message?: string };
 export type PlazaEvent =
   | { t: 'roster' } // everyone was replaced: first join, or back after a dropped connection
@@ -19,6 +21,7 @@ const PING_EVERY_MS = 10000;
 const PONG_WITHIN_MS = 5000;
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
 const CLOSE_REPLACED = 4009;
+const HINT_WAIT_MS = 2500; // a slow hint is dropped: the message is sent as it is
 
 // A refusal that retrying cannot fix, such as a wrong PIN or a closed class.
 class Refused extends Error {}
@@ -41,6 +44,7 @@ export class PlazaConnection {
   private pingTimer = 0;
   private pongTimer = 0;
   private retryTimer = 0;
+  private hints = new Map<string, (hint: GrammarHint) => void>();
 
   // A null avatar keeps the one saved on the server.
   constructor(pin: string, token: string, avatar: AvatarConfig | null) {
@@ -66,6 +70,22 @@ export class PlazaConnection {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.selfId) return false;
     this.ws.send(JSON.stringify(message));
     return true;
+  }
+
+  // Asks whether a message has a clear grammar mistake. Resolves to "fine" when
+  // anything is slow, offline or unsure, so it can never stop a message.
+  check(text: string): Promise<GrammarHint> {
+    return new Promise(resolve => {
+      const id = crypto.randomUUID();
+      let timer = 0;
+      const finish = (hint: GrammarHint) => {
+        window.clearTimeout(timer);
+        if (this.hints.delete(id)) resolve(hint);
+      };
+      timer = window.setTimeout(() => finish({ ok: true }), HINT_WAIT_MS);
+      this.hints.set(id, finish);
+      if (!this.send({ t: 'check', id, text })) finish({ ok: true });
+    });
   }
 
   close(): void {
@@ -152,6 +172,10 @@ export class PlazaConnection {
       this.fails = 0;
       this.setStatus({ state: 'online' });
       this.emit({ t: 'roster' });
+      return;
+    }
+    if (message.t === 'checked') {
+      this.hints.get(message.id)?.(message.ok ? { ok: true } : { ok: false, corrected: String(message.corrected), why: String(message.why) });
       return;
     }
     if (message.t === 'join') this.players.set(message.player.id, message.player);

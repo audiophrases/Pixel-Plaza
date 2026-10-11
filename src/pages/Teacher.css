@@ -23,3 +23,4 @@
 .teacher-queue small { color: #555; }
 .teacher-entry.teacher-oldest { background: #fff8e1; margin: 0 -.8rem; padding: 1rem .8rem; border-radius: 8px; }
 kbd { border: 1px solid #aaa; border-radius: 4px; padding: 0 .35rem; background: #f4f4f4; }
+.teacher-entry .teacher-note { color: #0b6b61; font-size: .9rem; margin: .3rem 0; }

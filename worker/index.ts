@@ -15,6 +15,7 @@ export interface Env {
     // Optional: with a key, every message is also checked by OpenAI's moderation before it reaches the teacher.
     OPENAI_API_KEY?: string;
     OPENAI_BASE_URL?: string; // tests only
+    OPENAI_GRAMMAR_MODEL?: string; // which chat model gives grammar hints; a small, cheap one by default
     // Set only on the teacher's laptop (npm run classroom): its address on the
     // school network, and the online Pixel Plaza where students sign in.
     LAN_URL?: string;
