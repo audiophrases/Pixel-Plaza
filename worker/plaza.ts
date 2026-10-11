@@ -8,6 +8,8 @@ const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
 const CHAT_KEEP = 500;
 const STATUS_HISTORY = 100;
 const CHAT_GAP_MS = 1500;
+// Nearby chat reaches students within this many map pixels of where the sender stood.
+export const HEARING_RANGE = 350;
 
 // Close codes the client acts on.
 const CLOSE_JOIN_AGAIN = 4001; // ticket unknown, used or expired
@@ -26,7 +28,7 @@ export type TeacherAction =
 export type TeacherStatus = {
     open: boolean;
     pin: string | null; // students type it to join; new each time the class opens
-    entries: { id: string; studentKey: string; sender: string; text: string; timestamp: number; status: string }[];
+    entries: { id: string; studentKey: string; sender: string; target: string | null; text: string; timestamp: number; status: string }[];
     muted: string[];
     online: { studentKey: string; name: string }[];
 };
@@ -55,6 +57,11 @@ export class PlazaRoom extends DurableObject<Env> {
             CREATE TABLE IF NOT EXISTS mutes (student_key TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS teacher_sessions (token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+        // Older rooms predate nearby chat and whispers: their messages were for everyone.
+        const chatColumns = this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('chat')").toArray().map(row => row.name);
+        for (const [column, type] of [['target_key', 'TEXT'], ['target_name', 'TEXT'], ['x', 'REAL'], ['y', 'REAL']]) {
+            if (!chatColumns.includes(column)) this.sql.exec(`ALTER TABLE chat ADD COLUMN ${column} ${type}`);
+        }
         // Keepalive pings are answered without waking the room.
         ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     }
@@ -142,7 +149,7 @@ export class PlazaRoom extends DurableObject<Env> {
         return {
             open: this.isOpen(),
             pin: this.classPin(),
-            entries: this.sql.exec<TeacherStatus['entries'][number]>(`SELECT id, student_key AS studentKey, sender, text,
+            entries: this.sql.exec<TeacherStatus['entries'][number]>(`SELECT id, student_key AS studentKey, sender, target_name AS target, text,
                 ts AS timestamp, status FROM (
                     SELECT * FROM chat WHERE status = 'pending'
                     UNION SELECT * FROM (SELECT * FROM chat ORDER BY ts DESC LIMIT ?))
@@ -207,7 +214,7 @@ export class PlazaRoom extends DurableObject<Env> {
         } else if (data?.t === 'emote' && EMOTES.includes(data.emote)) {
             this.broadcast({ t: 'emote', id: seat.id, emote: data.emote });
         } else if (data?.t === 'chat') {
-            this.chat(ws, seat, data.text);
+            this.chat(ws, seat, data.text, data.to);
         }
     }
 
@@ -275,7 +282,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (announce) this.systemChat(`${seat.name} left the Plaza.`, ws);
     }
 
-    private chat(ws: WebSocket, seat: Seat, value: unknown): void {
+    private chat(ws: WebSocket, seat: Seat, value: unknown, to: unknown): void {
         const reply = (level: 'info' | 'warning', text: string) => ws.send(JSON.stringify({ t: 'notice', level, text }));
         if (!this.isOpen() || this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', seat.studentKey).toArray().length) {
             return reply('warning', 'Chat is unavailable right now.');
@@ -286,22 +293,54 @@ export class PlazaRoom extends DurableObject<Env> {
         ws.serializeAttachment(seat);
         if (typeof value !== 'string') return reply('warning', 'Enter a text message.');
 
+        // `to` is the id of the classmate being whispered to; without it, the message is for whoever is nearby.
+        let target: Seat | undefined;
+        if (to !== undefined && to !== null) {
+            target = this.seats().find(other => other.id === to);
+            if (!target || target.studentKey === seat.studentKey) return reply('warning', 'That student is not in the Plaza right now.');
+        }
+
         // Blocked messages are kept too, so the teacher sees what was attempted.
         const problem = chatProblem(value);
-        this.sql.exec('INSERT INTO chat (id, student_key, sender, text, ts, status) VALUES (?, ?, ?, ?, ?, ?)',
-            crypto.randomUUID(), seat.studentKey, seat.name, value.trim().slice(0, 200), now, problem ? 'blocked' : 'pending');
+        this.sql.exec(`INSERT INTO chat (id, student_key, sender, text, ts, status, target_key, target_name, x, y)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            crypto.randomUUID(), seat.studentKey, seat.name, value.trim().slice(0, 200), now, problem ? 'blocked' : 'pending',
+            target?.studentKey ?? null, target?.name ?? null, seat.x, seat.y);
         this.sql.exec('DELETE FROM chat WHERE id NOT IN (SELECT id FROM chat ORDER BY ts DESC LIMIT ?)', CHAT_KEEP);
         reply(problem ? 'warning' : 'info', problem ?? 'Sent to your teacher for approval.');
     }
 
     private review(id: string, approve: boolean): boolean {
-        const entry = this.sql.exec<{ student_key: string; sender: string; text: string; status: string }>(
-            'SELECT student_key, sender, text, status FROM chat WHERE id = ?', id).toArray()[0];
+        const entry = this.sql.exec<{ student_key: string; sender: string; text: string; status: string;
+            target_key: string | null; x: number | null; y: number | null }>(
+            'SELECT student_key, sender, text, status, target_key, x, y FROM chat WHERE id = ?', id).toArray()[0];
         if (!entry || entry.status !== 'pending') return false;
         const approved = approve && this.isOpen();
         this.sql.exec('UPDATE chat SET status = ? WHERE id = ?', approved ? 'approved' : 'rejected', id);
-        if (approved) this.broadcast({ t: 'chat', sender: entry.sender, text: entry.text, ts: Date.now() });
-        this.notify(entry.student_key, 'info', approved ? 'Your message was approved.' : 'Your message was not posted.');
+        if (!approved) {
+            this.notify(entry.student_key, 'info', 'Your message was not posted.');
+            return true;
+        }
+
+        // A whisper goes to its two students, nearby chat to whoever stands within
+        // earshot of where the sender stood; the sender always sees their own.
+        const recipients = new Set([entry.student_key]);
+        for (const seat of this.seats()) {
+            const heard = entry.target_key !== null ? seat.studentKey === entry.target_key
+                : entry.x === null || entry.y === null || Math.hypot(seat.x - entry.x, seat.y - entry.y) <= HEARING_RANGE;
+            if (heard) recipients.add(seat.studentKey);
+        }
+        const message = JSON.stringify({ t: 'chat', sender: entry.sender, text: entry.text, ts: Date.now(),
+            ...(entry.target_key !== null ? { whisper: true, to: this.sql.exec<{ name: string }>(
+                'SELECT name FROM students WHERE student_key = ?', entry.target_key).toArray()[0]?.name ?? 'a classmate' } : {}) });
+        for (const studentKey of recipients) {
+            for (const ws of this.ctx.getWebSockets(studentKey)) {
+                try { ws.send(message); } catch { /* closing */ }
+            }
+        }
+        const delivered = entry.target_key === null || recipients.size > 1;
+        this.notify(entry.student_key, delivered ? 'info' : 'warning',
+            delivered ? 'Your message was approved.' : 'Your whisper was approved, but that student has left the Plaza.');
         return true;
     }
 

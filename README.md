@@ -1,6 +1,6 @@
 # Pixel Plaza
 
-A social plaza for an ESL class. Students sign in through PinPlay's Google student login, choose avatars, move around a shared map, use emotes, and submit chat messages. Every chat message must be approved by the teacher before classmates see it.
+A social plaza for an ESL class. Students sign in through PinPlay's Google student login, choose avatars, move around a shared map, use emotes, and submit chat messages, either to people nearby or as a whisper to one classmate. Every chat message, whispers included, must be approved by the teacher before anyone sees it.
 
 ## Where it runs
 
@@ -108,5 +108,5 @@ npm test
 - The PIN is shared by the class and changes each lesson. PinPlay supplies each student's verified Google identity; this app depends on PinPlay's login and roster policy.
 - There is one plaza. Every class shares it, so open it for one class at a time.
 - The word and phrase filter catches only a small set of obvious cases. Teacher approval is the moderation gate. There is no dictionary enforcement or AI context review.
-- Chat is shared across the room. Proximity chat, whispers, room decoration, items, and building interiors are not implemented.
+- Chat is nearby chat (heard by students within 350 map pixels of where the sender stood) or a whisper to one classmate. Both wait for teacher approval, and the teacher sees whispers too. Room decoration, items, and building interiors are not implemented.
 - Browser controls cannot reliably stop screenshots or external translation tools.

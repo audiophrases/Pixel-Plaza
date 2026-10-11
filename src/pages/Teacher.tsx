@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './Teacher.css';
 
-type Entry = { id: string; studentKey: string; sender: string; text: string; timestamp: number; status: string };
+type Entry = { id: string; studentKey: string; sender: string; target: string | null; text: string; timestamp: number; status: string };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
   open: boolean; pin: string | null; entries: Entry[]; muted: string[]; online: { studentKey: string; name: string }[];
@@ -102,7 +102,7 @@ export default function Teacher() {
         <h2>Chat review</h2>
         {status.entries.length === 0 && <p>No messages yet.</p>}
         {status.entries.map(entry => <article key={entry.id} className="teacher-entry">
-          <div><strong>{entry.sender}</strong> <small>{new Date(entry.timestamp).toLocaleTimeString()} · {entry.status}</small></div>
+          <div><strong>{entry.sender}</strong>{entry.target && <> → <strong>{entry.target}</strong> <em>(whisper)</em></>} <small>{new Date(entry.timestamp).toLocaleTimeString()} · {entry.status}</small></div>
           <p>{entry.text}</p>
           <div className="teacher-actions">
             {entry.status === 'pending' && <>

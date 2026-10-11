@@ -159,3 +159,18 @@
 .emote-btn:active {
   transform: translateY(0);
 }
+
+/* Whispers */
+.whisper-msg .chat-sender,
+.whisper-msg .chat-text {
+  color: #7B4DFF;
+  font-style: italic;
+}
+
+.chat-target {
+  max-width: 9rem;
+  padding: 0 0.4rem;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  background: rgba(255, 255, 255, 0.9);
+}

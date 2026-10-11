@@ -16,7 +16,8 @@ const wrangler = path.join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js
 let PIN = ''; // the teacher page shows it once the class is open
 const PASSWORD = 'local test password';
 const students = { 'signed-a': { studentKey: 'stu_a', displayName: 'Alex', className: '4B' },
-    'signed-b': { studentKey: 'stu_b', displayName: 'Sam', className: '4B' } };
+    'signed-b': { studentKey: 'stu_b', displayName: 'Sam', className: '4B' },
+    'signed-c': { studentKey: 'stu_c', displayName: 'Chris', className: '4B' } };
 
 // Windows can hold workerd's files a moment after it exits; a leftover temp
 // folder must not hide the test's real result.
@@ -165,6 +166,8 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         assert.deepEqual([(await moved).x, (await moved).y], [910, 805]);
 
         // Chat waits for the teacher.
+        sam.send({ t: 'move', x: 920, y: 810 });
+        await new Promise(resolve => setTimeout(resolve, 300));
         alex.send({ t: 'chat', text: 'Hello class!' });
         assert.match((await alex.next(message => message.t === 'notice', 'pending notice')).text, /approval/);
         let status = (await api(base, '/api/teacher/status', { session })).body;
@@ -176,6 +179,33 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         assert.equal((await sam.next(message => message.t === 'chat' && message.sender === 'Alex', 'approved chat')).text, 'Hello class!');
         assert.match((await alex.next(message => message.t === 'notice', 'decision')).text, /approved/);
 
+        // Nearby chat stops at earshot; a whisper reaches only its target, and the teacher sees both.
+        const chris = await enter(base, 'signed-c', null);
+        sockets.push(chris);
+        chris.send({ t: 'move', x: 100, y: 100 });
+        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 1600)); // chat rate limit
+        alex.send({ t: 'chat', text: 'Only people near me' });
+        await alex.next(message => message.t === 'notice' && /approval/.test(message.text), 'nearby pending');
+        await new Promise(resolve => setTimeout(resolve, 1600));
+        alex.send({ t: 'chat', text: 'Secret for Chris', to: chris.welcome.id });
+        await alex.next(message => message.t === 'notice' && /approval/.test(message.text), 'whisper pending');
+        status = (await api(base, '/api/teacher/status', { session })).body;
+        const nearby = status.entries.find(entry => entry.text === 'Only people near me');
+        const whisper = status.entries.find(entry => entry.text === 'Secret for Chris');
+        assert.equal(nearby.target, null);
+        assert.equal(whisper.target, 'Chris');
+        await api(base, '/api/teacher/review', { session, body: { id: nearby.id, approve: true } });
+        await api(base, '/api/teacher/review', { session, body: { id: whisper.id, approve: true } });
+        assert.equal((await sam.next(message => message.t === 'chat' && message.sender === 'Alex' && !message.whisper, 'near chat')).text, 'Only people near me');
+        const heard = await chris.next(message => message.t === 'chat' && message.sender === 'Alex', 'whisper');
+        assert.deepEqual([heard.text, heard.whisper, heard.to], ['Secret for Chris', true, 'Chris']);
+        assert.equal((await alex.next(message => message.t === 'chat' && message.whisper, 'own whisper')).text, 'Secret for Chris');
+        assert.equal(chris.inbox.some(message => message.text === 'Only people near me'), false);
+        assert.equal(sam.inbox.some(message => message.text === 'Secret for Chris'), false);
+        chris.ws.close();
+        await chris.closed;
+
         const emote = sam.next(message => message.t === 'emote', 'emote');
         alex.send({ t: 'emote', emote: '👍' });
         assert.deepEqual([(await emote).id, (await emote).emote], [alex.welcome.id, '👍']);
@@ -185,8 +215,8 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         sockets.push(alexAgain);
         assert.equal(await alex.closed, 4009);
         assert.deepEqual([alexAgain.me.x, alexAgain.me.y], [910, 805]);
-        assert.equal((await sam.next(message => message.t === 'leave', 'leave')).id, alex.welcome.id);
-        assert.equal((await sam.next(message => message.t === 'join', 'rejoin')).player.id, alexAgain.welcome.id);
+        assert.equal((await sam.next(message => message.t === 'leave' && message.id === alex.welcome.id, 'leave')).id, alex.welcome.id);
+        assert.equal((await sam.next(message => message.t === 'join' && message.player.name === 'Alex', 'rejoin')).player.id, alexAgain.welcome.id);
 
         // A mute follows the student, not the connection.
         await api(base, '/api/teacher/mute', { session, body: { studentKey: 'stu_a', muted: true } });

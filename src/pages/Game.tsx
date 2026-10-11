@@ -16,6 +16,8 @@ interface ChatMessage {
   sender: string;
   text: string;
   timestamp?: number;
+  whisper?: boolean;
+  to?: string;
 }
 
 export default function Game() {
@@ -26,6 +28,8 @@ export default function Game() {
   
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
+  const [whisperTo, setWhisperTo] = useState(''); // a classmate's id; empty means nearby chat
+  const [classmates, setClassmates] = useState<{ id: string; name: string }[]>([]);
   const [connection, setConnection] = useState<PlazaConnection | null>(null);
   const [status, setStatus] = useState<PlazaStatus>({ state: 'connecting' });
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -39,7 +43,12 @@ export default function Game() {
     const plaza = new PlazaConnection(state.roomCode, session.studentToken, state.avatarConfig);
     const say = (message: ChatMessage) => setMessages(prev => [...prev, message]);
     const unsubscribe = plaza.subscribe(event => {
-      if (event.t === 'chat') say({ sender: event.sender, text: event.text, timestamp: event.ts });
+      if (event.t === 'roster' || event.t === 'join' || event.t === 'leave') {
+        const others = [...plaza.players.values()].filter(player => player.id !== plaza.selfId);
+        setClassmates(others.map(({ id, name }) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)));
+        if (event.t === 'leave') setWhisperTo(current => (current === event.id ? '' : current));
+      }
+      if (event.t === 'chat') say({ sender: event.sender, text: event.text, timestamp: event.ts, whisper: event.whisper, to: event.to });
       else if (event.t === 'notice') say({ sender: event.level === 'warning' ? 'System Warning' : 'System', text: event.text });
     });
     const unwatch = plaza.onStatus(next => {
@@ -67,7 +76,7 @@ export default function Game() {
     if (!chatInput.trim() || !connection) return;
 
     // Send message to the server for moderation
-    if (connection.send({ t: 'chat', text: chatInput })) setChatInput('');
+    if (connection.send({ t: 'chat', text: chatInput, ...(whisperTo ? { to: whisperTo } : {}) })) setChatInput('');
     else setMessages(prev => [...prev, { sender: 'System Warning', text: 'Not connected. Try again in a moment.' }]);
   };
 
@@ -101,8 +110,8 @@ export default function Game() {
               const isSystem = msg.sender.startsWith('System');
               
               return (
-                <div key={i} className={`chat-message ${isSystem ? 'system-msg' : ''} ${isWarning ? 'warning-msg' : ''}`}>
-                  <span className="chat-sender">{msg.sender}:</span>
+                <div key={i} className={`chat-message ${isSystem ? 'system-msg' : ''} ${isWarning ? 'warning-msg' : ''} ${msg.whisper ? 'whisper-msg' : ''}`}>
+                  <span className="chat-sender">{msg.whisper ? `${msg.sender} → ${msg.to} (whisper)` : msg.sender}:</span>
                   <span className="chat-text">{msg.text}</span>
                 </div>
               );
@@ -123,10 +132,19 @@ export default function Game() {
           </div>
           
           <form className="chat-input-wrapper" onSubmit={handleSendMessage}>
+            <select
+              className="chat-target"
+              value={whisperTo}
+              onChange={(e) => setWhisperTo(e.target.value)}
+              title="Who can read this message"
+            >
+              <option value="">Nearby</option>
+              {classmates.map(player => <option key={player.id} value={player.id}>Whisper: {player.name}</option>)}
+            </select>
             <input 
               type="text" 
               className="chat-input"
-              placeholder="Type a message for teacher approval..."
+              placeholder={whisperTo ? 'Whisper (your teacher can read it)...' : 'Message people nearby (teacher approves)...'}
               maxLength={200}
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}

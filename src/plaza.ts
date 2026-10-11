@@ -8,7 +8,7 @@ export type PlazaEvent =
   | { t: 'leave'; id: string }
   | { t: 'move'; id: string; x: number; y: number }
   | { t: 'emote'; id: string; emote: string }
-  | { t: 'chat'; sender: string; text: string; ts: number }
+  | { t: 'chat'; sender: string; text: string; ts: number; whisper?: boolean; to?: string }
   | { t: 'notice'; level: 'info' | 'warning'; text: string };
 
 // As in PinPlay's live-socket.js: a connection can die without closing (a laptop
