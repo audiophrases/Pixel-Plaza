@@ -102,8 +102,8 @@ Before a message is sent, every word is checked against an English dictionary (H
 
 With the same `OPENAI_API_KEY`, a message that passes the dictionary check is also read by a small OpenAI chat model before it is sent. If it finds one clear mistake (verb form, article, plural, preposition, word order, a missing word) the student sees **Try this: *She goes to school every day.*** with a one-line reason in simple English and two buttons:
 
-- **Use this** sends the corrected sentence.
-- **Send mine** sends what they wrote.
+- **OK** sends the corrected sentence.
+- **Ignore** sends what they wrote.
 
 It never blocks. A message that looks fine, a short one (under 4 words), a slow answer (2 seconds), or any error means the message is simply sent. A student who turns hints down three times in a row is left alone for the next message. The queue shows the teacher a *Grammar hint* line for each message, saying whether the student used the suggestion or kept their own words.
 

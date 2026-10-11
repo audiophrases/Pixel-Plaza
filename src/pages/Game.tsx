@@ -205,8 +205,8 @@ export default function Game() {
             <div><strong>Try this:</strong> <span className="grammar-fix">{nudge.corrected}</span></div>
             <div className="grammar-why">{nudge.why}</div>
             <div className="grammar-actions">
-              <button type="button" className="btn btn-primary" onClick={useHint}>Use this</button>
-              <button type="button" className="spelling-fix" onClick={keepMine}>Send mine</button>
+              <button type="button" className="btn btn-primary" onClick={useHint} title="Send the sentence above">OK</button>
+              <button type="button" className="spelling-fix" onClick={keepMine} title="Send my sentence as I wrote it">Ignore</button>
             </div>
           </div>}
           <form className="chat-input-wrapper" onSubmit={event => void handleSendMessage(event)}>
