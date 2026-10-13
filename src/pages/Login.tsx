@@ -9,6 +9,7 @@ import {
 } from '../studentAuth';
 import type { StudentConfig, StudentSession } from '../studentAuth';
 import { firstName } from '../../shared/names';
+import { plazaMap } from '../../shared/plazaMap';
 import { testerAvatar, testerPin } from '../tester';
 import './Login.css';
 
@@ -94,7 +95,7 @@ export default function Login() {
   };
 
   return (
-    <div className="login-wrapper" style={{ backgroundImage: 'url(/background.jpg)' }}>
+    <div className="login-wrapper" style={{ backgroundImage: `url(${plazaMap.image})` }}>
       <div className="login-overlay" />
       <main className="login-content">
         <div className="login-brand animate-float">
