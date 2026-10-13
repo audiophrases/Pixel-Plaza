@@ -4,6 +4,7 @@ import type { PinPlayStudent } from './pinplay.ts';
 import { checkGrammar } from './grammar.ts';
 import { moderate } from './moderation.ts';
 import { campaignById, campaigns, chapterDone, pickRole, type QuestView } from '../shared/campaign.ts';
+import { wordDiff } from '../shared/diff.ts';
 import { zoneAt } from '../shared/plazaMap.ts';
 import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 
@@ -97,7 +98,7 @@ export class PlazaRoom extends DurableObject<Env> {
                 done TEXT NOT NULL DEFAULT '[]', last_wrong INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (game_id, student_key));`);
         // Older rooms predate nearby chat and whispers: their messages were for everyone.
         const chatColumns = this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('chat')").toArray().map(row => row.name);
-        for (const [column, type] of [['target_key', 'TEXT'], ['target_name', 'TEXT'], ['x', 'REAL'], ['y', 'REAL'], ['flag', 'TEXT'], ['note', 'TEXT'], ['game_id', 'TEXT']]) {
+        for (const [column, type] of [['target_key', 'TEXT'], ['target_name', 'TEXT'], ['x', 'REAL'], ['y', 'REAL'], ['flag', 'TEXT'], ['note', 'TEXT'], ['game_id', 'TEXT'], ['marks', 'TEXT']]) {
             if (!chatColumns.includes(column)) this.sql.exec(`ALTER TABLE chat ADD COLUMN ${column} ${type}`);
         }
         this.adoptOldClass();
@@ -294,7 +295,7 @@ export class PlazaRoom extends DurableObject<Env> {
             const text = (value: unknown) => (typeof value === 'string' ? value.slice(0, 200) : null);
             const note = text(data.was) ? `Used the suggestion. They wrote: "${text(data.was)}"`
                 : text(data.better) ? `Kept their own words. Suggested: "${text(data.better)}"` : null;
-            await this.chat(ws, seat, data.text, data.to, note, typeof data.cid === 'string' ? data.cid.slice(0, 64) : undefined);
+            await this.chat(ws, seat, data.text, data.to, note, typeof data.cid === 'string' ? data.cid.slice(0, 64) : undefined, text(data.better));
         }
     }
 
@@ -351,8 +352,8 @@ export class PlazaRoom extends DurableObject<Env> {
             status: row.status,
             chapter: { index: row.chapter, of: campaign.chapters.length, title: chapter.title, intro: chapter.intro,
                 ending: row.status === 'active' ? null : chapter.ending },
-            role: { id: role.id, name: role.name, card: role.card },
-            clues: [{ id: `role-${role.id}`, text: role.clue, from: 'Your job' }, ...found.map(item => ({ id: item.id, text: item.text, from: `The ${item.zone}` }))],
+            role: { id: role.id, icon: role.icon, name: role.name, card: role.card },
+            clues: [{ id: `role-${role.id}`, text: role.clue, from: 'job' }, ...found.map(item => ({ id: item.id, text: item.text, from: item.zone }))],
             objectives: chapter.objectives.map(objective => ({ id: objective.id, text: objective.text, choices: objective.choices, done: player.done.includes(objective.id) })),
             finale: row.status === 'campaign_complete' ? campaign.finale : null
         };
@@ -569,7 +570,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // `cid` is the page's own id for this message: every answer carries it back, so a message that
     // did not go through can be given back to its writer, draft intact.
-    private async chat(ws: WebSocket, seat: Seat, value: unknown, to: unknown, note: string | null, cid?: string): Promise<void> {
+    private async chat(ws: WebSocket, seat: Seat, value: unknown, to: unknown, note: string | null, cid?: string, better?: string | null): Promise<void> {
         const reply = (level: 'info' | 'warning', text: string) => ws.send(JSON.stringify({ t: 'notice', level, text, cid }));
         const unavailable = () => !this.isOpen() || this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', seat.studentKey).toArray().length > 0;
         if (unavailable()) return reply('warning', 'Chat is unavailable right now.');
@@ -608,11 +609,14 @@ export class PlazaRoom extends DurableObject<Env> {
         // Review mode posts only what OpenAI cleared, and never a whisper.
         const posts = !problem && cleared && !target && this.mode() === 'review';
         const entry = { id: crypto.randomUUID(), student_key: seat.studentKey, sender: seat.name, text: value.trim().slice(0, 200),
-            target_key: target?.studentKey ?? null, x: seat.x, y: seat.y };
-        this.sql.exec(`INSERT INTO chat (id, student_key, sender, text, ts, status, target_key, target_name, x, y, flag, note, game_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            target_key: target?.studentKey ?? null, x: seat.x, y: seat.y, marks: null as string | null };
+        // Sent as written although a better version was offered: mark the words that differ, for everyone who reads it.
+        const slips = better ? wordDiff(entry.text, better).original : [];
+        if (slips.length) entry.marks = JSON.stringify(slips);
+        this.sql.exec(`INSERT INTO chat (id, student_key, sender, text, ts, status, target_key, target_name, x, y, flag, note, game_id, marks)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             entry.id, entry.student_key, entry.sender, entry.text, now, problem ? 'blocked' : posts ? 'approved' : 'pending',
-            entry.target_key, target?.name ?? null, entry.x, entry.y, flag, note, seat.game);
+            entry.target_key, target?.name ?? null, entry.x, entry.y, flag, note, seat.game, entry.marks);
         this.sql.exec('DELETE FROM chat WHERE game_id IS ? AND id NOT IN (SELECT id FROM chat WHERE game_id IS ? ORDER BY ts DESC LIMIT ?)',
             seat.game, seat.game, CHAT_KEEP);
         if (posts) {
@@ -624,8 +628,8 @@ export class PlazaRoom extends DurableObject<Env> {
 
     private review(id: string, approve: boolean): boolean {
         const entry = this.sql.exec<{ id: string; student_key: string; sender: string; text: string; status: string;
-            target_key: string | null; x: number | null; y: number | null }>(
-            'SELECT id, student_key, sender, text, status, target_key, x, y FROM chat WHERE id = ?', id).toArray()[0];
+            target_key: string | null; x: number | null; y: number | null; marks: string | null }>(
+            'SELECT id, student_key, sender, text, status, target_key, x, y, marks FROM chat WHERE id = ?', id).toArray()[0];
         if (!entry) return false;
 
         // Taking down a message that already posted: it disappears from every screen.
@@ -652,7 +656,7 @@ export class PlazaRoom extends DurableObject<Env> {
     // A whisper goes to its two students, nearby chat to whoever stands within
     // earshot of where the sender stood; the sender always sees their own.
     // False when a whisper had nobody to reach.
-    private deliver(entry: { id: string; student_key: string; sender: string; text: string; target_key: string | null; x: number | null; y: number | null }): boolean {
+    private deliver(entry: { id: string; student_key: string; sender: string; text: string; target_key: string | null; x: number | null; y: number | null; marks?: string | null }): boolean {
         const recipients = new Set([entry.student_key]);
         for (const seat of this.seats()) {
             const heard = entry.target_key !== null ? seat.studentKey === entry.target_key
@@ -660,6 +664,7 @@ export class PlazaRoom extends DurableObject<Env> {
             if (heard) recipients.add(seat.studentKey);
         }
         const message = JSON.stringify({ t: 'chat', id: entry.id, sender: entry.sender, text: entry.text, ts: Date.now(),
+            ...(entry.marks ? { marks: JSON.parse(entry.marks) } : {}),
             ...(entry.target_key !== null ? { whisper: true, to: this.sql.exec<{ name: string }>(
                 'SELECT name FROM students WHERE student_key = ?', entry.target_key).toArray()[0]?.name ?? 'a classmate' } : {}) });
         for (const studentKey of recipients) {

@@ -535,6 +535,16 @@ test('grammar hints advise, never block, and the teacher sees what the student c
         assert.equal(note('She go to school every day'), 'Kept their own words. Suggested: "She goes to school every day"');
         assert.equal(note('She goes to school every day'), 'Used the suggestion. They wrote: "She go to school every day"');
         assert.equal(note('No hint was involved here'), null);
+
+        // A message kept with its mistake reaches everyone with the wrong word marked; the corrected one has none.
+        const kept = entries.find(entry => entry.text === 'She go to school every day');
+        const used = entries.find(entry => entry.text === 'She goes to school every day');
+        await api(base, '/api/teacher/review', { session, body: { id: kept.id, approve: true } });
+        const shown = await alex.next(message => message.t === 'chat' && message.text === kept.text, 'kept message shown');
+        assert.deepEqual(shown.marks, [[4, 6]]);
+        await api(base, '/api/teacher/review', { session, body: { id: used.id, approve: true } });
+        const clean = await alex.next(message => message.t === 'chat' && message.text === used.text, 'corrected message shown');
+        assert.equal(clean.marks, undefined);
     } finally {
         alex?.ws.close();
         await plaza.stop();

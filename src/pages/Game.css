@@ -290,12 +290,26 @@
 }
 
 .grammar-fix {
-  font-weight: 700;
-  color: #007f73;
+  font-size: 1rem;
+  color: #333;
 }
 
-.grammar-why {
-  color: #555;
+/* The word the correction changed or added */
+.diff-new {
+  padding: 0 3px;
+  border-radius: 4px;
+  background: #b7eb8f;
+  color: #135200;
+  font-weight: 800;
+}
+
+/* A word the sender was offered a better version of and kept: a gentler shade, for everyone who reads it */
+.slip {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: #ffe7ba;
+  text-decoration: underline dotted #d48806;
+  text-underline-offset: 3px;
 }
 
 .grammar-actions {

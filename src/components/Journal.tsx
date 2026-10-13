@@ -9,8 +9,10 @@ type Props = {
   onAnswer: (objective: string, choice: string) => void;
 };
 
-// The student's side of the campaign: their job, what they have found, and the question to answer.
-// It shows only what the server sent this student; the other roles' clues never arrive.
+const PLACE_ICON: Record<string, string> = { hotel: '🏨', cafe: '☕', shop: '🛍️', square: '⛲', park: '🌳' };
+
+// The student's side of the campaign, kept short and picture-led: who you are, what you know,
+// and the one question to answer. It shows only what the server sent this student.
 export default function Journal({ quest, feedback, onAnswer }: Props) {
   const [open, setOpen] = useState(true);
   const [fresh, setFresh] = useState(false); // something changed while the journal was shut
@@ -24,30 +26,32 @@ export default function Journal({ quest, feedback, onAnswer }: Props) {
 
   return <aside className="journal glass-panel">
     <button type="button" className="journal-toggle" onClick={() => { setOpen(value => !value); setFresh(false); }}>
-      Journal{fresh ? ' · new' : ''} {open ? '▲' : '▼'}
+      🌰 {quest.chapter.title}{fresh ? ' · new!' : ''} <span>{open ? '▲' : '▼'}</span>
     </button>
     {open && <div className="journal-body">
-      <h2>{quest.campaign.title}</h2>
-      <p className="journal-chapter">Chapter {quest.chapter.index + 1} of {quest.chapter.of}: {quest.chapter.title}</p>
-      <p>{quest.chapter.intro}</p>
+      <div className="journal-role">
+        <span className="journal-role-icon">{quest.role.icon}</span>
+        <div><strong>{quest.role.name}</strong><br />{quest.role.card}</div>
+      </div>
 
-      <h3>You are the {quest.role.name}</h3>
-      <p>{quest.role.card}</p>
+      {quest.status === 'active' && <p className="journal-intro">{quest.chapter.intro}</p>}
 
-      <h3>What you know</h3>
       <ul className="journal-clues">
-        {quest.clues.map(clue => <li key={clue.id}><span>{clue.from}</span> {clue.text}</li>)}
+        {quest.clues.map(clue => <li key={clue.id}>
+          <span className="journal-clue-icon">{clue.from === 'job' ? '🔎' : PLACE_ICON[clue.from] ?? '📍'}</span>
+          {clue.text}
+        </li>)}
       </ul>
 
       {quest.status === 'active' && quest.objectives.map(objective => <div key={objective.id} className="journal-question">
-        <h3>{objective.text}</h3>
-        {objective.done ? <p className="journal-right">✓ You got it. Help your classmates!</p> : <>
+        <h3>❓ {objective.text}</h3>
+        {objective.done ? <p className="journal-right">✅ You got it! Help your classmates.</p> : <>
           <div className="journal-choices">
-            {objective.choices.map(choice => <button key={choice.id} type="button" className="spelling-fix"
+            {objective.choices.map(choice => <button key={choice.id} type="button" className="journal-choice"
               onClick={() => onAnswer(objective.id, choice.id)}>{choice.text}</button>)}
           </div>
           {feedback?.objective === objective.id && !feedback.correct &&
-            <p className="journal-wrong">{feedback.wait ? 'Wait a moment, then try again.' : 'Not quite. Ask your classmates, then try again in a few seconds.'}</p>}
+            <p className="journal-wrong">{feedback.wait ? '⏳ Wait a moment…' : '❌ Not yet. Ask your classmates!'}</p>}
         </>}
       </div>)}
 

@@ -19,7 +19,7 @@ export type Chapter = {
     share: number;       // the fraction of the class that must finish every objective (0 to 1)
     discoveries: Discovery[];
 };
-export type Role = { id: string; name: string; card: string; clue: string };
+export type Role = { id: string; icon: string; name: string; card: string; clue: string };
 export type Campaign = { id: string; title: string; roles: Role[]; chapters: Chapter[]; finale: string };
 
 // What one student is allowed to see: only their own role and what they found.
@@ -27,7 +27,7 @@ export type QuestView = {
     campaign: { id: string; title: string };
     status: 'active' | 'chapter_complete' | 'campaign_complete';
     chapter: { index: number; of: number; title: string; intro: string; ending: string | null };
-    role: { id: string; name: string; card: string };
+    role: { id: string; icon: string; name: string; card: string };
     clues: { id: string; text: string; from: string }[];
     objectives: { id: string; text: string; choices: Choice[]; done: boolean }[];
     finale: string | null;
@@ -38,29 +38,29 @@ export const castanyada: Campaign = {
     title: 'The Haunted Castanyada',
     finale: 'To be continued…',
     roles: [
-        { id: 'baker', name: 'Café baker', card: 'You work at the café. You roast the chestnuts and bake panellets for tonight.',
-            clue: 'No blue box came to the café today.' },
-        { id: 'shopkeeper', name: 'Shopkeeper', card: 'You run the shop. You pack the boxes for the festival.',
-            clue: 'A blue box of chestnuts left the shop at 9:00.' },
-        { id: 'driver', name: 'Driver', card: 'You carry boxes from place to place in town.',
-            clue: 'I carried a blue box at 9:30. I left it near the water.' },
-        { id: 'receptionist', name: 'Hotel receptionist', card: 'You work at the front desk of the hotel. You see everyone who comes and goes.',
-            clue: 'No box came to the hotel today.' },
-        { id: 'planner', name: 'Festival planner', card: 'You plan the Castanyada party in the square. You know the town very well.',
+        { id: 'baker', icon: '☕', name: 'Café baker', card: 'You roast the chestnuts.',
+            clue: 'No blue box came to the café.' },
+        { id: 'shopkeeper', icon: '🛍️', name: 'Shopkeeper', card: 'You pack the boxes.',
+            clue: 'A blue box left the shop at 9:00.' },
+        { id: 'driver', icon: '🚚', name: 'Driver', card: 'You carry the boxes.',
+            clue: 'At 9:30 I left a blue box near the water.' },
+        { id: 'receptionist', icon: '🛎️', name: 'Hotel receptionist', card: 'You work at the hotel desk.',
+            clue: 'No box came to the hotel.' },
+        { id: 'planner', icon: '📋', name: 'Festival planner', card: 'You plan the party.',
             clue: 'The only water in town is the pond in the park.' },
     ],
     chapters: [{
         id: 'missing-chestnuts', title: 'The Missing Chestnuts', share: 0.6,
-        intro: 'It is Castanyada night in Pixel Plaza. The big box of chestnuts is gone! Talk to your classmates. Each of you knows something different.',
-        ending: 'You found the blue box in the park. The lock is open and the box is empty. Who took the chestnuts?',
+        intro: 'The chestnuts are gone! Ask your classmates. Each of you knows something different.',
+        ending: '📦 It was in the park. The lock is open. The box is empty! Who took the chestnuts?',
         objectives: [{
-            id: 'where', text: 'Where is the blue box of chestnuts now?',
-            choices: [{ id: 'hotel', text: 'At the hotel' }, { id: 'cafe', text: 'At the café' }, { id: 'shop', text: 'At the shop' }, { id: 'park', text: 'In the park' }],
+            id: 'where', text: 'Where is the blue box?',
+            choices: [{ id: 'hotel', text: '🏨 Hotel' }, { id: 'cafe', text: '☕ Café' }, { id: 'shop', text: '🛍️ Shop' }, { id: 'park', text: '🌳 Park' }],
             correct: 'park',
         }],
         discoveries: [
-            { id: 'hotel-note', zone: 'hotel', text: 'A note on the hotel door says: "The chestnuts are safe. Do not worry."' },
-            { id: 'park-lock', zone: 'park', text: 'In the park, you see a small blue lock on the grass.' },
+            { id: 'hotel-note', zone: 'hotel', text: 'A note on the hotel door: "The chestnuts are safe."' },
+            { id: 'park-lock', zone: 'park', text: 'A small blue lock on the grass.' },
         ],
     }],
 };

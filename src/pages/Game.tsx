@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Journal from '../components/Journal';
+import { wordDiff } from '../../shared/diff';
 import PhaserGame from '../components/PhaserGame';
 import type { QuestView } from '../../shared/campaign';
 import { PlazaConnection } from '../plaza';
@@ -23,6 +24,21 @@ interface ChatMessage {
   timestamp?: number;
   whisper?: boolean;
   to?: string;
+  marks?: [number, number][]; // words the sender was offered a better version of and kept
+}
+
+// Text with some character ranges wrapped, so a changed or mistaken word can have its own shade.
+function Marked({ text, marks, className }: { text: string; marks?: readonly (readonly [number, number])[]; className: string }) {
+  const parts: React.ReactNode[] = [];
+  let at = 0;
+  for (const [start, end] of [...(marks ?? [])].sort((a, b) => a[0] - b[0])) {
+    if (start < at || end > text.length) continue;
+    if (start > at) parts.push(text.slice(at, start));
+    parts.push(<mark key={start} className={className}>{text.slice(start, end)}</mark>);
+    at = end;
+  }
+  parts.push(text.slice(at));
+  return <>{parts}</>;
 }
 
 export default function Game() {
@@ -34,7 +50,7 @@ export default function Game() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   // A grammar hint waiting for the student's choice: what they wrote, the fix, and why.
-  const [nudge, setNudge] = useState<{ original: string; corrected: string; why: string } | null>(null);
+  const [nudge, setNudge] = useState<{ original: string; corrected: string } | null>(null);
   const [checking, setChecking] = useState(false);
   // A message on its way: the draft stays in the box until the server says it took it.
   const [sending, setSending] = useState(false);
@@ -43,8 +59,6 @@ export default function Game() {
   const [sendError, setSendError] = useState(''); // why the last message did not go, shown by the box
   const pending = useRef<{ cid: string; text: string; timer: number } | null>(null);
   const keptRun = useRef(0); // hints in a row the student turned down
-  // The student took a suggestion into the box: what they had written and what was suggested.
-  const usedHint = useRef<{ original: string; corrected: string } | null>(null);
   const chatField = useRef<HTMLInputElement>(null);
   const [spelling, setSpelling] = useState<Misspelling[]>([]); // words that stopped the last message
   const [whisperTo, setWhisperTo] = useState(''); // a classmate's id; empty means nearby chat
@@ -131,7 +145,7 @@ export default function Game() {
       if (event.t === 'result') return;
       if (event.t === 'quest') { setQuest(event.quest); setAnswered(null); return; }
       if (event.t === 'answered') { setAnswered({ objective: event.objective, correct: event.correct, wait: event.wait }); return; }
-      if (event.t === 'chat') say({ id: event.id, sender: event.sender, text: event.text, timestamp: event.ts, whisper: event.whisper, to: event.to });
+      if (event.t === 'chat') say({ id: event.id, sender: event.sender, text: event.text, timestamp: event.ts, whisper: event.whisper, to: event.to, marks: event.marks });
       else if (event.t === 'retract') setMessages(prev => prev.filter(message => message.id !== event.id));
       else if (event.t === 'notice') say({ sender: event.level === 'warning' ? 'System Warning' : 'System', text: event.text });
     });
@@ -179,7 +193,7 @@ export default function Game() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim() || !connection || checking || sending) return;
+    if (!chatInput.trim() || !connection || checking || sending || nudge) return;
     setChecking(true);
     try {
       // Every word must be English. Names of people in the Plaza are fine.
@@ -193,34 +207,25 @@ export default function Game() {
         if (problems.length) return;
       } catch { /* offline dictionary: the teacher still reviews the message */ }
 
-      // The suggestion exactly as offered, now sent on purpose: no second opinion.
-      const taken = usedHint.current;
-      if (taken && chatInput === taken.corrected) { usedHint.current = null; return deliver(chatInput, { was: taken.original }); }
-
       // Then a grammar hint, once, and only if they have not been turning them all down.
-      if (keptRun.current >= 3) { keptRun.current = 2; return deliver(chatInput, taken ? { was: taken.original } : {}); }
+      if (keptRun.current >= 3) { keptRun.current = 2; return deliver(chatInput); }
       const hint = await connection.check(chatInput);
       if (!hint.ok && (!check || check(hint.corrected, names).length === 0)) {
-        setNudge({ original: chatInput, corrected: hint.corrected, why: hint.why });
+        setNudge({ original: chatInput, corrected: hint.corrected });
         return;
       }
       keptRun.current = 0;
-      usedHint.current = null;
-      deliver(chatInput, taken ? { was: taken.original } : {});
+      deliver(chatInput);
     } finally {
       setChecking(false);
     }
   };
 
-  // The suggestion goes into the box, not out to the class: the student reads it, changes
-  // what they like, and sends it themselves.
+  // OK sends the corrected sentence; Ignore (below) sends the student's own, with the words that differ marked.
   const useHint = () => {
     if (!nudge) return;
     keptRun.current = 0;
-    usedHint.current = { original: nudge.original, corrected: nudge.corrected };
-    setChatInput(nudge.corrected);
-    setNudge(null);
-    chatField.current?.focus();
+    deliver(nudge.corrected, { was: nudge.original });
   };
 
   const keepMine = () => {
@@ -282,7 +287,7 @@ export default function Game() {
               return (
                 <div key={i} className={`chat-message ${isSystem ? 'system-msg' : ''} ${isWarning ? 'warning-msg' : ''} ${msg.whisper ? 'whisper-msg' : ''}`}>
                   <span className="chat-sender">{msg.whisper ? `${msg.sender} → ${msg.to} (whisper)` : msg.sender}:</span>
-                  <span className="chat-text">{msg.text}</span>
+                  <span className="chat-text"><Marked text={msg.text} marks={msg.marks} className="slip" /></span>
                 </div>
               );
             })}
@@ -314,10 +319,9 @@ export default function Game() {
           </div>}
           {sendError && <div className="composer-error" role="alert">{sendError}</div>}
           {nudge && <div className="grammar-help" role="status">
-            <div><strong>Try this:</strong> <span className="grammar-fix">{nudge.corrected}</span></div>
-            <div className="grammar-why">{nudge.why}</div>
+            <div className="grammar-fix"><Marked text={nudge.corrected} marks={wordDiff(nudge.original, nudge.corrected).corrected} className="diff-new" /></div>
             <div className="grammar-actions">
-              <button type="button" className="btn btn-primary" onClick={useHint} title="Put the sentence above in the box, so you can check it and send it">OK</button>
+              <button type="button" className="btn btn-primary" onClick={useHint} title="Send the corrected sentence">OK</button>
               <button type="button" className="spelling-fix" onClick={keepMine} title="Send my sentence as I wrote it">Ignore</button>
             </div>
           </div>}
@@ -339,14 +343,14 @@ export default function Game() {
               maxLength={200}
               value={chatInput}
               readOnly={sending}
-              onChange={(e) => { setChatInput(e.target.value); setNudge(null); setSendError(''); if (!e.target.value) { setSpelling([]); usedHint.current = null; } }}
+              onChange={(e) => { setChatInput(e.target.value); setNudge(null); setSendError(''); if (!e.target.value) setSpelling([]); }}
               onCopy={handlePreventClipboard}
               onPaste={handlePreventClipboard}
               onCut={handlePreventClipboard}
               autoComplete="off"
               spellCheck="true"
             />
-            <button type="submit" className="btn btn-primary chat-send-btn" disabled={checking || sending}>{checking || sending ? '…' : 'Send'}</button>
+            {!nudge && <button type="submit" className="btn btn-primary chat-send-btn" disabled={checking || sending}>{checking || sending ? '…' : 'Send'}</button>}
           </form>
         </div>
       </div>
