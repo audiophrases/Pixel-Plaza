@@ -50,7 +50,8 @@ const places = {
     'park arbor floor': [930, 755], 'park, under the big tree': [1000, 665],
     'park, west lawn by the pond': [700, 925], 'bridge, west end': [960, 914],
     'bridge deck': [1040, 932], 'bridge, east end': [1095, 1000],
-    'path south of the pond, west': [720, 1140], 'path south of the pond, east': [1000, 1140],
+    'path south of the pond, west': [760, 1170], 'path south of the pond, middle': [940, 1165], 'path south of the pond, east': [1000, 1175],
+    'path by the bottom fence, far west': [130, 1135], 'path by the bottom fence, west': [300, 1150], 'path by the bottom fence, curve': [650, 1172],
     'east street': [1175, 800],
 };
 
