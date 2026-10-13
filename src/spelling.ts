@@ -22,9 +22,15 @@ const WORD = /\p{L}+(?:['’]\p{L}+)*/gu;
 
 export type Checker = (text: string, names?: string[]) => Misspelling[];
 
-// aff and dic are a Hunspell dictionary, as in the dictionary-en package.
-export function createChecker(aff: string, dic: string): Checker {
+export type Dictionary = { aff: string; dic: string };
+
+// aff and dic are a Hunspell dictionary, as in the dictionary-en package: American
+// English, the one dialect the class uses, so every suggestion is American. `alsoAccept`
+// is another dictionary (British) whose words are fine when typed but never suggested.
+export function createChecker(aff: string, dic: string, alsoAccept?: Dictionary): Checker {
   const speller = NSpell(aff, dic);
+  const other = alsoAccept && NSpell(alsoAccept.aff, alsoAccept.dic);
+  const correct = (word: string) => speller.correct(word) || !!other?.correct(word);
   return (text, names = []) => {
     const known = new Set(names.flatMap(name => name.toLowerCase().split(/[^\p{L}]+/u)).filter(Boolean));
     const found = new Map<string, Misspelling>();
@@ -34,12 +40,12 @@ export function createChecker(aff: string, dic: string): Checker {
       if (found.has(lower) || CHAT_WORDS.has(lower) || LAUGH.test(lower) || known.has(lower)) continue;
       if (lower === 'a' || lower === 'i') continue;
       if (TEXT_SPEAK[lower]) { found.set(lower, { word: raw, suggestions: [TEXT_SPEAK[lower]] }); continue; }
-      if (lower.length > 1 && speller.correct(word)) continue;
+      if (lower.length > 1 && correct(word)) continue;
       // Hunspell is case-sensitive: a word that is only fine in lower case, in capitals.
-      if (lower.length > 1 && speller.correct(lower)) continue;
+      if (lower.length > 1 && correct(lower)) continue;
       // Learners type "cafe" and "café" alike: accents do not make a word foreign.
       const plain = lower.normalize('NFD').replace(/\p{M}/gu, '');
-      if (plain !== lower && speller.correct(plain)) continue;
+      if (plain !== lower && correct(plain)) continue;
       found.set(lower, { word: raw, suggestions: lower.length > 1 ? speller.suggest(lower).slice(0, 3) : [] });
     }
     return [...found.values()];

@@ -6,7 +6,10 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   // The English dictionary's two files, which the package does not export on their own.
-  resolve: { alias: { 'english-dictionary': fileURLToPath(new URL('./node_modules/dictionary-en', import.meta.url)) } },
+  resolve: { alias: {
+    'english-dictionary': fileURLToPath(new URL('./node_modules/dictionary-en', import.meta.url)),
+    'english-dictionary-gb': fileURLToPath(new URL('./node_modules/dictionary-en-gb', import.meta.url))
+  } },
   // In development the Worker runs separately (npm run dev:worker); the
   // deployed app serves both from one origin.
   server: {

@@ -5,8 +5,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createChecker } from '../../src/spelling.ts';
 
-const dictionary = path.join(import.meta.dirname, '..', '..', 'node_modules', 'dictionary-en');
-const check = createChecker(fs.readFileSync(path.join(dictionary, 'index.aff'), 'utf8'), fs.readFileSync(path.join(dictionary, 'index.dic'), 'utf8'));
+const read = (folder, file) => fs.readFileSync(path.join(import.meta.dirname, '..', '..', 'node_modules', folder, file), 'utf8');
+const check = createChecker(read('dictionary-en', 'index.aff'), read('dictionary-en', 'index.dic'),
+    { aff: read('dictionary-en-gb', 'index.aff'), dic: read('dictionary-en-gb', 'index.dic') });
 const words = (text, names) => check(text, names).map(item => item.word);
 
 test('ordinary English passes', () => {
@@ -45,4 +46,13 @@ test("names of people in the Plaza are allowed, other names are not", () => {
 
 test('each wrong word is listed once', () => {
     assert.equal(check('gracias, gracias, GRACIAS').length, 1);
+});
+
+test('British spellings pass; suggestions are American', () => {
+    assert.deepEqual(words('My favourite colour is grey. We organise the centre.'), []);
+    assert.deepEqual(words('My favorite color is gray. We organize the center.'), []);
+    // A typo of a British word is helped with the American spelling.
+    const [typo] = check('colur');
+    assert.ok(typo.suggestions.includes('color'));
+    assert.ok(!typo.suggestions.includes('colour'));
 });
