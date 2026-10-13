@@ -15,6 +15,7 @@ export type PlazaEvent =
   | { t: 'retract'; id: string } // the teacher took a posted message down
   | { t: 'notice'; level: 'info' | 'warning'; text: string; cid?: string } // cid: the chat message this answers
   | { t: 'result'; cid: string }
+  | { t: 'rename'; id: string; name: string }                              // a namesake arrived: this player's shown name changed
   | { t: 'quest'; quest: QuestView | null }                                  // this student's view of the campaign
   | { t: 'answered'; objective: string; correct: boolean; wait: boolean };                                          // that message was posted at once
 
@@ -184,6 +185,7 @@ export class PlazaConnection {
       return;
     }
     if (message.t === 'join') this.players.set(message.player.id, message.player);
+    if (message.t === 'rename') { const player = this.players.get(message.id); if (player) player.name = message.name; }
     if (message.t === 'leave') this.players.delete(message.id);
     if (message.t === 'move') {
       const player = this.players.get(message.id);

@@ -17,7 +17,10 @@ let PIN = ''; // the teacher page shows it once the class is open
 const PASSWORD = 'local test password';
 const students = { 'signed-a': { studentKey: 'stu_a', displayName: 'Alex', className: '4B' },
     'signed-b': { studentKey: 'stu_b', displayName: 'Sam', className: '4B' },
-    'signed-c': { studentKey: 'stu_c', displayName: 'Chris', className: '4B' } };
+    'signed-c': { studentKey: 'stu_c', displayName: 'Chris', className: '4B' },
+    'roger-1': { studentKey: 'stu_r1', displayName: 'Roger Lopez Marti', className: '4B' },
+    'roger-2': { studentKey: 'stu_r2', displayName: 'Roger Costa', className: '4B' },
+    'roger-3': { studentKey: 'stu_r3', displayName: 'Roger Lluch', className: '4B' } };
 
 // Windows can hold workerd's files a moment after it exits; a leftover temp
 // folder must not hide the test's real result.
@@ -654,6 +657,50 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'reset' } })).status, 400);
         assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'reset', confirm: true } })).body.campaign, null);
         assert.equal((await alexBack.socket.next(message => message.t === 'quest' && message.quest === null, 'story removed')).quest, null);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});
+
+test('shown names: first name alone, then a surname letter for namesakes, updating the Rogers already there', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    const join = async token => { const socket = await enter(plaza.base, token, null); sockets.push(socket); return socket; };
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        PIN = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body.pin;
+        const nameOf = (socket, id) => socket.welcome.players.find(player => player.id === id)?.name;
+
+        // The first Roger keeps just the first name while he is alone.
+        const first = await join('roger-1');
+        assert.equal(first.me.name, 'Roger');
+        const ana = await join('signed-a');
+        assert.equal(nameOf(ana, first.welcome.id), 'Roger');
+        assert.equal(ana.me.name, 'Alex');
+
+        // A second Roger arrives: he is Roger C, and the first one is renamed to Roger L on everyone's screen.
+        const second = await join('roger-2');
+        assert.equal(second.me.name, 'Roger C');
+        assert.equal(nameOf(second, first.welcome.id), 'Roger L');
+        const renamed = await first.next(message => message.t === 'rename' && message.id === first.welcome.id, 'rename');
+        assert.equal(renamed.name, 'Roger L');
+        assert.equal((await ana.next(message => message.t === 'rename' && message.id === first.welcome.id, 'rename seen')).name, 'Roger L');
+        assert.equal(ana.inbox.some(message => message.t === 'rename' && message.id === ana.welcome.id), false, 'other names are left alone');
+
+        // The teacher sees the same names, and chat carries them.
+        const online = (await api(base, '/api/teacher/status', { session })).body.online.map(student => student.name).sort();
+        assert.deepEqual(online, ['Alex', 'Roger C', 'Roger L']);
+
+        // A third Roger with the same initial makes the two L's tell themselves apart.
+        const third = await join('roger-3');
+        assert.equal(third.me.name, 'Roger Ll');
+        assert.equal((await first.next(message => message.t === 'rename' && message.id === first.welcome.id, 'second rename')).name, 'Roger Lo');
     } finally {
         for (const socket of sockets) socket.ws.close();
         await plaza.stop();

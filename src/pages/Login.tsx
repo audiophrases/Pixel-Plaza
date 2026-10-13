@@ -8,6 +8,7 @@ import {
   fetchStudentProfile, handOffTo, readStudentSession, saveStudentSession
 } from '../studentAuth';
 import type { StudentConfig, StudentSession } from '../studentAuth';
+import { firstName } from '../../shared/names';
 import { testerAvatar, testerPin } from '../tester';
 import './Login.css';
 
@@ -118,7 +119,7 @@ export default function Login() {
               </div>}
               <div className="student-signin">
                 {session ? <>
-                  <p>Signed in as <strong>{session.student.displayName}</strong>
+                  <p>Signed in as <strong>{firstName(session.student.displayName)}</strong>
                     {session.student.className ? ` (${session.student.className})` : ''}</p>
                   <button className="link-btn" type="button" onClick={signOut}>Not you? Sign out</button>
                 </> : signInUrl ? <>

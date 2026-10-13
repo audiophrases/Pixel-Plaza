@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Journal from '../components/Journal';
 import { wordDiff } from '../../shared/diff';
+import { firstName } from '../../shared/names';
 import PhaserGame from '../components/PhaserGame';
 import type { QuestView } from '../../shared/campaign';
 import { PlazaConnection } from '../plaza';
@@ -46,6 +47,8 @@ export default function Game() {
   const navigate = useNavigate();
   const state = location.state as GameState | null;
   const [session] = useState(() => readStudentSession());
+  // Shown as the first name, with a surname letter added when a classmate shares it; the plaza tells us which.
+  const [myName, setMyName] = useState(() => firstName(readStudentSession()?.student.displayName ?? ''));
   
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -80,7 +83,7 @@ export default function Game() {
   // While the chat is open everything counts as read; folded, new messages from others pile up.
   useEffect(() => { if (!chatSpot.folded) setSeenCount(messages.length); }, [chatSpot.folded, messages.length]);
   const unread = chatSpot.folded
-    ? messages.slice(seenCount).filter(message => !message.sender.startsWith('System') && message.sender !== session?.student.displayName).length
+    ? messages.slice(seenCount).filter(message => !message.sender.startsWith('System') && message.sender !== myName).length
     : 0;
 
   // Enter jumps to the chat box from the map, and Escape leaves it, so a student never needs the mouse.
@@ -121,7 +124,9 @@ export default function Game() {
     const plaza = new PlazaConnection(state.roomCode, session.studentToken, state.avatarConfig);
     const say = (message: ChatMessage) => setMessages(prev => [...prev, message]);
     const unsubscribe = plaza.subscribe(event => {
-      if (event.t === 'roster' || event.t === 'join' || event.t === 'leave') {
+      if (event.t === 'roster' || event.t === 'join' || event.t === 'leave' || event.t === 'rename') {
+        const me = plaza.players.get(plaza.selfId ?? '');
+        if (me) setMyName(me.name);
         const others = [...plaza.players.values()].filter(player => player.id !== plaza.selfId);
         setClassmates(others.map(({ id, name }) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)));
         if (event.t === 'leave') setWhisperTo(current => (current === event.id ? '' : current));
@@ -256,7 +261,7 @@ export default function Game() {
           <h1 className="heading-pixel" style={{fontSize: '1.2rem', margin: 0}}>Pixel Plaza</h1>
           <div className="room-info">
             <span className="badge">Room: Lobby</span>
-            <span className="badge">{session.student.displayName}</span>
+            <span className="badge">{myName}</span>
             {state.roomCode && <span className="badge">Class: {state.roomCode}</span>}
             {status.state !== 'online' && <span className="badge badge-status">
               {status.state === 'stopped' ? 'Disconnected' : status.state === 'connecting' ? 'Connecting…' : 'Reconnecting…'}

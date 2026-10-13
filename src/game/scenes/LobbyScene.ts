@@ -14,6 +14,7 @@ export default class LobbyScene extends Phaser.Scene {
 
   private playerEntities: { [id: string]: Phaser.GameObjects.Container } = {};
   private figures: { [id: string]: AvatarFigure } = {};
+  private nameplates: { [id: string]: Phaser.GameObjects.Text } = {};
   private localPlayerContainer?: Phaser.GameObjects.Container;
   private sent = { x: 0, y: 0 };
   private lastSent = 0;
@@ -111,6 +112,7 @@ export default class LobbyScene extends Phaser.Scene {
     if (event.t === 'roster') this.syncRoster();
     else if (event.t === 'join') this.addPlayer(event.player);
     else if (event.t === 'leave') this.removePlayer(event.id);
+    else if (event.t === 'rename') this.nameplates[event.id]?.setText(event.name);
     else if (event.t === 'move' && event.id !== this.connection.selfId) {
       const container = this.playerEntities[event.id];
       if (!container) return;
@@ -156,6 +158,7 @@ export default class LobbyScene extends Phaser.Scene {
       padding: { x: 4, y: 2 }
     }).setOrigin(0.5);
     container.add(nameText);
+    this.nameplates[player.id] = nameText;
 
     if (isLocal) {
       this.localPlayerContainer = container;
@@ -181,6 +184,7 @@ export default class LobbyScene extends Phaser.Scene {
       container.destroy();
       delete this.playerEntities[id];
     }
+    delete this.nameplates[id];
     this.figures[id]?.destroy(); // after the container, which still shows its pictures
     delete this.figures[id];
   }

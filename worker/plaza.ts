@@ -5,6 +5,7 @@ import { checkGrammar } from './grammar.ts';
 import { moderate } from './moderation.ts';
 import { answerMatches, campaignById, campaigns, chapterDone, pickRole, type QuestView } from '../shared/campaign.ts';
 import { wordDiff } from '../shared/diff.ts';
+import { cleanName, shownNames } from '../shared/names.ts';
 import { zoneAt } from '../shared/plazaMap.ts';
 import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 
@@ -91,6 +92,7 @@ export class PlazaRoom extends DurableObject<Env> {
                 id TEXT PRIMARY KEY, name TEXT NOT NULL, pin TEXT NOT NULL UNIQUE, created INTEGER NOT NULL, last_opened INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS positions (
                 game_id TEXT NOT NULL, student_key TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL, PRIMARY KEY (game_id, student_key));
+            CREATE TABLE IF NOT EXISTS game_students (game_id TEXT NOT NULL, student_key TEXT NOT NULL, PRIMARY KEY (game_id, student_key));
             CREATE TABLE IF NOT EXISTS campaigns (
                 game_id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, chapter INTEGER NOT NULL, status TEXT NOT NULL, started INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS campaign_players (
@@ -100,6 +102,10 @@ export class PlazaRoom extends DurableObject<Env> {
         const chatColumns = this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('chat')").toArray().map(row => row.name);
         for (const [column, type] of [['target_key', 'TEXT'], ['target_name', 'TEXT'], ['x', 'REAL'], ['y', 'REAL'], ['flag', 'TEXT'], ['note', 'TEXT'], ['game_id', 'TEXT'], ['marks', 'TEXT']]) {
             if (!chatColumns.includes(column)) this.sql.exec(`ALTER TABLE chat ADD COLUMN ${column} ${type}`);
+        }
+        // The whole name as PinPlay gives it, from which each game works out what to show.
+        if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('students')").toArray().some(row => row.name === 'full_name')) {
+            this.sql.exec('ALTER TABLE students ADD COLUMN full_name TEXT');
         }
         this.adoptOldClass();
         // Keepalive pings are answered without waking the room.
@@ -124,11 +130,11 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!this.isOpen()) return { error: 'Your teacher has not opened the class yet.' };
         const now = Date.now();
         const ticket = crypto.randomUUID();
-        this.sql.exec(`INSERT INTO students (student_key, name, class_name, avatar, first_seen, last_seen)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT (student_key) DO UPDATE SET name = excluded.name, class_name = excluded.class_name,
+        this.sql.exec(`INSERT INTO students (student_key, name, full_name, class_name, avatar, first_seen, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (student_key) DO UPDATE SET name = excluded.name, full_name = excluded.full_name, class_name = excluded.class_name,
                 avatar = COALESCE(excluded.avatar, students.avatar), last_seen = excluded.last_seen`,
-            student.studentKey, plazaName(student.displayName), student.className,
+            student.studentKey, plazaName(student.displayName), cleanName(student.displayName) || 'Student', student.className,
             avatar ? JSON.stringify(avatar) : null, now, now);
         this.sql.exec('DELETE FROM tickets WHERE expires < ?', now);
         this.sql.exec('INSERT INTO tickets (ticket, student_key, expires) VALUES (?, ?, ?)', ticket, student.studentKey, now + TICKET_MS);
@@ -245,6 +251,9 @@ export class PlazaRoom extends DurableObject<Env> {
         }
 
         const game = this.activeGame() ?? '';
+        // Joining may make two students share a first name: everyone already here is told their new name.
+        this.sql.exec('INSERT OR IGNORE INTO game_students (game_id, student_key) VALUES (?, ?)', game, row.student_key);
+        this.refreshNames(game);
         const saved = this.sql.exec<{ name: string; avatar: string | null; x: number | null; y: number | null }>(
             `SELECT s.name AS name, s.avatar AS avatar, p.x AS x, p.y AS y FROM students s
              LEFT JOIN positions p ON p.student_key = s.student_key AND p.game_id = ? WHERE s.student_key = ?`,
@@ -254,7 +263,7 @@ export class PlazaRoom extends DurableObject<Env> {
             ? { x: saved.x, y: saved.y }
             : { x: SPAWN.x + Math.round(Math.random() * 100 - 50), y: SPAWN.y + Math.round(Math.random() * 100 - 50) };
         const seat: Seat = {
-            id: crypto.randomUUID().slice(0, 8), game, studentKey: row.student_key, name: saved.name,
+            id: crypto.randomUUID().slice(0, 8), game, studentKey: row.student_key, name: this.rosterNames(game).get(row.student_key) ?? saved.name,
             avatar: (saved.avatar && sanitizeAvatar(JSON.parse(saved.avatar))) || defaultAvatar(),
             x: spot.x, y: spot.y,
             lastChat: 0
@@ -453,7 +462,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const row = this.campaignRow(game);
         const campaign = row && campaignById(row.campaign_id);
         if (!game || !row || !campaign) return null;
-        const names = new Map(this.sql.exec<{ student_key: string; name: string }>('SELECT student_key, name FROM students').toArray().map(item => [item.student_key, item.name]));
+        const names = this.rosterNames(game);
         return {
             id: campaign.id, title: campaign.title, status: row.status, chapter: row.chapter, chapters: campaign.chapters.length,
             chapterTitle: campaign.chapters[Math.min(row.chapter, campaign.chapters.length - 1)].title,
@@ -472,6 +481,28 @@ export class PlazaRoom extends DurableObject<Env> {
 
     private isOpen(): boolean {
         return this.setting('open') === '1';
+    }
+
+    // What each student of this game is called: the first name, with the start of the surname
+    // when another student of the game shares it.
+    private rosterNames(game: string): Map<string, string> {
+        const rows = this.sql.exec<{ student_key: string; full: string }>(
+            `SELECT student_key, COALESCE(full_name, name) AS full FROM students WHERE student_key IN
+             (SELECT student_key FROM game_students WHERE game_id = ? UNION SELECT student_key FROM positions WHERE game_id = ?)`, game, game).toArray();
+        return shownNames(rows.map(row => ({ key: row.student_key, full: row.full })));
+    }
+
+    // Anyone online whose shown name has changed (because a namesake arrived) is renamed, on every screen.
+    private refreshNames(game: string): void {
+        const names = this.rosterNames(game);
+        for (const ws of this.ctx.getWebSockets()) {
+            const seat = ws.deserializeAttachment() as Seat | null;
+            const name = seat && names.get(seat.studentKey);
+            if (!seat || seat.left || seat.game !== game || !name || name === seat.name) continue;
+            seat.name = name;
+            ws.serializeAttachment(seat);
+            this.broadcast({ t: 'rename', id: seat.id, name });
+        }
     }
 
     private activeGame(): string | null {
@@ -665,8 +696,7 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         const message = JSON.stringify({ t: 'chat', id: entry.id, sender: entry.sender, text: entry.text, ts: Date.now(),
             ...(entry.marks ? { marks: JSON.parse(entry.marks) } : {}),
-            ...(entry.target_key !== null ? { whisper: true, to: this.sql.exec<{ name: string }>(
-                'SELECT name FROM students WHERE student_key = ?', entry.target_key).toArray()[0]?.name ?? 'a classmate' } : {}) });
+            ...(entry.target_key !== null ? { whisper: true, to: this.rosterNames(this.activeGame() ?? '').get(entry.target_key) ?? 'a classmate' } : {}) });
         for (const studentKey of recipients) {
             for (const ws of this.ctx.getWebSockets(studentKey)) {
                 try { ws.send(message); } catch { /* closing */ }
