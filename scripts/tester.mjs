@@ -2,8 +2,11 @@
 // students and the teacher, each in its own browser tab. No Google, no internet,
 // and nothing shared with the real class or the online site.
 //
-//   npm run tester           (4 players)
-//   npm run tester -- 6      (6 players, up to 8)
+//   npm run tester               (4 players)
+//   npm run tester -- 6          (6 players, up to 8)
+//   npm run tester -- 4 noai     (no OpenAI checks, so no cost)
+//
+// The OpenAI key in .dev.vars is used, so grammar hints and moderation work as in class.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,21 +14,24 @@ import { spawn } from 'node:child_process';
 
 const root = path.join(import.meta.dirname, '..');
 const wrangler = path.join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
-const state = path.join(root, '.wrangler', 'tester');
+let state = path.join(root, '.wrangler', 'tester');
 const port = Number(process.env.TESTER_PORT || 8788);
 const origin = `http://localhost:${port}`;
 const NAMES = ['Ana', 'Ben', 'Cleo', 'Dev', 'Eli', 'Fay', 'Gus', 'Hal'];
-const count = Math.min(Math.max(Number(process.argv[2]) || 4, 1), NAMES.length);
+const args = process.argv.slice(2);
+const count = Math.min(Math.max(Number(args.find(arg => /^\d+$/.test(arg))) || 4, 1), NAMES.length);
+const noAi = args.includes('noai');
 const teacherPassword = 'tester'; // only this throwaway server accepts it
 
-fs.rmSync(state, { recursive: true, force: true }); // every run starts with an empty plaza
+// Every run starts with an empty plaza. If an earlier run still holds the folder, use a fresh one.
+try { fs.rmSync(state, { recursive: true, force: true }); } catch { state += `-${Date.now()}`; }
 
-console.log(`\n  Starting a test plaza with ${count} players. Keep this window open; Ctrl+C stops it.\n`);
+console.log(`\n  Starting a test plaza with ${count} players${noAi ? ' (OpenAI off)' : ''}. Keep this window open; Ctrl+C stops it.\n`);
 const child = spawn(process.execPath, [wrangler, 'dev', '--port', String(port), '--persist-to', state,
     '--show-interactive-dev-session=false',
     '--var', 'TESTER_MODE:1',
     '--var', `CREATE_PASSWORD_HASH:${crypto.createHash('sha256').update(teacherPassword).digest('hex')}`,
-    '--var', 'OPENAI_API_KEY:', // no OpenAI calls while testing
+    ...(noAi ? ['--var', 'OPENAI_API_KEY:'] : []),
     '--var', 'PINPLAY_API_URL:'], {
     cwd: root, env: { ...process.env, WRANGLER_SEND_METRICS: 'false' }, stdio: 'inherit'
 });

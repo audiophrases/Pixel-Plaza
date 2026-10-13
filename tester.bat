@@ -1,7 +1,8 @@
 @echo off
 rem Opens a test class on this PC: the teacher and a few made-up players, each in
 rem its own browser tab. No Google sign-in. Double-click for 4 players, or run
-rem "tester.bat 6" for more (up to 8). Close this window to stop.
+rem "tester.bat 6" for more (up to 8); add noai ("tester.bat 4 noai") to skip the
+rem OpenAI checks. Close this window to stop.
 cd /d "%~dp0"
 title Pixel Plaza - tester
 
