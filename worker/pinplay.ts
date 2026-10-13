@@ -3,7 +3,7 @@
 // Time does); PINPLAY_API_URL replaces it for local development and tests.
 
 export type PinPlayStudent = { studentKey: string; displayName: string; className: string };
-export type PinPlayEnv = { PINPLAY_AUTH?: { fetch: (request: Request) => Promise<Response> }; PINPLAY_API_URL?: string };
+export type PinPlayEnv = { PINPLAY_AUTH?: { fetch: (request: Request) => Promise<Response> }; PINPLAY_API_URL?: string; TESTER_MODE?: string };
 
 export class PinPlayAuthError extends Error {
     status: number;
@@ -39,6 +39,10 @@ async function pinPlayRequest(env: PinPlayEnv, path: string, init: RequestInit =
     return data;
 }
 
+// Local testing only (tester.bat sets TESTER_MODE; production never does): a token
+// "tester:Name" is a made-up student, so several can play without Google.
+export const testerMode = (env: PinPlayEnv) => env.TESTER_MODE === '1';
+
 export async function studentConfig(env: PinPlayEnv) {
     const data = await pinPlayRequest(env, '/api/student/config');
     return {
@@ -65,6 +69,11 @@ export async function studentLogin(env: PinPlayEnv, googleIdToken: unknown): Pro
 export async function resolveStudent(env: PinPlayEnv, studentToken: unknown): Promise<PinPlayStudent> {
     if (typeof studentToken !== 'string' || !studentToken || studentToken.length > 2048) {
         throw new PinPlayAuthError('Please sign in with Google.', 401);
+    }
+    if (testerMode(env) && studentToken.startsWith('tester:')) {
+        const name = studentToken.slice(7).trim();
+        if (!/^[A-Za-z0-9 _-]{1,24}$/.test(name)) throw new PinPlayAuthError('Please sign in with Google.', 401);
+        return { studentKey: `tester-${name.toLowerCase()}`, displayName: name, className: 'Tester' };
     }
     const data = await pinPlayRequest(env, '/api/student/me', { headers: { 'X-Student-Token': studentToken } });
     const student = data?.student;

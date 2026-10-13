@@ -21,11 +21,17 @@ function usable(session: StudentSession | null): StudentSession | null {
     ? session : null;
 }
 
+// A tester (tester.bat) lives in its own tab's sessionStorage, so several can
+// play from one browser; a real student is remembered in localStorage.
 export function readStudentSession(): StudentSession | null {
-  try {
-    const raw = localStorage.getItem(sessionKey);
-    return usable(raw ? JSON.parse(raw) as StudentSession : null);
-  } catch { return null; }
+  for (const store of [sessionStorage, localStorage]) {
+    try {
+      const raw = store.getItem(sessionKey);
+      const session = usable(raw ? JSON.parse(raw) as StudentSession : null);
+      if (session) return session;
+    } catch { /* storage disabled */ }
+  }
+  return null;
 }
 
 // Browser storage is per address, so the session signed in online travels to
@@ -48,11 +54,11 @@ export function receiveHandOff(): void {
 }
 
 export function saveStudentSession(session: StudentSession): void {
-  localStorage.setItem(sessionKey, JSON.stringify(session));
+  (session.studentToken.startsWith('tester:') ? sessionStorage : localStorage).setItem(sessionKey, JSON.stringify(session));
 }
 
 export function clearStudentSession(): void {
-  try { localStorage.removeItem(sessionKey); } catch { /* storage disabled */ }
+  try { localStorage.removeItem(sessionKey); sessionStorage.removeItem(sessionKey); } catch { /* storage disabled */ }
   window.google?.accounts.id.disableAutoSelect?.();
 }
 

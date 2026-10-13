@@ -47,10 +47,10 @@ export default function Teacher() {
     return () => window.clearInterval(timer);
   }, [token, refresh]);
 
-  const signIn = async () => {
+  const signIn = async (typed = password) => {
     try {
       const { token: session, notice: linked } = await call<{ token: string; notice?: string }>('login', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password })
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: typed })
       });
       setStatus(await call<Status>('status', { headers: { 'x-teacher-session': session } }));
       setPassword('');
@@ -59,6 +59,12 @@ export default function Teacher() {
       setToken(session);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Sign-in failed.'); }
   };
+
+  // tester.bat opens /teacher?autologin=tester; its throwaway server's password is "tester".
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('autologin') === 'tester') void signIn('tester');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Oldest waiting message first, like a queue.
   const waiting = status ? status.entries.filter(entry => entry.status === 'pending').reverse() : [];

@@ -1,5 +1,5 @@
 import { PlazaRoom, type TeacherAction } from './plaza.ts';
-import { PinPlayAuthError, resolveStudent, studentConfig, studentLogin } from './pinplay.ts';
+import { PinPlayAuthError, resolveStudent, studentConfig, studentLogin, testerMode } from './pinplay.ts';
 import { laptopOrigin, sanitizeAvatar, secretsMatch, teacherPasswordMatches } from './rules.ts';
 
 export { PlazaRoom };
@@ -20,6 +20,8 @@ export interface Env {
     // school network, and the online Pixel Plaza where students sign in.
     LAN_URL?: string;
     CLOUD_URL?: string;
+    // Set only by tester.bat on a local server: lets "tester:Name" tokens sign in without Google.
+    TESTER_MODE?: string;
 }
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -105,6 +107,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (path === '/api/student/config' && get) {
         // Google sign-in needs HTTPS, which the laptop does not have: students
         // sign in online and are sent back here.
+        if (testerMode(env)) return json({ loginEnabled: false, googleClientId: '', allowedDomains: [] });
         if (onLaptop(env)) return json({ loginEnabled: false, googleClientId: '', allowedDomains: [], signInUrl: env.CLOUD_URL });
         return json({ ...(await studentConfig(env)), laptopUrl: await plaza(env).laptopUrl() });
     }

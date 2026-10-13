@@ -10,7 +10,8 @@
     "build": "wrangler types worker/runtime.d.ts --include-env=false && tsc -b && vite build",
     "lint": "oxlint",
     "test": "npm run build && node --test \"worker/tests/*.test.mjs\"",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && wrangler deploy",
+    "tester": "node scripts/tester.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",

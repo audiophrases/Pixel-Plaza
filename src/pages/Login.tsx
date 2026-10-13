@@ -8,6 +8,7 @@ import {
   fetchStudentProfile, handOffTo, readStudentSession, saveStudentSession
 } from '../studentAuth';
 import type { StudentConfig, StudentSession } from '../studentAuth';
+import { testerAvatar, testerPin } from '../tester';
 import './Login.css';
 
 export default function Login() {
@@ -48,6 +49,14 @@ export default function Login() {
     }
     return () => { active = false; };
   }, []);
+
+  // tester.bat: a tester tab goes straight into the class.
+  useEffect(() => {
+    const pin = testerPin();
+    if (pin && session?.studentToken.startsWith('tester:')) {
+      navigate('/game', { state: { roomCode: pin, avatarConfig: testerAvatar(session.student.displayName) } });
+    }
+  }, [session, navigate]);
 
   useEffect(() => {
     if (step !== 'details' || session || !config?.loginEnabled || !googleButton.current) return;
