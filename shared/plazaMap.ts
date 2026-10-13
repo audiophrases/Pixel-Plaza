@@ -105,5 +105,25 @@ export const SPAWN = { x: Math.round(plazaMap.spawn.x * SCALE), y: Math.round(pl
 // The named place (zone id) a world position is in, or null.
 export const zoneAt = (x: number, y: number): string | null => worldZones.find(zone => inside(x, y, zone.rect))?.id ?? null;
 
+// The avatar walks at 200 pixels a second (283 on a diagonal). A move is believed up to this speed, with
+// room for a slow connection to deliver several steps at once.
+export const MAX_SPEED = 450;
+const MOVE_SLACK = 30; // pixels
+const MOVE_TIME_CAP_MS = 2000;
+
+// Whether a student could really have walked from one place to another in `elapsedMs`: the end is
+// not in a wall, it is not further than they can walk, and no wall lies on the straight line between.
+export function legalMove(fromX: number, fromY: number, toX: number, toY: number, elapsedMs: number): boolean {
+    if (isBlocked(toX, toY)) return false;
+    const distance = Math.hypot(toX - fromX, toY - fromY);
+    const time = Math.min(Math.max(elapsedMs, 50), MOVE_TIME_CAP_MS) / 1000;
+    if (distance > MAX_SPEED * time + MOVE_SLACK) return false;
+    const steps = Math.ceil(distance / 6);
+    for (let step = 1; step < steps; step++) {
+        if (isBlocked(fromX + (toX - fromX) * step / steps, fromY + (toY - fromY) * step / steps)) return false;
+    }
+    return true;
+}
+
 // True when a world position is in a place nobody can walk.
 export const isBlocked = (x: number, y: number) => worldRects.some(rect => inside(x, y, rect));

@@ -57,7 +57,7 @@ async function startPlaza(pinPlayUrl, persistTo, vars = {}) {
         '--var', `CREATE_PASSWORD_HASH:${await sha256Hex(PASSWORD)}`,
         '--var', `PINPLAY_API_URL:${pinPlayUrl}`,
         // No OpenAI key unless a test brings its own: the one in .dev.vars must not change the results.
-        ...Object.entries({ OPENAI_API_KEY: '', ...vars }).flatMap(([key, value]) => ['--var', `${key}:${value}`])], {
+        ...Object.entries({ OPENAI_API_KEY: '', MOVEMENT_CHECK: '0', ...vars }).flatMap(([key, value]) => ['--var', `${key}:${value}`])], {
         cwd: root, env: { ...process.env, WRANGLER_SEND_METRICS: 'false' }, stdio: ['ignore', 'pipe', 'pipe']
     });
     let log = '';
@@ -770,6 +770,53 @@ test('random names: a made-up name to keep, hidden from classmates, known to the
         const back = await join('signed-a');
         const backAlias = await back.next(message => message.t === 'alias', 'alias after reopening');
         assert.deepEqual([backAlias.name, backAlias.kept], [another.name, true]);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});
+
+test('movement: no walking through walls, no teleporting, but real walking is believed', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, { MOVEMENT_CHECK: '1' });
+    const sockets = [];
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        PIN = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body.pin;
+        const alex = await enter(base, 'signed-a', null);
+        const sam = await enter(base, 'signed-b', null);
+        sockets.push(alex, sam);
+        const { x, y } = alex.me;
+        const snapBack = () => alex.next(message => message.t === 'snap', 'put back');
+
+        // A normal few steps are passed on to everyone.
+        await pause(300);
+        alex.send({ t: 'move', x: x + 20, y });
+        const seen = await sam.next(message => message.t === 'move' && message.id === alex.welcome.id, 'a step');
+        assert.deepEqual([seen.x, seen.y], [x + 20, y]);
+
+        // Stepping into the fountain is refused, and Alex is told where they really are.
+        alex.send({ t: 'move', x: 590, y: 1280 }); // the fountain basin: far, and a wall
+        assert.deepEqual(((s) => [s.x, s.y])(await snapBack()), [x + 20, y]);
+
+        // So is appearing across the map, even somewhere open.
+        alex.send({ t: 'move', x: 1100, y: 740 });
+        assert.deepEqual(((s) => [s.x, s.y])(await snapBack()), [x + 20, y]);
+
+        // And a short hop into the top of the fountain.
+        alex.send({ t: 'move', x: x + 20, y: y + 100 });
+        await snapBack();
+        assert.equal(sam.inbox.filter(message => message.t === 'move' && message.id === alex.welcome.id && message.y !== y).length, 0, 'refused moves never reach anyone');
+
+        // The same distance walked over time is fine: a long walk, given the seconds it takes.
+        await pause(1500);
+        alex.send({ t: 'move', x: x + 20, y: y - 100 });
+        assert.equal((await sam.next(message => message.t === 'move' && message.id === alex.welcome.id, 'a longer walk')).y, y - 100);
     } finally {
         for (const socket of sockets) socket.ws.close();
         await plaza.stop();

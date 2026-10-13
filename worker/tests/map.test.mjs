@@ -2,7 +2,7 @@
 // data with the player's real foot box, so a wall that closes off a path or a gate fails here.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAP_SIZE, SCALE, SPAWN, isBlocked, worldRects } from '../../shared/plazaMap.ts';
+import { MAP_SIZE, SCALE, SPAWN, isBlocked, legalMove, worldRects } from '../../shared/plazaMap.ts';
 
 const CELL = 4;
 const N = Math.ceil(MAP_SIZE / CELL);
@@ -68,4 +68,18 @@ test('the bridge is crossed by its deck, not by going around the pond', () => {
     assert.ok(across, 'and left at the east end');
     // Over the deck it is a few hundred pixels; round the pond and back it would be well over a thousand.
     assert.ok((across - 1) * CELL < 600, `crossing takes ${(across - 1) * CELL} pixels`);
+});
+
+test('a move is believed only if it could have been walked', () => {
+    const { x, y } = SPAWN;
+    assert.equal(legalMove(x, y, x + 10, y, 100), true, 'a step');
+    assert.equal(legalMove(x, y, x + 100, y, 1000), true, 'a second of walking');
+    assert.equal(legalMove(x, y, x + 600, y, 100), false, 'too fast');
+    assert.equal(legalMove(x, y, 590, 1280, 5000), false, 'into the fountain');
+    // Walking straight through the fountain is refused even though both ends are open and the time is generous.
+    const south = [372 * SCALE, 1000 * SCALE];
+    assert.equal(isBlocked(south[0], south[1]), false);
+    assert.equal(legalMove(x, y, south[0], south[1], 2000), false);
+    // Time beyond a couple of seconds buys no more distance, so waiting is no way to teleport.
+    assert.equal(legalMove(x, y, x + 1500, y, 60000), false);
 });

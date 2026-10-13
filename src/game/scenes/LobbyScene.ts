@@ -113,6 +113,10 @@ export default class LobbyScene extends Phaser.Scene {
     else if (event.t === 'join') this.addPlayer(event.player);
     else if (event.t === 'leave') this.removePlayer(event.id);
     else if (event.t === 'rename') this.nameplates[event.id]?.setText(event.name);
+    else if (event.t === 'snap' && this.localPlayerContainer?.body) {
+      (this.localPlayerContainer.body as Phaser.Physics.Arcade.Body).reset(event.x, event.y);
+      this.sent = { x: event.x, y: event.y };
+    }
     else if (event.t === 'move' && event.id !== this.connection.selfId) {
       const container = this.playerEntities[event.id];
       if (!container) return;

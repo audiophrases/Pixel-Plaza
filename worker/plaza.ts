@@ -7,7 +7,7 @@ import { answerMatches, campaignById, campaigns, chapterDone, pickRole, type Que
 import { wordDiff } from '../shared/diff.ts';
 import { cleanName, shownNames } from '../shared/names.ts';
 import { randomName } from '../shared/randomNames.ts';
-import { zoneAt } from '../shared/plazaMap.ts';
+import { legalMove, zoneAt } from '../shared/plazaMap.ts';
 import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 
 const TICKET_MS = 60_000;
@@ -28,7 +28,7 @@ const CLOSE_CLASS_CLOSED = 4002; // the teacher closed the game
 
 // Per-socket state. It lives in the socket's attachment, so it survives the
 // room hibernating between messages.
-type Seat = { id: string; game: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; x: number; y: number; lastChat: number; lastCheck?: number; lastReroll?: number; left?: boolean };
+type Seat = { id: string; game: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; x: number; y: number; lastChat: number; lastCheck?: number; lastReroll?: number; movedAt?: number; left?: boolean };
 
 // 'approve': every message waits for the teacher. 'review': nearby chat that OpenAI
 // cleared posts at once and the teacher reviews afterwards; whispers still wait.
@@ -277,7 +277,7 @@ export class PlazaRoom extends DurableObject<Env> {
             id: crypto.randomUUID().slice(0, 8), game, studentKey: row.student_key, name: this.rosterNames(game).get(row.student_key) ?? saved.name,
             avatar: (saved.avatar && sanitizeAvatar(JSON.parse(saved.avatar))) || defaultAvatar(),
             x: spot.x, y: spot.y,
-            lastChat: 0
+            lastChat: 0, movedAt: Date.now()
         };
         const others = this.seats();
         this.ctx.acceptWebSocket(server, [seat.studentKey]);
@@ -300,6 +300,13 @@ export class PlazaRoom extends DurableObject<Env> {
         if (data?.t === 'move') {
             const position = clampPosition(data.x, data.y);
             if (!position) return;
+            // A move through a wall, or further than anyone can walk, puts the student back where they were.
+            const now = Date.now();
+            if (this.env.MOVEMENT_CHECK !== '0' && !legalMove(seat.x, seat.y, position.x, position.y, now - (seat.movedAt ?? now))) {
+                try { ws.send(JSON.stringify({ t: 'snap', x: seat.x, y: seat.y })); } catch { /* closing */ }
+                return;
+            }
+            seat.movedAt = now;
             seat.x = position.x;
             seat.y = position.y;
             this.discover(seat);
