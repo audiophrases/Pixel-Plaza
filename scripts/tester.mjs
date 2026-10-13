@@ -5,6 +5,7 @@
 //   npm run tester               (4 players)
 //   npm run tester -- 6          (6 players, up to 8)
 //   npm run tester -- 4 noai     (no OpenAI checks, so no cost)
+//   npm run tester -- 4 random   (the game gives made-up names, as a new game does by default)
 //
 // The OpenAI key in .dev.vars is used, so grammar hints and moderation work as in class.
 import crypto from 'node:crypto';
@@ -21,6 +22,7 @@ const NAMES = ['Ana', 'Ben', 'Cleo', 'Dev', 'Eli', 'Fay', 'Gus', 'Hal'];
 const args = process.argv.slice(2);
 const count = Math.min(Math.max(Number(args.find(arg => /^\d+$/.test(arg))) || 4, 1), NAMES.length);
 const noAi = args.includes('noai');
+const randomNames = args.includes('random');
 const teacherPassword = 'tester'; // only this throwaway server accepts it
 
 // Every run starts with an empty plaza. If an earlier run still holds the folder, use a fresh one.
@@ -55,7 +57,7 @@ for (let attempt = 0; ; attempt++) {
 let pin;
 try {
     const { token } = await post('/api/teacher/login', { password: teacherPassword });
-    ({ pin } = await post('/api/teacher/class', { open: true }, { 'x-teacher-session': token }));
+    ({ pin } = await post('/api/teacher/game', { name: 'Class 1', randomNames }, { 'x-teacher-session': token }));
 } catch (error) {
     console.error(`Could not open the test class: ${error.message}`);
     child.kill();

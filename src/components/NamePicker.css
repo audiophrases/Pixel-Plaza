@@ -1,0 +1,18 @@
+.name-picker {
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(360px, calc(100vw - 2rem));
+  padding: 1.25rem;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.96);
+  pointer-events: auto;
+  z-index: 20;
+}
+
+.name-picker p { margin: 0; }
+.name-picker-label { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #667; }
+.name-picker-name { margin: 0.5rem 0 1rem !important; font-size: 1.6rem; font-weight: 800; }
+.name-picker-actions { display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; }
+.name-picker-note { margin-top: 0.9rem !important; font-size: 0.8rem; color: #667; }

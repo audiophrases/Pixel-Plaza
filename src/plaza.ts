@@ -15,6 +15,7 @@ export type PlazaEvent =
   | { t: 'retract'; id: string } // the teacher took a posted message down
   | { t: 'notice'; level: 'info' | 'warning'; text: string; cid?: string } // cid: the chat message this answers
   | { t: 'result'; cid: string }
+  | { t: 'alias'; name: string; kept: boolean }                            // your made-up name, and whether you have kept it
   | { t: 'rename'; id: string; name: string }                              // a namesake arrived: this player's shown name changed
   | { t: 'quest'; quest: QuestView | null }                                  // this student's view of the campaign
   | { t: 'answered'; objective: string; correct: boolean; wait: boolean };                                          // that message was posted at once

@@ -25,6 +25,8 @@
 kbd { border: 1px solid #aaa; border-radius: 4px; padding: 0 .35rem; background: #f4f4f4; }
 .teacher-entry .teacher-note { color: #0b6b61; font-size: .9rem; margin: .3rem 0; }
 
+.teacher-toggle { display: flex; gap: 0.5rem; align-items: flex-start; flex: 1 1 100%; font-size: 0.9rem; color: #444; }
+.teacher-toggle input { margin-top: 0.2rem; }
 .teacher-newgame { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
 .teacher-newgame input { flex: 1 1 14rem; padding: 0.5rem 0.75rem; border: 1px solid #ccc; border-radius: 8px; font: inherit; }
 .teacher-games ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }

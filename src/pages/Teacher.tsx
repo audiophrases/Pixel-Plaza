@@ -7,11 +7,11 @@ type CampaignInfo = {
   id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string;
   players: { studentKey: string; name: string; role: string; clues: number; done: string[] }[];
 };
-type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean };
+type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
   campaign: CampaignInfo | null; campaigns: { id: string; title: string }[];
-  open: boolean; game: { id: string; name: string } | null; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: { studentKey: string; name: string }[];
+  open: boolean; game: { id: string; name: string; randomNames: boolean } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: { studentKey: string; name: string }[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
 };
 
@@ -31,6 +31,7 @@ export default function Teacher() {
   // A problem sending students to this laptop, from sign-in or opening the class.
   const [notice, setNotice] = useState('');
   const [newGameName, setNewGameName] = useState('');
+  const [randomNames, setRandomNames] = useState(true); // students get made-up names, and the teacher sees who they are
 
   const request = useCallback((path: string, body?: object) => call<Status>(path, {
     method: body ? 'POST' : 'GET',
@@ -72,6 +73,12 @@ export default function Teacher() {
     if (new URLSearchParams(window.location.search).get('autologin') === 'tester') void signIn('tester');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The plaza may show made-up names; the teacher always sees the real one beside them.
+  const who = (studentKey: string, shown: string) => {
+    const real = status?.realNames?.[studentKey];
+    return real && real !== shown ? `${shown} (${real})` : shown;
+  };
 
   // Oldest waiting message first, like a queue.
   const waiting = status ? status.entries.filter(entry => entry.status === 'pending').reverse() : [];
@@ -143,16 +150,20 @@ export default function Teacher() {
         <form className="teacher-newgame" onSubmit={event => {
           event.preventDefault();
           if (!newGameName.trim()) return;
-          void action('game', { name: newGameName });
+          void action('game', { name: newGameName, randomNames });
           setNewGameName('');
         }}>
           <input aria-label="Name for a new game" placeholder="New game, e.g. 3A Castanyada" maxLength={40}
             value={newGameName} onChange={event => setNewGameName(event.target.value)} />
           <button className="btn btn-primary" disabled={!newGameName.trim()}>New game</button>
+          <label className="teacher-toggle">
+            <input type="checkbox" checked={randomNames} onChange={event => setRandomNames(event.target.checked)} />
+            Random names: students pick a made-up name and you see who is who. Off: first names, with a surname letter when two match.
+          </label>
         </form>
         {status.games.length > 0 && <ul>
           {status.games.map(game => <li key={game.id}>
-            <span><strong>{game.name}</strong> · PIN {game.pin} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
+            <span><strong>{game.name}</strong> · PIN {game.pin} · {game.randomNames ? 'random names' : 'real first names'} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
             {!game.open && <button className="btn btn-secondary" onClick={() => void action('class', { open: true, game: game.id })}>
               {status.open ? 'Switch to this game' : 'Open'}
             </button>}
@@ -180,7 +191,7 @@ export default function Teacher() {
           </div>
           {status.campaign.players.length > 0 && <ul>
             {status.campaign.players.map(player => <li key={player.studentKey}>
-              <span><strong>{player.name}</strong> · {player.role} · {player.clues} place clue{player.clues === 1 ? '' : 's'} · {player.done.length ? `answered ${player.done.length}` : 'not answered yet'}</span>
+              <span><strong>{who(player.studentKey, player.name)}</strong> · {player.role} · {player.clues} place clue{player.clues === 1 ? '' : 's'} · {player.done.length ? `answered ${player.done.length}` : 'not answered yet'}</span>
             </li>)}
           </ul>}
         </>}
@@ -204,7 +215,7 @@ export default function Teacher() {
       </section>
       <section className="teacher-online">
         <h2>In the Plaza now ({status.online.length})</h2>
-        <p>{status.online.length ? status.online.map(student => student.name).join(', ') : 'Nobody yet.'}</p>
+        <p>{status.online.length ? status.online.map(student => who(student.studentKey, student.name)).join(', ') : 'Nobody yet.'}</p>
       </section>
       <section className="teacher-entries">
         <h2>Chat review</h2>
@@ -215,7 +226,7 @@ export default function Teacher() {
         </div>}
         {status.entries.length === 0 && <p>No messages yet.</p>}
         {status.entries.map(entry => <article key={entry.id} className={`teacher-entry${entry === oldest ? ' teacher-oldest' : ''}`}>
-          <div><strong>{entry.sender}</strong>{entry.target && <> → <strong>{entry.target}</strong> <em>(whisper)</em></>} <small>{new Date(entry.timestamp).toLocaleTimeString()} · {entry.status}</small></div>
+          <div><strong>{who(entry.studentKey, entry.sender)}</strong>{entry.target && <> → <strong>{entry.target}</strong> <em>(whisper)</em></>} <small>{new Date(entry.timestamp).toLocaleTimeString()} · {entry.status}</small></div>
           <p>{entry.text}</p>
           {entry.note && <p className="teacher-note">Grammar hint: {entry.note}</p>}
           {entry.flag && <p className="teacher-flag">{entry.status === 'blocked' ? 'Blocked by moderation' : 'Not checked by moderation'}: {entry.flag}</p>}

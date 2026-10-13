@@ -80,6 +80,15 @@ Once on the laptop: install Node.js and copy the project. The first time `classr
 
 The laptop's address is plain HTTP, so student sessions cross the school network unencrypted. Sign in to the teacher controls on the laptop itself (`localhost`), not from another device.
 
+## Names in the plaza
+
+Each game is created with **Random names** on (the default) or off:
+
+- **On:** a student is given a made-up name such as *Happy Plato* or *Brave Hypatia*, drawn from PinPlay's random-names lists with unkind adjectives left out. They can ask for **Another name** until they **Keep** one, which they keep for the whole game; until then they cannot chat. Classmates never see real names, and the teacher controls show the real name beside each made-up one.
+- **Off:** students are shown by first name, plus the first letter of their surname when two students of the game share a first name (*Roger L*, *Roger C*). Whoever was already there is renamed on every screen when a namesake joins.
+
+The choice is made when the game is created and applies to that game only.
+
 ## AI moderation (optional)
 
 With an OpenAI API key, every message, nearby or whisper, is checked by OpenAI's moderation endpoint (`omni-moderation-latest`, free to use) after the word filter and before it reaches the teacher.

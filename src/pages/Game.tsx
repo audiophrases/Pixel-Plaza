@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Journal from '../components/Journal';
+import NamePicker from '../components/NamePicker';
 import { wordDiff } from '../../shared/diff';
 import { firstName } from '../../shared/names';
 import PhaserGame from '../components/PhaserGame';
@@ -57,6 +58,7 @@ export default function Game() {
   const [checking, setChecking] = useState(false);
   // A message on its way: the draft stays in the box until the server says it took it.
   const [sending, setSending] = useState(false);
+  const [alias, setAlias] = useState<{ name: string; kept: boolean } | null>(null); // set when this game gives made-up names
   const [quest, setQuest] = useState<QuestView | null>(null); // this student's part of the campaign, if one is running
   const [answered, setAnswered] = useState<{ objective: string; correct: boolean; wait: boolean } | null>(null);
   const [sendError, setSendError] = useState(''); // why the last message did not go, shown by the box
@@ -148,6 +150,7 @@ export default function Game() {
         chatField.current?.blur(); // sent: the keys walk again until Enter opens the box
       }
       if (event.t === 'result') return;
+      if (event.t === 'alias') { setAlias({ name: event.name, kept: event.kept }); return; }
       if (event.t === 'quest') { setQuest(event.quest); setAnswered(null); return; }
       if (event.t === 'answered') { setAnswered({ objective: event.objective, correct: event.correct, wait: event.wait }); return; }
       if (event.t === 'chat') say({ id: event.id, sender: event.sender, text: event.text, timestamp: event.ts, whisper: event.whisper, to: event.to, marks: event.marks });
@@ -273,6 +276,9 @@ export default function Game() {
           <p>{status.message}</p>
           <button type="button" className="btn btn-primary" onClick={() => navigate('/')}>Back to the start</button>
         </div>}
+
+        {alias && !alias.kept && <NamePicker name={alias.name}
+          onAnother={() => connection?.send({ t: 'reroll' })} onKeep={() => connection?.send({ t: 'keep' })} />}
 
         {quest && <Journal quest={quest} feedback={answered}
           onAnswer={(objective, text) => connection?.send({ t: 'answer', objective, text })} />}

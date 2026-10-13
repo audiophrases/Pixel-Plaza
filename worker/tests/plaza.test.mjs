@@ -674,7 +674,7 @@ test('shown names: first name alone, then a surname letter for namesakes, updati
     try {
         const { base } = plaza;
         const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
-        PIN = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body.pin;
+        PIN = (await api(base, '/api/teacher/game', { session, body: { name: 'First names', randomNames: false } })).body.pin;
         const nameOf = (socket, id) => socket.welcome.players.find(player => player.id === id)?.name;
 
         // The first Roger keeps just the first name while he is alone.
@@ -701,6 +701,75 @@ test('shown names: first name alone, then a surname letter for namesakes, updati
         const third = await join('roger-3');
         assert.equal(third.me.name, 'Roger Ll');
         assert.equal((await first.next(message => message.t === 'rename' && message.id === first.welcome.id, 'second rename')).name, 'Roger Lo');
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});
+
+test('random names: a made-up name to keep, hidden from classmates, known to the teacher', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    const join = async token => { const socket = await enter(plaza.base, token, null); sockets.push(socket); return socket; };
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        // Random names are the default for a new game.
+        const created = (await api(base, '/api/teacher/game', { session, body: { name: '3A' } })).body;
+        PIN = created.pin;
+        assert.equal(created.game.randomNames, true);
+
+        // Nobody is shown by a real name, and each student is offered a name to keep or change.
+        const alex = await join('signed-a');
+        const offered = await alex.next(message => message.t === 'alias', 'alias offered');
+        assert.equal(offered.kept, false);
+        assert.match(offered.name, /^[A-Z][a-z]+ [A-Za-z]+$/);
+        assert.equal(alex.me.name, offered.name);
+        assert.notEqual(alex.me.name, 'Alex');
+        const sam = await join('signed-b');
+        const samOffer = await sam.next(message => message.t === 'alias', 'alias for Sam');
+        assert.notEqual(samOffer.name, offered.name);
+        assert.equal(sam.welcome.players.find(player => player.id === alex.welcome.id).name, offered.name);
+
+        // Until a name is kept, chat is refused and the draft comes back.
+        alex.send({ t: 'chat', text: 'Hello there', cid: 'c1' });
+        assert.match((await alex.next(message => message.t === 'notice', 'choose first')).text, /Choose your name first/);
+
+        // Asking for another name renames them for everyone, and never repeats a name in use.
+        await pause(400);
+        alex.send({ t: 'reroll' });
+        const another = await alex.next(message => message.t === 'alias', 'another name');
+        assert.notEqual(another.name, offered.name);
+        assert.equal((await sam.next(message => message.t === 'rename' && message.id === alex.welcome.id, 'rename seen')).name, another.name);
+
+        // Keeping it is final: no more changes, and chat opens.
+        alex.send({ t: 'keep' });
+        assert.equal((await alex.next(message => message.t === 'alias' && message.kept, 'kept')).name, another.name);
+        await pause(400);
+        alex.send({ t: 'reroll' });
+        assert.equal((await alex.next(message => message.t === 'alias', 'still the same')).name, another.name);
+        await pause(1600);
+        alex.send({ t: 'chat', text: 'Hello there' });
+        assert.match((await alex.next(message => message.t === 'notice', 'sent')).text, /approval|posted/i);
+
+        // The teacher sees the made-up name with the real one beside it.
+        const status = (await api(base, '/api/teacher/status', { session })).body;
+        assert.deepEqual(status.online.find(student => student.studentKey === 'stu_a'), { studentKey: 'stu_a', name: another.name });
+        assert.equal(status.realNames.stu_a, 'Alex');
+        assert.equal(status.entries.find(entry => entry.text === 'Hello there').sender, another.name);
+
+        // Closing and reopening the game brings back the kept name, already final.
+        await api(base, '/api/teacher/class', { session, body: { open: false } });
+        await alex.closed;
+        await api(base, '/api/teacher/class', { session, body: { open: true } });
+        const back = await join('signed-a');
+        const backAlias = await back.next(message => message.t === 'alias', 'alias after reopening');
+        assert.deepEqual([backAlias.name, backAlias.kept], [another.name, true]);
     } finally {
         for (const socket of sockets) socket.ws.close();
         await plaza.stop();
