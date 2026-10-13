@@ -247,13 +247,47 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         sockets.push(alexNextLesson);
         assert.deepEqual([alexNextLesson.me.x, alexNextLesson.me.y, alexNextLesson.me.hair], [1100, 740, 3]);
 
-        // Closing the class keeps new students out, and the next lesson has a new PIN.
+        // Closing the game sends everyone out and keeps new students out; reopening it
+        // brings back the same PIN and the same places.
         await api(base, '/api/teacher/class', { session, body: { open: false } });
+        assert.equal(await alexNextLesson.closed, 4002);
         assert.equal((await api(base, '/api/plaza/join', { token: 'signed-b', body: { pin: PIN } })).status, 403);
-        const nextPin = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body.pin;
-        assert.notEqual(nextPin, PIN);
-        assert.equal((await api(base, '/api/plaza/join', { token: 'signed-b', body: { pin: PIN } })).status, 403);
-        assert.equal((await api(base, '/api/plaza/join', { token: 'signed-b', body: { pin: nextPin } })).status, 200);
+        const reopened = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body;
+        assert.equal(reopened.pin, PIN);
+        assert.equal((await api(base, '/api/plaza/join', { token: 'signed-b', body: { pin: PIN } })).status, 200);
+        const alexBack = await enter(base, 'signed-a', null);
+        sockets.push(alexBack);
+        assert.deepEqual([alexBack.me.x, alexBack.me.y], [1100, 740]);
+
+        // A second game has its own PIN, and its own places and chat; the first is kept.
+        const second = (await api(base, '/api/teacher/game', { session, body: { name: '  3B   Winter ' } })).body;
+        assert.equal(await alexBack.closed, 4002);
+        assert.deepEqual(second.game.name, '3B Winter');
+        assert.notEqual(second.pin, PIN);
+        assert.equal(second.games.length, 2);
+        assert.equal((await api(base, '/api/teacher/game', { session, body: { name: '   ' } })).status, 400);
+        assert.equal((await api(base, '/api/plaza/join', { token: 'signed-a', body: { pin: PIN } })).status, 403);
+        const firstPin = PIN;
+        PIN = second.pin; // enter() joins with the current PIN
+        const alexSecond = await enter(base, 'signed-a', null);
+        sockets.push(alexSecond);
+        assert.notDeepEqual([alexSecond.me.x, alexSecond.me.y], [1100, 740]);
+        alexSecond.send({ t: 'move', x: 1300, y: 760 });
+        await new Promise(resolve => setTimeout(resolve, 300));
+        assert.equal(second.entries.some(entry => entry.text === 'Hello class!'), false);
+
+        // Back to the first game: Alex is where they were, and the old chat is there.
+        await api(base, '/api/teacher/class', { session, body: { open: true, game: reopened.game.id } });
+        assert.equal(await alexSecond.closed, 4002);
+        PIN = firstPin;
+        const firstAgain = (await api(base, '/api/teacher/status', { session })).body;
+        assert.equal(firstAgain.pin, PIN);
+        assert.equal(firstAgain.entries.find(entry => entry.text === 'Hello class!').status, 'approved');
+        assert.equal(firstAgain.games.filter(game => game.open).length, 1);
+        assert.equal((await api(base, '/api/teacher/class', { session, body: { open: true, game: 'nope' } })).status, 400);
+        const alexOnceMore = await enter(base, 'signed-a', null);
+        sockets.push(alexOnceMore);
+        assert.deepEqual([alexOnceMore.me.x, alexOnceMore.me.y], [1100, 740]);
     } finally {
         for (const socket of sockets) socket.ws.close();
         await plaza.stop();

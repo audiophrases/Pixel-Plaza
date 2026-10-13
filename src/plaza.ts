@@ -21,6 +21,7 @@ const PING_EVERY_MS = 10000;
 const PONG_WITHIN_MS = 5000;
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
 const CLOSE_REPLACED = 4009;
+const CLOSE_CLASS_CLOSED = 4002;
 const HINT_WAIT_MS = 2500; // a slow hint is dropped: the message is sent as it is
 
 // A refusal that retrying cannot fix, such as a wrong PIN or a closed class.
@@ -197,6 +198,7 @@ export class PlazaConnection {
     try { ws.close(); } catch { /* already closed */ }
     if (this.stopped) return;
     if (code === CLOSE_REPLACED) this.stop('Pixel Plaza is open in another window or tab.');
+    else if (code === CLOSE_CLASS_CLOSED) this.stop('Your teacher closed the class. Join again with the PIN when it reopens.');
     else this.retry(); // includes 4001, an unusable ticket: the next join asks for a new one
   }
 

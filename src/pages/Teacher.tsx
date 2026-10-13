@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom';
 import './Teacher.css';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string };
+type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
-  open: boolean; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: { studentKey: string; name: string }[];
+  open: boolean; game: { id: string; name: string } | null; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: { studentKey: string; name: string }[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
 };
 
@@ -24,6 +25,7 @@ export default function Teacher() {
   const [error, setError] = useState('');
   // A problem sending students to this laptop, from sign-in or opening the class.
   const [notice, setNotice] = useState('');
+  const [newGameName, setNewGameName] = useState('');
 
   const request = useCallback((path: string, body?: object) => call<Status>(path, {
     method: body ? 'POST' : 'GET',
@@ -123,12 +125,34 @@ export default function Teacher() {
       <button className="btn btn-primary">Open controls</button>
     </form> : <>
       <section className="teacher-controls">
-        <strong>Class is {status.open ? 'open' : 'closed'}</strong>
+        <strong>{status.game ? `${status.game.name} is ${status.open ? 'open' : 'closed'}` : 'No game yet'}</strong>
         {status.pin && <span className="teacher-pin">Class PIN <strong>{status.pin}</strong></span>}
-        <button className="btn btn-primary" onClick={() => void action('class', { open: !status.open })}>
+        {status.game && <button className="btn btn-primary" onClick={() => void action('class', { open: !status.open })}>
           {status.open ? 'Close class' : 'Open class'}
-        </button>
+        </button>}
         <button className="btn btn-secondary" onClick={() => { setStatus(null); setToken(''); }}>Sign out</button>
+      </section>
+      <section className="teacher-games">
+        <h2>Games</h2>
+        <p>Each game keeps its own PIN, chat and where everyone stood. Close one and reopen it any later lesson; one game is open at a time.</p>
+        <form className="teacher-newgame" onSubmit={event => {
+          event.preventDefault();
+          if (!newGameName.trim()) return;
+          void action('game', { name: newGameName });
+          setNewGameName('');
+        }}>
+          <input aria-label="Name for a new game" placeholder="New game, e.g. 3A Castanyada" maxLength={40}
+            value={newGameName} onChange={event => setNewGameName(event.target.value)} />
+          <button className="btn btn-primary" disabled={!newGameName.trim()}>New game</button>
+        </form>
+        {status.games.length > 0 && <ul>
+          {status.games.map(game => <li key={game.id}>
+            <span><strong>{game.name}</strong> · PIN {game.pin} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
+            {!game.open && <button className="btn btn-secondary" onClick={() => void action('class', { open: true, game: game.id })}>
+              {status.open ? 'Switch to this game' : 'Open'}
+            </button>}
+          </li>)}
+        </ul>}
       </section>
       {status.laptop && <section className="teacher-laptop">
         <h2>Playing on this laptop</h2>

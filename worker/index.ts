@@ -84,7 +84,10 @@ async function linkOnline(env: Env, body: { password?: unknown; url: string | nu
 function teacherAction(path: string, method: string, body: any): TeacherAction | null {
     if (path === '/api/teacher/status' && method === 'GET') return { kind: 'status' };
     if (method !== 'POST') return null;
-    if (path === '/api/teacher/class' && typeof body?.open === 'boolean') return { kind: 'open', open: body.open };
+    if (path === '/api/teacher/class' && typeof body?.open === 'boolean') {
+        return { kind: 'open', open: body.open, ...(typeof body.game === 'string' ? { game: body.game } : {}) };
+    }
+    if (path === '/api/teacher/game' && typeof body?.name === 'string') return { kind: 'newGame', name: body.name };
     if (path === '/api/teacher/review' && typeof body?.id === 'string' && typeof body?.approve === 'boolean') {
         return { kind: 'review', id: body.id, approve: body.approve };
     }
@@ -150,7 +153,8 @@ async function handle(request: Request, env: Env): Promise<Response> {
         const result = await plaza(env).teacher(request.headers.get('x-teacher-session') || '', action);
         if ('error' in result) return json({ error: result.error }, result.status);
         // Closing the class on the laptop stops sending students to it.
-        const notice = action.kind === 'open' ? await linkOnline(env, { url: action.open ? env.LAN_URL ?? null : null }) : '';
+        const notice = action.kind === 'open' || action.kind === 'newGame'
+            ? await linkOnline(env, { url: action.kind === 'newGame' || action.open ? env.LAN_URL ?? null : null }) : '';
         return json({ ...result, laptop: onLaptop(env) ? { url: env.LAN_URL, signInUrl: env.CLOUD_URL } : null, notice });
     }
 

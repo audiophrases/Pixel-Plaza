@@ -17,10 +17,11 @@ export const HEARING_RANGE = 350;
 // Close codes the client acts on.
 const CLOSE_JOIN_AGAIN = 4001; // ticket unknown, used or expired
 const CLOSE_REPLACED = 4009;   // the same student joined from another window
+const CLOSE_CLASS_CLOSED = 4002; // the teacher closed the game
 
 // Per-socket state. It lives in the socket's attachment, so it survives the
 // room hibernating between messages.
-type Seat = { id: string; studentKey: string; name: string; avatar: Avatar; x: number; y: number; lastChat: number; lastCheck?: number; left?: boolean };
+type Seat = { id: string; game: string; studentKey: string; name: string; avatar: Avatar; x: number; y: number; lastChat: number; lastCheck?: number; left?: boolean };
 
 // 'approve': every message waits for the teacher. 'review': nearby chat that OpenAI
 // cleared posts at once and the teacher reviews afterwards; whispers still wait.
@@ -28,15 +29,20 @@ export type ChatMode = 'approve' | 'review';
 
 export type TeacherAction =
     | { kind: 'status' }
-    | { kind: 'open'; open: boolean }
+    | { kind: 'open'; open: boolean; game?: string } // a saved game (the last played by default), or close the open one
+    | { kind: 'newGame'; name: string }              // a new game with its own PIN, opened at once
     | { kind: 'review'; id: string; approve: boolean } // approve = false also takes down a message already posted
     | { kind: 'approveAll' }
     | { kind: 'mode'; mode: ChatMode }
     | { kind: 'mute'; studentKey: string; muted: boolean };
 
+export type GameSummary = { id: string; name: string; pin: string; lastOpened: number; open: boolean };
+
 export type TeacherStatus = {
     open: boolean;
-    pin: string | null; // students type it to join; new each time the class opens
+    game: { id: string; name: string } | null; // the open game, or the one last played
+    games: GameSummary[];                      // every saved game, most recently played first
+    pin: string | null; // the open game's PIN, which students type to join
     entries: { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string }[];
     mode: ChatMode;
     moderation: boolean; // an OpenAI key is set, so 'review' mode can post anything
@@ -46,9 +52,9 @@ export type TeacherStatus = {
 
 const publicSeat = (seat: Seat) => ({ id: seat.id, name: seat.name, x: seat.x, y: seat.y, ...seat.avatar });
 
-// The class's plaza. Everything that must outlast a lesson is a SQLite row:
-// each student's looks and last position, the chat log, mutes, and whether the
-// class is open. Who is online right now is the set of open sockets.
+// The plaza. Everything that must outlast a lesson is a SQLite row: each student's
+// looks, the games (a PIN each, kept for good) with where every student stood in
+// them, the chat log, mutes, and which game is open. One game is open at a time. Who is online right now is the set of open sockets.
 export class PlazaRoom extends DurableObject<Env> {
     private sql: SqlStorage;
 
@@ -67,22 +73,26 @@ export class PlazaRoom extends DurableObject<Env> {
             CREATE INDEX IF NOT EXISTS chat_status ON chat (status);
             CREATE TABLE IF NOT EXISTS mutes (student_key TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS teacher_sessions (token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
-            CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+            CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS games (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, pin TEXT NOT NULL UNIQUE, created INTEGER NOT NULL, last_opened INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS positions (
+                game_id TEXT NOT NULL, student_key TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL, PRIMARY KEY (game_id, student_key));`);
         // Older rooms predate nearby chat and whispers: their messages were for everyone.
         const chatColumns = this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('chat')").toArray().map(row => row.name);
-        for (const [column, type] of [['target_key', 'TEXT'], ['target_name', 'TEXT'], ['x', 'REAL'], ['y', 'REAL'], ['flag', 'TEXT'], ['note', 'TEXT']]) {
+        for (const [column, type] of [['target_key', 'TEXT'], ['target_name', 'TEXT'], ['x', 'REAL'], ['y', 'REAL'], ['flag', 'TEXT'], ['note', 'TEXT'], ['game_id', 'TEXT']]) {
             if (!chatColumns.includes(column)) this.sql.exec(`ALTER TABLE chat ADD COLUMN ${column} ${type}`);
         }
+        this.adoptOldClass();
         // Keepalive pings are answered without waking the room.
         ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     }
 
     // ---------- Called by the Worker ----------
 
-    // The PIN students type to join, or null while the class is closed.
+    // The PIN students type to join, or null while no game is open.
     classPin(): string | null {
-        if (!this.isOpen()) return null;
-        return this.setting('pin') ?? this.newPin();
+        return (this.isOpen() ? this.game(this.activeGame())?.pin : null) ?? null;
     }
 
     savedAvatar(studentKey: string): Avatar | null {
@@ -147,12 +157,20 @@ export class PlazaRoom extends DurableObject<Env> {
     teacher(token: string, action: TeacherAction): TeacherStatus | { error: string; status: number } {
         const session = this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray();
         if (!token || session.length === 0) return { error: 'Please sign in again.', status: 401 };
-        if (action.kind === 'open') this.setOpen(action.open);
+        if (action.kind === 'open') {
+            if (action.open && action.game !== undefined && !this.game(action.game)) return { error: 'That game does not exist.', status: 400 };
+            this.setOpen(action.open, action.game);
+        }
+        if (action.kind === 'newGame') {
+            const name = action.name.trim().replace(/\s+/g, ' ').slice(0, 40);
+            if (!name) return { error: 'Give the game a name.', status: 400 };
+            this.setOpen(true, this.createGame(name));
+        }
         if (action.kind === 'review' && !this.review(action.id, action.approve)) {
             return { error: 'That message is no longer pending.', status: 400 };
         }
         if (action.kind === 'approveAll') {
-            const pending = this.sql.exec<{ id: string }>("SELECT id FROM chat WHERE status = 'pending' ORDER BY ts").toArray();
+            const pending = this.sql.exec<{ id: string }>("SELECT id FROM chat WHERE status = 'pending' AND game_id IS ? ORDER BY ts", this.activeGame()).toArray();
             for (const { id } of pending) this.review(id, true);
         }
         if (action.kind === 'mode') this.saveSetting('mode', action.mode);
@@ -162,14 +180,19 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         // The dashboard polls every 2 seconds: send everything still pending plus
         // recent history, read through the indexes, not the whole log each time.
+        const current = this.game(this.activeGame());
         return {
             open: this.isOpen(),
+            game: current && { id: current.id, name: current.name },
+            games: this.sql.exec<{ id: string; name: string; pin: string; lastOpened: number }>(
+                'SELECT id, name, pin, last_opened AS lastOpened FROM games ORDER BY last_opened DESC').toArray()
+                .map(game => ({ ...game, open: this.isOpen() && game.id === current?.id })),
             pin: this.classPin(),
             entries: this.sql.exec<TeacherStatus['entries'][number]>(`SELECT id, student_key AS studentKey, sender, target_name AS target, flag, note, text,
                 ts AS timestamp, status FROM (
-                    SELECT * FROM chat WHERE status = 'pending'
-                    UNION SELECT * FROM (SELECT * FROM chat ORDER BY ts DESC LIMIT ?))
-                ORDER BY ts DESC`, STATUS_HISTORY).toArray(),
+                    SELECT * FROM chat WHERE status = 'pending' AND game_id IS ?
+                    UNION SELECT * FROM (SELECT * FROM chat WHERE game_id IS ? ORDER BY ts DESC LIMIT ?))
+                ORDER BY ts DESC`, current?.id ?? null, current?.id ?? null, STATUS_HISTORY).toArray(),
             mode: this.mode(),
             moderation: !!this.env.OPENAI_API_KEY,
             muted: this.sql.exec<{ student_key: string }>('SELECT student_key FROM mutes').toArray().map(row => row.student_key),
@@ -197,14 +220,17 @@ export class PlazaRoom extends DurableObject<Env> {
             try { old.close(CLOSE_REPLACED, 'Opened in another window.'); } catch { /* already closing */ }
         }
 
+        const game = this.activeGame() ?? '';
         const saved = this.sql.exec<{ name: string; avatar: string | null; x: number | null; y: number | null }>(
-            'SELECT name, avatar, x, y FROM students WHERE student_key = ?', row.student_key).one();
-        // A saved spot that is now a wall (the map changed) starts over at the spawn
+            `SELECT s.name AS name, s.avatar AS avatar, p.x AS x, p.y AS y FROM students s
+             LEFT JOIN positions p ON p.student_key = s.student_key AND p.game_id = ? WHERE s.student_key = ?`,
+            game, row.student_key).one();
+        // Where they stood last time in this game, unless the map has changed under them since
         const spot = saved.x != null && saved.y != null && !isBlocked(saved.x, saved.y)
             ? { x: saved.x, y: saved.y }
             : { x: SPAWN.x + Math.round(Math.random() * 100 - 50), y: SPAWN.y + Math.round(Math.random() * 100 - 50) };
         const seat: Seat = {
-            id: crypto.randomUUID().slice(0, 8), studentKey: row.student_key, name: saved.name,
+            id: crypto.randomUUID().slice(0, 8), game, studentKey: row.student_key, name: saved.name,
             avatar: (saved.avatar && sanitizeAvatar(JSON.parse(saved.avatar))) || defaultAvatar(),
             x: spot.x, y: spot.y,
             lastChat: 0
@@ -264,10 +290,41 @@ export class PlazaRoom extends DurableObject<Env> {
         return this.setting('open') === '1';
     }
 
+    private activeGame(): string | null {
+        return this.setting('active_game');
+    }
+
+    private game(id: string | null): { id: string; name: string; pin: string } | null {
+        return id === null ? null
+            : this.sql.exec<{ id: string; name: string; pin: string }>('SELECT id, name, pin FROM games WHERE id = ?', id).toArray()[0] ?? null;
+    }
+
+    // A game keeps its PIN for good, so a PIN is never reused.
     private newPin(): string {
-        const pin = String(100000 + crypto.getRandomValues(new Uint32Array(1))[0] % 900000);
-        this.saveSetting('pin', pin);
-        return pin;
+        for (;;) {
+            const pin = String(100000 + crypto.getRandomValues(new Uint32Array(1))[0] % 900000);
+            if (this.sql.exec('SELECT 1 FROM games WHERE pin = ?', pin).toArray().length === 0) return pin;
+        }
+    }
+
+    private createGame(name: string): string {
+        const id = crypto.randomUUID().slice(0, 8);
+        const now = Date.now();
+        this.sql.exec('INSERT INTO games (id, name, pin, created, last_opened) VALUES (?, ?, ?, ?, ?)', id, name, this.newPin(), now, now);
+        return id;
+    }
+
+    // Rooms from before games existed: their one class becomes the first game, with its
+    // PIN, chat and where everyone stood.
+    private adoptOldClass(): void {
+        if (this.sql.exec('SELECT 1 FROM games').toArray().length > 0) return;
+        const pin = this.setting('pin');
+        if (!pin) return;
+        const now = Date.now();
+        this.sql.exec('INSERT INTO games (id, name, pin, created, last_opened) VALUES (?, ?, ?, ?, ?)', 'first', 'First class', pin, now, now);
+        this.sql.exec("UPDATE chat SET game_id = 'first' WHERE game_id IS NULL");
+        this.sql.exec("INSERT OR IGNORE INTO positions (game_id, student_key, x, y) SELECT 'first', student_key, x, y FROM students WHERE x IS NOT NULL AND y IS NOT NULL");
+        this.saveSetting('active_game', 'first');
     }
 
     private laptop(): { url: string | null; lease: string; expires: number } | null {
@@ -302,13 +359,15 @@ export class PlazaRoom extends DurableObject<Env> {
         this.broadcast({ t: 'chat', sender: 'System', text, ts: Date.now() }, except);
     }
 
-    // Saves where the student stood, so the next lesson starts there.
+    // Saves where the student stood in this game, so the next lesson starts there.
     private leave(ws: WebSocket, announce: boolean): void {
         const seat = ws.deserializeAttachment() as Seat | null;
         if (!seat || seat.left) return;
         seat.left = true;
         try { ws.serializeAttachment(seat); } catch { /* closed */ }
-        this.sql.exec('UPDATE students SET x = ?, y = ?, last_seen = ? WHERE student_key = ?', seat.x, seat.y, Date.now(), seat.studentKey);
+        this.sql.exec('UPDATE students SET last_seen = ? WHERE student_key = ?', Date.now(), seat.studentKey);
+        this.sql.exec(`INSERT INTO positions (game_id, student_key, x, y) VALUES (?, ?, ?, ?)
+            ON CONFLICT (game_id, student_key) DO UPDATE SET x = excluded.x, y = excluded.y`, seat.game, seat.studentKey, seat.x, seat.y);
         this.broadcast({ t: 'leave', id: seat.id }, ws);
         if (announce) this.systemChat(`${seat.name} left the Plaza.`, ws);
     }
@@ -365,11 +424,12 @@ export class PlazaRoom extends DurableObject<Env> {
         const posts = !problem && cleared && !target && this.mode() === 'review';
         const entry = { id: crypto.randomUUID(), student_key: seat.studentKey, sender: seat.name, text: value.trim().slice(0, 200),
             target_key: target?.studentKey ?? null, x: seat.x, y: seat.y };
-        this.sql.exec(`INSERT INTO chat (id, student_key, sender, text, ts, status, target_key, target_name, x, y, flag, note)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        this.sql.exec(`INSERT INTO chat (id, student_key, sender, text, ts, status, target_key, target_name, x, y, flag, note, game_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             entry.id, entry.student_key, entry.sender, entry.text, now, problem ? 'blocked' : posts ? 'approved' : 'pending',
-            entry.target_key, target?.name ?? null, entry.x, entry.y, flag, note);
-        this.sql.exec('DELETE FROM chat WHERE id NOT IN (SELECT id FROM chat ORDER BY ts DESC LIMIT ?)', CHAT_KEEP);
+            entry.target_key, target?.name ?? null, entry.x, entry.y, flag, note, seat.game);
+        this.sql.exec('DELETE FROM chat WHERE game_id IS ? AND id NOT IN (SELECT id FROM chat WHERE game_id IS ? ORDER BY ts DESC LIMIT ?)',
+            seat.game, seat.game, CHAT_KEEP);
         if (posts) this.deliver(entry);
         else reply(problem ? 'warning' : 'info', problem ?? 'Sent to your teacher for approval.');
     }
@@ -422,17 +482,33 @@ export class PlazaRoom extends DurableObject<Env> {
         return entry.target_key === null || recipients.size > 1;
     }
 
-    // Closing rejects pending chat and stops new joins; students already in stay.
-    private setOpen(open: boolean): void {
-        const wasOpen = this.isOpen();
-        this.saveSetting('open', open ? '1' : '0');
-        // Each lesson gets its own PIN, so last lesson's no longer lets anyone in.
-        if (open && !wasOpen) this.newPin();
-        if (open) return;
+    // Opens a saved game (the one last played when none is named, or a first game when there
+    // are none), or closes the open one. Closing saves where everyone stood, rejects chat
+    // still waiting and sends everyone out; opening another game closes the first.
+    private setOpen(open: boolean, game?: string): void {
+        if (!open) {
+            this.saveSetting('open', '0');
+            this.closeRoom();
+            return;
+        }
+        const target = game ?? this.activeGame() ?? this.createGame('Class 1');
+        const switching = this.isOpen() && this.activeGame() !== target;
+        if (switching) this.closeRoom();
+        const reopening = !this.isOpen() || switching;
+        this.saveSetting('open', '1');
+        this.saveSetting('active_game', target);
+        if (reopening) this.sql.exec('UPDATE games SET last_opened = ? WHERE id = ?', Date.now(), target);
+    }
+
+    private closeRoom(): void {
         const rejected = this.sql.exec<{ student_key: string }>(
             "UPDATE chat SET status = 'rejected' WHERE status = 'pending' RETURNING student_key").toArray();
         for (const studentKey of new Set(rejected.map(row => row.student_key))) {
             this.notify(studentKey, 'info', 'Your message was not posted.');
+        }
+        for (const ws of this.ctx.getWebSockets()) {
+            this.leave(ws, false);
+            try { ws.close(CLOSE_CLASS_CLOSED, 'The class is closed.'); } catch { /* already closing */ }
         }
     }
 }
