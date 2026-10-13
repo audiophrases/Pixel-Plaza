@@ -9,10 +9,8 @@ type Props = {
   onAnswer: (objective: string, choice: string) => void;
 };
 
-const PLACE_ICON: Record<string, string> = { hotel: '🏨', cafe: '☕', shop: '🛍️', square: '⛲', park: '🌳' };
-
-// The student's side of the campaign, kept short and picture-led: who you are, what you know,
-// and the one question to answer. It shows only what the server sent this student.
+// The student's side of the campaign, in short labelled blocks: the task, who you are, what
+// you know, and the question. It shows only what the server sent this student.
 export default function Journal({ quest, feedback, onAnswer }: Props) {
   const [open, setOpen] = useState(true);
   const [fresh, setFresh] = useState(false); // something changed while the journal was shut
@@ -26,37 +24,49 @@ export default function Journal({ quest, feedback, onAnswer }: Props) {
 
   return <aside className="journal glass-panel">
     <button type="button" className="journal-toggle" onClick={() => { setOpen(value => !value); setFresh(false); }}>
-      🌰 {quest.chapter.title}{fresh ? ' · new!' : ''} <span>{open ? '▲' : '▼'}</span>
+      <span>{quest.chapter.title}{fresh && <b className="journal-new">NEW</b>}</span>
+      <span>{open ? '▲' : '▼'}</span>
     </button>
     {open && <div className="journal-body">
-      <div className="journal-role">
-        <span className="journal-role-icon">{quest.role.icon}</span>
-        <div><strong>{quest.role.name}</strong><br />{quest.role.card}</div>
-      </div>
+      {quest.status === 'active' && <section className="journal-block journal-task">
+        <h3>Task</h3>
+        <p>{quest.chapter.intro}</p>
+      </section>}
 
-      {quest.status === 'active' && <p className="journal-intro">{quest.chapter.intro}</p>}
+      <section className="journal-block">
+        <h3>You are</h3>
+        <p className="journal-role">{quest.role.name}</p>
+        <p>{quest.role.card}</p>
+      </section>
 
-      <ul className="journal-clues">
-        {quest.clues.map(clue => <li key={clue.id}>
-          <span className="journal-clue-icon">{clue.from === 'job' ? '🔎' : PLACE_ICON[clue.from] ?? '📍'}</span>
-          {clue.text}
-        </li>)}
-      </ul>
+      <section className="journal-block">
+        <h3>What you know</h3>
+        <ul className="journal-clues">
+          {quest.clues.map(clue => <li key={clue.id}>
+            <span className="journal-source">{clue.from === 'job' ? 'Your clue' : `Found: ${clue.from}`}</span>
+            {clue.text}
+          </li>)}
+        </ul>
+      </section>
 
-      {quest.status === 'active' && quest.objectives.map(objective => <div key={objective.id} className="journal-question">
-        <h3>❓ {objective.text}</h3>
-        {objective.done ? <p className="journal-right">✅ You got it! Help your classmates.</p> : <>
+      {quest.status === 'active' && quest.objectives.map(objective => <section key={objective.id} className="journal-block journal-question">
+        <h3>Question</h3>
+        <p className="journal-ask">{objective.text}</p>
+        {objective.done ? <p className="journal-right">Correct. Help your classmates.</p> : <>
           <div className="journal-choices">
             {objective.choices.map(choice => <button key={choice.id} type="button" className="journal-choice"
               onClick={() => onAnswer(objective.id, choice.id)}>{choice.text}</button>)}
           </div>
           {feedback?.objective === objective.id && !feedback.correct &&
-            <p className="journal-wrong">{feedback.wait ? '⏳ Wait a moment…' : '❌ Not yet. Ask your classmates!'}</p>}
+            <p className="journal-wrong">{feedback.wait ? 'Wait a moment.' : 'Not yet. Ask your classmates.'}</p>}
         </>}
-      </div>)}
+      </section>)}
 
-      {quest.chapter.ending && <p className="journal-ending">{quest.chapter.ending}</p>}
-      {quest.finale && <p className="journal-ending">{quest.finale}</p>}
+      {quest.chapter.ending && <section className="journal-block journal-ending">
+        <h3>Chapter complete</h3>
+        <p>{quest.chapter.ending}</p>
+      </section>}
+      {quest.finale && <section className="journal-block journal-ending"><p>{quest.finale}</p></section>}
     </div>}
   </aside>;
 }

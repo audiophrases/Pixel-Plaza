@@ -352,7 +352,7 @@ export class PlazaRoom extends DurableObject<Env> {
             status: row.status,
             chapter: { index: row.chapter, of: campaign.chapters.length, title: chapter.title, intro: chapter.intro,
                 ending: row.status === 'active' ? null : chapter.ending },
-            role: { id: role.id, icon: role.icon, name: role.name, card: role.card },
+            role: { id: role.id, name: role.name, card: role.card },
             clues: [{ id: `role-${role.id}`, text: role.clue, from: 'job' }, ...found.map(item => ({ id: item.id, text: item.text, from: item.zone }))],
             objectives: chapter.objectives.map(objective => ({ id: objective.id, text: objective.text, choices: objective.choices, done: player.done.includes(objective.id) })),
             finale: row.status === 'campaign_complete' ? campaign.finale : null

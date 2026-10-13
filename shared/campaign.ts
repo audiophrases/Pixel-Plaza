@@ -19,7 +19,7 @@ export type Chapter = {
     share: number;       // the fraction of the class that must finish every objective (0 to 1)
     discoveries: Discovery[];
 };
-export type Role = { id: string; icon: string; name: string; card: string; clue: string };
+export type Role = { id: string; name: string; card: string; clue: string };
 export type Campaign = { id: string; title: string; roles: Role[]; chapters: Chapter[]; finale: string };
 
 // What one student is allowed to see: only their own role and what they found.
@@ -27,7 +27,7 @@ export type QuestView = {
     campaign: { id: string; title: string };
     status: 'active' | 'chapter_complete' | 'campaign_complete';
     chapter: { index: number; of: number; title: string; intro: string; ending: string | null };
-    role: { id: string; icon: string; name: string; card: string };
+    role: { id: string; name: string; card: string };
     clues: { id: string; text: string; from: string }[];
     objectives: { id: string; text: string; choices: Choice[]; done: boolean }[];
     finale: string | null;
@@ -38,24 +38,24 @@ export const castanyada: Campaign = {
     title: 'The Haunted Castanyada',
     finale: 'To be continued…',
     roles: [
-        { id: 'baker', icon: '☕', name: 'Café baker', card: 'You roast the chestnuts.',
+        { id: 'baker', name: 'Café baker', card: 'You roast the chestnuts.',
             clue: 'No blue box came to the café.' },
-        { id: 'shopkeeper', icon: '🛍️', name: 'Shopkeeper', card: 'You pack the boxes.',
+        { id: 'shopkeeper', name: 'Shopkeeper', card: 'You pack the boxes.',
             clue: 'A blue box left the shop at 9:00.' },
-        { id: 'driver', icon: '🚚', name: 'Driver', card: 'You carry the boxes.',
+        { id: 'driver', name: 'Driver', card: 'You carry the boxes.',
             clue: 'At 9:30 I left a blue box near the water.' },
-        { id: 'receptionist', icon: '🛎️', name: 'Hotel receptionist', card: 'You work at the hotel desk.',
+        { id: 'receptionist', name: 'Hotel receptionist', card: 'You work at the hotel desk.',
             clue: 'No box came to the hotel.' },
-        { id: 'planner', icon: '📋', name: 'Festival planner', card: 'You plan the party.',
+        { id: 'planner', name: 'Festival planner', card: 'You plan the party.',
             clue: 'The only water in town is the pond in the park.' },
     ],
     chapters: [{
         id: 'missing-chestnuts', title: 'The Missing Chestnuts', share: 0.6,
-        intro: 'The chestnuts are gone! Ask your classmates. Each of you knows something different.',
-        ending: '📦 It was in the park. The lock is open. The box is empty! Who took the chestnuts?',
+        intro: 'The chestnuts are gone. Ask your classmates. Each of you knows something different.',
+        ending: 'It was in the park. The lock is open. The box is empty! Who took the chestnuts?',
         objectives: [{
             id: 'where', text: 'Where is the blue box?',
-            choices: [{ id: 'hotel', text: '🏨 Hotel' }, { id: 'cafe', text: '☕ Café' }, { id: 'shop', text: '🛍️ Shop' }, { id: 'park', text: '🌳 Park' }],
+            choices: [{ id: 'hotel', text: 'Hotel' }, { id: 'cafe', text: 'Café' }, { id: 'shop', text: 'Shop' }, { id: 'park', text: 'Park' }],
             correct: 'park',
         }],
         discoveries: [
