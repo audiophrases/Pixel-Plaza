@@ -34,6 +34,10 @@ export default function Game() {
   // A grammar hint waiting for the student's choice: what they wrote, the fix, and why.
   const [nudge, setNudge] = useState<{ original: string; corrected: string; why: string } | null>(null);
   const [checking, setChecking] = useState(false);
+  // A message on its way: the draft stays in the box until the server says it took it.
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState(''); // why the last message did not go, shown by the box
+  const pending = useRef<{ cid: string; text: string; timer: number } | null>(null);
   const keptRun = useRef(0); // hints in a row the student turned down
   const [spelling, setSpelling] = useState<Misspelling[]>([]); // words that stopped the last message
   const [whisperTo, setWhisperTo] = useState(''); // a classmate's id; empty means nearby chat
@@ -88,6 +92,22 @@ export default function Game() {
         setClassmates(others.map(({ id, name }) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)));
         if (event.t === 'leave') setWhisperTo(current => (current === event.id ? '' : current));
       }
+      // What became of the message being sent. A refusal gives the draft back, with the reason beside it.
+      const settled = (event.t === 'notice' || event.t === 'result') && !!event.cid && event.cid === pending.current?.cid;
+      if (settled && pending.current) {
+        const sent = pending.current;
+        window.clearTimeout(sent.timer);
+        pending.current = null;
+        setSending(false);
+        if (event.t === 'notice' && event.level === 'warning') {
+          setChatInput(sent.text);
+          setSendError(event.text);
+          return;
+        }
+        setChatInput('');
+        setSendError('');
+      }
+      if (event.t === 'result') return;
       if (event.t === 'chat') say({ id: event.id, sender: event.sender, text: event.text, timestamp: event.ts, whisper: event.whisper, to: event.to });
       else if (event.t === 'retract') setMessages(prev => prev.filter(message => message.id !== event.id));
       else if (event.t === 'notice') say({ sender: event.level === 'warning' ? 'System Warning' : 'System', text: event.text });
@@ -101,6 +121,8 @@ export default function Game() {
     return () => {
       unsubscribe();
       unwatch();
+      if (pending.current) window.clearTimeout(pending.current.timer);
+      pending.current = null;
       plaza.close();
     };
   }, [state, session, navigate]);
@@ -115,16 +137,26 @@ export default function Game() {
   // Sends a message; `extra` tells the teacher what the student did with a hint.
   const deliver = (text: string, extra: object = {}) => {
     if (!connection) return;
-    if (connection.send({ t: 'chat', text, ...(whisperTo ? { to: whisperTo } : {}), ...extra })) {
-      setChatInput('');
+    const cid = crypto.randomUUID();
+    if (connection.send({ t: 'chat', text, cid, ...(whisperTo ? { to: whisperTo } : {}), ...extra })) {
+      // The draft stays (as what is being sent) until the server answers.
+      setChatInput(text);
       setNudge(null);
       setSpelling([]);
+      setSendError('');
+      setSending(true);
+      const timer = window.setTimeout(() => {
+        pending.current = null;
+        setSending(false);
+        setSendError('No answer from the server. Your message is still here; check the chat before sending it again.');
+      }, 15000);
+      pending.current = { cid, text, timer };
     } else setMessages(prev => [...prev, { sender: 'System Warning', text: 'Not connected. Try again in a moment.' }]);
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim() || !connection || checking) return;
+    if (!chatInput.trim() || !connection || checking || sending) return;
     setChecking(true);
     try {
       // Every word must be English. Names of people in the Plaza are fine.
@@ -239,6 +271,7 @@ export default function Game() {
               </> : <span>is not an English word. Try a different word.</span>}
             </div>)}
           </div>}
+          {sendError && <div className="composer-error" role="alert">{sendError}</div>}
           {nudge && <div className="grammar-help" role="status">
             <div><strong>Try this:</strong> <span className="grammar-fix">{nudge.corrected}</span></div>
             <div className="grammar-why">{nudge.why}</div>
@@ -263,14 +296,15 @@ export default function Game() {
               placeholder={whisperTo ? 'Whisper (your teacher can read it)...' : 'Message people nearby (teacher approves)...'}
               maxLength={200}
               value={chatInput}
-              onChange={(e) => { setChatInput(e.target.value); setNudge(null); if (!e.target.value) setSpelling([]); }}
+              readOnly={sending}
+              onChange={(e) => { setChatInput(e.target.value); setNudge(null); setSendError(''); if (!e.target.value) setSpelling([]); }}
               onCopy={handlePreventClipboard}
               onPaste={handlePreventClipboard}
               onCut={handlePreventClipboard}
               autoComplete="off"
               spellCheck="true"
             />
-            <button type="submit" className="btn btn-primary chat-send-btn" disabled={checking}>{checking ? '…' : 'Send'}</button>
+            <button type="submit" className="btn btn-primary chat-send-btn" disabled={checking || sending}>{checking || sending ? '…' : 'Send'}</button>
           </form>
         </div>
       </div>

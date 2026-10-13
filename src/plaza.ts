@@ -12,7 +12,8 @@ export type PlazaEvent =
   | { t: 'emote'; id: string; emote: string }
   | { t: 'chat'; id?: string; sender: string; text: string; ts: number; whisper?: boolean; to?: string }
   | { t: 'retract'; id: string } // the teacher took a posted message down
-  | { t: 'notice'; level: 'info' | 'warning'; text: string };
+  | { t: 'notice'; level: 'info' | 'warning'; text: string; cid?: string } // cid: the chat message this answers
+  | { t: 'result'; cid: string };                                          // that message was posted at once
 
 // As in PinPlay's live-socket.js: a connection can die without closing (a laptop
 // lid, Wi-Fi roaming), and only a missing pong shows it. The room answers

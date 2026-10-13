@@ -267,7 +267,7 @@ export class PlazaRoom extends DurableObject<Env> {
             const text = (value: unknown) => (typeof value === 'string' ? value.slice(0, 200) : null);
             const note = text(data.was) ? `Used the suggestion. They wrote: "${text(data.was)}"`
                 : text(data.better) ? `Kept their own words. Suggested: "${text(data.better)}"` : null;
-            await this.chat(ws, seat, data.text, data.to, note);
+            await this.chat(ws, seat, data.text, data.to, note, typeof data.cid === 'string' ? data.cid.slice(0, 64) : undefined);
         }
     }
 
@@ -384,8 +384,10 @@ export class PlazaRoom extends DurableObject<Env> {
         try { ws.send(JSON.stringify({ t: 'checked', id, ...answer })); } catch { /* closing */ }
     }
 
-    private async chat(ws: WebSocket, seat: Seat, value: unknown, to: unknown, note: string | null): Promise<void> {
-        const reply = (level: 'info' | 'warning', text: string) => ws.send(JSON.stringify({ t: 'notice', level, text }));
+    // `cid` is the page's own id for this message: every answer carries it back, so a message that
+    // did not go through can be given back to its writer, draft intact.
+    private async chat(ws: WebSocket, seat: Seat, value: unknown, to: unknown, note: string | null, cid?: string): Promise<void> {
+        const reply = (level: 'info' | 'warning', text: string) => ws.send(JSON.stringify({ t: 'notice', level, text, cid }));
         const unavailable = () => !this.isOpen() || this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', seat.studentKey).toArray().length > 0;
         if (unavailable()) return reply('warning', 'Chat is unavailable right now.');
 
@@ -430,7 +432,10 @@ export class PlazaRoom extends DurableObject<Env> {
             entry.target_key, target?.name ?? null, entry.x, entry.y, flag, note, seat.game);
         this.sql.exec('DELETE FROM chat WHERE game_id IS ? AND id NOT IN (SELECT id FROM chat WHERE game_id IS ? ORDER BY ts DESC LIMIT ?)',
             seat.game, seat.game, CHAT_KEEP);
-        if (posts) this.deliver(entry);
+        if (posts) {
+            this.deliver(entry);
+            if (cid) ws.send(JSON.stringify({ t: 'result', cid })); // posted at once: nothing else to say
+        }
         else reply(problem ? 'warning' : 'info', problem ?? 'Sent to your teacher for approval.');
     }
 

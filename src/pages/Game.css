@@ -100,6 +100,17 @@
   display: none;
 }
 
+.composer-error {
+  margin: 0 12px 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #a8071a;
+  background: #fff1f0;
+  border: 1px solid #ffa39e;
+}
+
 .chat-messages {
   flex-grow: 1;
   padding: 1rem;

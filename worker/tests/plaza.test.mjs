@@ -220,8 +220,10 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
 
         // A mute follows the student, not the connection.
         await api(base, '/api/teacher/mute', { session, body: { studentKey: 'stu_a', muted: true } });
-        alexAgain.send({ t: 'chat', text: 'Can you hear me?' });
-        assert.match((await alexAgain.next(message => message.t === 'notice', 'muted notice')).text, /unavailable/);
+        alexAgain.send({ t: 'chat', text: 'Can you hear me?', cid: 'draft-1' });
+        const refusal = await alexAgain.next(message => message.t === 'notice', 'muted notice');
+        assert.match(refusal.text, /unavailable/);
+        assert.equal(refusal.cid, 'draft-1'); // the page can tell which message it was
 
         alexAgain.ws.close();
         await sam.next(message => message.t === 'chat' && /Alex left/.test(message.text), 'leave announcement');
