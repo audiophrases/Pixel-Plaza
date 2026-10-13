@@ -1,11 +1,16 @@
 // Asks an OpenAI chat model whether a chat message has one clear grammar
-// mistake. It only ever advises: any failure or doubt means "fine", so a
-// message is never held up by it. No Workers-only APIs, so tests run it in node.
+// mistake. A quick yes/no from OpenAI's Decisions API goes first, so the chat model
+// only runs for messages that probably need help. It only ever advises: any failure
+// or doubt means "fine", so a message is never held up by it. No Workers-only APIs, so tests run it in node.
 
-export type GrammarEnv = { OPENAI_API_KEY?: string; OPENAI_BASE_URL?: string; OPENAI_GRAMMAR_MODEL?: string };
+export type GrammarEnv = { OPENAI_API_KEY?: string; OPENAI_BASE_URL?: string; OPENAI_GRAMMAR_MODEL?: string; OPENAI_GRAMMAR_GATE?: string };
 export type Grammar = { ok: true } | { ok: false; corrected: string; why: string };
 
 const TIMEOUT_MS = 2000;
+const GATE_TIMEOUT_MS = 1000;
+// Unsure counts as "maybe": the chat model double-checks, and verdict() trusts it, not the gate.
+export const GATE_THRESHOLD = 0.35;
+const GATE_QUESTION = 'Does this chat message from an English learner contain a clear grammar mistake: verb form or tense, subject-verb agreement, missing or wrong article, plural, preposition, word order, or a missing word? Ignore spelling, capitalization, punctuation, slang and informal wording.';
 export const MIN_WORDS = 4; // "hi there" and "thank you" are not worth a call
 
 const INSTRUCTIONS = `You help students who are learning English, inside a school chat game.
@@ -43,8 +48,40 @@ export function verdict(original: string, answer: unknown): Grammar {
     return { ok: false, corrected: fix, why: reason };
 }
 
+// When the key has no access to Decisions (or it is down), skip the gate for a while
+// instead of paying for a failed call on every message.
+let gateOffUntil = 0;
+
+// False only when OpenAI says a mistake is unlikely. Any trouble means "maybe".
+export async function mayNeedHelp(text: string, env: GrammarEnv): Promise<boolean> {
+    if (env.OPENAI_GRAMMAR_GATE === '0' || Date.now() < gateOffUntil) return true;
+    const started = Date.now();
+    try {
+        const response = await fetch(`${env.OPENAI_BASE_URL || 'https://api.openai.com'}/v1/decisions`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${env.OPENAI_API_KEY}` },
+            body: JSON.stringify({
+                model: 'gpt-6-luna', input: text,
+                questions: [{ type: 'predicate', name: 'grammar_mistake', instructions: GATE_QUESTION }]
+            }),
+            signal: AbortSignal.timeout(GATE_TIMEOUT_MS)
+        });
+        if (!response.ok) {
+            if ([400, 401, 403, 404].includes(response.status)) gateOffUntil = Date.now() + 10 * 60_000;
+            return true;
+        }
+        const answers = ((await response.json()) as { answers?: { name?: string; probability?: number }[] }).answers;
+        const probability = answers?.find(answer => answer.name === 'grammar_mistake')?.probability;
+        console.log(`grammar gate: ${typeof probability === 'number' ? probability.toFixed(2) : 'no answer'} in ${Date.now() - started} ms`);
+        return typeof probability !== 'number' || probability >= GATE_THRESHOLD;
+    } catch {
+        return true;
+    }
+}
+
 export async function checkGrammar(text: string, env: GrammarEnv): Promise<Grammar> {
     if (!env.OPENAI_API_KEY || words(text).length < MIN_WORDS || text.length > 200) return { ok: true };
+    if (!(await mayNeedHelp(text, env))) return { ok: true };
     try {
         const response = await fetch(`${env.OPENAI_BASE_URL || 'https://api.openai.com'}/v1/chat/completions`, {
             method: 'POST',

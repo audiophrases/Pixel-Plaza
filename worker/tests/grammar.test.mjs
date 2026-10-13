@@ -1,7 +1,7 @@
 // What counts as a believable grammar correction, and when no call is made.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkGrammar, verdict } from '../grammar.ts';
+import { GATE_THRESHOLD, checkGrammar, mayNeedHelp, verdict } from '../grammar.ts';
 
 const answer = (corrected, why = 'Use "goes" with "she".') => ({ ok: false, corrected, why });
 
@@ -34,10 +34,58 @@ test('no call is made without a key, for short messages, or for long ones', asyn
         assert.deepEqual(await checkGrammar('hello there', { OPENAI_API_KEY: 'k' }), { ok: true });
         assert.deepEqual(await checkGrammar('word '.repeat(60), { OPENAI_API_KEY: 'k' }), { ok: true });
         assert.equal(calls, 0);
-        // A failing network is "fine", not an error.
+        // A failing network is "fine", not an error (one call to the gate, one to the chat model).
         assert.deepEqual(await checkGrammar('She go to school every day', { OPENAI_API_KEY: 'k' }), { ok: true });
-        assert.equal(calls, 1);
+        assert.equal(calls, 2);
     } finally {
         globalThis.fetch = realFetch;
     }
+});
+
+// A fake OpenAI: the Decisions gate answers with `probability`; the chat model gets a call only if asked.
+async function withOpenAI(handler, run) {
+    const calls = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+        calls.push(String(url).replace('https://api.openai.com', ''));
+        return handler(String(url), init);
+    };
+    try { await run(calls); } finally { globalThis.fetch = realFetch; }
+}
+const reply = body => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+const chatAnswer = content => reply({ choices: [{ message: { content: JSON.stringify(content) } }] });
+const mistake = { ok: false, corrected: 'She goes to school every day', why: 'Use "goes" with "she".' };
+const message = 'She go to school every day';
+
+test('a message the gate thinks is fine never reaches the chat model', async () => {
+    await withOpenAI(() => reply({ answers: [{ type: 'predicate', name: 'grammar_mistake', probability: 0.02 }] }), async calls => {
+        assert.deepEqual(await checkGrammar(message, { OPENAI_API_KEY: 'k' }), { ok: true });
+        assert.deepEqual(calls, ['/v1/decisions']);
+    });
+});
+
+test('a message the gate doubts is handed to the chat model', async () => {
+    await withOpenAI(url => url.endsWith('/v1/decisions')
+        ? reply({ answers: [{ type: 'predicate', name: 'grammar_mistake', probability: GATE_THRESHOLD }] }) : chatAnswer(mistake), async calls => {
+        assert.deepEqual(await checkGrammar(message, { OPENAI_API_KEY: 'k' }), mistake);
+        assert.deepEqual(calls, ['/v1/decisions', '/v1/chat/completions']);
+    });
+});
+
+test('without the gate, the chat model is asked as before', async () => {
+    await withOpenAI(() => chatAnswer(mistake), async calls => {
+        assert.deepEqual(await checkGrammar(message, { OPENAI_API_KEY: 'k', OPENAI_GRAMMAR_GATE: '0' }), mistake);
+        assert.deepEqual(calls, ['/v1/chat/completions']);
+    });
+});
+
+test('when Decisions is unavailable the chat model still runs, and the gate rests', async () => {
+    await withOpenAI(url => url.endsWith('/v1/decisions') ? new Response('{}', { status: 404 }) : chatAnswer(mistake), async calls => {
+        assert.deepEqual(await checkGrammar(message, { OPENAI_API_KEY: 'k' }), mistake);
+        assert.deepEqual(calls, ['/v1/decisions', '/v1/chat/completions']);
+        calls.length = 0;
+        assert.deepEqual(await checkGrammar(message, { OPENAI_API_KEY: 'k' }), mistake);
+        assert.deepEqual(calls, ['/v1/chat/completions']); // no second failed call
+        assert.equal(await mayNeedHelp(message, { OPENAI_API_KEY: 'k' }), true);
+    });
 });
