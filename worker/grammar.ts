@@ -6,10 +6,11 @@
 export type GrammarEnv = { OPENAI_API_KEY?: string; OPENAI_BASE_URL?: string; OPENAI_GRAMMAR_MODEL?: string; OPENAI_GRAMMAR_GATE?: string };
 export type Grammar = { ok: true } | { ok: false; corrected: string; why: string };
 
-const TIMEOUT_MS = 2000;
-const GATE_TIMEOUT_MS = 1000;
+// A hint waits for both calls in a row, and the page gives up after 4 seconds (HINT_WAIT_MS in src/plaza.ts).
+const TIMEOUT_MS = 2500;
+const GATE_TIMEOUT_MS = 1500;
 // Unsure counts as "maybe": the chat model double-checks, and verdict() trusts it, not the gate.
-export const GATE_THRESHOLD = 0.35;
+export const GATE_THRESHOLD = 0.3;
 const GATE_QUESTION = 'Does this chat message from an English learner contain a clear grammar mistake: verb form or tense, subject-verb agreement, missing or wrong article, plural, preposition, word order, or a missing word? Ignore spelling, capitalization, punctuation, slang and informal wording.';
 export const MIN_WORDS = 4; // "hi there" and "thank you" are not worth a call
 
@@ -67,6 +68,7 @@ export async function mayNeedHelp(text: string, env: GrammarEnv): Promise<boolea
             signal: AbortSignal.timeout(GATE_TIMEOUT_MS)
         });
         if (!response.ok) {
+            console.log(`grammar gate: HTTP ${response.status} after ${Date.now() - started} ms`);
             if ([400, 401, 403, 404].includes(response.status)) gateOffUntil = Date.now() + 10 * 60_000;
             return true;
         }
@@ -75,6 +77,7 @@ export async function mayNeedHelp(text: string, env: GrammarEnv): Promise<boolea
         console.log(`grammar gate: ${typeof probability === 'number' ? probability.toFixed(2) : 'no answer'} in ${Date.now() - started} ms`);
         return typeof probability !== 'number' || probability >= GATE_THRESHOLD;
     } catch {
+        console.log(`grammar gate: no answer after ${Date.now() - started} ms`);
         return true;
     }
 }

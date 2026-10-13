@@ -29,7 +29,7 @@ const PONG_WITHIN_MS = 5000;
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
 const CLOSE_REPLACED = 4009;
 const CLOSE_CLASS_CLOSED = 4002;
-const HINT_WAIT_MS = 2500; // a slow hint is dropped: the message is sent as it is
+const HINT_WAIT_MS = 4000; // a slow hint is dropped: the message is sent as it is
 
 // A refusal that retrying cannot fix, such as a wrong PIN or a closed class.
 class Refused extends Error {}
