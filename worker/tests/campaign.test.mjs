@@ -85,8 +85,10 @@ test('a typed answer counts in any sensible wording, and a guess does not', () =
 });
 
 test('a classmate can be named by the whole shown name, or the second part of a made-up one', () => {
-    assert.deepEqual(acceptedNames(['Happy Plato', 'Ana', 'Roger L']), ['Happy Plato', 'Plato', 'Ana', 'Roger L']);
-    const names = { id: 'x', text: 'x', accept: acceptedNames(['Happy Plato']) };
+    assert.deepEqual(acceptedNames(['Happy Plato', 'Ana', 'Roger L']), ['Happy Plato', 'Plato', 'Happy', 'Ana', 'Roger L']);
+    // The first part is accepted only when nobody else in the game starts with it.
+    assert.deepEqual(acceptedNames(['Happy Plato'], ['Happy Plato', 'Happy Kant', 'Brave Hypatia']), ['Happy Plato', 'Plato']);
+    const names = { id: 'x', text: 'x', accept: acceptedNames(['Happy Plato'], ['Happy Plato', 'Happy Kant']) };
     assert.equal(answerMatches(names, 'happy plato'), true);
     assert.equal(answerMatches(names, 'it is Plato'), true);
     assert.equal(answerMatches(names, 'Happy'), false, 'the first part is shared by too many');
@@ -96,6 +98,9 @@ test('the class progress counts main answers only', () => {
     const chapter = castanyada.chapters[0];
     assert.deepEqual(teamProgress(chapter, []), { done: 0, total: 0 });
     assert.deepEqual(teamProgress(chapter, [{ done: ['where', 'when'] }, { done: [] }, { done: ['where', 'lock'] }]), { done: 3, total: 9 });
+    // A thief is not asked who the thief is, so that free answer is not counted.
+    const second = castanyada.chapters[1];
+    assert.deepEqual(teamProgress(second, [{ done: ['thief'], thief: true }, { done: ['meet-shop'] }]), { done: 1, total: 5 });
 });
 
 test('a class gets one thief, two above fifteen', () => {
@@ -103,8 +108,8 @@ test('a class gets one thief, two above fifteen', () => {
 });
 
 test('clues describe how the thief looks, in the same order for every clue', () => {
-    const brown = { hair: 'brown', hat: 'a cowboy hat', glasses: null };
-    const red = { hair: 'orange', hat: null, glasses: 'glasses' };
+    const brown = { hair: 'brown', hat: 'a cowboy hat', glasses: null, coat: 'green' };
+    const red = { hair: 'orange', hat: null, glasses: 'glasses', coat: 'red' };
     assert.equal(fillThiefClue('At 9:20 a person ran past. {hat}', [brown]), 'At 9:20 a person ran past. They wore a cowboy hat.');
     assert.equal(fillThiefClue('A person came to my shop. {glasses}', [brown]), 'A person came to my shop. They had no glasses.');
     assert.equal(fillThiefClue('I saw a person. {hair}', [red]), 'I saw a person. They had orange hair.');
@@ -116,8 +121,8 @@ test('clues describe how the thief looks, in the same order for every clue', () 
 });
 
 test('an avatar is described by its hair colour, hat and glasses', () => {
-    assert.deepEqual(lookOf({ hairColor: 0, hat: 0, glasses: 0 }), { hair: 'black', hat: null, glasses: null });
-    const look = lookOf({ hairColor: 9, hat: 14, glasses: 11 });
+    assert.deepEqual(lookOf({ hairColor: 0, hat: 0, glasses: 0, shirt: 0 }), { hair: 'black', hat: null, glasses: null, coat: lookOf({ hairColor: 0, hat: 0, glasses: 0, shirt: 0 }).coat });
+    const look = lookOf({ hairColor: 9, hat: 14, glasses: 11, shirt: 3 });
     assert.equal(look.hair, 'green');
     assert.match(look.hat, /^an? .*(hat|cap|crown|beanie|helmet|beret|headband|tam|wig|lid|halo|earmuffs|tricorn|mortarboard|stack)$/);
     assert.ok(['glasses', 'goggles', 'an eye patch', 'a visor'].includes(look.glasses));
@@ -129,7 +134,7 @@ test('the thief chapter is complete: a card, a story, a question to answer, and 
         assert.ok(chapter.objectives.some(objective => objective.answerThief), 'there is a question to name the thief');
         for (const role of castanyada.roles) assert.ok(chapter.roleClues?.[role.id], `${role.id} has a clue this chapter`);
         // Only the three looks the avatar words can describe are used as gaps.
-        for (const clue of Object.values(chapter.roleClues)) for (const [, gap] of clue.matchAll(/\{(\w+)\}/g)) assert.ok(['hat', 'glasses', 'hair'].includes(gap), gap);
+        for (const clue of Object.values(chapter.roleClues)) for (const [, gap] of clue.matchAll(/\{(\w+)\}/g)) assert.ok(['hat', 'glasses', 'hair', 'coat'].includes(gap), gap);
         // The thief's own story clashes with a clue somebody else holds.
         assert.match(chapter.thieves.story, /9:25/);
         assert.ok(Object.values(chapter.objectives[0].rewards).some(text => /9:25/.test(text)));

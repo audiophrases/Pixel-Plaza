@@ -37,7 +37,7 @@ function Question({ objective, feedback, onAnswer }: { objective: QuestView['obj
 // The student's side of the campaign, in short labelled blocks: the task, who you are, what
 // you know, and the questions. It shows only what the server sent this student.
 export default function Journal({ quest, feedback, onAnswer }: Props) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(() => window.innerHeight >= 700); // shut at first on a short screen, where it would cover the map
   const [fresh, setFresh] = useState(false); // something changed while the journal was shut
   const [recapSeen, setRecapSeen] = useState(false);
   const seen = useRef('');

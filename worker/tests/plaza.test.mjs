@@ -962,3 +962,38 @@ test('chapter 2: a secret thief among the students, clues that describe how they
         removeTemp(persistTo);
     }
 });
+
+test('the thief is never a student who is not there', { timeout: 240000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        PIN = (await api(base, '/api/teacher/game', { session, body: { name: '3A', randomNames: false } })).body.pin;
+        const join = async token => { const socket = await enter(base, token, null); sockets.push(socket); return socket; };
+        const teacher = body => api(base, '/api/teacher/campaign', { session, body });
+        const a = await join('signed-a');
+        const b = await join('signed-b');
+        let c = await join('signed-c');
+        for (let round = 0; round < 8; round++) {
+            // Everyone has played chapter 1; then Chris goes home before chapter 2 starts.
+            await teacher({ op: 'reset', confirm: true });
+            await teacher({ op: 'start', campaign: 'castanyada' });
+            c.ws.close();
+            await c.closed;
+            await new Promise(resolve => setTimeout(resolve, 200));
+            const campaign = (await teacher({ op: 'next' })).body.campaign;
+            const thieves = campaign.players.filter(player => player.thief).map(player => player.studentKey);
+            assert.equal(thieves.length, 1, 'one thief for a small class');
+            assert.notEqual(thieves[0], 'stu_c', 'the student who went home is never the thief');
+            c = await join('signed-c');
+        }
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});

@@ -129,9 +129,9 @@ export const castanyada: Campaign = {
         },
         // Each role saw something about the thief; together the clues describe an avatar in the plaza.
         roleClues: {
-            baker: 'At 9:20 a person ran past the café. {hat}',
-            shopkeeper: 'At 9:10 a person in a green coat came to my shop. {glasses}',
-            driver: 'At 9:30 a person ran into the park. {hair}',
+            baker: 'At 9:20 somebody ran past the café. {hat}',
+            shopkeeper: 'At 9:10 somebody came to my shop. {coat} {glasses}',
+            driver: 'At 9:30 somebody ran into the park. {hair}',
             receptionist: 'The hotel phone rang at 9:25. Nobody answered.',
             planner: 'My key was in my bag. Somebody moved my bag at 9:00.',
         },
@@ -214,19 +214,25 @@ export function answerMatches(objective: Objective, typed: string): boolean {
 }
 
 // What a student may type to name a classmate: the whole shown name, and for a two-part made-up name
-// ("Happy Plato") the second part alone. Never just the first part, which many students share.
-export function acceptedNames(shown: readonly string[]): string[] {
+// ("Happy Plato") the second part alone, or the first part too when nobody else in the game starts with it
+// (`everyone` is every name in the game).
+export function acceptedNames(shown: readonly string[], everyone: readonly string[] = shown): string[] {
+    const first = (name: string) => name.trim().split(/\s+/)[0].toLowerCase();
     return shown.flatMap(name => {
         const parts = name.trim().split(/\s+/);
-        return parts.length === 2 && parts[1].length >= 3 ? [name, parts[1]] : [name];
+        if (parts.length !== 2 || parts[1].length < 3) return [name];
+        const shared = everyone.filter(other => first(other) === first(name)).length > 1;
+        return shared || parts[0].length < 3 ? [name, parts[1]] : [name, parts[1], parts[0]];
     });
 }
 
 // How far the whole class is through the main questions: answers given out of answers possible.
-export function teamProgress(chapter: Chapter, players: readonly { done: readonly string[] }[]): { done: number; total: number } {
+// A thief is never asked who the thief is, so that question is left out of their share.
+export function teamProgress(chapter: Chapter, players: readonly { done: readonly string[]; thief?: boolean }[]): { done: number; total: number } {
     const main = chapter.objectives.filter(objective => !objective.optional);
+    const asked = (player: { thief?: boolean }) => main.filter(objective => !(player.thief && objective.answerThief));
     return {
-        done: players.reduce((sum, player) => sum + main.filter(objective => player.done.includes(objective.id)).length, 0),
-        total: players.length * main.length,
+        done: players.reduce((sum, player) => sum + asked(player).filter(objective => player.done.includes(objective.id)).length, 0),
+        total: players.reduce((sum, player) => sum + asked(player).length, 0),
     };
 }

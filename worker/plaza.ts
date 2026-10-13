@@ -389,9 +389,14 @@ export class PlazaRoom extends DurableObject<Env> {
     private pickThieves(game: string, chapterIndex: number, chapter: { thieves?: unknown; objectives: { id: string; answerThief?: boolean }[] } | undefined): void {
         if (!chapter?.thieves || this.thieves(game, chapterIndex).length > 0) return;
         const players = this.campaignPlayers(game);
-        if (players.length < 2) return;
-        const pool = players.map(player => player.student_key);
-        for (let n = thiefCount(pool.length); n > 0; n--) {
+        // Only from students who are in the plaza now: an absent thief would leave the class chasing nobody.
+        const here = new Set(this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey));
+        const present = players.filter(player => here.has(player.student_key));
+        if (present.length < 2) return;
+        // And, where the class is big enough, not from a role nobody else plays, whose clue would be lost with them.
+        const sharedRole = present.filter(player => present.filter(other => other.role_id === player.role_id).length > 1);
+        const pool = (sharedRole.length >= thiefCount(present.length) ? sharedRole : present).map(player => player.student_key);
+        for (let n = thiefCount(present.length); n > 0; n--) {
             const [key] = pool.splice(Math.floor(Math.random() * pool.length), 1);
             this.sql.exec('INSERT INTO campaign_thieves (game_id, chapter, student_key) VALUES (?, ?, ?)', game, chapterIndex, key);
             const player = players.find(item => item.student_key === key)!;
@@ -431,7 +436,7 @@ export class PlazaRoom extends DurableObject<Env> {
                 { id: `role-${role.id}`, from: 'job',
                     text: isThief && chapter.thieves ? `Your story: ${chapter.thieves.story}` : fillThiefClue(chapter.roleClues?.[role.id] ?? role.clue, looks) },
                 ...found.map(item => ({ id: item.id, text: item.text, from: item.zone })),
-                ...rewardClues(chapter, role.id, player.done).map(item => ({ ...item, from: 'reward' })),
+                ...(isThief && chapter.thieves ? [] : rewardClues(chapter, role.id, player.done).map(item => ({ ...item, from: 'reward' }))),
                 ...chapter.reveals.slice(0, row.revealed).map(item => ({ id: `news-${item.id}`, text: item.text, from: 'news' })),
             ],
             // Questions come one after another; once the chapter is finished only the bonus ones stay open.
@@ -441,7 +446,7 @@ export class PlazaRoom extends DurableObject<Env> {
                 && !(isThief && objective.answerThief))
                 .map(objective => ({ id: objective.id, text: objective.text, done: player.done.includes(objective.id), optional: !!objective.optional,
                     kind: objective.kind === 'report' ? 'report' as const : objective.answerRole ? 'name' as const : 'text' as const })),
-            team: teamProgress(chapter, this.campaignPlayers(game)),
+            team: teamProgress(chapter, this.campaignPlayers(game).map(item => ({ done: item.done, thief: thieves.includes(item.student_key) }))),
             // "Previously", for a student coming back to a story that is already under way
             recap: !withRecap || row.status !== 'active' ? null
                 : row.chapter > 0 ? campaign.chapters[row.chapter - 1].ending
@@ -505,13 +510,13 @@ export class PlazaRoom extends DurableObject<Env> {
             // The thief's made-up name, as the plaza shows it. The thief never gets this question.
             const names = this.rosterNames(seat.game);
             const culprits = this.thieves(seat.game, row.chapter).filter(key => key !== seat.studentKey).map(key => names.get(key) ?? '');
-            right = this.thieves(seat.game, row.chapter).includes(seat.studentKey) ? false : answerMatches({ ...objective, accept: acceptedNames(culprits.filter(Boolean)) }, typed);
+            right = this.thieves(seat.game, row.chapter).includes(seat.studentKey) ? false : answerMatches({ ...objective, accept: acceptedNames(culprits.filter(Boolean), [...names.values()]) }, typed);
         } else if (objective.answerRole) {
             // The name of a classmate who has that role, as the plaza shows it; never one's own.
             const names = this.rosterNames(seat.game);
             const holders = this.campaignPlayers(seat.game).filter(other => other.role_id === objective.answerRole && other.student_key !== seat.studentKey)
                 .map(other => names.get(other.student_key) ?? '');
-            right = answerMatches({ ...objective, accept: acceptedNames(holders.filter(Boolean)) }, typed);
+            right = answerMatches({ ...objective, accept: acceptedNames(holders.filter(Boolean), [...names.values()]) }, typed);
         } else right = answerMatches(objective, typed);
         if (!right) {
             this.sql.exec('UPDATE campaign_players SET last_wrong = ? WHERE game_id = ? AND student_key = ?', now, seat.game, seat.studentKey);
