@@ -90,7 +90,7 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
         return { kind: 'open', open: body.open, ...(typeof body.game === 'string' ? { game: body.game } : {}) };
     }
     if (path === '/api/teacher/game' && typeof body?.name === 'string') return { kind: 'newGame', name: body.name, randomNames: body.randomNames !== false };
-    if (path === '/api/teacher/campaign' && ['start', 'next', 'reset'].includes(body?.op)) {
+    if (path === '/api/teacher/campaign' && ['start', 'next', 'reveal', 'reset'].includes(body?.op)) {
         return { kind: 'campaign', op: body.op, ...(typeof body.campaign === 'string' ? { campaign: body.campaign } : {}), confirm: body.confirm === true };
     }
     if (path === '/api/teacher/review' && typeof body?.id === 'string' && typeof body?.approve === 'boolean') {

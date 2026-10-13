@@ -5,6 +5,7 @@ import './Teacher.css';
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string };
 type CampaignInfo = {
   id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string;
+  reveals: { shown: number; total: number; next: string | null };
   players: { studentKey: string; name: string; role: string; clues: number; done: string[] }[];
 };
 type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean };
@@ -182,6 +183,8 @@ export default function Teacher() {
           <p><strong>{status.campaign.title}</strong> · chapter {status.campaign.chapter + 1} of {status.campaign.chapters}: {status.campaign.chapterTitle} ·{' '}
             {{ active: 'in progress', chapter_complete: 'chapter finished: the class has its cliffhanger', campaign_complete: 'finished' }[status.campaign.status]}</p>
           <div className="teacher-newgame">
+            {status.campaign.status === 'active' && status.campaign.reveals.next && <button className="btn btn-secondary" title={status.campaign.reveals.next}
+              onClick={() => void action('campaign', { op: 'reveal' })}>Reveal the next news ({status.campaign.reveals.shown} of {status.campaign.reveals.total} shown)</button>}
             {status.campaign.status !== 'campaign_complete' && <button className="btn btn-primary" onClick={() => void action('campaign', { op: 'next' })}>
               {status.campaign.chapter + 1 < status.campaign.chapters ? 'Start the next chapter' : 'End the campaign'}
             </button>}
@@ -189,6 +192,7 @@ export default function Teacher() {
               if (window.confirm('Erase the campaign for this game, including every role and clue?')) void action('campaign', { op: 'reset', confirm: true });
             }}>Erase campaign</button>
           </div>
+          {status.campaign.status === 'active' && status.campaign.reveals.next && <p>Next news: <em>{status.campaign.reveals.next}</em></p>}
           {status.campaign.players.length > 0 && <ul>
             {status.campaign.players.map(player => <li key={player.studentKey}>
               <span><strong>{who(player.studentKey, player.name)}</strong> · {player.role} · {player.clues} place clue{player.clues === 1 ? '' : 's'} · {player.done.length ? `answered ${player.done.length}` : 'not answered yet'}</span>

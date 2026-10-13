@@ -82,6 +82,9 @@
 .journal-choice:hover:not(:disabled) { border-color: #1677ff; }
 .journal-choice:disabled { opacity: 0.5; cursor: default; }
 
+.journal-recap { border-left-color: #b37feb; background: #f9f0ff; }
+.journal-dismiss { margin-top: 0.3rem; padding: 0.2rem 0.8rem; border: 1px solid #b37feb; border-radius: 6px; background: white; font: inherit; font-weight: 700; cursor: pointer; }
+.journal-bonus { border-left-color: #13c2c2; background: #e6fffb; }
 .journal-right { color: #237804; font-weight: 700; }
 .journal-wrong { color: #a8071a; font-weight: 700; }
 .journal-ending { border-left-color: #52c41a; background: #f6ffed; font-weight: 700; }

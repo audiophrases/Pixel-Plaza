@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { sha256Hex } from '../rules.ts';
+import { castanyada } from '../../shared/campaign.ts';
 
 const root = path.join(import.meta.dirname, '..', '..');
 const wrangler = path.join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
@@ -624,10 +625,28 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         assert.equal(samBack.quest.role.id, quests.sam.role.id);
         assert.equal(chrisBack.quest.role.id, quests.chris.role.id);
         assert.equal(chrisBack.quest.clues.length, 2);
+        assert.equal(alexBack.quest.recap, null, 'nothing to recall yet');
+        assert.match(chrisBack.quest.recap, /Last time/);
 
-        // Answers: a wrong one must wait before another try; a right one counts; 2 of 3 students finish the chapter.
-        const answer = (who, text) => who.socket.send({ t: 'answer', objective: 'where', text });
+        // Teacher reveals: prepared news goes to everyone, in order, until there is no more.
+        const chapter = castanyada.chapters[0];
+        const reveal = () => api(base, '/api/teacher/campaign', { session, body: { op: 'reveal' } });
+        let revealed = (await reveal()).body.campaign;
+        assert.deepEqual([revealed.reveals.shown, revealed.reveals.total], [1, 2]);
+        for (const who of [alexBack, samBack, chrisBack]) {
+            const news = (await who.socket.next(message => message.t === 'quest' && message.quest.clues.some(clue => clue.from === 'news'), 'news')).quest;
+            assert.equal(news.clues.find(clue => clue.from === 'news').text, chapter.reveals[0].text);
+        }
+        await reveal();
+        assert.equal((await reveal()).status, 400, 'no more news to reveal');
+
+        // Answers: questions open one after another; a wrong one must wait before another try;
+        // a right one earns a clue for your role and opens the next question.
+        const answer = (who, text, objective = 'where') => who.socket.send({ t: 'answer', objective, text });
         const result = who => who.socket.next(message => message.t === 'answered', 'answer result');
+        answer(alexBack, '9:30', 'when');
+        await pause(300);
+        assert.equal(alexBack.socket.inbox.some(message => message.t === 'answered'), false, 'a locked question is not answered');
         answer(alexBack, 'In the hotel');
         assert.deepEqual((({ correct, wait }) => ({ correct, wait }))(await result(alexBack)), { correct: false, wait: false });
         answer(alexBack, 'the park');
@@ -635,17 +654,40 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         await pause(3200);
         answer(alexBack, 'It is in the park');
         assert.equal((await result(alexBack)).correct, true);
+        const next = (await alexBack.socket.next(message => message.t === 'quest' && message.quest.objectives.some(item => item.id === 'when'), 'next question')).quest;
+        assert.ok(next.clues.some(clue => clue.from === 'reward' && clue.text === chapter.objectives[0].rewards[next.role.id]), 'a clue for their role');
+        assert.deepEqual(next.objectives.filter(item => item.optional).map(item => item.id).sort(), ['lock', 'note']);
+        assert.equal(JSON.stringify(next).includes('"keys"'), false, 'later questions stay hidden');
         let status = (await api(base, '/api/teacher/status', { session })).body.campaign;
         assert.equal(status.status, 'active');
+
+        // Sam answers all three main questions; Alex the other two. Two of three students finish the chapter.
         answer(samBack, 'park!');
         assert.equal((await result(samBack)).correct, true);
+        answer(samBack, 'Half past nine', 'when');
+        assert.equal((await result(samBack)).correct, true);
+        answer(samBack, 'two', 'keys');
+        assert.equal((await result(samBack)).correct, true);
+        answer(alexBack, 'at 9:30', 'when');
+        assert.equal((await result(alexBack)).correct, true);
+        answer(alexBack, '2', 'keys');
+        assert.equal((await result(alexBack)).correct, true);
         for (const who of [alexBack, samBack, chrisBack]) {
             const done = (await who.socket.next(message => message.t === 'quest' && message.quest.status === 'chapter_complete', 'chapter complete')).quest;
             assert.match(done.chapter.ending, /Who took the chestnuts/);
+            assert.equal(done.objectives.every(item => item.optional), true, 'only bonus questions stay open');
         }
+        assert.equal((await reveal()).status, 400, 'no news once the chapter is over');
+
+        // A bonus question can still be answered after the chapter is finished; a main one cannot.
+        answer(alexBack, 'a star', 'lock');
+        assert.equal((await result(alexBack)).correct, true);
+        answer(chrisBack, 'park', 'where');
+        await pause(300);
+        assert.equal(chrisBack.socket.inbox.some(message => message.t === 'answered'), false);
         status = (await api(base, '/api/teacher/status', { session })).body.campaign;
         assert.equal(status.status, 'chapter_complete');
-        assert.deepEqual(status.players.map(player => player.done.length).sort(), [0, 1, 1]);
+        assert.deepEqual(status.players.map(player => player.done.length).sort(), [0, 3, 4]);
 
         // The teacher moves the story on; with one chapter that is the end of the campaign.
         assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'next' } })).body.campaign.status, 'campaign_complete');
