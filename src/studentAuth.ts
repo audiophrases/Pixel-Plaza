@@ -36,16 +36,35 @@ export function readStudentSession(): StudentSession | null {
 
 // Browser storage is per address, so the session signed in online travels to
 // the teacher's laptop in the URL fragment, which is never sent to a server.
-export function handOffTo(laptopUrl: string, session: StudentSession): void {
+export function handOffTo(laptopUrl: string, session: StudentSession, pin = ''): void {
   const target = new URL(laptopUrl);
-  target.hash = new URLSearchParams({ [handOffKey]: JSON.stringify(session) }).toString();
+  target.hash = new URLSearchParams({ [handOffKey]: JSON.stringify(session), ...(pin ? { pin } : {}) }).toString();
   window.location.assign(target);
 }
 
+const pinKey = 'pixelplaza.join-pin';
+const validPin = (value: string | null): string => (value && /^\d{4,8}$/.test(value) ? value : '');
+
+// The class PIN a join link carries (https://.../?pin=123456), whether it arrived in the address or was
+// handed over with the sign-in. Empty when there is none.
+export function joinPin(): string {
+  const fromAddress = validPin(new URLSearchParams(window.location.search).get('pin'));
+  try {
+    if (fromAddress) sessionStorage.setItem(pinKey, fromAddress);
+    return fromAddress || validPin(sessionStorage.getItem(pinKey));
+  } catch { return fromAddress; }
+}
+
+// A link for the class to open, that signs students in and brings them to the game with the PIN already filled in.
+export const joinLink = (base: string, pin: string) => `${base.replace(/\/$/, '')}/?pin=${pin}`;
+
 // On the laptop: keep a handed-over session and take it out of the address bar.
 export function receiveHandOff(): void {
-  const raw = new URLSearchParams(window.location.hash.slice(1)).get(handOffKey);
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const raw = params.get(handOffKey);
   if (raw === null) return;
+  const pin = validPin(params.get('pin'));
+  if (pin) { try { sessionStorage.setItem(pinKey, pin); } catch { /* storage disabled */ } }
   history.replaceState(null, '', window.location.pathname + window.location.search);
   try {
     const session = usable(JSON.parse(raw) as StudentSession);

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { joinLink } from '../studentAuth';
 import './Teacher.css';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string };
@@ -37,6 +38,7 @@ export default function Teacher() {
   // A problem sending students to this laptop, from sign-in or opening the class.
   const [notice, setNotice] = useState('');
   const [newGameName, setNewGameName] = useState('');
+  const [copied, setCopied] = useState(''); // the PIN whose link was just copied
   const [vision, setVision] = useState(450); // how far students see in a new game, in map pixels
   const [randomNames, setRandomNames] = useState(true); // students get made-up names, and the teacher sees who they are
 
@@ -80,6 +82,13 @@ export default function Teacher() {
     if (new URLSearchParams(window.location.search).get('autologin') === 'tester') void signIn('tester');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The link for a game: students open it, sign in, and arrive with the PIN already filled in. It is the online
+  // site that signs them in, so on the laptop it points there; the PIN stays the same for every lesson.
+  const linkFor = (pin: string) => joinLink(status?.laptop?.signInUrl ?? window.location.origin, pin);
+  const copyLink = (pin: string) => {
+    void navigator.clipboard?.writeText(linkFor(pin)).then(() => { setCopied(pin); window.setTimeout(() => setCopied(''), 2500); });
+  };
 
   // The plaza may show made-up names; the teacher always sees the real one beside them.
   const who = (studentKey: string, shown: string) => {
@@ -146,6 +155,8 @@ export default function Teacher() {
       <section className="teacher-controls">
         <strong>{status.game ? `${status.game.name} is ${status.open ? 'open' : 'closed'}` : 'No game yet'}</strong>
         {status.pin && <span className="teacher-pin">Class PIN <strong>{status.pin}</strong></span>}
+        {status.pin && <button className="btn btn-secondary" onClick={() => copyLink(status.pin!)} title={linkFor(status.pin)}>
+          {copied === status.pin ? 'Link copied' : 'Copy the join link'}</button>}
         {status.game && <button className="btn btn-primary" onClick={() => void action('class', { open: !status.open })}>
           {status.open ? 'Close class' : 'Open class'}
         </button>}
@@ -178,6 +189,7 @@ export default function Teacher() {
         {status.games.length > 0 && <ul>
           {status.games.map(game => <li key={game.id}>
             <span><strong>{game.name}</strong> · PIN {game.pin} · {game.randomNames ? 'random names' : 'real first names'} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
+            <button className="btn btn-secondary" onClick={() => copyLink(game.pin)} title={linkFor(game.pin)}>{copied === game.pin ? 'Link copied' : 'Copy join link'}</button>
             {!game.open && <button className="btn btn-secondary" onClick={() => void action('class', { open: true, game: game.id })}>
               {status.open ? 'Switch to this game' : 'Open'}
             </button>}

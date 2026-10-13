@@ -5,7 +5,7 @@ import type { AvatarConfig } from '../utils/AvatarRenderer';
 import { renderGoogleButton } from '../googleIdentity';
 import {
   clearStudentSession, exchangeGoogleCredential, fetchStudentConfig,
-  fetchStudentProfile, handOffTo, readStudentSession, saveStudentSession
+  fetchStudentProfile, handOffTo, joinPin, readStudentSession, saveStudentSession
 } from '../studentAuth';
 import type { StudentConfig, StudentSession } from '../studentAuth';
 import { firstName } from '../../shared/names';
@@ -15,7 +15,7 @@ import './Login.css';
 
 export default function Login() {
   const [step, setStep] = useState<'details' | 'avatar'>('details');
-  const [pin, setPin] = useState('');
+  const [pin, setPin] = useState(() => joinPin()); // filled in when the class opened a join link
   const [session, setSession] = useState<StudentSession | null>(() => {
     // "Not you?" on the teacher's laptop signs out here too.
     if (new URLSearchParams(window.location.search).has('signout')) {
@@ -71,7 +71,7 @@ export default function Login() {
         if (!active) return;
         saveStudentSession(value);
         // The class plays on the teacher's laptop: go straight there.
-        if (config.laptopUrl) handOffTo(config.laptopUrl, value);
+        if (config.laptopUrl) handOffTo(config.laptopUrl, value, joinPin());
         else { setSession(value); setSavedAvatar(avatar); }
       }).catch(cause => {
         if (active) setError(cause instanceof Error ? cause.message : 'Google sign-in failed.');
@@ -106,7 +106,7 @@ export default function Login() {
           {step === 'details' ? (
             <form className="login-form" onSubmit={event => {
               event.preventDefault();
-              if (laptopUrl) { if (session) handOffTo(laptopUrl, session); return; }
+              if (laptopUrl) { if (session) handOffTo(laptopUrl, session, joinPin()); return; }
               if (!ready) return;
               if (savedAvatar) enter(null);
               else setStep('avatar');
