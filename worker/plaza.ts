@@ -3,6 +3,8 @@ import type { Env } from './index.ts';
 import type { PinPlayStudent } from './pinplay.ts';
 import { checkGrammar } from './grammar.ts';
 import { moderate } from './moderation.ts';
+import { campaignById, campaigns, chapterDone, pickRole, type QuestView } from '../shared/campaign.ts';
+import { zoneAt } from '../shared/plazaMap.ts';
 import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 
 const TICKET_MS = 60_000;
@@ -10,6 +12,7 @@ const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
 const CHAT_KEEP = 500;
 const STATUS_HISTORY = 100;
 const CHAT_GAP_MS = 1500;
+const WRONG_ANSWER_WAIT_MS = 3000; // before a student can try a chapter question again
 const CHECK_GAP_MS = 800; // grammar hints cost money: no more than one a student can read
 // Nearby chat reaches students within this many map pixels of where the sender stood.
 export const HEARING_RANGE = 350;
@@ -21,7 +24,7 @@ const CLOSE_CLASS_CLOSED = 4002; // the teacher closed the game
 
 // Per-socket state. It lives in the socket's attachment, so it survives the
 // room hibernating between messages.
-type Seat = { id: string; game: string; studentKey: string; name: string; avatar: Avatar; x: number; y: number; lastChat: number; lastCheck?: number; left?: boolean };
+type Seat = { id: string; game: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; x: number; y: number; lastChat: number; lastCheck?: number; left?: boolean };
 
 // 'approve': every message waits for the teacher. 'review': nearby chat that OpenAI
 // cleared posts at once and the teacher reviews afterwards; whispers still wait.
@@ -31,6 +34,7 @@ export type TeacherAction =
     | { kind: 'status' }
     | { kind: 'open'; open: boolean; game?: string } // a saved game (the last played by default), or close the open one
     | { kind: 'newGame'; name: string }              // a new game with its own PIN, opened at once
+    | { kind: 'campaign'; op: 'start' | 'next' | 'reset'; campaign?: string; confirm?: boolean }
     | { kind: 'review'; id: string; approve: boolean } // approve = false also takes down a message already posted
     | { kind: 'approveAll' }
     | { kind: 'mode'; mode: ChatMode }
@@ -38,7 +42,15 @@ export type TeacherAction =
 
 export type GameSummary = { id: string; name: string; pin: string; lastOpened: number; open: boolean };
 
+// Where this game's campaign stands, and what every student has done in it.
+export type CampaignStatus = {
+    id: string; title: string; status: QuestView['status']; chapter: number; chapters: number; chapterTitle: string;
+    players: { studentKey: string; name: string; role: string; clues: number; done: string[] }[];
+};
+
 export type TeacherStatus = {
+    campaign: CampaignStatus | null; // the open game's campaign, once started
+    campaigns: { id: string; title: string }[]; // those that can be started
     open: boolean;
     game: { id: string; name: string } | null; // the open game, or the one last played
     games: GameSummary[];                      // every saved game, most recently played first
@@ -77,7 +89,12 @@ export class PlazaRoom extends DurableObject<Env> {
             CREATE TABLE IF NOT EXISTS games (
                 id TEXT PRIMARY KEY, name TEXT NOT NULL, pin TEXT NOT NULL UNIQUE, created INTEGER NOT NULL, last_opened INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS positions (
-                game_id TEXT NOT NULL, student_key TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL, PRIMARY KEY (game_id, student_key));`);
+                game_id TEXT NOT NULL, student_key TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL, PRIMARY KEY (game_id, student_key));
+            CREATE TABLE IF NOT EXISTS campaigns (
+                game_id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, chapter INTEGER NOT NULL, status TEXT NOT NULL, started INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS campaign_players (
+                game_id TEXT NOT NULL, student_key TEXT NOT NULL, role_id TEXT NOT NULL, clues TEXT NOT NULL DEFAULT '[]',
+                done TEXT NOT NULL DEFAULT '[]', last_wrong INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (game_id, student_key));`);
         // Older rooms predate nearby chat and whispers: their messages were for everyone.
         const chatColumns = this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('chat')").toArray().map(row => row.name);
         for (const [column, type] of [['target_key', 'TEXT'], ['target_name', 'TEXT'], ['x', 'REAL'], ['y', 'REAL'], ['flag', 'TEXT'], ['note', 'TEXT'], ['game_id', 'TEXT']]) {
@@ -161,6 +178,10 @@ export class PlazaRoom extends DurableObject<Env> {
             if (action.open && action.game !== undefined && !this.game(action.game)) return { error: 'That game does not exist.', status: 400 };
             this.setOpen(action.open, action.game);
         }
+        if (action.kind === 'campaign') {
+            const failed = this.campaignAction(action);
+            if (failed) return { error: failed, status: 400 };
+        }
         if (action.kind === 'newGame') {
             const name = action.name.trim().replace(/\s+/g, ' ').slice(0, 40);
             if (!name) return { error: 'Give the game a name.', status: 400 };
@@ -182,6 +203,8 @@ export class PlazaRoom extends DurableObject<Env> {
         // recent history, read through the indexes, not the whole log each time.
         const current = this.game(this.activeGame());
         return {
+            campaign: this.campaignStatus(current?.id ?? null),
+            campaigns: campaigns.map(campaign => ({ id: campaign.id, title: campaign.title })),
             open: this.isOpen(),
             game: current && { id: current.id, name: current.name },
             games: this.sql.exec<{ id: string; name: string; pin: string; lastOpened: number }>(
@@ -241,6 +264,7 @@ export class PlazaRoom extends DurableObject<Env> {
         server.send(JSON.stringify({ t: 'welcome', id: seat.id, players: [...others, seat].map(publicSeat) }));
         this.broadcast({ t: 'join', player: publicSeat(seat) }, server);
         if (replaced.length === 0) this.systemChat(`${seat.name} has joined the Plaza.`, server);
+        this.sendQuest(server, seat.game, seat.studentKey);
         return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -256,8 +280,11 @@ export class PlazaRoom extends DurableObject<Env> {
             if (!position) return;
             seat.x = position.x;
             seat.y = position.y;
+            this.discover(seat);
             ws.serializeAttachment(seat);
             this.broadcast({ t: 'move', id: seat.id, ...position }, ws);
+        } else if (data?.t === 'answer' && typeof data.objective === 'string' && typeof data.choice === 'string') {
+            this.answer(ws, seat, data.objective, data.choice);
         } else if (data?.t === 'emote' && EMOTES.includes(data.emote)) {
             this.broadcast({ t: 'emote', id: seat.id, emote: data.emote });
         } else if (data?.t === 'check') {
@@ -281,6 +308,160 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     // ---------- Internals ----------
+
+    // ---------- The campaign ----------
+    // One per game, saved with it: closing the game is the checkpoint, and reopening it picks the
+    // story up where it stopped. Each student's role and finds are saved too, and only that
+    // student's own are ever sent to them.
+
+    private campaignRow(game: string | null): { campaign_id: string; chapter: number; status: QuestView['status'] } | null {
+        return game === null ? null : this.sql.exec<{ campaign_id: string; chapter: number; status: QuestView['status'] }>(
+            'SELECT campaign_id, chapter, status FROM campaigns WHERE game_id = ?', game).toArray()[0] ?? null;
+    }
+
+    private campaignPlayers(game: string): { student_key: string; role_id: string; clues: string[]; done: string[]; last_wrong: number }[] {
+        return this.sql.exec<{ student_key: string; role_id: string; clues: string; done: string; last_wrong: number }>(
+            'SELECT student_key, role_id, clues, done, last_wrong FROM campaign_players WHERE game_id = ?', game).toArray()
+            .map(row => ({ ...row, clues: JSON.parse(row.clues), done: JSON.parse(row.done) }));
+    }
+
+    // The student's role, chosen at random the first time and the same ever after.
+    private player(game: string, studentKey: string, campaignId: string) {
+        const existing = this.campaignPlayers(game).find(row => row.student_key === studentKey);
+        if (existing) return existing;
+        const campaign = campaignById(campaignId);
+        if (!campaign) return null;
+        const role = pickRole(campaign.roles, this.campaignPlayers(game).map(row => row.role_id), Math.random());
+        this.sql.exec('INSERT INTO campaign_players (game_id, student_key, role_id) VALUES (?, ?, ?)', game, studentKey, role.id);
+        return { student_key: studentKey, role_id: role.id, clues: [] as string[], done: [] as string[], last_wrong: 0 };
+    }
+
+    // What this student may see of the campaign, or null before it starts.
+    private questView(game: string, studentKey: string): QuestView | null {
+        const row = this.campaignRow(game);
+        const campaign = row && campaignById(row.campaign_id);
+        if (!row || !campaign) return null;
+        const player = this.player(game, studentKey, row.campaign_id);
+        const role = campaign.roles.find(item => item.id === player?.role_id);
+        const chapter = campaign.chapters[Math.min(row.chapter, campaign.chapters.length - 1)];
+        if (!player || !role) return null;
+        const found = campaign.chapters.flatMap(item => item.discoveries).filter(discovery => player.clues.includes(discovery.id));
+        return {
+            campaign: { id: campaign.id, title: campaign.title },
+            status: row.status,
+            chapter: { index: row.chapter, of: campaign.chapters.length, title: chapter.title, intro: chapter.intro,
+                ending: row.status === 'active' ? null : chapter.ending },
+            role: { id: role.id, name: role.name, card: role.card },
+            clues: [{ id: `role-${role.id}`, text: role.clue, from: 'Your job' }, ...found.map(item => ({ id: item.id, text: item.text, from: `The ${item.zone}` }))],
+            objectives: chapter.objectives.map(objective => ({ id: objective.id, text: objective.text, choices: objective.choices, done: player.done.includes(objective.id) })),
+            finale: row.status === 'campaign_complete' ? campaign.finale : null
+        };
+    }
+
+    private sendQuest(target: WebSocket, game: string, studentKey: string): void {
+        const quest = this.questView(game, studentKey);
+        if (quest) try { target.send(JSON.stringify({ t: 'quest', quest })); } catch { /* closing */ }
+    }
+
+    // Everyone in the game gets their own view again, after the story moved on.
+    private sendQuestToAll(game: string): void {
+        for (const seat of this.seats()) {
+            if (seat.game !== game) continue;
+            const quest = this.questView(game, seat.studentKey);
+            for (const ws of this.ctx.getWebSockets(seat.studentKey)) {
+                try { ws.send(JSON.stringify({ t: 'quest', quest })); } catch { /* closing */ }
+            }
+        }
+    }
+
+    // Stepping into a named place can reveal a clue, once.
+    private discover(seat: Seat): void {
+        const zone = zoneAt(seat.x, seat.y);
+        if (zone === (seat.zone ?? null)) return;
+        seat.zone = zone;
+        const row = zone ? this.campaignRow(seat.game) : null;
+        const campaign = row && campaignById(row.campaign_id);
+        if (!zone || !row || !campaign || row.status !== 'active') return;
+        const player = this.player(seat.game, seat.studentKey, row.campaign_id);
+        const fresh = campaign.chapters[row.chapter]?.discoveries.filter(item => item.zone === zone && !player?.clues.includes(item.id)) ?? [];
+        if (!player || fresh.length === 0) return;
+        this.sql.exec('UPDATE campaign_players SET clues = ? WHERE game_id = ? AND student_key = ?',
+            JSON.stringify([...player.clues, ...fresh.map(item => item.id)]), seat.game, seat.studentKey);
+        for (const ws of this.ctx.getWebSockets(seat.studentKey)) this.sendQuest(ws, seat.game, seat.studentKey);
+    }
+
+    // A student's answer to a chapter question. Wrong answers can be tried again after a short wait.
+    private answer(ws: WebSocket, seat: Seat, objectiveId: string, choice: string): void {
+        const row = this.campaignRow(seat.game);
+        const campaign = row && campaignById(row.campaign_id);
+        const objective = campaign?.chapters[row?.chapter ?? 0]?.objectives.find(item => item.id === objectiveId);
+        if (!row || !campaign || !objective || row.status !== 'active') return;
+        const player = this.player(seat.game, seat.studentKey, row.campaign_id);
+        if (!player || player.done.includes(objective.id)) return;
+        const reply = (correct: boolean, wait = false) => ws.send(JSON.stringify({ t: 'answered', objective: objective.id, correct, wait }));
+        const now = Date.now();
+        if (now - player.last_wrong < WRONG_ANSWER_WAIT_MS) return reply(false, true);
+        if (choice !== objective.correct) {
+            this.sql.exec('UPDATE campaign_players SET last_wrong = ? WHERE game_id = ? AND student_key = ?', now, seat.game, seat.studentKey);
+            return reply(false);
+        }
+        this.sql.exec('UPDATE campaign_players SET done = ? WHERE game_id = ? AND student_key = ?',
+            JSON.stringify([...player.done, objective.id]), seat.game, seat.studentKey);
+        reply(true);
+        const chapter = campaign.chapters[row.chapter];
+        if (chapterDone(chapter, this.campaignPlayers(seat.game))) {
+            this.sql.exec("UPDATE campaigns SET status = 'chapter_complete' WHERE game_id = ?", seat.game);
+            this.sendQuestToAll(seat.game);
+        } else for (const socket of this.ctx.getWebSockets(seat.studentKey)) this.sendQuest(socket, seat.game, seat.studentKey);
+    }
+
+    // The teacher's controls. Returns what went wrong, or null.
+    private campaignAction(action: Extract<TeacherAction, { kind: 'campaign' }>): string | null {
+        const game = this.activeGame();
+        if (game === null) return 'Open or create a game first.';
+        const row = this.campaignRow(game);
+        if (action.op === 'start') {
+            if (row) return 'This game already has a campaign.';
+            const campaign = campaignById(action.campaign ?? '');
+            if (!campaign) return 'That campaign does not exist.';
+            this.sql.exec("INSERT INTO campaigns (game_id, campaign_id, chapter, status, started) VALUES (?, ?, 0, 'active', ?)", game, campaign.id, Date.now());
+            for (const seat of this.seats()) if (seat.game === game) this.player(game, seat.studentKey, campaign.id);
+        } else if (!row) {
+            return 'This game has no campaign.';
+        } else if (action.op === 'next') {
+            const campaign = campaignById(row.campaign_id);
+            if (!campaign || row.status === 'campaign_complete') return 'The campaign is over.';
+            if (row.chapter + 1 < campaign.chapters.length) {
+                this.sql.exec("UPDATE campaigns SET chapter = chapter + 1, status = 'active' WHERE game_id = ?", game);
+            } else this.sql.exec("UPDATE campaigns SET status = 'campaign_complete' WHERE game_id = ?", game);
+        } else if (action.op === 'reset') {
+            if (action.confirm !== true) return 'Confirm to erase this game\'s campaign.';
+            this.sql.exec('DELETE FROM campaigns WHERE game_id = ?', game);
+            this.sql.exec('DELETE FROM campaign_players WHERE game_id = ?', game);
+            for (const seat of this.seats()) {
+                if (seat.game !== game) continue;
+                for (const ws of this.ctx.getWebSockets(seat.studentKey)) { try { ws.send(JSON.stringify({ t: 'quest', quest: null })); } catch { /* closing */ } }
+            }
+            return null;
+        }
+        this.sendQuestToAll(game);
+        return null;
+    }
+
+    private campaignStatus(game: string | null): CampaignStatus | null {
+        const row = this.campaignRow(game);
+        const campaign = row && campaignById(row.campaign_id);
+        if (!game || !row || !campaign) return null;
+        const names = new Map(this.sql.exec<{ student_key: string; name: string }>('SELECT student_key, name FROM students').toArray().map(item => [item.student_key, item.name]));
+        return {
+            id: campaign.id, title: campaign.title, status: row.status, chapter: row.chapter, chapters: campaign.chapters.length,
+            chapterTitle: campaign.chapters[Math.min(row.chapter, campaign.chapters.length - 1)].title,
+            players: this.campaignPlayers(game).map(item => ({
+                studentKey: item.student_key, name: names.get(item.student_key) ?? 'Student',
+                role: campaign.roles.find(role => role.id === item.role_id)?.name ?? item.role_id, clues: item.clues.length, done: item.done
+            }))
+        };
+    }
 
     private mode(): ChatMode {
         return this.setting('mode') === 'review' ? 'review' : 'approve';

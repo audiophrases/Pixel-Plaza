@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import Journal from '../components/Journal';
 import PhaserGame from '../components/PhaserGame';
+import type { QuestView } from '../../shared/campaign';
 import { PlazaConnection } from '../plaza';
 import { loadChecker } from '../spellingData';
 import type { Checker, Misspelling } from '../spelling';
@@ -36,6 +38,8 @@ export default function Game() {
   const [checking, setChecking] = useState(false);
   // A message on its way: the draft stays in the box until the server says it took it.
   const [sending, setSending] = useState(false);
+  const [quest, setQuest] = useState<QuestView | null>(null); // this student's part of the campaign, if one is running
+  const [answered, setAnswered] = useState<{ objective: string; correct: boolean; wait: boolean } | null>(null);
   const [sendError, setSendError] = useState(''); // why the last message did not go, shown by the box
   const pending = useRef<{ cid: string; text: string; timer: number } | null>(null);
   const keptRun = useRef(0); // hints in a row the student turned down
@@ -111,6 +115,8 @@ export default function Game() {
         setSendError('');
       }
       if (event.t === 'result') return;
+      if (event.t === 'quest') { setQuest(event.quest); setAnswered(null); return; }
+      if (event.t === 'answered') { setAnswered({ objective: event.objective, correct: event.correct, wait: event.wait }); return; }
       if (event.t === 'chat') say({ id: event.id, sender: event.sender, text: event.text, timestamp: event.ts, whisper: event.whisper, to: event.to });
       else if (event.t === 'retract') setMessages(prev => prev.filter(message => message.id !== event.id));
       else if (event.t === 'notice') say({ sender: event.level === 'warning' ? 'System Warning' : 'System', text: event.text });
@@ -238,6 +244,9 @@ export default function Game() {
             </span>}
           </div>
         </header>
+
+        {quest && <Journal quest={quest} feedback={answered}
+          onAnswer={(objective, choice) => connection?.send({ t: 'answer', objective, choice })} />}
 
         <div className={`chat-container glass-panel${chatSpot.folded ? ' chat-folded' : ''}`} ref={chatBox}
           style={{ transform: `translate(${chatSpot.x}px, ${chatSpot.y}px)` }}>

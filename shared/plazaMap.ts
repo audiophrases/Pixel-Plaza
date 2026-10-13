@@ -99,5 +99,8 @@ export const worldRects: Rect[] = plazaMap.blocked.map(toWorld);
 export const worldZones = plazaMap.zones.map(zone => ({ id: zone.id, rect: toWorld(zone.rect) }));
 export const SPAWN = { x: Math.round(plazaMap.spawn.x * SCALE), y: Math.round(plazaMap.spawn.y * SCALE) };
 
+// The named place (zone id) a world position is in, or null.
+export const zoneAt = (x: number, y: number): string | null => worldZones.find(zone => inside(x, y, zone.rect))?.id ?? null;
+
 // True when a world position is in a place nobody can walk.
 export const isBlocked = (x: number, y: number) => worldRects.some(rect => inside(x, y, rect));

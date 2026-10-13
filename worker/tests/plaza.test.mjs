@@ -538,3 +538,111 @@ test('grammar hints advise, never block, and the teacher sees what the student c
         removeTemp(persistTo);
     }
 });
+
+test('a campaign: random fixed roles, private clues, discoveries, answers, chapters, and resuming', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const join = async token => {
+        const socket = await enter(plaza.base, token, null);
+        sockets.push(socket);
+        return { socket, quest: (await socket.next(message => message.t === 'quest', 'quest')).quest };
+    };
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const opened = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body;
+        PIN = opened.pin;
+        assert.equal(opened.campaign, null);
+        assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada']);
+
+        // No story yet: nothing is sent.
+        const early = await enter(base, 'signed-a', null);
+        sockets.push(early);
+        await pause(300);
+        assert.equal(early.inbox.some(message => message.t === 'quest'), false);
+
+        // The teacher starts it; everyone inside gets a role, and anyone arriving later does too.
+        assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'start', campaign: 'nope' } })).status, 400);
+        const started = (await api(base, '/api/teacher/campaign', { session, body: { op: 'start', campaign: 'castanyada' } })).body;
+        assert.equal(started.campaign.status, 'active');
+        assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'start', campaign: 'castanyada' } })).status, 400);
+        const alexQuest = (await early.next(message => message.t === 'quest', 'alex quest')).quest;
+        const sam = await join('signed-b');
+        const chris = await join('signed-c');
+        const quests = { alex: alexQuest, sam: sam.quest, chris: chris.quest };
+        assert.equal(new Set(Object.values(quests).map(quest => quest.role.id)).size, 3, 'three students, three different roles');
+
+        // Each student is handed only their own job's clue, never anyone else's.
+        const clueOf = quest => quest.clues[0].text;
+        for (const quest of Object.values(quests)) {
+            assert.equal(quest.clues.length, 1);
+            assert.equal(quest.status, 'active');
+            assert.equal(quest.chapter.ending, null);
+            const others = Object.values(quests).filter(other => other !== quest);
+            for (const other of others) assert.equal(JSON.stringify(quest).includes(clueOf(other)), false);
+        }
+        assert.equal(JSON.stringify(sam.socket.inbox).includes(clueOf(quests.alex)), false);
+
+        // Walking into a named place reveals a clue, once.
+        chris.socket.send({ t: 'move', x: 1470, y: 1241 });
+        const found = (await chris.socket.next(message => message.t === 'quest' && message.quest.clues.length === 2, 'park clue')).quest;
+        assert.match(found.clues[1].text, /blue lock/);
+        chris.socket.send({ t: 'move', x: 5, y: 5 });
+        chris.socket.send({ t: 'move', x: 1470, y: 1241 });
+        await pause(300);
+        assert.equal(chris.socket.inbox.some(message => message.t === 'quest'), false, 'the same place gives nothing twice');
+
+        // Closing the game is the checkpoint: reopening it brings back the same roles and finds.
+        await api(base, '/api/teacher/class', { session, body: { open: false } });
+        assert.equal(await chris.socket.closed, 4002);
+        await api(base, '/api/teacher/class', { session, body: { open: true } });
+        const alexBack = await join('signed-a');
+        const samBack = await join('signed-b');
+        const chrisBack = await join('signed-c');
+        assert.equal(alexBack.quest.role.id, quests.alex.role.id);
+        assert.equal(samBack.quest.role.id, quests.sam.role.id);
+        assert.equal(chrisBack.quest.role.id, quests.chris.role.id);
+        assert.equal(chrisBack.quest.clues.length, 2);
+
+        // Answers: a wrong one must wait before another try; a right one counts; 2 of 3 students finish the chapter.
+        const answer = (who, choice) => who.socket.send({ t: 'answer', objective: 'where', choice });
+        const result = who => who.socket.next(message => message.t === 'answered', 'answer result');
+        answer(alexBack, 'hotel');
+        assert.deepEqual((({ correct, wait }) => ({ correct, wait }))(await result(alexBack)), { correct: false, wait: false });
+        answer(alexBack, 'park');
+        assert.equal((await result(alexBack)).wait, true);
+        await pause(3200);
+        answer(alexBack, 'park');
+        assert.equal((await result(alexBack)).correct, true);
+        let status = (await api(base, '/api/teacher/status', { session })).body.campaign;
+        assert.equal(status.status, 'active');
+        answer(samBack, 'park');
+        assert.equal((await result(samBack)).correct, true);
+        for (const who of [alexBack, samBack, chrisBack]) {
+            const done = (await who.socket.next(message => message.t === 'quest' && message.quest.status === 'chapter_complete', 'chapter complete')).quest;
+            assert.match(done.chapter.ending, /Who took the chestnuts/);
+        }
+        status = (await api(base, '/api/teacher/status', { session })).body.campaign;
+        assert.equal(status.status, 'chapter_complete');
+        assert.deepEqual(status.players.map(player => player.done.length).sort(), [0, 1, 1]);
+
+        // The teacher moves the story on; with one chapter that is the end of the campaign.
+        assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'next' } })).body.campaign.status, 'campaign_complete');
+        const over = (await alexBack.socket.next(message => message.t === 'quest' && message.quest.status === 'campaign_complete', 'the end')).quest;
+        assert.equal(over.finale, 'To be continued…');
+        assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'next' } })).status, 400);
+
+        // Erasing it takes a confirmation, and everyone's story disappears.
+        assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'reset' } })).status, 400);
+        assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'reset', confirm: true } })).body.campaign, null);
+        assert.equal((await alexBack.socket.next(message => message.t === 'quest' && message.quest === null, 'story removed')).quest, null);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});

@@ -1,4 +1,5 @@
 import type { AvatarConfig } from './utils/AvatarRenderer';
+import type { QuestView } from '../shared/campaign';
 
 export type PlazaPlayer = AvatarConfig & { id: string; name: string; x: number; y: number };
 // A hint on one chat message, from the server. Never a refusal.
@@ -13,7 +14,9 @@ export type PlazaEvent =
   | { t: 'chat'; id?: string; sender: string; text: string; ts: number; whisper?: boolean; to?: string }
   | { t: 'retract'; id: string } // the teacher took a posted message down
   | { t: 'notice'; level: 'info' | 'warning'; text: string; cid?: string } // cid: the chat message this answers
-  | { t: 'result'; cid: string };                                          // that message was posted at once
+  | { t: 'result'; cid: string }
+  | { t: 'quest'; quest: QuestView | null }                                  // this student's view of the campaign
+  | { t: 'answered'; objective: string; correct: boolean; wait: boolean };                                          // that message was posted at once
 
 // As in PinPlay's live-socket.js: a connection can die without closing (a laptop
 // lid, Wi-Fi roaming), and only a missing pong shows it. The room answers

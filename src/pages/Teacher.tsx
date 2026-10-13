@@ -3,9 +3,14 @@ import { Link } from 'react-router-dom';
 import './Teacher.css';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string };
+type CampaignInfo = {
+  id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string;
+  players: { studentKey: string; name: string; role: string; clues: number; done: string[] }[];
+};
 type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
+  campaign: CampaignInfo | null; campaigns: { id: string; title: string }[];
   open: boolean; game: { id: string; name: string } | null; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: { studentKey: string; name: string }[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
 };
@@ -154,6 +159,32 @@ export default function Teacher() {
           </li>)}
         </ul>}
       </section>
+      {status.game && <section className="teacher-games">
+        <h2>Campaign</h2>
+        {!status.campaign ? <>
+          <p>Start a story for <strong>{status.game.name}</strong>. Each student gets a role at random and keeps it for the whole campaign. Closing the game saves it, and reopening picks the story up again.</p>
+          <div className="teacher-newgame">
+            {status.campaigns.map(campaign => <button key={campaign.id} className="btn btn-primary"
+              onClick={() => void action('campaign', { op: 'start', campaign: campaign.id })}>Start {campaign.title}</button>)}
+          </div>
+        </> : <>
+          <p><strong>{status.campaign.title}</strong> · chapter {status.campaign.chapter + 1} of {status.campaign.chapters}: {status.campaign.chapterTitle} ·{' '}
+            {{ active: 'in progress', chapter_complete: 'chapter finished: the class has its cliffhanger', campaign_complete: 'finished' }[status.campaign.status]}</p>
+          <div className="teacher-newgame">
+            {status.campaign.status !== 'campaign_complete' && <button className="btn btn-primary" onClick={() => void action('campaign', { op: 'next' })}>
+              {status.campaign.chapter + 1 < status.campaign.chapters ? 'Start the next chapter' : 'End the campaign'}
+            </button>}
+            <button className="btn btn-secondary" onClick={() => {
+              if (window.confirm('Erase the campaign for this game, including every role and clue?')) void action('campaign', { op: 'reset', confirm: true });
+            }}>Erase campaign</button>
+          </div>
+          {status.campaign.players.length > 0 && <ul>
+            {status.campaign.players.map(player => <li key={player.studentKey}>
+              <span><strong>{player.name}</strong> · {player.role} · {player.clues} place clue{player.clues === 1 ? '' : 's'} · {player.done.length ? `answered ${player.done.length}` : 'not answered yet'}</span>
+            </li>)}
+          </ul>}
+        </>}
+      </section>}
       {status.laptop && <section className="teacher-laptop">
         <h2>Playing on this laptop</h2>
         <p>Students go to <strong>{status.laptop.signInUrl}</strong> and sign in with Google. They are then sent
