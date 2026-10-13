@@ -8,6 +8,7 @@ const SEND_EVERY_MS = 100;
 
 export default class LobbyScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+  private wasd!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
   private walls!: Phaser.Physics.Arcade.StaticGroup;
   private connection!: PlazaConnection;
 
@@ -38,6 +39,8 @@ export default class LobbyScene extends Phaser.Scene {
 
     if (this.input.keyboard) {
       this.cursors = this.input.keyboard.createCursorKeys();
+      // No capture, so typing w, a, s or d in the chat box still works.
+      this.wasd = this.input.keyboard.addKeys('W,A,S,D', false) as typeof this.wasd;
     }
     
     this.cameras.main.setBounds(0, 0, mapWidth, mapHeight);
@@ -180,15 +183,22 @@ export default class LobbyScene extends Phaser.Scene {
 
     body.setVelocity(0);
 
-    if (this.cursors.left.isDown) {
+    // Letters walk only when the chat box is not being typed in.
+    const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName ?? '');
+    const left = this.cursors.left.isDown || (!typing && this.wasd.A.isDown);
+    const right = this.cursors.right.isDown || (!typing && this.wasd.D.isDown);
+    const up = this.cursors.up.isDown || (!typing && this.wasd.W.isDown);
+    const down = this.cursors.down.isDown || (!typing && this.wasd.S.isDown);
+
+    if (left) {
       body.setVelocityX(-speed);
-    } else if (this.cursors.right.isDown) {
+    } else if (right) {
       body.setVelocityX(speed);
     }
 
-    if (this.cursors.up.isDown) {
+    if (up) {
       body.setVelocityY(-speed);
-    } else if (this.cursors.down.isDown) {
+    } else if (down) {
       body.setVelocityY(speed);
     }
 
