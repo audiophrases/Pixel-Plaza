@@ -131,12 +131,33 @@ test('an avatar is described by its hair colour, hat and glasses', () => {
 test('the thief chapter is complete: a card, a story, a question to answer, and a clue for every role', () => {
     for (const chapter of castanyada.chapters.filter(item => item.thieves)) {
         assert.ok(chapter.thieves.card && chapter.thieves.story);
-        assert.ok(chapter.objectives.some(objective => objective.answerThief), 'there is a question to name the thief');
+        // A chapter that carries the thieves on needs no question of its own to name them.
+        assert.ok(chapter.thieves.carry || chapter.objectives.some(objective => objective.answerThief), 'there is a question to name the thief');
         for (const role of castanyada.roles) assert.ok(chapter.roleClues?.[role.id], `${role.id} has a clue this chapter`);
         // Only the three looks the avatar words can describe are used as gaps.
         for (const clue of Object.values(chapter.roleClues)) for (const [, gap] of clue.matchAll(/\{(\w+)\}/g)) assert.ok(['hat', 'glasses', 'hair', 'coat'].includes(gap), gap);
-        // The thief's own story clashes with a clue somebody else holds.
-        assert.match(chapter.thieves.story, /9:25/);
-        assert.ok(Object.values(chapter.objectives[0].rewards).some(text => /9:25/.test(text)));
+        // In the chapter where they hide, the thief's own story clashes with a clue somebody else holds.
+        if (!chapter.thieves.carry) {
+            assert.match(chapter.thieves.story, /9:25/);
+            assert.ok(Object.values(chapter.objectives[0].rewards).some(text => /9:25/.test(text)));
+        }
     }
+});
+
+test('chapter 3: the cellar code is made from every role\'s number, in the order the planner gives', () => {
+    const chapter = castanyada.chapters[2];
+    const code = chapter.objectives.find(objective => objective.id === 'code');
+    const digit = text => text.match(/is (\d)\./)[1];
+    const byRole = Object.fromEntries(['baker', 'shopkeeper', 'driver', 'receptionist'].map(role => [role, digit(code.rewards[role])]));
+    const order = code.rewards.planner.match(/order: (.*)\./)[1].split(', ');
+    const expected = order.map(role => byRole[role]).join('');
+    assert.equal(order.length, 4);
+    assert.ok(code.accept.includes(expected), `${expected} is accepted`);
+    assert.equal(answerMatches(code, 'the code is 7 4 3 1'), true);
+    assert.equal(answerMatches(code, '1347'), false);
+    // The thief already knows where the chestnuts are, and the other questions open one after another.
+    assert.equal(chapter.objectives.find(objective => objective.id === 'hide').thiefKnows, true);
+    assert.deepEqual(chapter.objectives.filter(objective => !objective.optional).map(objective => objective.after ?? null), [null, 'hide', 'code']);
+    assert.equal(answerMatches(chapter.objectives.find(objective => objective.id === 'why'), 'for a surprise party'), true);
+    assert.equal(castanyada.finale, 'The end. Happy Castanyada!');
 });

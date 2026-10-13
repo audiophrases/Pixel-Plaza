@@ -694,9 +694,11 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         // The teacher moves the story on to chapter 2, and from there to the end of the campaign.
         const second = (await api(base, '/api/teacher/campaign', { session, body: { op: 'next' } })).body.campaign;
         assert.deepEqual([second.status, second.chapter], ['active', 1]);
+        const third = (await api(base, '/api/teacher/campaign', { session, body: { op: 'next' } })).body.campaign;
+        assert.deepEqual([third.status, third.chapter], ['active', 2]);
         assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'next' } })).body.campaign.status, 'campaign_complete');
         const over = (await alexBack.socket.next(message => message.t === 'quest' && message.quest.status === 'campaign_complete', 'the end')).quest;
-        assert.equal(over.finale, 'To be continued…');
+        assert.equal(over.finale, 'The end. Happy Castanyada!');
         assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'next' } })).status, 400);
 
         // Erasing it takes a confirmation, and everyone's story disappears.
@@ -1116,6 +1118,71 @@ test('the warm-up: a secret fact, someone to find by name, progress for everyone
         // Ending it takes the panel away.
         assert.equal((await warmup({ op: 'end' })).body.warmup.active, false);
         assert.equal((await players.stu_c.next(message => message.t === 'warmup' && message.warmup === null, 'ended')).warmup, null);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});
+
+test('chapter 3: the thief hides the chestnuts, and the class opens the cellar with a code', { timeout: 180000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        PIN = (await api(base, '/api/teacher/game', { session, body: { name: '3A', randomNames: false } })).body.pin;
+        const byKey = {};
+        for (const token of ['signed-a', 'signed-b', 'signed-c']) {
+            const socket = await enter(base, token, null);
+            sockets.push(socket);
+            byKey[students[token].studentKey] = socket;
+        }
+        const teacher = body => api(base, '/api/teacher/campaign', { session, body });
+        const lastQuest = key => [...byKey[key].inbox].reverse().find(message => message.t === 'quest' && message.quest)?.quest;
+        await teacher({ op: 'start', campaign: 'castanyada' });
+        await teacher({ op: 'next' });
+        const chapter3 = (await teacher({ op: 'next' })).body.campaign;
+        assert.deepEqual([chapter3.chapter, chapter3.status], [2, 'active']);
+        await pause(500);
+
+        // The thief of chapter 2 is still the thief: the secret is theirs, and they are not asked where it is hidden.
+        const thieves = chapter3.players.filter(player => player.thief);
+        assert.equal(thieves.length, 1);
+        assert.match(lastQuest(thieves[0].studentKey).secret.text, /You hid the chestnuts in the hotel cellar/);
+        assert.match(lastQuest(thieves[0].studentKey).clues[0].text, /^Your plan: /);
+        assert.equal(lastQuest(thieves[0].studentKey).objectives.some(item => item.id === 'hide'), false);
+        const solver = chapter3.players.find(player => !player.thief);
+        assert.equal(lastQuest(solver.studentKey).secret, null);
+        assert.deepEqual(lastQuest(solver.studentKey).objectives.map(item => item.id), ['hide']);
+        assert.equal(lastQuest(solver.studentKey).thieves, null, 'who it was stays hidden until the chapter is over');
+
+        // Each answer opens the next question and earns a clue; the code is four numbers.
+        const answer = (objective, text) => byKey[solver.studentKey].send({ t: 'answer', objective, text });
+        const result = () => byKey[solver.studentKey].next(message => message.t === 'answered', 'result');
+        answer('hide', 'The hotel garden');
+        assert.equal((await result()).correct, false);
+        await pause(3200);
+        answer('hide', 'In the cellar of the hotel');
+        assert.equal((await result()).correct, true);
+        await pause(300);
+        const afterHide = lastQuest(solver.studentKey);
+        assert.deepEqual(afterHide.objectives.map(item => item.id), ['hide', 'code']);
+        answer('code', '1 3 4 7');
+        assert.equal((await result()).correct, false, 'the right numbers in the wrong order');
+        await pause(3200);
+        answer('code', '7431');
+        assert.equal((await result()).correct, true);
+        await pause(300);
+        assert.ok(lastQuest(solver.studentKey).objectives.some(item => item.id === 'why'));
+        answer('why', 'For a surprise party');
+        assert.equal((await result()).correct, true);
+        await pause(300);
+        assert.ok(lastQuest(solver.studentKey).objectives.some(item => item.id === 'report-3' && item.optional), 'the written bonus opens last');
     } finally {
         for (const socket of sockets) socket.ws.close();
         await plaza.stop();

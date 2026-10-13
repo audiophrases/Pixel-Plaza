@@ -15,6 +15,7 @@
 export type Objective = {
     id: string; text: string; accept: string[];
     answerThief?: boolean;            // the answer is the name of the chapter's thief (the thief does not get this question)
+    thiefKnows?: boolean;             // the thief already knows the answer, so is not asked
     answerRole?: string;              // the answer is the name of a classmate who has this role (so students must meet people)
     kind?: 'report';                  // a few written sentences, which the teacher reads; any real attempt counts
     after?: string;                   // asked only once this question has been answered
@@ -37,7 +38,8 @@ export type Chapter = {
     roleClues?: Record<string, string>;
     // A secret thief among the students: one for a class, two above fifteen, chosen at random. The thief gets this card
     // and this story to tell, and never sees the question about who took the chestnuts.
-    thieves?: { card: string; story: string };
+    // `carry` keeps the thieves of the chapter before; `label` heads the thief's own clue ("Your story" by default).
+    thieves?: { card: string; story: string; label?: string; carry?: boolean };
 };
 export type Role = { id: string; name: string; card: string; clue: string };
 export type Campaign = { id: string; title: string; roles: Role[]; chapters: Chapter[]; finale: string };
@@ -61,7 +63,7 @@ export type QuestView = {
 export const castanyada: Campaign = {
     id: 'castanyada',
     title: 'The Haunted Castanyada',
-    finale: 'To be continued…',
+    finale: 'The end. Happy Castanyada!',
     roles: [
         { id: 'baker', name: 'Café baker', card: 'You roast the chestnuts.',
             clue: 'No blue box came to the café.' },
@@ -155,6 +157,56 @@ export const castanyada: Campaign = {
             { id: 'door', text: 'News: the shop door was open at 9:05.' },
             { id: 'phone', text: 'News: the hotel phone rang at 9:25.' },
         ],
+    }, {
+        // A first draft of chapter 3: the thief hid the chestnuts for a surprise, and the class opens the cellar together.
+        id: 'haunted-celebration', title: 'The Haunted Celebration', share: 0.6,
+        intro: 'It is almost midnight. You know who took the chestnuts. Now find them before the party starts!',
+        recap: 'Last time: you found the thief. The chestnuts are still hidden somewhere.',
+        ending: 'The chestnuts are safe! The thief wanted a surprise party. Now the haunted celebration can start.',
+        thieves: {
+            carry: true, label: 'Your plan',
+            card: 'You hid the chestnuts in the hotel cellar, for a surprise party. Give small hints. Never say the answers!',
+            story: 'Help the class with hints, but do not tell them where the chestnuts are.',
+        },
+        roleClues: {
+            baker: 'I smell hot chestnuts near the hotel.',
+            shopkeeper: 'At 9:00 somebody bought wood and matches. You need fire to roast chestnuts.',
+            driver: 'At 9:40 I carried a heavy bag to the hotel.',
+            receptionist: 'The cellar door at the hotel is old and locked. It has a four-number code.',
+            planner: 'The party starts at 6:00. The chestnuts must be ready before then.',
+        },
+        objectives: [
+            { id: 'hide', text: 'Where did the thief hide the chestnuts?', accept: ['cellar', 'basement'], thiefKnows: true },
+            {
+                id: 'code', text: 'What is the code of the cellar door? Type the four numbers.', after: 'hide',
+                accept: ['7 4 3 1', '7431'],
+                rewards: {
+                    baker: 'One number of the code is 4. It is the number of my oven.',
+                    shopkeeper: 'One number of the code is 1. It is the number of doors in my shop.',
+                    driver: 'One number of the code is 7. It is the number of my truck.',
+                    receptionist: 'One number of the code is 3. It is the number of the hotel key.',
+                    planner: 'Read the numbers in this order: driver, baker, receptionist, shopkeeper.',
+                },
+            },
+            {
+                id: 'why', text: 'Why did the thief take the chestnuts?', after: 'code', accept: ['surprise', 'party', 'present', 'gift'],
+                rewards: {
+                    baker: 'In the cellar there is a note. It says: "I wanted a surprise..."',
+                    shopkeeper: 'The note says: "...party for everyone..."',
+                    driver: 'The note says: "...with hot chestnuts..."',
+                    receptionist: 'The note says: "...I am sorry."',
+                    planner: 'The note is signed by a friend of the town.',
+                },
+            },
+            { id: 'report-3', text: 'Write 3 sentences. What happens at the celebration?', after: 'why', optional: true, kind: 'report', accept: [] },
+        ],
+        discoveries: [
+            { id: 'cellar-door', zone: 'hotel', text: 'At the hotel there is an old door. It has a lock with four numbers.' },
+        ],
+        reveals: [
+            { id: 'smell', text: 'News: a neighbor smelled hot chestnuts near the hotel.' },
+            { id: 'bag', text: 'News: a heavy bag went into the hotel at 9:40.' },
+        ],
     }],
 };
 
@@ -227,10 +279,10 @@ export function acceptedNames(shown: readonly string[], everyone: readonly strin
 }
 
 // How far the whole class is through the main questions: answers given out of answers possible.
-// A thief is never asked who the thief is, so that question is left out of their share.
+// A thief is never asked who the thief is, or what they already know, so those questions are left out of their share.
 export function teamProgress(chapter: Chapter, players: readonly { done: readonly string[]; thief?: boolean }[]): { done: number; total: number } {
     const main = chapter.objectives.filter(objective => !objective.optional);
-    const asked = (player: { thief?: boolean }) => main.filter(objective => !(player.thief && objective.answerThief));
+    const asked = (player: { thief?: boolean }) => main.filter(objective => !(player.thief && (objective.answerThief || objective.thiefKnows)));
     return {
         done: players.reduce((sum, player) => sum + asked(player).filter(objective => player.done.includes(objective.id)).length, 0),
         total: players.reduce((sum, player) => sum + asked(player).length, 0),
