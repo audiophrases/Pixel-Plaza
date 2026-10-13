@@ -43,6 +43,7 @@ export default function Game() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatBox = useRef<HTMLDivElement>(null);
   // The chat box can be dragged out of the way of the map and folded away; it remembers where.
+  const [seenCount, setSeenCount] = useState(0); // messages the student has had the chance to read
   const [chatSpot, setChatSpot] = useState<{ x: number; y: number; folded: boolean }>(() => {
     try { return { x: 0, y: 0, folded: false, ...JSON.parse(localStorage.getItem('pixelplaza.chat') || '{}') }; }
     catch { return { x: 0, y: 0, folded: false }; }
@@ -50,6 +51,12 @@ export default function Game() {
   useEffect(() => {
     try { localStorage.setItem('pixelplaza.chat', JSON.stringify(chatSpot)); } catch { /* storage disabled */ }
   }, [chatSpot]);
+
+  // While the chat is open everything counts as read; folded, new messages from others pile up.
+  useEffect(() => { if (!chatSpot.folded) setSeenCount(messages.length); }, [chatSpot.folded, messages.length]);
+  const unread = chatSpot.folded
+    ? messages.slice(seenCount).filter(message => !message.sender.startsWith('System') && message.sender !== session?.student.displayName).length
+    : 0;
 
   const dragChat = (event: React.PointerEvent<HTMLDivElement>) => {
     const box = chatBox.current;
@@ -190,7 +197,7 @@ export default function Game() {
         <div className={`chat-container glass-panel${chatSpot.folded ? ' chat-folded' : ''}`} ref={chatBox}
           style={{ transform: `translate(${chatSpot.x}px, ${chatSpot.y}px)` }}>
           <div className="chat-handle" onPointerDown={dragChat} title="Drag to move the chat">
-            <span>Chat</span>
+            <span className={unread ? 'chat-unread' : undefined}>{unread ? `Chat · ${unread} new` : 'Chat'}</span>
             <button type="button" aria-label={chatSpot.folded ? 'Show chat' : 'Hide chat'}
               onClick={() => setChatSpot(spot => ({ ...spot, folded: !spot.folded }))}>{chatSpot.folded ? '▲' : '▼'}</button>
           </div>
