@@ -14,20 +14,22 @@ const SOURCE: Record<string, string> = { job: 'Your clue', reward: 'New clue', n
 // One question with its own answer box, so typing in one never lands in another.
 function Question({ objective, feedback, onAnswer }: { objective: QuestView['objectives'][number]; feedback: Props['feedback']; onAnswer: Props['onAnswer'] }) {
   const [typed, setTyped] = useState('');
+  const report = objective.kind === 'report';
   return <section className={`journal-block journal-question${objective.optional ? ' journal-bonus' : ''}`}>
     <h3>{objective.optional ? 'Bonus question' : 'Question'}</h3>
     <p className="journal-ask">{objective.text}</p>
-    {objective.done ? <p className="journal-right">Correct.</p> : <>
+    {objective.done ? <p className="journal-right">{report ? 'Sent to your teacher.' : 'Correct.'}</p> : <>
       <form className="journal-answer" onSubmit={event => {
         event.preventDefault();
         if (typed.trim()) { onAnswer(objective.id, typed.trim()); setTyped(''); }
       }}>
-        <input value={typed} maxLength={80} placeholder="Type your answer in English" autoComplete="off"
+        <input value={typed} maxLength={report ? 200 : 80} autoComplete="off"
+          placeholder={report ? 'Write 2 sentences in English' : objective.kind === 'name' ? 'Type their name' : 'Type your answer in English'}
           aria-label="Your answer" onChange={event => setTyped(event.target.value)} />
         <button className="journal-choice" disabled={!typed.trim()}>Answer</button>
       </form>
       {feedback?.objective === objective.id && !feedback.correct &&
-        <p className="journal-wrong">{feedback.wait ? 'Wait a moment.' : 'Not yet. Ask your classmates.'}</p>}
+        <p className="journal-wrong">{feedback.wait ? 'Wait a moment.' : report ? 'Write a little more.' : 'Not yet. Ask your classmates.'}</p>}
     </>}
   </section>;
 }
@@ -59,6 +61,14 @@ export default function Journal({ quest, feedback, onAnswer }: Props) {
         <h3>Previously</h3>
         <p>{quest.recap}</p>
         <button type="button" className="journal-dismiss" onClick={() => setRecapSeen(true)}>OK</button>
+      </section>}
+
+      {quest.team.total > 0 && <section className="journal-block journal-team">
+        <h3>Class progress</h3>
+        <div className="journal-meter" role="progressbar" aria-valuemin={0} aria-valuemax={quest.team.total} aria-valuenow={quest.team.done}>
+          <span style={{ width: `${Math.round(100 * quest.team.done / quest.team.total)}%` }} />
+        </div>
+        <p>{quest.team.done} of {quest.team.total} answers</p>
       </section>}
 
       {quest.status === 'active' && <section className="journal-block journal-task">

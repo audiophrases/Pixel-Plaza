@@ -14,6 +14,8 @@
 // "the park", "In the park!" and a small spelling slip in a long word all count for "park".
 export type Objective = {
     id: string; text: string; accept: string[];
+    answerRole?: string;              // the answer is the name of a classmate who has this role (so students must meet people)
+    kind?: 'report';                  // a few written sentences, which the teacher reads; any real attempt counts
     after?: string;                   // asked only once this question has been answered
     optional?: boolean;               // a bonus: it never holds the chapter up
     rewards?: Record<string, string>; // the new clue each role earns by answering, by role id
@@ -41,7 +43,8 @@ export type QuestView = {
     role: { id: string; name: string; card: string };
     // `from` says where a clue came from: "job", a place, "reward" or "news"
     clues: { id: string; text: string; from: string }[];
-    objectives: { id: string; text: string; done: boolean; optional: boolean }[];
+    objectives: { id: string; text: string; done: boolean; optional: boolean; kind: 'text' | 'name' | 'report' }[];
+    team: { done: number; total: number }; // how far the whole class is through this chapter's main questions
     recap: string | null; // sent when the student comes back to a story already under way
     finale: string | null;
 };
@@ -90,10 +93,12 @@ export const castanyada: Campaign = {
                 },
             },
             { id: 'keys', text: 'How many people have a key?', after: 'when', accept: ['two', '2'] },
-            // Bonus questions: they need clues from other students, and never hold the class up.
+            // Bonus questions: they need clues from other students, and never hold the class up. The last asks for a few
+            // written sentences, for the students who want more; the teacher reads them.
             { id: 'note', text: 'What does the note on the hotel door say?', after: 'where', optional: true, accept: ['safe', 'not worry'] },
             { id: 'lock', text: 'What is on the lock?', after: 'where', optional: true, accept: ['star'] },
             { id: 'chestnuts', text: 'How many chestnuts were in the box?', after: 'when', optional: true, accept: ['40', 'forty'] },
+            { id: 'report-1', text: 'Write 2 sentences. Who do you think has the chestnuts? Why?', after: 'keys', optional: true, kind: 'report', accept: [] },
         ],
         discoveries: [
             { id: 'hotel-note', zone: 'hotel', text: 'A note on the hotel door: "The chestnuts are safe. Do not worry."' },
@@ -102,6 +107,31 @@ export const castanyada: Campaign = {
         reveals: [
             { id: 'coat', text: 'News: a neighbor saw a person in a green coat near the park at 9:20.' },
             { id: 'click', text: 'News: somebody heard a lock click in the park.' },
+        ],
+    }, {
+        // A first draft of chapter 2: the class has to find each other. Every answer is a classmate's name.
+        id: 'conflicting-stories', title: 'Conflicting Stories', share: 0.6,
+        intro: 'Now people tell different stories. Find the people you need. Ask them questions.',
+        recap: 'Last time: the box was in the park, and the lock was open. You are looking for who opened it.',
+        ending: 'Everyone says something different. Somebody is not telling the truth!',
+        objectives: [
+            {
+                id: 'meet-shop', text: 'Who is the shopkeeper? Type their name.', accept: [], answerRole: 'shopkeeper',
+                rewards: {
+                    baker: 'I was at the café all morning. I never went to the park.',
+                    shopkeeper: 'I left the shop at 9:10 to look for the box.',
+                    driver: 'I saw a person in a green coat near the pond.',
+                    receptionist: 'The planner called the hotel at 9:25. The planner asked about the key.',
+                    planner: 'I was in the park at 9:20. I wore a green coat.',
+                },
+            },
+            { id: 'meet-planner', text: 'Who is the planner? Type their name.', after: 'meet-shop', accept: [], answerRole: 'planner' },
+            { id: 'report-2', text: 'Write 2 sentences. Who is not telling the truth? Why?', after: 'meet-planner', optional: true, kind: 'report', accept: [] },
+        ],
+        discoveries: [],
+        reveals: [
+            { id: 'door', text: 'News: the shop door was open at 9:05.' },
+            { id: 'phone', text: 'News: the hotel phone rang at 9:25.' },
         ],
     }],
 };
@@ -159,4 +189,22 @@ export function answerMatches(objective: Objective, typed: string): boolean {
         const wanted = wordsOf(answer);
         return wanted.length > 0 && words.some((_, start) => wanted.every((word, offset) => start + offset < words.length && sameWord(words[start + offset], word)));
     });
+}
+
+// What a student may type to name a classmate: the whole shown name, and for a two-part made-up name
+// ("Happy Plato") the second part alone. Never just the first part, which many students share.
+export function acceptedNames(shown: readonly string[]): string[] {
+    return shown.flatMap(name => {
+        const parts = name.trim().split(/\s+/);
+        return parts.length === 2 && parts[1].length >= 3 ? [name, parts[1]] : [name];
+    });
+}
+
+// How far the whole class is through the main questions: answers given out of answers possible.
+export function teamProgress(chapter: Chapter, players: readonly { done: readonly string[] }[]): { done: number; total: number } {
+    const main = chapter.objectives.filter(objective => !objective.optional);
+    return {
+        done: players.reduce((sum, player) => sum + main.filter(objective => player.done.includes(objective.id)).length, 0),
+        total: players.length * main.length,
+    };
 }

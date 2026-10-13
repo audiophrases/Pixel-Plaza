@@ -6,6 +6,7 @@ type Entry = { id: string; studentKey: string; sender: string; target: string | 
 type CampaignInfo = {
   id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string;
   reveals: { shown: number; total: number; next: string | null };
+  reports: { studentKey: string; objective: string; text: string }[];
   players: { studentKey: string; name: string; role: string; clues: number; done: string[] }[];
 };
 type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean };
@@ -192,6 +193,12 @@ export default function Teacher() {
               if (window.confirm('Erase the campaign for this game, including every role and clue?')) void action('campaign', { op: 'reset', confirm: true });
             }}>Erase campaign</button>
           </div>
+          {status.campaign.reports.length > 0 && <>
+            <h3>What students wrote</h3>
+            <ul>{status.campaign.reports.map(report => <li key={report.studentKey + report.objective}>
+              <span><strong>{who(report.studentKey, status.campaign?.players.find(player => player.studentKey === report.studentKey)?.name ?? 'Student')}</strong>: {report.text}</span>
+            </li>)}</ul>
+          </>}
           {status.campaign.status === 'active' && status.campaign.reveals.next && <p>Next news: <em>{status.campaign.reveals.next}</em></p>}
           {status.campaign.players.length > 0 && <ul>
             {status.campaign.players.map(player => <li key={player.studentKey}>

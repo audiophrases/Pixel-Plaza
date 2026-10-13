@@ -1,7 +1,7 @@
 // The campaign rules that need no server: spreading roles, when a chapter is done, where a place is.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { answerMatches, castanyada, chapterDone, isUnlocked, pickRole, rewardClues } from '../../shared/campaign.ts';
+import { acceptedNames, answerMatches, castanyada, chapterDone, isUnlocked, pickRole, rewardClues, teamProgress } from '../../shared/campaign.ts';
 import { zoneAt, worldZones } from '../../shared/plazaMap.ts';
 
 test('roles are spread across the class before any repeats, with ties broken at random', () => {
@@ -48,7 +48,8 @@ test('every discovery and the story itself are well formed', () => {
         for (const discovery of chapter.discoveries) assert.ok(zones.has(discovery.zone), `${discovery.id} is in a place that exists`);
         const ids = chapter.objectives.map(objective => objective.id);
         for (const objective of chapter.objectives) {
-            assert.ok(objective.accept.length > 0, `${objective.id} accepts something`);
+            assert.ok(objective.accept.length > 0 || objective.answerRole || objective.kind === 'report', `${objective.id} accepts something`);
+            if (objective.answerRole) assert.ok(castanyada.roles.some(role => role.id === objective.answerRole), `${objective.id} asks for a role that exists`);
             assert.ok(!objective.after || ids.includes(objective.after), `${objective.id} follows a question that exists`);
             for (const roleId of Object.keys(objective.rewards ?? {})) assert.ok(castanyada.roles.some(role => role.id === roleId), `${objective.id} rewards a real role`);
         }
@@ -80,4 +81,18 @@ test('a typed answer counts in any sensible wording, and a guess does not', () =
     assert.equal(answerMatches({ id: 'x', text: 'x', accept: ['car'] }, 'cat'), false);
     assert.equal(answerMatches({ id: 'x', text: 'x', accept: ['chestnuts'] }, 'chestnut'), true);
     assert.equal(answerMatches({ id: 'x', text: 'x', accept: ['the old fountain'] }, 'at the old fontain'), true);
+});
+
+test('a classmate can be named by the whole shown name, or the second part of a made-up one', () => {
+    assert.deepEqual(acceptedNames(['Happy Plato', 'Ana', 'Roger L']), ['Happy Plato', 'Plato', 'Ana', 'Roger L']);
+    const names = { id: 'x', text: 'x', accept: acceptedNames(['Happy Plato']) };
+    assert.equal(answerMatches(names, 'happy plato'), true);
+    assert.equal(answerMatches(names, 'it is Plato'), true);
+    assert.equal(answerMatches(names, 'Happy'), false, 'the first part is shared by too many');
+});
+
+test('the class progress counts main answers only', () => {
+    const chapter = castanyada.chapters[0];
+    assert.deepEqual(teamProgress(chapter, []), { done: 0, total: 0 });
+    assert.deepEqual(teamProgress(chapter, [{ done: ['where', 'when'] }, { done: [] }, { done: ['where', 'lock'] }]), { done: 3, total: 9 });
 });

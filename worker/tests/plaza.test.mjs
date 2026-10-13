@@ -676,6 +676,7 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
             const done = (await who.socket.next(message => message.t === 'quest' && message.quest.status === 'chapter_complete', 'chapter complete')).quest;
             assert.match(done.chapter.ending, /Who took the chestnuts/);
             assert.equal(done.objectives.every(item => item.optional), true, 'only bonus questions stay open');
+            assert.deepEqual(done.team, { done: 6, total: 9 }, 'six of nine main answers: two students finished all three');
         }
         assert.equal((await reveal()).status, 400, 'no news once the chapter is over');
 
@@ -689,7 +690,9 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         assert.equal(status.status, 'chapter_complete');
         assert.deepEqual(status.players.map(player => player.done.length).sort(), [0, 3, 4]);
 
-        // The teacher moves the story on; with one chapter that is the end of the campaign.
+        // The teacher moves the story on to chapter 2, and from there to the end of the campaign.
+        const second = (await api(base, '/api/teacher/campaign', { session, body: { op: 'next' } })).body.campaign;
+        assert.deepEqual([second.status, second.chapter], ['active', 1]);
         assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'next' } })).body.campaign.status, 'campaign_complete');
         const over = (await alexBack.socket.next(message => message.t === 'quest' && message.quest.status === 'campaign_complete', 'the end')).quest;
         assert.equal(over.finale, 'To be continued…');
@@ -859,6 +862,81 @@ test('movement: no walking through walls, no teleporting, but real walking is be
         await pause(1500);
         alex.send({ t: 'move', x: x + 20, y: y - 100 });
         assert.equal((await sam.next(message => message.t === 'move' && message.id === alex.welcome.id, 'a longer walk')).y, y - 100);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});
+
+test('chapter 2: answers are classmates\' names, and a written report goes to the teacher', { timeout: 180000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        PIN = (await api(base, '/api/teacher/game', { session, body: { name: '3A', randomNames: true } })).body.pin;
+        const players = {};
+        for (const token of ['signed-a', 'signed-b', 'signed-c']) {
+            const socket = await enter(base, token, null);
+            sockets.push(socket);
+            await socket.next(message => message.t === 'alias', 'alias');
+            socket.send({ t: 'keep' });
+            players[token] = socket;
+        }
+        // Roles are random: start over until someone is the shopkeeper and someone else the planner.
+        const start = () => api(base, '/api/teacher/campaign', { session, body: { op: 'start', campaign: 'castanyada' } });
+        const holders = campaign => ({
+            shop: campaign.players.filter(player => player.role === 'Shopkeeper'),
+            planner: campaign.players.filter(player => player.role === 'Festival planner'),
+        });
+        let campaign = (await start()).body.campaign;
+        for (let attempt = 0; attempt < 30 && !(holders(campaign).shop.length && holders(campaign).planner.length); attempt++) {
+            await api(base, '/api/teacher/campaign', { session, body: { op: 'reset', confirm: true } });
+            campaign = (await start()).body.campaign;
+        }
+        assert.ok(holders(campaign).shop.length && holders(campaign).planner.length, 'a shopkeeper and a planner among the three');
+        await api(base, '/api/teacher/campaign', { session, body: { op: 'next' } });
+        const keyByStudent = { stu_a: 'signed-a', stu_b: 'signed-b', stu_c: 'signed-c' };
+        const answer = (key, objective, text) => players[keyByStudent[key]].send({ t: 'answer', objective, text });
+        const result = key => players[keyByStudent[key]].next(message => message.t === 'answered', 'result');
+
+        // Naming the shopkeeper means finding out who they are: only their made-up name works, and never your own.
+        const [shop] = holders(campaign).shop;
+        const asker = campaign.players.find(player => player.studentKey !== shop.studentKey);
+        answer(asker.studentKey, 'meet-shop', 'Banana Splits');
+        assert.equal((await result(asker.studentKey)).correct, false);
+        await pause(3200);
+        answer(asker.studentKey, 'meet-shop', shop.name);
+        assert.equal((await result(asker.studentKey)).correct, true);
+        const realName = (await api(base, '/api/teacher/status', { session })).body.realNames[shop.studentKey];
+        assert.notEqual(shop.name, realName, 'the answer is the made-up name, not the real one');
+        answer(shop.studentKey, 'meet-shop', shop.name);
+        assert.equal((await result(shop.studentKey)).correct, false, 'your own name does not count');
+        assert.notEqual(shop.name, 'Student');
+
+        // The written bonus needs a few words, and the teacher can read what was written.
+        await pause(100);
+        answer(asker.studentKey, 'meet-planner', holders(campaign).planner.find(planner => planner.studentKey !== asker.studentKey)?.name ?? 'nobody');
+        await result(asker.studentKey);
+        const planner = holders(campaign).planner.find(item => item.studentKey !== asker.studentKey);
+        if (planner) {
+            await pause(3200);
+            answer(asker.studentKey, 'meet-planner', planner.name);
+            assert.equal((await result(asker.studentKey)).correct, true);
+            await asker && players[keyByStudent[asker.studentKey]].next(message => message.t === 'quest' && message.quest.objectives.some(item => item.id === 'report-2'), 'report offered');
+            answer(asker.studentKey, 'report-2', 'Maybe');
+            assert.equal((await result(asker.studentKey)).correct, false, 'too short to count');
+            await pause(3200);
+            answer(asker.studentKey, 'report-2', 'I think the planner wore a green coat.');
+            assert.equal((await result(asker.studentKey)).correct, true);
+            const status = (await api(base, '/api/teacher/status', { session })).body.campaign;
+            assert.deepEqual(status.reports.map(report => [report.studentKey, report.text]), [[asker.studentKey, 'I think the planner wore a green coat.']]);
+        }
     } finally {
         for (const socket of sockets) socket.ws.close();
         await plaza.stop();

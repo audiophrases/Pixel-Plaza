@@ -3,7 +3,7 @@ import type { Env } from './index.ts';
 import type { PinPlayStudent } from './pinplay.ts';
 import { checkGrammar } from './grammar.ts';
 import { moderate } from './moderation.ts';
-import { answerMatches, campaignById, campaigns, chapterDone, isUnlocked, pickRole, rewardClues, type QuestView } from '../shared/campaign.ts';
+import { acceptedNames, answerMatches, campaignById, campaigns, chapterDone, isUnlocked, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
 import { wordDiff } from '../shared/diff.ts';
 import { cleanName, shownNames } from '../shared/names.ts';
 import { randomName } from '../shared/randomNames.ts';
@@ -51,6 +51,7 @@ export type CampaignStatus = {
     id: string; title: string; status: QuestView['status']; chapter: number; chapters: number; chapterTitle: string;
     reveals: { shown: number; total: number; next: string | null }; // prepared news the teacher can release
     players: { studentKey: string; name: string; role: string; clues: number; done: string[] }[];
+    reports: { studentKey: string; objective: string; text: string }[]; // what students wrote for the written questions
 };
 
 export type TeacherStatus = {
@@ -101,6 +102,9 @@ export class PlazaRoom extends DurableObject<Env> {
             CREATE TABLE IF NOT EXISTS game_students (game_id TEXT NOT NULL, student_key TEXT NOT NULL, PRIMARY KEY (game_id, student_key));
             CREATE TABLE IF NOT EXISTS campaigns (
                 game_id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, chapter INTEGER NOT NULL, status TEXT NOT NULL, started INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS campaign_reports (
+                game_id TEXT NOT NULL, student_key TEXT NOT NULL, objective TEXT NOT NULL, text TEXT NOT NULL, ts INTEGER NOT NULL,
+                PRIMARY KEY (game_id, student_key, objective));
             CREATE TABLE IF NOT EXISTS campaign_players (
                 game_id TEXT NOT NULL, student_key TEXT NOT NULL, role_id TEXT NOT NULL, clues TEXT NOT NULL DEFAULT '[]',
                 done TEXT NOT NULL DEFAULT '[]', last_wrong INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (game_id, student_key));`);
@@ -316,7 +320,7 @@ export class PlazaRoom extends DurableObject<Env> {
             this.discover(seat);
             ws.serializeAttachment(seat);
             this.broadcast({ t: 'move', id: seat.id, ...position }, ws);
-        } else if (data?.t === 'answer' && typeof data.objective === 'string' && typeof data.text === 'string' && data.text.length <= 80) {
+        } else if (data?.t === 'answer' && typeof data.objective === 'string' && typeof data.text === 'string' && data.text.length <= 200) {
             this.answer(ws, seat, data.objective, data.text);
         } else if (data?.t === 'reroll' || data?.t === 'keep') {
             this.chooseAlias(ws, seat, data.t === 'keep');
@@ -395,7 +399,9 @@ export class PlazaRoom extends DurableObject<Env> {
             ],
             // Questions come one after another; once the chapter is finished only the bonus ones stay open.
             objectives: chapter.objectives.filter(objective => isUnlocked(objective, player.done) && (row.status === 'active' || objective.optional))
-                .map(objective => ({ id: objective.id, text: objective.text, done: player.done.includes(objective.id), optional: !!objective.optional })),
+                .map(objective => ({ id: objective.id, text: objective.text, done: player.done.includes(objective.id), optional: !!objective.optional,
+                    kind: objective.kind === 'report' ? 'report' as const : objective.answerRole ? 'name' as const : 'text' as const })),
+            team: teamProgress(chapter, this.campaignPlayers(game)),
             // "Previously", for a student coming back to a story that is already under way
             recap: !withRecap || row.status !== 'active' ? null
                 : row.chapter > 0 ? campaign.chapters[row.chapter - 1].ending
@@ -448,7 +454,21 @@ export class PlazaRoom extends DurableObject<Env> {
         const reply = (correct: boolean, wait = false) => ws.send(JSON.stringify({ t: 'answered', objective: objective.id, correct, wait }));
         const now = Date.now();
         if (now - player.last_wrong < WRONG_ANSWER_WAIT_MS) return reply(false, true);
-        if (!answerMatches(objective, typed)) {
+        if (objective.kind !== 'report' && typed.length > 80) return;
+        let right: boolean;
+        if (objective.kind === 'report') {
+            // Any real attempt in a few words counts; the teacher reads what was written.
+            right = typed.trim().split(/\s+/).length >= 5;
+            if (right) this.sql.exec(`INSERT INTO campaign_reports (game_id, student_key, objective, text, ts) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (game_id, student_key, objective) DO UPDATE SET text = excluded.text, ts = excluded.ts`, seat.game, seat.studentKey, objective.id, typed.trim(), now);
+        } else if (objective.answerRole) {
+            // The name of a classmate who has that role, as the plaza shows it; never one's own.
+            const names = this.rosterNames(seat.game);
+            const holders = this.campaignPlayers(seat.game).filter(other => other.role_id === objective.answerRole && other.student_key !== seat.studentKey)
+                .map(other => names.get(other.student_key) ?? '');
+            right = answerMatches({ ...objective, accept: acceptedNames(holders.filter(Boolean)) }, typed);
+        } else right = answerMatches(objective, typed);
+        if (!right) {
             this.sql.exec('UPDATE campaign_players SET last_wrong = ? WHERE game_id = ? AND student_key = ?', now, seat.game, seat.studentKey);
             return reply(false);
         }
@@ -491,6 +511,7 @@ export class PlazaRoom extends DurableObject<Env> {
             if (action.confirm !== true) return 'Confirm to erase this game\'s campaign.';
             this.sql.exec('DELETE FROM campaigns WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM campaign_players WHERE game_id = ?', game);
+            this.sql.exec('DELETE FROM campaign_reports WHERE game_id = ?', game);
             for (const seat of this.seats()) {
                 if (seat.game !== game) continue;
                 for (const ws of this.ctx.getWebSockets(seat.studentKey)) { try { ws.send(JSON.stringify({ t: 'quest', quest: null })); } catch { /* closing */ } }
@@ -516,7 +537,10 @@ export class PlazaRoom extends DurableObject<Env> {
             players: this.campaignPlayers(game).map(item => ({
                 studentKey: item.student_key, name: names.get(item.student_key) ?? 'Student',
                 role: campaign.roles.find(role => role.id === item.role_id)?.name ?? item.role_id, clues: item.clues.length, done: item.done
-            }))
+            })),
+            reports: this.sql.exec<{ student_key: string; objective: string; text: string }>(
+                'SELECT student_key, objective, text FROM campaign_reports WHERE game_id = ? ORDER BY ts DESC LIMIT 100', game).toArray()
+                .map(report => ({ studentKey: report.student_key, objective: report.objective, text: report.text }))
         };
     }
 
