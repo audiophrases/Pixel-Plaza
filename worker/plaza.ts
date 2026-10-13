@@ -7,6 +7,7 @@ import { acceptedNames, answerMatches, campaignById, campaigns, chapterDone, isU
 import { wordDiff } from '../shared/diff.ts';
 import { cleanName, shownNames } from '../shared/names.ts';
 import { fillThiefClue, lookOf, thiefCount } from '../shared/thief.ts';
+import { assignLateJoiner, assignWarmup, factById, type WarmupView } from '../shared/warmup.ts';
 import { randomName } from '../shared/randomNames.ts';
 import { legalMove, zoneAt } from '../shared/plazaMap.ts';
 import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
@@ -42,6 +43,7 @@ export type TeacherAction =
     | { kind: 'open'; open: boolean; game?: string } // a saved game (the last played by default), or close the open one
     | { kind: 'newGame'; name: string; randomNames?: boolean; vision?: number } // a new game with its own PIN, opened at once
     | { kind: 'vision'; radius: number }                // how far a student sees, in map pixels; 0 shows everyone
+    | { kind: 'warmup'; op: 'start' | 'end' }          // the get-to-know-you warm-up at the start of a lesson
     | { kind: 'campaign'; op: 'start' | 'next' | 'reveal' | 'reset'; campaign?: string; confirm?: boolean }
     | { kind: 'review'; id: string; approve: boolean } // approve = false also takes down a message already posted
     | { kind: 'approveAll' }
@@ -59,6 +61,7 @@ export type CampaignStatus = {
 };
 
 export type TeacherStatus = {
+    warmup: { active: boolean; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
     campaign: CampaignStatus | null; // the open game's campaign, once started
     campaigns: { id: string; title: string }[]; // those that can be started
     open: boolean;
@@ -106,6 +109,10 @@ export class PlazaRoom extends DurableObject<Env> {
             CREATE TABLE IF NOT EXISTS game_students (game_id TEXT NOT NULL, student_key TEXT NOT NULL, PRIMARY KEY (game_id, student_key));
             CREATE TABLE IF NOT EXISTS campaigns (
                 game_id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, chapter INTEGER NOT NULL, status TEXT NOT NULL, started INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS warmups (game_id TEXT PRIMARY KEY, active INTEGER NOT NULL DEFAULT 1, started INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS warmup_players (
+                game_id TEXT NOT NULL, student_key TEXT NOT NULL, fact TEXT NOT NULL, targets TEXT NOT NULL,
+                step INTEGER NOT NULL DEFAULT 0, last_wrong INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (game_id, student_key));
             CREATE TABLE IF NOT EXISTS campaign_thieves (
                 game_id TEXT NOT NULL, chapter INTEGER NOT NULL, student_key TEXT NOT NULL, PRIMARY KEY (game_id, chapter, student_key));
             CREATE TABLE IF NOT EXISTS campaign_reports (
@@ -216,6 +223,17 @@ export class PlazaRoom extends DurableObject<Env> {
             const failed = this.campaignAction(action);
             if (failed) return { error: failed, status: 400 };
         }
+        if (action.kind === 'warmup') {
+            const game = this.activeGame();
+            if (game === null) return { error: 'Open a game first.', status: 400 };
+            if (action.op === 'start') {
+                const failed = this.startWarmup(game);
+                if (failed) return { error: failed, status: 400 };
+            } else {
+                this.sql.exec('UPDATE warmups SET active = 0 WHERE game_id = ?', game);
+                this.sendWarmupToAll(game);
+            }
+        }
         if (action.kind === 'vision') {
             const game = this.activeGame();
             if (game === null || !Number.isFinite(action.radius)) return { error: 'Open a game first.', status: 400 };
@@ -243,6 +261,7 @@ export class PlazaRoom extends DurableObject<Env> {
         // recent history, read through the indexes, not the whole log each time.
         const current = this.game(this.activeGame());
         return {
+            warmup: this.warmupStatus(current?.id ?? null),
             campaign: this.campaignStatus(current?.id ?? null),
             campaigns: campaigns.map(campaign => ({ id: campaign.id, title: campaign.title })),
             open: this.isOpen(),
@@ -312,6 +331,7 @@ export class PlazaRoom extends DurableObject<Env> {
         this.sendQuest(server, seat.game, seat.studentKey, true);
         this.sendAlias(server, seat.game, seat.studentKey);
         this.sendVision(server, seat.game);
+        this.sendWarmup(server, seat.game, seat.studentKey);
         return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -337,6 +357,8 @@ export class PlazaRoom extends DurableObject<Env> {
             this.discover(seat);
             ws.serializeAttachment(seat);
             this.broadcast({ t: 'move', id: seat.id, ...position }, ws);
+        } else if (data?.t === 'warmup-answer' && typeof data.text === 'string' && data.text.length <= 80) {
+            this.warmupAnswer(ws, seat, data.text);
         } else if (data?.t === 'answer' && typeof data.objective === 'string' && typeof data.text === 'string' && data.text.length <= 200) {
             this.answer(ws, seat, data.objective, data.text);
         } else if (data?.t === 'reroll' || data?.t === 'keep') {
@@ -701,6 +723,100 @@ export class PlazaRoom extends DurableObject<Env> {
         this.sql.exec(`INSERT INTO aliases (game_id, student_key, name, kept) VALUES (?, ?, ?, 0)
             ON CONFLICT (game_id, student_key) DO UPDATE SET name = excluded.name`, game, studentKey, name);
         return name;
+    }
+
+    // ---------- The warm-up ----------
+    // A few minutes at the start of a lesson: each student has a made-up fact about themselves and looks for
+    // classmates who have other facts, typing their names. It is separate from the campaign.
+
+    private warmupActive(game: string | null): boolean {
+        return game !== null && this.sql.exec<{ active: number }>('SELECT active FROM warmups WHERE game_id = ?', game).toArray()[0]?.active === 1;
+    }
+
+    private warmupPlayers(game: string): { student_key: string; fact: string; targets: string[]; step: number; last_wrong: number }[] {
+        return this.sql.exec<{ student_key: string; fact: string; targets: string; step: number; last_wrong: number }>(
+            'SELECT student_key, fact, targets, step, last_wrong FROM warmup_players WHERE game_id = ?', game).toArray()
+            .map(row => ({ ...row, targets: JSON.parse(row.targets) }));
+    }
+
+    // Starts afresh for the students who are here; anyone who arrives later is given a fact when they do.
+    private startWarmup(game: string): string | null {
+        const here = this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey);
+        if (here.length < 2) return 'At least two students need to be in the plaza.';
+        this.sql.exec('DELETE FROM warmup_players WHERE game_id = ?', game);
+        this.sql.exec('INSERT INTO warmups (game_id, active, started) VALUES (?, 1, ?) ON CONFLICT (game_id) DO UPDATE SET active = 1, started = excluded.started', game, Date.now());
+        for (const [key, assignment] of assignWarmup(here)) {
+            this.sql.exec('INSERT INTO warmup_players (game_id, student_key, fact, targets) VALUES (?, ?, ?, ?)', game, key, assignment.fact, JSON.stringify(assignment.targets));
+        }
+        this.sendWarmupToAll(game);
+        return null;
+    }
+
+    private warmupView(game: string, studentKey: string): WarmupView | null {
+        if (!this.warmupActive(game)) return null;
+        let players = this.warmupPlayers(game);
+        let me = players.find(player => player.student_key === studentKey);
+        if (!me) {
+            // Arrived after the start: a fact already in play, so there is someone to find.
+            const late = assignLateJoiner(players.map(player => player.fact));
+            if (!late) return null;
+            this.sql.exec('INSERT INTO warmup_players (game_id, student_key, fact, targets) VALUES (?, ?, ?, ?)', game, studentKey, late.fact, JSON.stringify(late.targets));
+            players = this.warmupPlayers(game);
+            me = players.find(player => player.student_key === studentKey)!;
+        }
+        return {
+            fact: factById(me.fact)?.mine ?? '',
+            task: me.step < me.targets.length ? `Find someone who ${factById(me.targets[me.step])?.find ?? ''}.` : null,
+            step: me.step, of: me.targets.length,
+            team: { done: players.reduce((sum, player) => sum + player.step, 0), total: players.reduce((sum, player) => sum + player.targets.length, 0) },
+        };
+    }
+
+    private sendWarmup(target: WebSocket, game: string, studentKey: string): void {
+        if (!this.warmupActive(game) && this.warmupPlayers(game).length === 0) return;
+        try { target.send(JSON.stringify({ t: 'warmup', warmup: this.warmupView(game, studentKey) })); } catch { /* closing */ }
+    }
+
+    private sendWarmupToAll(game: string): void {
+        for (const seat of this.seats()) {
+            if (seat.game !== game) continue;
+            for (const ws of this.ctx.getWebSockets(seat.studentKey)) this.sendWarmup(ws, game, seat.studentKey);
+        }
+    }
+
+    // The name of a classmate who has the fact being looked for; never one's own.
+    private warmupAnswer(ws: WebSocket, seat: Seat, typed: string): void {
+        const view = this.warmupView(seat.game, seat.studentKey);
+        const players = this.warmupPlayers(seat.game);
+        const me = players.find(player => player.student_key === seat.studentKey);
+        if (!view || !me || me.step >= me.targets.length) return;
+        const reply = (correct: boolean, wait = false) => ws.send(JSON.stringify({ t: 'warmup-answered', correct, wait }));
+        const now = Date.now();
+        if (now - me.last_wrong < WRONG_ANSWER_WAIT_MS) return reply(false, true);
+        const names = this.rosterNames(seat.game);
+        const holders = players.filter(player => player.fact === me.targets[me.step] && player.student_key !== seat.studentKey)
+            .map(player => names.get(player.student_key) ?? '').filter(Boolean);
+        if (!answerMatches({ id: 'warmup', text: '', accept: acceptedNames(holders, [...names.values()]) }, typed)) {
+            this.sql.exec('UPDATE warmup_players SET last_wrong = ? WHERE game_id = ? AND student_key = ?', now, seat.game, seat.studentKey);
+            return reply(false);
+        }
+        this.sql.exec('UPDATE warmup_players SET step = step + 1 WHERE game_id = ? AND student_key = ?', seat.game, seat.studentKey);
+        reply(true);
+        // Everyone's progress bar moves
+        this.sendWarmupToAll(seat.game);
+    }
+
+    private warmupStatus(game: string | null): TeacherStatus['warmup'] {
+        if (game === null) return null;
+        const players = this.warmupPlayers(game);
+        if (players.length === 0 && !this.warmupActive(game)) return null;
+        const names = this.rosterNames(game);
+        return {
+            active: this.warmupActive(game),
+            players: players.map(player => ({ studentKey: player.student_key, name: names.get(player.student_key) ?? 'Student',
+                fact: factById(player.fact)?.mine ?? '', found: player.step, of: player.targets.length })),
+            team: { done: players.reduce((sum, player) => sum + player.step, 0), total: players.reduce((sum, player) => sum + player.targets.length, 0) },
+        };
     }
 
     private sendAlias(target: WebSocket, game: string, studentKey: string): void {

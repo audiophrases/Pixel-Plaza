@@ -1,5 +1,6 @@
 import type { AvatarConfig } from './utils/AvatarRenderer';
 import type { QuestView } from '../shared/campaign';
+import type { WarmupView } from '../shared/warmup';
 
 export type PlazaPlayer = AvatarConfig & { id: string; name: string; x: number; y: number };
 // A hint on one chat message, from the server. Never a refusal.
@@ -16,6 +17,8 @@ export type PlazaEvent =
   | { t: 'notice'; level: 'info' | 'warning'; text: string; cid?: string } // cid: the chat message this answers
   | { t: 'result'; cid: string }
   | { t: 'snap'; x: number; y: number }                                    // the server put you back: your last move was not possible
+  | { t: 'warmup'; warmup: WarmupView | null }                               // your part of the warm-up, or null when it is over
+  | { t: 'warmup-answered'; correct: boolean; wait: boolean }
   | { t: 'vision'; radius: number }                                        // how far you see, in map pixels; 0 is everyone
   | { t: 'alias'; name: string; kept: boolean }                            // your made-up name, and whether you have kept it
   | { t: 'rename'; id: string; name: string }                              // a namesake arrived: this player's shown name changed

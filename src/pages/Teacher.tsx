@@ -13,6 +13,7 @@ type Game = { id: string; name: string; pin: string; lastOpened: number; open: b
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
   campaign: CampaignInfo | null; campaigns: { id: string; title: string }[];
+  warmup: { active: boolean; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
   open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: { studentKey: string; name: string }[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
 };
@@ -183,6 +184,21 @@ export default function Teacher() {
           </li>)}
         </ul>}
       </section>
+      {status.game && <section className="teacher-games">
+        <h2>Warm-up</h2>
+        <p>Each student gets a made-up fun fact and has to find classmates who have other facts, by asking and typing their names. Good for the first few minutes.</p>
+        <div className="teacher-newgame">
+          <button className="btn btn-primary" disabled={!status.open} onClick={() => void action('warmup', { op: 'start' })}>
+            {status.warmup?.active ? 'Start again' : 'Start the warm-up'}</button>
+          {status.warmup?.active && <button className="btn btn-secondary" onClick={() => void action('warmup', { op: 'end' })}>End the warm-up</button>}
+        </div>
+        {status.warmup && <>
+          <p>{status.warmup.active ? 'In progress' : 'Finished'}: {status.warmup.team.done} of {status.warmup.team.total} found.</p>
+          <ul>{status.warmup.players.map(player => <li key={player.studentKey}>
+            <span><strong>{who(player.studentKey, player.name)}</strong> · {player.fact} · found {player.found} of {player.of}</span>
+          </li>)}</ul>
+        </>}
+      </section>}
       {status.game && <section className="teacher-games">
         <h2>Vision</h2>
         <p>How far students see around themselves in <strong>{status.game.name}</strong>. Applies at once.</p>

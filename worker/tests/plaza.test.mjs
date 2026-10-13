@@ -11,6 +11,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { sha256Hex } from '../rules.ts';
 import { castanyada } from '../../shared/campaign.ts';
+import { FACTS } from '../../shared/warmup.ts';
 
 const root = path.join(import.meta.dirname, '..', '..');
 const wrangler = path.join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
@@ -1029,6 +1030,92 @@ test('limited vision: a radius per game that the teacher can change while studen
         const open = (await api(base, '/api/teacher/game', { session, body: { name: '3B', randomNames: false, vision: 0 } })).body;
         assert.equal(open.game.vision, 0);
         assert.equal(open.games.length, 2);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});
+
+test('the warm-up: a secret fact, someone to find by name, progress for everyone, and a late joiner', { timeout: 180000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        PIN = (await api(base, '/api/teacher/game', { session, body: { name: '3A', randomNames: true } })).body.pin;
+        const players = {};
+        const join = async token => {
+            const socket = await enter(base, token, null);
+            sockets.push(socket);
+            const alias = await socket.next(message => message.t === 'alias', 'alias');
+            socket.send({ t: 'keep' });
+            players[students[token].studentKey] = socket;
+            return alias.name;
+        };
+        const warmup = body => api(base, '/api/teacher/warmup', { session, body });
+
+        // It needs at least two students in the plaza.
+        await join('signed-a');
+        assert.equal((await warmup({ op: 'start' })).status, 400);
+        await join('signed-b');
+        await join('signed-c');
+        await pause(300);
+
+        const started = (await warmup({ op: 'start' })).body.warmup;
+        assert.equal(started.active, true);
+        assert.equal(started.players.length, 3);
+        const views = {};
+        for (const [key, socket] of Object.entries(players)) {
+            views[key] = (await socket.next(message => message.t === 'warmup' && message.warmup, 'warm-up')).warmup;
+            assert.match(views[key].fact, /^You /);
+            assert.match(views[key].task, /^Find someone who /);
+            assert.deepEqual([views[key].step, views[key].of], [0, 2], 'two people to find among three students');
+        }
+        // A student sees only their own fact: nobody else's appears in their messages.
+        for (const [key, socket] of Object.entries(players))
+            for (const other of started.players.filter(player => player.studentKey !== key)) assert.equal(JSON.stringify(socket.inbox).includes(other.fact), false);
+
+        // Naming a classmate who has the fact being looked for: the made-up name works, one's own and a wrong one do not.
+        const names = Object.fromEntries(started.players.map(player => [player.studentKey, player.name]));
+        const asker = 'stu_a';
+        const wantedId = FACTS.find(fact => `Find someone who ${fact.find}.` === views[asker].task).id;
+        const holder = started.players.find(player => player.studentKey !== asker && FACTS.find(fact => fact.mine === player.fact).id === wantedId);
+        assert.ok(holder, 'someone else has the fact being looked for');
+        const answer = text => players[asker].send({ t: 'warmup-answer', text });
+        const result = () => players[asker].next(message => message.t === 'warmup-answered', 'result');
+        answer(names[asker]);
+        assert.equal((await result()).correct, false, 'your own name does not count');
+        await pause(3200);
+        answer(names[holder.studentKey]);
+        assert.equal((await result()).correct, true);
+        const next = (await players[asker].next(message => message.t === 'warmup' && message.warmup && message.warmup.step === 1, 'next person')).warmup;
+        assert.notEqual(next.task, views[asker].task);
+        assert.deepEqual(next.team, { done: 1, total: 6 }, 'one found of six in all');
+
+        // Everyone else's bar moves too, and the teacher sees who has what.
+        const other = await players.stu_b.next(message => message.t === 'warmup' && message.warmup && message.warmup.team.done === 1, 'progress for others');
+        assert.equal(other.warmup.step, 0);
+        const status = (await api(base, '/api/teacher/status', { session })).body;
+        assert.equal(status.warmup.team.done, 1);
+        assert.equal(status.realNames.stu_a, 'Alex');
+
+        // Someone who arrives late is given a fact that is already in play.
+        const late = await enter(base, 'roger-1', null);
+        sockets.push(late);
+        await late.next(message => message.t === 'alias', 'alias');
+        late.send({ t: 'keep' });
+        const lateView = (await late.next(message => message.t === 'warmup' && message.warmup, 'late warm-up')).warmup;
+        assert.match(lateView.fact, /^You /);
+        assert.ok(lateView.of >= 1);
+
+        // Ending it takes the panel away.
+        assert.equal((await warmup({ op: 'end' })).body.warmup.active, false);
+        assert.equal((await players.stu_c.next(message => message.t === 'warmup' && message.warmup === null, 'ended')).warmup, null);
     } finally {
         for (const socket of sockets) socket.ws.close();
         await plaza.stop();

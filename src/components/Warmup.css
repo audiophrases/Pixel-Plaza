@@ -1,0 +1,27 @@
+.warmup {
+  position: absolute;
+  top: 5.5rem;
+  left: 1rem;
+  width: min(300px, calc(100vw - 2rem));
+  padding: 0.5rem 0.75rem 0.75rem;
+  background: rgba(255, 255, 255, 0.95);
+  font-size: 0.9rem;
+  pointer-events: auto;
+}
+
+.warmup h2 { margin: 0.2rem 0 0.4rem; font-size: 1rem; }
+.warmup p { margin: 0.15rem 0; }
+.warmup-block { margin-top: 0.4rem; padding: 0.4rem 0.6rem; border-left: 4px solid #adc6ff; border-radius: 4px; background: #f5f8ff; }
+.warmup-block h3 { margin: 0 0 0.2rem; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; color: #556; }
+.warmup-fact { border-left-color: #b37feb; background: #f9f0ff; font-weight: 700; }
+.warmup-task { border-left-color: #ffa940; background: #fff7e6; }
+.warmup-done { border-left-color: #52c41a; background: #f6ffed; font-weight: 700; }
+.warmup-ask { font-weight: 800; margin-bottom: 0.4rem !important; }
+.warmup form { display: flex; gap: 0.4rem; }
+.warmup input { flex: 1; min-width: 0; padding: 0.4rem 0.55rem; border: 2px solid #d9d9d9; border-radius: 8px; font: inherit; }
+.warmup input:focus { outline: none; border-color: #1677ff; }
+.warmup button { padding: 0.4rem 0.7rem; border: 2px solid #d9d9d9; border-radius: 8px; background: white; font: inherit; font-weight: 700; cursor: pointer; }
+.warmup button:disabled { opacity: 0.5; cursor: default; }
+.warmup-wrong { color: #a8071a; font-weight: 700; }
+.warmup-meter { height: 8px; margin-top: 0.6rem; border-radius: 4px; background: #d9f7be; overflow: hidden; }
+.warmup-meter span { display: block; height: 100%; background: #52c41a; transition: width 0.4s; }
