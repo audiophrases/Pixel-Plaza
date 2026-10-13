@@ -462,6 +462,11 @@ test('grammar hints advise, never block, and the teacher sees what the student c
             const request = JSON.parse(body);
             res.setHeader('content-type', 'application/json');
             if (req.url === '/v1/moderations') return res.end(JSON.stringify({ results: [{ flagged: false, categories: {} }] }));
+            // The quick gate: sure of a mistake in the "She go" and "broken" messages, sure there is none elsewhere.
+            if (req.url === '/v1/decisions') {
+                const probability = /^She go |broken/.test(request.input) ? 0.9 : 0.02;
+                return res.end(JSON.stringify({ answers: [{ type: 'predicate', name: 'grammar_mistake', probability }] }));
+            }
             const text = JSON.parse(request.messages[1].content).message;
             calls.push({ auth: req.headers.authorization, model: request.model, text });
             if (/broken/.test(text)) { res.statusCode = 500; return res.end('{}'); }
