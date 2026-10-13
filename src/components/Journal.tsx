@@ -57,6 +57,12 @@ export default function Journal({ quest, feedback, onAnswer }: Props) {
       <span>{open ? '▲' : '▼'}</span>
     </button>
     {open && <div className="journal-body">
+      {quest.secret && <section className="journal-block journal-secret">
+        <h3>Secret</h3>
+        <p className="journal-role">{quest.secret.title}</p>
+        <p>{quest.secret.text}</p>
+      </section>}
+
       {quest.recap && !recapSeen && <section className="journal-block journal-recap">
         <h3>Previously</h3>
         <p>{quest.recap}</p>
@@ -93,6 +99,11 @@ export default function Journal({ quest, feedback, onAnswer }: Props) {
       </section>
 
       {main.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} />)}
+
+      {quest.thieves && quest.thieves.length > 0 && <section className="journal-block journal-ending">
+        <h3>{quest.thieves.length === 1 ? 'The thief was' : 'The thieves were'}</h3>
+        <p className="journal-role">{quest.thieves.join(' and ')}</p>
+      </section>}
 
       {quest.chapter.ending && <section className="journal-block journal-ending">
         <h3>Chapter complete</h3>

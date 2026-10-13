@@ -85,6 +85,7 @@
 .journal-team { border-left-color: #73d13d; background: #f6ffed; }
 .journal-meter { height: 10px; border-radius: 5px; background: #d9f7be; overflow: hidden; }
 .journal-meter span { display: block; height: 100%; background: #52c41a; transition: width 0.4s; }
+.journal-secret { border-left-color: #cf1322; background: #fff1f0; }
 .journal-recap { border-left-color: #b37feb; background: #f9f0ff; }
 .journal-dismiss { margin-top: 0.3rem; padding: 0.2rem 0.8rem; border: 1px solid #b37feb; border-radius: 6px; background: white; font: inherit; font-weight: 700; cursor: pointer; }
 .journal-bonus { border-left-color: #13c2c2; background: #e6fffb; }

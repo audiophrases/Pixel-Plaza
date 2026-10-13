@@ -6,6 +6,7 @@ import { moderate } from './moderation.ts';
 import { acceptedNames, answerMatches, campaignById, campaigns, chapterDone, isUnlocked, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
 import { wordDiff } from '../shared/diff.ts';
 import { cleanName, shownNames } from '../shared/names.ts';
+import { fillThiefClue, lookOf, thiefCount } from '../shared/thief.ts';
 import { randomName } from '../shared/randomNames.ts';
 import { legalMove, zoneAt } from '../shared/plazaMap.ts';
 import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
@@ -50,7 +51,7 @@ export type GameSummary = { id: string; name: string; pin: string; lastOpened: n
 export type CampaignStatus = {
     id: string; title: string; status: QuestView['status']; chapter: number; chapters: number; chapterTitle: string;
     reveals: { shown: number; total: number; next: string | null }; // prepared news the teacher can release
-    players: { studentKey: string; name: string; role: string; clues: number; done: string[] }[];
+    players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
     reports: { studentKey: string; objective: string; text: string }[]; // what students wrote for the written questions
 };
 
@@ -102,6 +103,8 @@ export class PlazaRoom extends DurableObject<Env> {
             CREATE TABLE IF NOT EXISTS game_students (game_id TEXT NOT NULL, student_key TEXT NOT NULL, PRIMARY KEY (game_id, student_key));
             CREATE TABLE IF NOT EXISTS campaigns (
                 game_id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, chapter INTEGER NOT NULL, status TEXT NOT NULL, started INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS campaign_thieves (
+                game_id TEXT NOT NULL, chapter INTEGER NOT NULL, student_key TEXT NOT NULL, PRIMARY KEY (game_id, chapter, student_key));
             CREATE TABLE IF NOT EXISTS campaign_reports (
                 game_id TEXT NOT NULL, student_key TEXT NOT NULL, objective TEXT NOT NULL, text TEXT NOT NULL, ts INTEGER NOT NULL,
                 PRIMARY KEY (game_id, student_key, objective));
@@ -375,6 +378,34 @@ export class PlazaRoom extends DurableObject<Env> {
         return { student_key: studentKey, role_id: role.id, clues: [] as string[], done: [] as string[], last_wrong: 0 };
     }
 
+    // The students who took the chestnuts in this chapter, in the order they were chosen.
+    private thieves(game: string, chapter: number): string[] {
+        return this.sql.exec<{ student_key: string }>('SELECT student_key FROM campaign_thieves WHERE game_id = ? AND chapter = ? ORDER BY rowid', game, chapter)
+            .toArray().map(row => row.student_key);
+    }
+
+    // At random from those who have joined: one for a class, two above fifteen. Chosen once, and only when
+    // at least two students are there to play it. A thief never has to answer who the thief is.
+    private pickThieves(game: string, chapterIndex: number, chapter: { thieves?: unknown; objectives: { id: string; answerThief?: boolean }[] } | undefined): void {
+        if (!chapter?.thieves || this.thieves(game, chapterIndex).length > 0) return;
+        const players = this.campaignPlayers(game);
+        if (players.length < 2) return;
+        const pool = players.map(player => player.student_key);
+        for (let n = thiefCount(pool.length); n > 0; n--) {
+            const [key] = pool.splice(Math.floor(Math.random() * pool.length), 1);
+            this.sql.exec('INSERT INTO campaign_thieves (game_id, chapter, student_key) VALUES (?, ?, ?)', game, chapterIndex, key);
+            const player = players.find(item => item.student_key === key)!;
+            const skipped = chapter.objectives.filter(objective => objective.answerThief).map(objective => objective.id);
+            this.sql.exec('UPDATE campaign_players SET done = ? WHERE game_id = ? AND student_key = ?',
+                JSON.stringify([...new Set([...player.done, ...skipped])]), game, key);
+        }
+    }
+
+    private avatarOf(studentKey: string): Avatar {
+        const row = this.sql.exec<{ avatar: string | null }>('SELECT avatar FROM students WHERE student_key = ?', studentKey).toArray()[0];
+        return (row?.avatar && sanitizeAvatar(JSON.parse(row.avatar))) || defaultAvatar();
+    }
+
     // What this student may see of the campaign, or null before it starts.
     private questView(game: string, studentKey: string, withRecap = false): QuestView | null {
         const row = this.campaignRow(game);
@@ -384,6 +415,11 @@ export class PlazaRoom extends DurableObject<Env> {
         const role = campaign.roles.find(item => item.id === player?.role_id);
         const chapter = campaign.chapters[Math.min(row.chapter, campaign.chapters.length - 1)];
         if (!player || !role) return null;
+        this.pickThieves(game, row.chapter, campaign.chapters[row.chapter]);
+        const thieves = this.thieves(game, row.chapter);
+        const isThief = thieves.includes(studentKey);
+        const looks = thieves.map(key => lookOf(this.avatarOf(key)));
+        const names = this.rosterNames(game);
         const found = campaign.chapters.flatMap(item => item.discoveries).filter(discovery => player.clues.includes(discovery.id));
         return {
             campaign: { id: campaign.id, title: campaign.title },
@@ -392,13 +428,17 @@ export class PlazaRoom extends DurableObject<Env> {
                 ending: row.status === 'active' ? null : chapter.ending },
             role: { id: role.id, name: role.name, card: role.card },
             clues: [
-                { id: `role-${role.id}`, text: role.clue, from: 'job' },
+                { id: `role-${role.id}`, from: 'job',
+                    text: isThief && chapter.thieves ? `Your story: ${chapter.thieves.story}` : fillThiefClue(chapter.roleClues?.[role.id] ?? role.clue, looks) },
                 ...found.map(item => ({ id: item.id, text: item.text, from: item.zone })),
                 ...rewardClues(chapter, role.id, player.done).map(item => ({ ...item, from: 'reward' })),
                 ...chapter.reveals.slice(0, row.revealed).map(item => ({ id: `news-${item.id}`, text: item.text, from: 'news' })),
             ],
             // Questions come one after another; once the chapter is finished only the bonus ones stay open.
-            objectives: chapter.objectives.filter(objective => isUnlocked(objective, player.done) && (row.status === 'active' || objective.optional))
+            secret: isThief && chapter.thieves ? { title: 'You are the thief', text: chapter.thieves.card } : null,
+            thieves: chapter.thieves && row.status !== 'active' ? thieves.map(key => names.get(key) ?? 'Student') : null,
+            objectives: chapter.objectives.filter(objective => isUnlocked(objective, player.done) && (row.status === 'active' || objective.optional)
+                && !(isThief && objective.answerThief))
                 .map(objective => ({ id: objective.id, text: objective.text, done: player.done.includes(objective.id), optional: !!objective.optional,
                     kind: objective.kind === 'report' ? 'report' as const : objective.answerRole ? 'name' as const : 'text' as const })),
             team: teamProgress(chapter, this.campaignPlayers(game)),
@@ -461,6 +501,11 @@ export class PlazaRoom extends DurableObject<Env> {
             right = typed.trim().split(/\s+/).length >= 5;
             if (right) this.sql.exec(`INSERT INTO campaign_reports (game_id, student_key, objective, text, ts) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT (game_id, student_key, objective) DO UPDATE SET text = excluded.text, ts = excluded.ts`, seat.game, seat.studentKey, objective.id, typed.trim(), now);
+        } else if (objective.answerThief) {
+            // The thief's made-up name, as the plaza shows it. The thief never gets this question.
+            const names = this.rosterNames(seat.game);
+            const culprits = this.thieves(seat.game, row.chapter).filter(key => key !== seat.studentKey).map(key => names.get(key) ?? '');
+            right = this.thieves(seat.game, row.chapter).includes(seat.studentKey) ? false : answerMatches({ ...objective, accept: acceptedNames(culprits.filter(Boolean)) }, typed);
         } else if (objective.answerRole) {
             // The name of a classmate who has that role, as the plaza shows it; never one's own.
             const names = this.rosterNames(seat.game);
@@ -493,6 +538,7 @@ export class PlazaRoom extends DurableObject<Env> {
             if (!campaign) return 'That campaign does not exist.';
             this.sql.exec("INSERT INTO campaigns (game_id, campaign_id, chapter, status, started) VALUES (?, ?, 0, 'active', ?)", game, campaign.id, Date.now());
             for (const seat of this.seats()) if (seat.game === game) this.player(game, seat.studentKey, campaign.id);
+            this.pickThieves(game, 0, campaign.chapters[0]);
         } else if (!row) {
             return 'This game has no campaign.';
         } else if (action.op === 'next') {
@@ -500,6 +546,7 @@ export class PlazaRoom extends DurableObject<Env> {
             if (!campaign || row.status === 'campaign_complete') return 'The campaign is over.';
             if (row.chapter + 1 < campaign.chapters.length) {
                 this.sql.exec("UPDATE campaigns SET chapter = chapter + 1, status = 'active', revealed = 0 WHERE game_id = ?", game);
+                this.pickThieves(game, row.chapter + 1, campaign.chapters[row.chapter + 1]);
             } else this.sql.exec("UPDATE campaigns SET status = 'campaign_complete' WHERE game_id = ?", game);
         } else if (action.op === 'reveal') {
             // Prepared news goes to everyone, in the order the story gives it, when the class needs a nudge.
@@ -512,6 +559,7 @@ export class PlazaRoom extends DurableObject<Env> {
             this.sql.exec('DELETE FROM campaigns WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM campaign_players WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM campaign_reports WHERE game_id = ?', game);
+            this.sql.exec('DELETE FROM campaign_thieves WHERE game_id = ?', game);
             for (const seat of this.seats()) {
                 if (seat.game !== game) continue;
                 for (const ws of this.ctx.getWebSockets(seat.studentKey)) { try { ws.send(JSON.stringify({ t: 'quest', quest: null })); } catch { /* closing */ } }
@@ -536,7 +584,8 @@ export class PlazaRoom extends DurableObject<Env> {
             })(),
             players: this.campaignPlayers(game).map(item => ({
                 studentKey: item.student_key, name: names.get(item.student_key) ?? 'Student',
-                role: campaign.roles.find(role => role.id === item.role_id)?.name ?? item.role_id, clues: item.clues.length, done: item.done
+                role: campaign.roles.find(role => role.id === item.role_id)?.name ?? item.role_id, clues: item.clues.length, done: item.done,
+                thief: this.thieves(game, row.chapter).includes(item.student_key)
             })),
             reports: this.sql.exec<{ student_key: string; objective: string; text: string }>(
                 'SELECT student_key, objective, text FROM campaign_reports WHERE game_id = ? ORDER BY ts DESC LIMIT 100', game).toArray()

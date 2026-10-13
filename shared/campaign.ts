@@ -14,6 +14,7 @@
 // "the park", "In the park!" and a small spelling slip in a long word all count for "park".
 export type Objective = {
     id: string; text: string; accept: string[];
+    answerThief?: boolean;            // the answer is the name of the chapter's thief (the thief does not get this question)
     answerRole?: string;              // the answer is the name of a classmate who has this role (so students must meet people)
     kind?: 'report';                  // a few written sentences, which the teacher reads; any real attempt counts
     after?: string;                   // asked only once this question has been answered
@@ -31,6 +32,12 @@ export type Chapter = {
     share: number;       // the fraction of the class that must finish every main question (0 to 1)
     discoveries: Discovery[];
     reveals: { id: string; text: string }[]; // news the teacher releases to everyone, in this order
+    // Each student's own clue for this chapter, instead of the one their role brings. {hat}, {glasses} and {hair} are filled
+    // in with how the thief looks, so the clues point at a real avatar in the plaza.
+    roleClues?: Record<string, string>;
+    // A secret thief among the students: one for a class, two above fifteen, chosen at random. The thief gets this card
+    // and this story to tell, and never sees the question about who took the chestnuts.
+    thieves?: { card: string; story: string };
 };
 export type Role = { id: string; name: string; card: string; clue: string };
 export type Campaign = { id: string; title: string; roles: Role[]; chapters: Chapter[]; finale: string };
@@ -43,6 +50,8 @@ export type QuestView = {
     role: { id: string; name: string; card: string };
     // `from` says where a clue came from: "job", a place, "reward" or "news"
     clues: { id: string; text: string; from: string }[];
+    secret: { title: string; text: string } | null; // only for the thief
+    thieves: string[] | null; // who it was, once the chapter is over
     objectives: { id: string; text: string; done: boolean; optional: boolean; kind: 'text' | 'name' | 'report' }[];
     team: { done: number; total: number }; // how far the whole class is through this chapter's main questions
     recap: string | null; // sent when the student comes back to a story already under way
@@ -111,22 +120,35 @@ export const castanyada: Campaign = {
     }, {
         // A first draft of chapter 2: the class has to find each other. Every answer is a classmate's name.
         id: 'conflicting-stories', title: 'Conflicting Stories', share: 0.6,
-        intro: 'Now people tell different stories. Find the people you need. Ask them questions.',
+        intro: 'Now people tell different stories. Somebody in this class took the chestnuts! Ask questions. Who is lying?',
         recap: 'Last time: the box was in the park, and the lock was open. You are looking for who opened it.',
-        ending: 'Everyone says something different. Somebody is not telling the truth!',
+        ending: 'You found the thief. But why did they take the chestnuts?',
+        thieves: {
+            card: 'You took the chestnuts. Tell nobody! If a classmate asks, say you are innocent. Your classmates saw how you look, so be careful.',
+            story: 'At 9:25 I was at the hotel desk.',
+        },
+        // Each role saw something about the thief; together the clues describe an avatar in the plaza.
+        roleClues: {
+            baker: 'At 9:20 a person ran past the café. {hat}',
+            shopkeeper: 'At 9:10 a person in a green coat came to my shop. {glasses}',
+            driver: 'At 9:30 a person ran into the park. {hair}',
+            receptionist: 'The hotel phone rang at 9:25. Nobody answered.',
+            planner: 'My key was in my bag. Somebody moved my bag at 9:00.',
+        },
         objectives: [
             {
                 id: 'meet-shop', text: 'Who is the shopkeeper? Type their name.', accept: [], answerRole: 'shopkeeper',
                 rewards: {
-                    baker: 'I was at the café all morning. I never went to the park.',
-                    shopkeeper: 'I left the shop at 9:10 to look for the box.',
-                    driver: 'I saw a person in a green coat near the pond.',
-                    receptionist: 'The planner called the hotel at 9:25. The planner asked about the key.',
-                    planner: 'I was in the park at 9:20. I wore a green coat.',
+                    baker: 'At 9:15 the café was empty. Nobody came.',
+                    shopkeeper: 'At 9:05 I went to the bank. The shop door was open.',
+                    driver: 'At 9:25 I was in my truck near the hotel. Nobody went in.',
+                    receptionist: 'At 9:25 the hotel was closed. Nobody was at the desk.',
+                    planner: 'At 9:20 I was in the square with the band.',
                 },
             },
             { id: 'meet-planner', text: 'Who is the planner? Type their name.', after: 'meet-shop', accept: [], answerRole: 'planner' },
-            { id: 'report-2', text: 'Write 2 sentences. Who is not telling the truth? Why?', after: 'meet-planner', optional: true, kind: 'report', accept: [] },
+            { id: 'thief', text: 'Who took the chestnuts? Type their name.', after: 'meet-planner', accept: [], answerThief: true },
+            { id: 'report-2', text: 'Write 2 sentences. How do you know who took the chestnuts?', after: 'meet-planner', optional: true, kind: 'report', accept: [] },
         ],
         discoveries: [],
         reveals: [

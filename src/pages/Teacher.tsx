@@ -7,7 +7,7 @@ type CampaignInfo = {
   id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string;
   reveals: { shown: number; total: number; next: string | null };
   reports: { studentKey: string; objective: string; text: string }[];
-  players: { studentKey: string; name: string; role: string; clues: number; done: string[] }[];
+  players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
 };
 type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
@@ -202,7 +202,7 @@ export default function Teacher() {
           {status.campaign.status === 'active' && status.campaign.reveals.next && <p>Next news: <em>{status.campaign.reveals.next}</em></p>}
           {status.campaign.players.length > 0 && <ul>
             {status.campaign.players.map(player => <li key={player.studentKey}>
-              <span><strong>{who(player.studentKey, player.name)}</strong> · {player.role} · {player.clues} place clue{player.clues === 1 ? '' : 's'} · {player.done.length ? `answered ${player.done.length}` : 'not answered yet'}</span>
+              <span><strong>{who(player.studentKey, player.name)}</strong> · {player.role}{player.thief ? ' · THIEF' : ''} · {player.clues} place clue{player.clues === 1 ? '' : 's'} · {player.done.length ? `answered ${player.done.length}` : 'not answered yet'}</span>
             </li>)}
           </ul>}
         </>}
