@@ -13,7 +13,7 @@ type Game = { id: string; name: string; pin: string; lastOpened: number; open: b
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
   campaign: CampaignInfo | null; campaigns: { id: string; title: string }[];
-  open: boolean; game: { id: string; name: string; randomNames: boolean } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: { studentKey: string; name: string }[];
+  open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: { studentKey: string; name: string }[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
 };
 
@@ -24,6 +24,9 @@ async function call<T>(path: string, init: RequestInit): Promise<T> {
   return result as T;
 }
 
+// How far a student sees, in map pixels: a few steps, from the whole map to a small circle
+const VISION_CHOICES: [number, string][] = [[0, 'Everyone'], [650, 'Wide'], [450, 'Medium'], [300, 'Small']];
+
 export default function Teacher() {
   const [password, setPassword] = useState('');
   // The password is checked once; the session token carries the rest.
@@ -33,6 +36,7 @@ export default function Teacher() {
   // A problem sending students to this laptop, from sign-in or opening the class.
   const [notice, setNotice] = useState('');
   const [newGameName, setNewGameName] = useState('');
+  const [vision, setVision] = useState(450); // how far students see in a new game, in map pixels
   const [randomNames, setRandomNames] = useState(true); // students get made-up names, and the teacher sees who they are
 
   const request = useCallback((path: string, body?: object) => call<Status>(path, {
@@ -152,12 +156,19 @@ export default function Teacher() {
         <form className="teacher-newgame" onSubmit={event => {
           event.preventDefault();
           if (!newGameName.trim()) return;
-          void action('game', { name: newGameName, randomNames });
+          void action('game', { name: newGameName, randomNames, vision });
           setNewGameName('');
         }}>
           <input aria-label="Name for a new game" placeholder="New game, e.g. 3A Castanyada" maxLength={40}
             value={newGameName} onChange={event => setNewGameName(event.target.value)} />
           <button className="btn btn-primary" disabled={!newGameName.trim()}>New game</button>
+          <label className="teacher-toggle">
+            Vision:
+            <select value={vision} onChange={event => setVision(Number(event.target.value))} aria-label="How far students see">
+              {VISION_CHOICES.map(([radius, label]) => <option key={radius} value={radius}>{label}</option>)}
+            </select>
+            Students see only the area around them, and classmates farther away are hidden. You can change it any time.
+          </label>
           <label className="teacher-toggle">
             <input type="checkbox" checked={randomNames} onChange={event => setRandomNames(event.target.checked)} />
             Random names: students pick a made-up name and you see who is who. Off: first names, with a surname letter when two match.
@@ -172,6 +183,14 @@ export default function Teacher() {
           </li>)}
         </ul>}
       </section>
+      {status.game && <section className="teacher-games">
+        <h2>Vision</h2>
+        <p>How far students see around themselves in <strong>{status.game.name}</strong>. Applies at once.</p>
+        <div className="teacher-newgame">
+          {VISION_CHOICES.map(([radius, label]) => <button key={radius} className={`btn ${status.game?.vision === radius ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => void action('vision', { radius })}>{label}</button>)}
+        </div>
+      </section>}
       {status.game && <section className="teacher-games">
         <h2>Campaign</h2>
         {!status.campaign ? <>

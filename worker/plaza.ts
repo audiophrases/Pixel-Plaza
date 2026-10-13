@@ -16,6 +16,8 @@ const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
 const CHAT_KEEP = 500;
 const STATUS_HISTORY = 100;
 const CHAT_GAP_MS = 1500;
+const DEFAULT_VISION = 450; // map pixels a student sees around themselves in a new game
+const MAX_VISION = 2000;
 const REROLL_GAP_MS = 300; // between asks for another name
 const WRONG_ANSWER_WAIT_MS = 3000; // before a student can try a chapter question again
 const CHECK_GAP_MS = 800; // grammar hints cost money: no more than one a student can read
@@ -38,7 +40,8 @@ export type ChatMode = 'approve' | 'review';
 export type TeacherAction =
     | { kind: 'status' }
     | { kind: 'open'; open: boolean; game?: string } // a saved game (the last played by default), or close the open one
-    | { kind: 'newGame'; name: string; randomNames?: boolean } // a new game with its own PIN, opened at once
+    | { kind: 'newGame'; name: string; randomNames?: boolean; vision?: number } // a new game with its own PIN, opened at once
+    | { kind: 'vision'; radius: number }                // how far a student sees, in map pixels; 0 shows everyone
     | { kind: 'campaign'; op: 'start' | 'next' | 'reveal' | 'reset'; campaign?: string; confirm?: boolean }
     | { kind: 'review'; id: string; approve: boolean } // approve = false also takes down a message already posted
     | { kind: 'approveAll' }
@@ -59,7 +62,7 @@ export type TeacherStatus = {
     campaign: CampaignStatus | null; // the open game's campaign, once started
     campaigns: { id: string; title: string }[]; // those that can be started
     open: boolean;
-    game: { id: string; name: string; randomNames: boolean } | null; // the open game, or the one last played
+    game: { id: string; name: string; randomNames: boolean; vision: number } | null; // the open game, or the one last played
     realNames: Record<string, string>; // every student's real name, since the plaza may show made-up ones
     games: GameSummary[];                      // every saved game, most recently played first
     pin: string | null; // the open game's PIN, which students type to join
@@ -126,6 +129,10 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaigns')").toArray().some(row => row.name === 'revealed')) {
             this.sql.exec('ALTER TABLE campaigns ADD COLUMN revealed INTEGER NOT NULL DEFAULT 0');
+        }
+        // Games from before limited vision show everyone.
+        if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('games')").toArray().some(row => row.name === 'vision')) {
+            this.sql.exec('ALTER TABLE games ADD COLUMN vision INTEGER NOT NULL DEFAULT 0');
         }
         this.adoptOldClass();
         // Keepalive pings are answered without waking the room.
@@ -209,10 +216,16 @@ export class PlazaRoom extends DurableObject<Env> {
             const failed = this.campaignAction(action);
             if (failed) return { error: failed, status: 400 };
         }
+        if (action.kind === 'vision') {
+            const game = this.activeGame();
+            if (game === null || !Number.isFinite(action.radius)) return { error: 'Open a game first.', status: 400 };
+            this.sql.exec('UPDATE games SET vision = ? WHERE id = ?', Math.max(0, Math.min(MAX_VISION, Math.round(action.radius))), game);
+            this.broadcast({ t: 'vision', radius: this.vision(game) });
+        }
         if (action.kind === 'newGame') {
             const name = action.name.trim().replace(/\s+/g, ' ').slice(0, 40);
             if (!name) return { error: 'Give the game a name.', status: 400 };
-            this.setOpen(true, this.createGame(name, action.randomNames !== false));
+            this.setOpen(true, this.createGame(name, action.randomNames !== false, action.vision ?? DEFAULT_VISION));
         }
         if (action.kind === 'review' && !this.review(action.id, action.approve)) {
             return { error: 'That message is no longer pending.', status: 400 };
@@ -233,7 +246,7 @@ export class PlazaRoom extends DurableObject<Env> {
             campaign: this.campaignStatus(current?.id ?? null),
             campaigns: campaigns.map(campaign => ({ id: campaign.id, title: campaign.title })),
             open: this.isOpen(),
-            game: current && { id: current.id, name: current.name, randomNames: this.isRandom(current.id) },
+            game: current && { id: current.id, name: current.name, randomNames: this.isRandom(current.id), vision: this.vision(current.id) },
             realNames: Object.fromEntries(this.sql.exec<{ student_key: string; full: string }>(
                 'SELECT student_key, COALESCE(full_name, name) AS full FROM students').toArray().map(row => [row.student_key, row.full])),
             games: this.sql.exec<{ id: string; name: string; pin: string; lastOpened: number; randomNames: number }>(
@@ -298,6 +311,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (replaced.length === 0) this.systemChat(`${seat.name} has joined the Plaza.`, server);
         this.sendQuest(server, seat.game, seat.studentKey, true);
         this.sendAlias(server, seat.game, seat.studentKey);
+        this.sendVision(server, seat.game);
         return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -652,12 +666,20 @@ export class PlazaRoom extends DurableObject<Env> {
         }
     }
 
-    private createGame(name: string, randomNames: boolean): string {
+    private createGame(name: string, randomNames: boolean, vision: number): string {
         const id = crypto.randomUUID().slice(0, 8);
         const now = Date.now();
-        this.sql.exec('INSERT INTO games (id, name, pin, created, last_opened, random_names) VALUES (?, ?, ?, ?, ?, ?)',
-            id, name, this.newPin(), now, now, randomNames ? 1 : 0);
+        this.sql.exec('INSERT INTO games (id, name, pin, created, last_opened, random_names, vision) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            id, name, this.newPin(), now, now, randomNames ? 1 : 0, Math.max(0, Math.min(MAX_VISION, Math.round(vision))));
         return id;
+    }
+
+    private vision(game: string | null): number {
+        return game === null ? 0 : this.sql.exec<{ vision: number }>('SELECT vision FROM games WHERE id = ?', game).toArray()[0]?.vision ?? 0;
+    }
+
+    private sendVision(target: WebSocket, game: string): void {
+        try { target.send(JSON.stringify({ t: 'vision', radius: this.vision(game) })); } catch { /* closing */ }
     }
 
     private isRandom(game: string | null): boolean {
@@ -890,7 +912,7 @@ export class PlazaRoom extends DurableObject<Env> {
             this.closeRoom();
             return;
         }
-        const target = game ?? this.activeGame() ?? this.createGame('Class 1', false);
+        const target = game ?? this.activeGame() ?? this.createGame('Class 1', false, 0);
         const switching = this.isOpen() && this.activeGame() !== target;
         if (switching) this.closeRoom();
         const reopening = !this.isOpen() || switching;

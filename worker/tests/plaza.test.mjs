@@ -997,3 +997,42 @@ test('the thief is never a student who is not there', { timeout: 240000 }, async
         removeTemp(persistTo);
     }
 });
+
+test('limited vision: a radius per game that the teacher can change while students play', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const vision = radius => api(base, '/api/teacher/vision', { session, body: { radius } });
+
+        // A new game limits vision by default, and a student is told as they arrive.
+        const created = (await api(base, '/api/teacher/game', { session, body: { name: '3A', randomNames: false } })).body;
+        PIN = created.pin;
+        assert.equal(created.game.vision, 450);
+        const alex = await enter(base, 'signed-a', null);
+        sockets.push(alex);
+        assert.equal((await alex.next(message => message.t === 'vision', 'told at arrival')).radius, 450);
+
+        // The teacher can widen it, show everyone, or narrow it, and students hear at once.
+        assert.equal((await vision(650)).body.game.vision, 650);
+        assert.equal((await alex.next(message => message.t === 'vision', 'widened')).radius, 650);
+        await vision(0);
+        assert.equal((await alex.next(message => message.t === 'vision', 'everyone')).radius, 0);
+        assert.equal((await vision(99999)).body.game.vision, 2000, 'a silly size is kept within reason');
+        assert.equal((await alex.next(message => message.t === 'vision', 'clamped')).radius, 2000);
+        assert.equal((await api(base, '/api/teacher/vision', { session, body: { radius: 'wide' } })).status, 400);
+
+        // A game can be made with everyone visible, and a game from before this setting shows everyone too.
+        const open = (await api(base, '/api/teacher/game', { session, body: { name: '3B', randomNames: false, vision: 0 } })).body;
+        assert.equal(open.game.vision, 0);
+        assert.equal(open.games.length, 2);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});

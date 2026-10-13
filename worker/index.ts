@@ -89,7 +89,8 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     if (path === '/api/teacher/class' && typeof body?.open === 'boolean') {
         return { kind: 'open', open: body.open, ...(typeof body.game === 'string' ? { game: body.game } : {}) };
     }
-    if (path === '/api/teacher/game' && typeof body?.name === 'string') return { kind: 'newGame', name: body.name, randomNames: body.randomNames !== false };
+    if (path === '/api/teacher/game' && typeof body?.name === 'string') return { kind: 'newGame', name: body.name, randomNames: body.randomNames !== false, ...(typeof body.vision === 'number' ? { vision: body.vision } : {}) };
+    if (path === '/api/teacher/vision' && typeof body?.radius === 'number') return { kind: 'vision', radius: body.radius };
     if (path === '/api/teacher/campaign' && ['start', 'next', 'reveal', 'reset'].includes(body?.op)) {
         return { kind: 'campaign', op: body.op, ...(typeof body.campaign === 'string' ? { campaign: body.campaign } : {}), confirm: body.confirm === true };
     }

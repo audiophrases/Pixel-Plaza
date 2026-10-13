@@ -15,6 +15,8 @@ export default class LobbyScene extends Phaser.Scene {
   private playerEntities: { [id: string]: Phaser.GameObjects.Container } = {};
   private figures: { [id: string]: AvatarFigure } = {};
   private nameplates: { [id: string]: Phaser.GameObjects.Text } = {};
+  private fog?: Phaser.GameObjects.Image;
+  private vision = 0;
   private localPlayerContainer?: Phaser.GameObjects.Container;
   private sent = { x: 0, y: 0 };
   private lastSent = 0;
@@ -59,6 +61,7 @@ export default class LobbyScene extends Phaser.Scene {
     }
 
     this.addForegrounds();
+    this.setVision(this.connection.vision);
 
     // F2 shows where the walls (red) and named places (blue) are, to tune them against the art.
     const overlay = this.add.graphics().setDepth(100000).setVisible(false);
@@ -108,11 +111,41 @@ export default class LobbyScene extends Phaser.Scene {
     });
   }
 
+  // Limited vision: the world beyond `radius` pixels of the student is dimmed, and classmates out there are
+  // hidden. The dimming is one small picture, scaled up to cover the whole map, that follows the student.
+  private setVision(radius: number) {
+    this.vision = radius;
+    this.fog?.destroy();
+    this.fog = undefined;
+    if (this.textures.exists('fog')) this.textures.remove('fog');
+    if (radius <= 0) return;
+    const size = 512; // pixels of the picture; each stands for 8 map pixels
+    const scale = 8;
+    const canvas = this.textures.createCanvas('fog', size, size);
+    if (!canvas) return;
+    const context = canvas.getContext();
+    context.fillStyle = 'rgba(0, 0, 0, 0.62)';
+    context.fillRect(0, 0, size, size);
+    // Clear in the middle, fading out to the edge of what the student can see
+    context.globalCompositeOperation = 'destination-out';
+    const outer = radius / scale;
+    const gradient = context.createRadialGradient(size / 2, size / 2, outer * 0.65, size / 2, size / 2, outer);
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 1)');
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    context.fillStyle = gradient;
+    context.beginPath();
+    context.arc(size / 2, size / 2, outer, 0, Math.PI * 2);
+    context.fill();
+    canvas.refresh();
+    this.fog = this.add.image(0, 0, 'fog').setScale(scale).setDepth(1_000_000);
+  }
+
   private onPlazaEvent(event: PlazaEvent) {
     if (event.t === 'roster') this.syncRoster();
     else if (event.t === 'join') this.addPlayer(event.player);
     else if (event.t === 'leave') this.removePlayer(event.id);
     else if (event.t === 'rename') this.nameplates[event.id]?.setText(event.name);
+    else if (event.t === 'vision') this.setVision(event.radius);
     else if (event.t === 'snap' && this.localPlayerContainer?.body) {
       (this.localPlayerContainer.body as Phaser.Physics.Arcade.Body).reset(event.x, event.y);
       this.sent = { x: event.x, y: event.y };
@@ -218,10 +251,17 @@ export default class LobbyScene extends Phaser.Scene {
 
   update(time: number) {
     // Walk cycles, and whoever stands lower on the map is drawn in front.
+    const me = this.localPlayerContainer;
     for (const [id, container] of Object.entries(this.playerEntities)) {
       this.figures[id]?.update(time);
       container.setDepth(container.y);
+      // Classmates fade out toward the edge of what the student sees
+      if (this.vision > 0 && me && container !== me) {
+        const alpha = Phaser.Math.Clamp((this.vision - Phaser.Math.Distance.Between(me.x, me.y, container.x, container.y)) / (this.vision * 0.3), 0, 1);
+        container.setAlpha(alpha).setVisible(alpha > 0);
+      } else if (container.alpha !== 1 || !container.visible) container.setAlpha(1).setVisible(true);
     }
+    if (this.fog && me) this.fog.setPosition(me.x, me.y);
 
     if (!this.cursors || !this.localPlayerContainer || !this.localPlayerContainer.body) return;
 

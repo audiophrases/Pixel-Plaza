@@ -16,6 +16,7 @@ export type PlazaEvent =
   | { t: 'notice'; level: 'info' | 'warning'; text: string; cid?: string } // cid: the chat message this answers
   | { t: 'result'; cid: string }
   | { t: 'snap'; x: number; y: number }                                    // the server put you back: your last move was not possible
+  | { t: 'vision'; radius: number }                                        // how far you see, in map pixels; 0 is everyone
   | { t: 'alias'; name: string; kept: boolean }                            // your made-up name, and whether you have kept it
   | { t: 'rename'; id: string; name: string }                              // a namesake arrived: this player's shown name changed
   | { t: 'quest'; quest: QuestView | null }                                  // this student's view of the campaign
@@ -39,6 +40,7 @@ class Refused extends Error {}
 export class PlazaConnection {
   players = new Map<string, PlazaPlayer>();
   selfId = '';
+  vision = 0; // how far this student sees, from the server; 0 shows everyone
   status: PlazaStatus = { state: 'connecting' };
   private pin: string;
   private token: string;
@@ -187,6 +189,7 @@ export class PlazaConnection {
       return;
     }
     if (message.t === 'join') this.players.set(message.player.id, message.player);
+    if (message.t === 'vision') this.vision = message.radius;
     if (message.t === 'rename') { const player = this.players.get(message.id); if (player) player.name = message.name; }
     if (message.t === 'leave') this.players.delete(message.id);
     if (message.t === 'move') {
