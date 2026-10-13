@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { AvatarFigure, FIGURE_BODY, FIGURE_TOP } from '../AvatarFigure';
-import { MAP_SIZE, plazaMap, worldRects, worldZones } from '../../../shared/plazaMap';
+import { ART, MAP_SIZE, SCALE, plazaMap, worldRects, worldZones } from '../../../shared/plazaMap';
 import type { PlazaConnection, PlazaEvent, PlazaPlayer } from '../../plaza';
 
 // Position updates go out at most this often; remote avatars glide between them.
@@ -54,18 +54,52 @@ export default class LobbyScene extends Phaser.Scene {
       this.walls.add(rect);
     }
 
+    this.addForegrounds();
+
     // F2 shows where the walls (red) and named places (blue) are, to tune them against the art.
     const overlay = this.add.graphics().setDepth(100000).setVisible(false);
     overlay.fillStyle(0xff0000, 0.35);
     for (const [x, y, w, h] of worldRects) overlay.fillRect(x, y, w, h);
     overlay.lineStyle(3, 0x3399ff, 1);
     for (const { rect: [x, y, w, h] } of worldZones) overlay.strokeRect(x, y, w, h);
+    overlay.lineStyle(3, 0x00ff66, 1);
+    for (const piece of plazaMap.foreground) {
+      if (piece.shape === 'ellipse') overlay.strokeEllipse((piece.rect[0] + piece.rect[2] / 2) * SCALE, (piece.rect[1] + piece.rect[3] / 2) * SCALE, piece.rect[2] * SCALE, piece.rect[3] * SCALE);
+      else overlay.strokePoints(piece.points.map(([x, y]) => new Phaser.Math.Vector2(x * SCALE, y * SCALE)), true);
+    }
     this.input.keyboard?.on('keydown-F2', () => overlay.setVisible(!overlay.visible));
 
     this.syncRoster();
     const unsubscribe = this.connection.subscribe(event => this.onPlazaEvent(event));
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, unsubscribe);
     this.events.once(Phaser.Scenes.Events.DESTROY, unsubscribe);
+  }
+
+  // Trees and lamp posts are cut out of the background and drawn again at the depth of
+  // the ground they stand on, so a player north of one is hidden behind it.
+  private addForegrounds() {
+    const source = this.textures.get('plaza_bg').getSourceImage() as HTMLImageElement;
+    const pixels = source.width / ART; // the picture's own pixels per art pixel
+    plazaMap.foreground.forEach((piece, index) => {
+      const points = piece.shape === 'poly' ? piece.points : null;
+      const [x, y, w, h] = piece.shape === 'ellipse' ? piece.rect : [
+        Math.min(...points!.map(point => point[0])), Math.min(...points!.map(point => point[1])),
+        Math.max(...points!.map(point => point[0])) - Math.min(...points!.map(point => point[0])),
+        Math.max(...points!.map(point => point[1])) - Math.min(...points!.map(point => point[1]))
+      ];
+      const key = `foreground_${index}`;
+      const canvas = this.textures.createCanvas(key, Math.ceil(w * SCALE), Math.ceil(h * SCALE));
+      if (!canvas) return;
+      const context = canvas.getContext();
+      context.beginPath();
+      if (piece.shape === 'ellipse') context.ellipse(canvas.width / 2, canvas.height / 2, canvas.width / 2, canvas.height / 2, 0, 0, Math.PI * 2);
+      else piece.points.forEach(([px, py], i) => context[i ? 'lineTo' : 'moveTo']((px - x) * SCALE, (py - y) * SCALE));
+      context.closePath();
+      context.clip();
+      context.drawImage(source, x * pixels, y * pixels, w * pixels, h * pixels, 0, 0, canvas.width, canvas.height);
+      canvas.refresh();
+      this.add.image(x * SCALE, y * SCALE, key).setOrigin(0, 0).setDepth(piece.sortY * SCALE);
+    });
   }
 
   private onPlazaEvent(event: PlazaEvent) {

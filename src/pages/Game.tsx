@@ -41,6 +41,31 @@ export default function Game() {
   const [connection, setConnection] = useState<PlazaConnection | null>(null);
   const [status, setStatus] = useState<PlazaStatus>({ state: 'connecting' });
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatBox = useRef<HTMLDivElement>(null);
+  // The chat box can be dragged out of the way of the map and folded away; it remembers where.
+  const [chatSpot, setChatSpot] = useState<{ x: number; y: number; folded: boolean }>(() => {
+    try { return { x: 0, y: 0, folded: false, ...JSON.parse(localStorage.getItem('pixelplaza.chat') || '{}') }; }
+    catch { return { x: 0, y: 0, folded: false }; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('pixelplaza.chat', JSON.stringify(chatSpot)); } catch { /* storage disabled */ }
+  }, [chatSpot]);
+
+  const dragChat = (event: React.PointerEvent<HTMLDivElement>) => {
+    const box = chatBox.current;
+    if (!box || (event.target as HTMLElement).closest('button')) return;
+    const home = box.getBoundingClientRect(); // where it sits now, with the current offset
+    const start = { x: event.clientX, y: event.clientY, spotX: chatSpot.x, spotY: chatSpot.y };
+    const move = (next: PointerEvent) => {
+      // Keep the whole box on screen
+      const x = Math.min(Math.max(start.spotX + next.clientX - start.x, start.spotX - home.left), start.spotX + window.innerWidth - home.right);
+      const y = Math.min(Math.max(start.spotY + next.clientY - start.y, start.spotY - home.top), start.spotY + window.innerHeight - home.bottom);
+      setChatSpot(spot => ({ ...spot, x, y }));
+    };
+    const stop = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+  };
 
   useEffect(() => {
     if (!state?.roomCode || !session) {
@@ -162,7 +187,13 @@ export default function Game() {
           </div>
         </header>
 
-        <div className="chat-container glass-panel">
+        <div className={`chat-container glass-panel${chatSpot.folded ? ' chat-folded' : ''}`} ref={chatBox}
+          style={{ transform: `translate(${chatSpot.x}px, ${chatSpot.y}px)` }}>
+          <div className="chat-handle" onPointerDown={dragChat} title="Drag to move the chat">
+            <span>Chat</span>
+            <button type="button" aria-label={chatSpot.folded ? 'Show chat' : 'Hide chat'}
+              onClick={() => setChatSpot(spot => ({ ...spot, folded: !spot.folded }))}>{chatSpot.folded ? '▲' : '▼'}</button>
+          </div>
           <div className="chat-messages">
             {messages.map((msg, i) => {
               const isWarning = msg.sender.includes('Warning');

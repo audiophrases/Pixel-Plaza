@@ -61,6 +61,36 @@
   overflow: hidden;
 }
 
+.chat-handle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #666;
+  background: rgba(0, 0, 0, 0.05);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.chat-handle button {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+}
+
+/* Folded, only the handle shows; the rest of the box is out of the way. */
+.chat-folded {
+  height: auto;
+}
+
+.chat-folded > :not(.chat-handle) {
+  display: none;
+}
+
 .chat-messages {
   flex-grow: 1;
   padding: 1rem;
