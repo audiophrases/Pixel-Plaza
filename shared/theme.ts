@@ -16,6 +16,12 @@ export type WalkBehind =
 
 export type Zone = { id: string; rect: Rect };
 
+// A place nobody can walk that is not a rectangle: an oval inside `rect`, or a polygon. The game turns it into thin
+// strips (see shapeRects), so walls, the server's check and the walking test all keep working with rectangles.
+export type BlockShape =
+    | { shape: 'ellipse'; rect: Rect }
+    | { shape: 'poly'; points: readonly Point[] };
+
 export type Theme = {
     id: string;
     name: string;
@@ -24,6 +30,7 @@ export type Theme = {
     world: number;          // width and height of the game's world, in pixels
     spawn: { x: number; y: number };
     blocked: Rect[];        // where nobody can walk
+    blockedShapes?: BlockShape[]; // where nobody can walk, as ovals and free shapes
     walkBehind: WalkBehind[];
     zones: Zone[];          // named places, for the story
 };
@@ -39,11 +46,56 @@ const MOVE_TIME_CAP_MS = 2000;
 
 const inside = (x: number, y: number, [rx, ry, rw, rh]: Rect) => x >= rx && x < rx + rw && y >= ry && y < ry + rh;
 
+// A shape as the thin horizontal strips it is made of, each `step` art pixels tall, with neighbouring strips of the
+// same width joined, so a block of any shape can be treated as rectangles.
+export function shapeRects(piece: BlockShape, step = 3): Rect[] {
+    const spansAt = (y: number): [number, number][] => {
+        if (piece.shape === 'ellipse') {
+            const [rx, ry, rw, rh] = piece.rect;
+            const dy = (y - (ry + rh / 2)) / (rh / 2);
+            if (Math.abs(dy) >= 1) return [];
+            const half = (rw / 2) * Math.sqrt(1 - dy * dy);
+            return [[rx + rw / 2 - half, rx + rw / 2 + half]];
+        }
+        const crossings: number[] = [];
+        const points = piece.points;
+        for (let i = 0; i < points.length; i++) {
+            const [x1, y1] = points[i];
+            const [x2, y2] = points[(i + 1) % points.length];
+            if ((y1 <= y && y < y2) || (y2 <= y && y < y1)) crossings.push(x1 + (y - y1) * (x2 - x1) / (y2 - y1));
+        }
+        crossings.sort((a, b) => a - b);
+        const spans: [number, number][] = [];
+        for (let i = 0; i + 1 < crossings.length; i += 2) spans.push([crossings[i], crossings[i + 1]]);
+        return spans;
+    };
+    const box = piece.shape === 'ellipse' ? piece.rect : (() => {
+        const xs = piece.points.map(point => point[0]);
+        const ys = piece.points.map(point => point[1]);
+        return [Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)] as const;
+    })();
+    const rects: Rect[] = [];
+    let open: { left: number; right: number; top: number; bottom: number }[] = [];
+    for (let top = box[1]; top < box[1] + box[3]; top += step) {
+        const bottom = Math.min(top + step, box[1] + box[3]);
+        const spans = spansAt((top + bottom) / 2).filter(([left, right]) => right - left > 0.5);
+        const continued: typeof open = [];
+        for (const [left, right] of spans) {
+            const same = open.find(item => Math.abs(item.left - left) < 0.75 && Math.abs(item.right - right) < 0.75);
+            if (same) { same.bottom = bottom; continued.push(same); } else continued.push({ left, right, top, bottom });
+        }
+        for (const item of open) if (!continued.includes(item)) rects.push([item.left, item.top, item.right - item.left, item.bottom - item.top]);
+        open = continued;
+    }
+    for (const item of open) rects.push([item.left, item.top, item.right - item.left, item.bottom - item.top]);
+    return rects;
+}
+
 // A theme ready to use in the game: its rectangles in world pixels, and the checks the server and the page make.
 export function makeWorld(theme: Theme) {
     const scale = theme.world / theme.art;
     const toWorld = ([x, y, w, h]: Rect): Rect => [x * scale, y * scale, w * scale, h * scale];
-    const worldRects: Rect[] = theme.blocked.map(toWorld);
+    const worldRects: Rect[] = [...theme.blocked, ...(theme.blockedShapes ?? []).flatMap(piece => shapeRects(piece))].map(toWorld);
     const worldZones = theme.zones.map(zone => ({ id: zone.id, rect: toWorld(zone.rect) }));
     const SPAWN = { x: Math.round(theme.spawn.x * scale), y: Math.round(theme.spawn.y * scale) };
 
@@ -85,6 +137,11 @@ export function validateTheme(theme: Theme): { errors: string[]; warnings: strin
         if (!(w > 0 && h > 0)) errors.push(`Block ${index + 1} has no size.`);
         else if (x + w < 0 || y + h < 0 || x > theme.art || y > theme.art) warnings.push(`Block ${index + 1} is outside the picture.`);
     });
+    (theme.blockedShapes ?? []).forEach((piece, index) => {
+        const label = `Block shape ${index + 1}`;
+        if (piece.shape === 'poly' && piece.points.length < 3) errors.push(`${label} needs at least three corners.`);
+        if (piece.shape === 'ellipse' && !(piece.rect[2] > 0 && piece.rect[3] > 0)) errors.push(`${label} has no size.`);
+    });
     theme.walkBehind.forEach((piece, index) => {
         const label = `Walk-behind area ${index + 1}`;
         if (piece.shape === 'poly' && piece.points.length < 3) errors.push(`${label} needs at least three corners.`);
@@ -118,6 +175,7 @@ export function formatTheme(theme: Theme): string {
         ` "world": ${theme.world},`,
         ` "spawn": ${line(theme.spawn)},`,
         ` "blocked": ${lines(theme.blocked.map(rect => [...rect]))},`,
+        ...(theme.blockedShapes?.length ? [` "blockedShapes": ${lines(theme.blockedShapes)},`] : []),
         ` "walkBehind": ${lines(theme.walkBehind)},`,
         ` "zones": ${lines(theme.zones)}`,
         '}',

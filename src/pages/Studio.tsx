@@ -7,8 +7,8 @@ import type { Rect, Theme, WalkBehind } from '../../shared/theme';
 import { feetBlocked, walkReport } from '../../shared/walk';
 import './Studio.css';
 
-type Tool = 'select' | 'block' | 'zone' | 'ellipse' | 'poly' | 'spawn';
-type Selection = { kind: 'block' | 'behind' | 'zone'; index: number } | { kind: 'spawn' } | null;
+type Tool = 'select' | 'block' | 'bellipse' | 'bpoly' | 'zone' | 'ellipse' | 'poly' | 'spawn';
+type Selection = { kind: 'block' | 'shape' | 'behind' | 'zone'; index: number } | { kind: 'spawn' } | null;
 type Corner = 'nw' | 'ne' | 'sw' | 'se';
 type Drag =
   | { type: 'move'; from: [number, number]; start: Theme }
@@ -19,6 +19,8 @@ type Drag =
 const TOOLS: [Tool, string, string][] = [
   ['select', 'Select', 'Click a shape to select it, drag to move it, drag a handle to resize'],
   ['block', 'Block', 'Draw a rectangle nobody can walk through'],
+  ['bellipse', 'Block (oval)', 'Draw an oval nobody can walk through, such as a fountain'],
+  ['bpoly', 'Block (shape)', 'Click the corners of a place nobody can walk through, such as a curved edge; double-click to finish'],
   ['ellipse', 'Walk-behind (oval)', 'Draw an oval over something tall, such as a tree crown'],
   ['poly', 'Walk-behind (shape)', 'Click the corners of something tall; double-click to finish'],
   ['zone', 'Zone', 'Draw a named place for the story'],
@@ -75,7 +77,7 @@ export default function Studio() {
   const world = useMemo(() => makeWorld(theme), [theme]);
   // What is picked, unless undo or a new file has taken it away
   const selection: Selection = !picked || picked.kind === 'spawn' ? picked
-    : picked.index < (picked.kind === 'block' ? theme.blocked.length : picked.kind === 'zone' ? theme.zones.length : theme.walkBehind.length) ? picked : null;
+    : picked.index < (picked.kind === 'block' ? theme.blocked.length : picked.kind === 'zone' ? theme.zones.length : picked.kind === 'shape' ? (theme.blockedShapes?.length ?? 0) : theme.walkBehind.length) ? picked : null;
   const problems = useMemo(() => validateTheme(theme), [theme]);
 
   // ---------- history ----------
@@ -95,7 +97,7 @@ export default function Studio() {
   const remove = useCallback(() => {
     if (!selection || selection.kind === 'spawn') return;
     const next = clone(theme);
-    const list = selection.kind === 'block' ? next.blocked : selection.kind === 'behind' ? next.walkBehind : next.zones;
+    const list: unknown[] = selection.kind === 'block' ? next.blocked : selection.kind === 'behind' ? next.walkBehind : selection.kind === 'shape' ? (next.blockedShapes ??= []) : next.zones;
     list.splice(selection.index, 1);
     setSelection(null);
     change(next);
@@ -110,6 +112,10 @@ export default function Studio() {
       if (piece.shape === 'ellipse') piece.rect = [piece.rect[0] + dx, piece.rect[1] + dy, piece.rect[2], piece.rect[3]];
       else piece.points = piece.points.map(([x, y]) => [x + dx, y + dy]);
       piece.sortY += dy;
+    } else if (selection.kind === 'shape') {
+      const piece = (next.blockedShapes ??= [])[selection.index];
+      if (piece.shape === 'ellipse') piece.rect = [piece.rect[0] + dx, piece.rect[1] + dy, piece.rect[2], piece.rect[3]];
+      else piece.points = piece.points.map(([x, y]) => [x + dx, y + dy]);
     } else {
       const list = selection.kind === 'block' ? next.blocked : next.zones.map(zone => zone.rect);
       const rect = list[selection.index];
@@ -179,9 +185,15 @@ export default function Studio() {
     if (polyDraft.length < 3) { setPolyDraft([]); return; }
     const sortY = Math.max(...polyDraft.map(point => point[1]));
     const next = clone(theme);
-    next.walkBehind.push({ shape: 'poly', points: polyDraft, sortY });
+    if (tool === 'bpoly') {
+      const shapes = (next.blockedShapes ??= []);
+      shapes.push({ shape: 'poly', points: polyDraft });
+      setSelection({ kind: 'shape', index: shapes.length - 1 });
+    } else {
+      next.walkBehind.push({ shape: 'poly', points: polyDraft, sortY });
+      setSelection({ kind: 'behind', index: next.walkBehind.length - 1 });
+    }
     setPolyDraft([]);
-    setSelection({ kind: 'behind', index: next.walkBehind.length - 1 });
     setTool('select');
     change(next);
   };
@@ -192,7 +204,7 @@ export default function Studio() {
     const at = pointAt(event);
     if (tool === 'select') { setSelection(null); return; }
     if (tool === 'spawn') { const next = clone(theme); next.spawn = { x: at[0], y: at[1] }; setSelection({ kind: 'spawn' }); change(next); return; }
-    if (tool === 'poly') { setPolyDraft(points => [...points, at]); return; }
+    if (tool === 'poly' || tool === 'bpoly') { setPolyDraft(points => [...points, at]); return; }
     (event.currentTarget as SVGSVGElement).setPointerCapture(event.pointerId);
     drag.current = { type: 'draw', from: at };
     setDraft([at[0], at[1], 0, 0]);
@@ -214,6 +226,12 @@ export default function Studio() {
       if (selection?.kind === 'spawn') next.spawn = { x: current.start.spawn.x + dx, y: current.start.spawn.y + dy };
       else if (selection?.kind === 'block') { const r = current.start.blocked[selection.index]; next.blocked[selection.index] = [r[0] + dx, r[1] + dy, r[2], r[3]]; }
       else if (selection?.kind === 'zone') { const r = current.start.zones[selection.index].rect; next.zones[selection.index].rect = [r[0] + dx, r[1] + dy, r[2], r[3]]; }
+      else if (selection?.kind === 'shape') {
+        const piece = next.blockedShapes?.[selection.index];
+        const original = current.start.blockedShapes?.[selection.index];
+        if (piece && original && piece.shape === 'ellipse' && original.shape === 'ellipse') piece.rect = [original.rect[0] + dx, original.rect[1] + dy, original.rect[2], original.rect[3]];
+        else if (piece && original && piece.shape === 'poly' && original.shape === 'poly') piece.points = original.points.map(([x, y]) => [x + dx, y + dy]);
+      }
       else if (selection?.kind === 'behind') {
         const piece = next.walkBehind[selection.index];
         const original = current.start.walkBehind[selection.index];
@@ -224,10 +242,11 @@ export default function Studio() {
     } else if (current.type === 'corner' && selection) {
       if (selection.kind === 'block') next.blocked[selection.index] = resized(current.start.blocked[selection.index], current.corner, at[0], at[1]);
       else if (selection.kind === 'zone') next.zones[selection.index].rect = resized(current.start.zones[selection.index].rect, current.corner, at[0], at[1]);
+      else if (selection.kind === 'shape') { const piece = next.blockedShapes?.[selection.index]; if (piece && piece.shape === 'ellipse') piece.rect = resized((current.start.blockedShapes?.[selection.index] as { rect: Rect }).rect, current.corner, at[0], at[1]); }
       else if (selection.kind === 'behind') { const piece = next.walkBehind[selection.index]; if (piece.shape === 'ellipse') piece.rect = resized((current.start.walkBehind[selection.index] as { rect: Rect }).rect, current.corner, at[0], at[1]); }
-    } else if (current.type === 'vertex' && selection?.kind === 'behind') {
-      const piece = next.walkBehind[selection.index];
-      if (piece.shape === 'poly') piece.points = piece.points.map((point, index) => (index === current.vertex ? [at[0], at[1]] : point));
+    } else if (current.type === 'vertex' && (selection?.kind === 'behind' || selection?.kind === 'shape')) {
+      const piece = selection.kind === 'shape' ? next.blockedShapes?.[selection.index] : next.walkBehind[selection.index];
+      if (piece && piece.shape === 'poly') piece.points = piece.points.map((point, index) => (index === current.vertex ? [at[0], at[1]] : point));
     }
     setTheme(next);
   };
@@ -247,6 +266,10 @@ export default function Studio() {
         while (next.zones.some(zone => zone.id === `zone-${n}`)) n++;
         next.zones.push({ id: `zone-${n}`, rect: shape });
         setSelection({ kind: 'zone', index: next.zones.length - 1 });
+      } else if (tool === 'bellipse') {
+        const shapes = (next.blockedShapes ??= []);
+        shapes.push({ shape: 'ellipse', rect: shape });
+        setSelection({ kind: 'shape', index: shapes.length - 1 });
       } else if (tool === 'ellipse') {
         next.walkBehind.push({ shape: 'ellipse', rect: shape, sortY: round(shape[1] + shape[3]) });
         setSelection({ kind: 'behind', index: next.walkBehind.length - 1 });
@@ -261,7 +284,7 @@ export default function Studio() {
     }
   };
 
-  const grab = (event: ReactPointerEvent, kind: 'block' | 'behind' | 'zone' | 'spawn', index = 0) => {
+  const grab = (event: ReactPointerEvent, kind: 'block' | 'shape' | 'behind' | 'zone' | 'spawn', index = 0) => {
     if (preview || tool !== 'select') return;
     event.stopPropagation();
     svg.current?.setPointerCapture(event.pointerId);
@@ -337,7 +360,7 @@ export default function Studio() {
   };
 
   // ---------- drawing ----------
-  const edited = (kind: 'block' | 'behind' | 'zone', index: number) => selection && selection.kind === kind && selection.index === index;
+  const edited = (kind: 'block' | 'shape' | 'behind' | 'zone', index: number) => selection && selection.kind === kind && selection.index === index;
   const handles = (rect: Rect) => (['nw', 'ne', 'sw', 'se'] as Corner[]).map(corner => {
     const x = corner === 'nw' || corner === 'sw' ? rect[0] : rect[0] + rect[2];
     const y = corner === 'nw' || corner === 'ne' ? rect[1] : rect[1] + rect[3];
@@ -346,7 +369,7 @@ export default function Studio() {
   });
 
   // What is picked, as a box to put corner handles on, or as a shape with corners of its own
-  const pickedPiece = selection?.kind === 'behind' ? theme.walkBehind[selection.index] : undefined;
+  const pickedPiece = selection?.kind === 'behind' ? theme.walkBehind[selection.index] : selection?.kind === 'shape' ? theme.blockedShapes?.[selection.index] : undefined;
   const pickedRect: Rect | null = !selection || selection.kind === 'spawn' ? null
     : selection.kind === 'block' ? theme.blocked[selection.index] ?? null
     : selection.kind === 'zone' ? theme.zones[selection.index]?.rect ?? null
@@ -362,7 +385,7 @@ export default function Studio() {
       <div className="studio-scroll">
         <svg ref={svg} className={`studio-canvas tool-${preview ? 'preview' : tool}`} width={theme.art * zoom} height={theme.art * zoom}
           viewBox={`0 0 ${theme.art} ${theme.art}`} onPointerDown={onBackgroundDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
-          onDoubleClick={() => { if (tool === 'poly') finishPolygon(); }}>
+          onDoubleClick={() => { if (tool === 'poly' || tool === 'bpoly') finishPolygon(); }}>
           <defs>
             {theme.walkBehind.map((piece, index) => <clipPath key={index} id={`behind-${index}`}>
               {piece.shape === 'ellipse'
@@ -375,6 +398,10 @@ export default function Studio() {
 
           {layers.blocks && !preview && theme.blocked.map((rect, index) => <rect key={index} className={`block${edited('block', index) ? ' picked' : ''}`}
             x={rect[0]} y={rect[1]} width={rect[2]} height={rect[3]} onPointerDown={event => grab(event, 'block', index)} />)}
+          {layers.blocks && !preview && (theme.blockedShapes ?? []).map((piece, index) => piece.shape === 'ellipse'
+            ? <ellipse key={`shape-${index}`} className={`block${edited('shape', index) ? ' picked' : ''}`} cx={piece.rect[0] + piece.rect[2] / 2} cy={piece.rect[1] + piece.rect[3] / 2}
+                rx={piece.rect[2] / 2} ry={piece.rect[3] / 2} onPointerDown={event => grab(event, 'shape', index)} />
+            : <polygon key={`shape-${index}`} className={`block${edited('shape', index) ? ' picked' : ''}`} points={polygon(piece.points)} onPointerDown={event => grab(event, 'shape', index)} />)}
           {layers.zones && !preview && theme.zones.map((zone, index) => <g key={zone.id + index}>
             <rect className={`zone${edited('zone', index) ? ' picked' : ''}`} x={zone.rect[0]} y={zone.rect[1]} width={zone.rect[2]} height={zone.rect[3]}
               onPointerDown={event => grab(event, 'zone', index)} />
@@ -449,6 +476,7 @@ export default function Studio() {
         {selection?.kind === 'behind' && <label className="studio-field">Ground line (where it meets the floor)
           <input type="number" value={theme.walkBehind[selection.index].sortY} onChange={event => { const next = clone(theme); next.walkBehind[selection.index].sortY = Number(event.target.value); change(next); }} /></label>}
         {selection?.kind === 'block' && <p>Block: {theme.blocked[selection.index].join(', ')}</p>}
+        {selection?.kind === 'shape' && <p>A block shaped like {theme.blockedShapes?.[selection.index]?.shape === 'ellipse' ? 'an oval' : 'a free shape'}.</p>}
         {!selection && <p className="studio-hint">Nothing selected.</p>}
         {selection && selection.kind !== 'spawn' && <button onClick={remove}>Delete it</button>}
 

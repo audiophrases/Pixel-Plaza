@@ -81,6 +81,31 @@ for (const [x, y] of [[500, 500], [560, 500], [560, 560]]) await act(async () =>
 await act(async () => { fire(svg(), 'dblclick', ...at(560, 560)); });
 check('a walk-behind polygon is added', count('polygon.behind') === behindBefore + 1);
 
+// 5b. Blocks that are not rectangles: an oval, and a free shape with a corner that can be dragged
+await act(async () => { button('Block (oval)').click(); });
+await act(async () => { fire(svg(), 'pointerdown', ...at(700, 100)); });
+await act(async () => { fire(svg(), 'pointermove', ...at(780, 140)); });
+await act(async () => { fire(svg(), 'pointerup', ...at(780, 140)); });
+check('an oval block is added', count('ellipse.block') === 1);
+await act(async () => { button('Block (shape)').click(); });
+for (const [x, y] of [[900, 100], [960, 100], [960, 160]]) await act(async () => { fire(svg(), 'pointerdown', ...at(x, y)); });
+await act(async () => { fire(svg(), 'dblclick', ...at(960, 160)); });
+check('a free-shaped block is added', count('polygon.block') === 1);
+const corner = document.querySelector('circle.vertex');
+check('its corners can be dragged', !!corner);
+if (corner) {
+  await act(async () => { fire(corner, 'pointerdown', ...at(960, 160)); });
+  await act(async () => { fire(svg(), 'pointermove', ...at(990, 190)); });
+  await act(async () => { fire(svg(), 'pointerup', ...at(990, 190)); });
+  check('dragging a corner reshapes it', document.querySelector('polygon.block')!.getAttribute('points')!.includes('990,190'));
+}
+await act(async () => { button('Undo').click(); });
+check('undo puts the corner back', document.querySelector('polygon.block')!.getAttribute('points')!.includes('960,160'));
+await act(async () => { fire(document.querySelector('ellipse.block')!, 'pointerdown', ...at(740, 120)); });
+await act(async () => { fire(svg(), 'pointerup', ...at(740, 120)); });
+await act(async () => { window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Delete' })); });
+check('an oval can be selected and deleted', count('ellipse.block') === 0);
+
 // 6. The walking check on the real plaza is clean; a wall across the start is reported
 await act(async () => { button('Check where students can walk').click(); });
 check('the check runs and shows a verdict', text().includes('Every place can be reached') || text().includes('cannot be reached') || text().includes('cut off'));
