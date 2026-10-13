@@ -162,8 +162,8 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         assert.equal((await alex.next(message => message.t === 'join', 'join')).player.name, 'Sam');
         await alex.next(message => message.t === 'chat' && /Sam has joined/.test(message.text), 'join announcement');
         const moved = sam.next(message => message.t === 'move', 'move');
-        alex.send({ t: 'move', x: 910, y: 805 });
-        assert.deepEqual([(await moved).x, (await moved).y], [910, 805]);
+        alex.send({ t: 'move', x: 1100, y: 740 });
+        assert.deepEqual([(await moved).x, (await moved).y], [1100, 740]);
 
         // Chat waits for the teacher.
         sam.send({ t: 'move', x: 920, y: 810 });
@@ -214,7 +214,7 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         const alexAgain = await enter(base, 'signed-a', null);
         sockets.push(alexAgain);
         assert.equal(await alex.closed, 4009);
-        assert.deepEqual([alexAgain.me.x, alexAgain.me.y], [910, 805]);
+        assert.deepEqual([alexAgain.me.x, alexAgain.me.y], [1100, 740]);
         assert.equal((await sam.next(message => message.t === 'leave' && message.id === alex.welcome.id, 'leave')).id, alex.welcome.id);
         assert.equal((await sam.next(message => message.t === 'join' && message.player.name === 'Alex', 'rejoin')).player.id, alexAgain.welcome.id);
 
@@ -245,7 +245,7 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
 
         const alexNextLesson = await enter(base, 'signed-a', null);
         sockets.push(alexNextLesson);
-        assert.deepEqual([alexNextLesson.me.x, alexNextLesson.me.y, alexNextLesson.me.hair], [910, 805, 3]);
+        assert.deepEqual([alexNextLesson.me.x, alexNextLesson.me.y, alexNextLesson.me.hair], [1100, 740, 3]);
 
         // Closing the class keeps new students out, and the next lesson has a new PIN.
         await api(base, '/api/teacher/class', { session, body: { open: false } });

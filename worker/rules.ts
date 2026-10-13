@@ -1,8 +1,9 @@
 // Rules shared by the HTTP routes and the room. No Workers APIs here, so the
 // tests run this file directly under `node --test`.
 
-export const MAP_SIZE = 2048;
-export const SPAWN = { x: 700, y: 700 };
+import { MAP_SIZE, SPAWN, isBlocked } from '../shared/plazaMap.ts';
+
+export { MAP_SIZE, SPAWN, isBlocked };
 export const EMOTES = ['🙋', '❓', '👍', '😂'];
 
 // One index per part. Counts come from public/cup/avatar-parts.js, the same

@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { AvatarFigure, FIGURE_BODY, FIGURE_TOP } from '../AvatarFigure';
+import { MAP_SIZE, plazaMap, worldRects, worldZones } from '../../../shared/plazaMap';
 import type { PlazaConnection, PlazaEvent, PlazaPlayer } from '../../plaza';
 
 // Position updates go out at most this often; remote avatars glide between them.
@@ -25,19 +26,14 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image('plaza_bg', '/assets/plaza.jpg');
+    this.load.image('plaza_bg', plazaMap.image);
   }
 
   create() {
-    // Add the background image
-    const bg = this.add.image(0, 0, 'plaza_bg').setOrigin(0, 0);
-    
-    // Scale image to a reasonable size (not 4000x4000 which makes it too zoomed in)
-    bg.setScale(2); // 2x scale makes it 2048x2048 if it was 1024x1024
-    
-    const mapWidth = bg.displayWidth;
-    const mapHeight = bg.displayHeight;
-    
+    this.add.image(0, 0, 'plaza_bg').setOrigin(0, 0).setDisplaySize(MAP_SIZE, MAP_SIZE);
+    const mapWidth = MAP_SIZE;
+    const mapHeight = MAP_SIZE;
+
     this.physics.world.setBounds(0, 0, mapWidth, mapHeight);
 
     if (this.input.keyboard) {
@@ -49,24 +45,19 @@ export default class LobbyScene extends Phaser.Scene {
     // Create a StaticGroup for walls/buildings
     this.walls = this.physics.add.staticGroup();
 
-    // Helper to create walls from top-left coordinates
-    const createWall = (x: number, y: number, w: number, h: number) => {
+    for (const [x, y, w, h] of worldRects) {
       const rect = this.add.rectangle(x, y, w, h, 0xff0000, 0).setOrigin(0, 0);
       this.physics.add.existing(rect, true); // true = static body
       this.walls.add(rect);
-    };
+    }
 
-    // 1. Grand Plaza Hotel (Top Left/Center)
-    createWall(0, 0, 1100, 480);
-    
-    // 2. Right Tower (Top Right)
-    createWall(1100, 0, 948, 650);
-    
-    // 3. The Rusty Mug (Bottom Right)
-    createWall(1400, 650, 648, 1398);
-    
-    // 4. Bottom Left Trees & Decor
-    createWall(0, 850, 450, 1198);
+    // F2 shows where the walls (red) and named places (blue) are, to tune them against the art.
+    const overlay = this.add.graphics().setDepth(100000).setVisible(false);
+    overlay.fillStyle(0xff0000, 0.35);
+    for (const [x, y, w, h] of worldRects) overlay.fillRect(x, y, w, h);
+    overlay.lineStyle(3, 0x3399ff, 1);
+    for (const { rect: [x, y, w, h] } of worldZones) overlay.strokeRect(x, y, w, h);
+    this.input.keyboard?.on('keydown-F2', () => overlay.setVisible(!overlay.visible));
 
     this.syncRoster();
     const unsubscribe = this.connection.subscribe(event => this.onPlazaEvent(event));

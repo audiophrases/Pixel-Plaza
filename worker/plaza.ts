@@ -3,7 +3,7 @@ import type { Env } from './index.ts';
 import type { PinPlayStudent } from './pinplay.ts';
 import { checkGrammar } from './grammar.ts';
 import { moderate } from './moderation.ts';
-import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
+import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 
 const TICKET_MS = 60_000;
 const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
@@ -199,11 +199,14 @@ export class PlazaRoom extends DurableObject<Env> {
 
         const saved = this.sql.exec<{ name: string; avatar: string | null; x: number | null; y: number | null }>(
             'SELECT name, avatar, x, y FROM students WHERE student_key = ?', row.student_key).one();
+        // A saved spot that is now a wall (the map changed) starts over at the spawn
+        const spot = saved.x != null && saved.y != null && !isBlocked(saved.x, saved.y)
+            ? { x: saved.x, y: saved.y }
+            : { x: SPAWN.x + Math.round(Math.random() * 100 - 50), y: SPAWN.y + Math.round(Math.random() * 100 - 50) };
         const seat: Seat = {
             id: crypto.randomUUID().slice(0, 8), studentKey: row.student_key, name: saved.name,
             avatar: (saved.avatar && sanitizeAvatar(JSON.parse(saved.avatar))) || defaultAvatar(),
-            x: saved.x ?? SPAWN.x + Math.round(Math.random() * 100 - 50),
-            y: saved.y ?? SPAWN.y + Math.round(Math.random() * 100 - 50),
+            x: spot.x, y: spot.y,
             lastChat: 0
         };
         const others = this.seats();

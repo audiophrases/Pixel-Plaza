@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chatProblem, clampPosition, laptopOrigin, plazaName, sanitizeAvatar, secretsMatch, sha256Hex, teacherPasswordMatches } from '../rules.ts';
+import { SPAWN, chatProblem, clampPosition, isBlocked, laptopOrigin, plazaName, sanitizeAvatar, secretsMatch, sha256Hex, teacherPasswordMatches } from '../rules.ts';
 
 test('chat validation blocks invalid content and caps length', () => {
     assert.match(chatProblem('nobody likes you'), /rewrite/);
@@ -49,4 +49,11 @@ test('a laptop address is reduced to its http(s) origin', () => {
     assert.equal(laptopOrigin('javascript:alert(1)'), null);
     assert.equal(laptopOrigin('http://user:pass@192.168.1.20'), null);
     assert.equal(laptopOrigin(42), null);
+});
+
+test('walls block the hotel and fountain but not the street or the spawn', () => {
+    assert.equal(isBlocked(600, 300), true);
+    assert.equal(isBlocked(600, 1100), true);
+    assert.equal(isBlocked(1100, 740), false);
+    assert.equal(isBlocked(SPAWN.x, SPAWN.y), false);
 });
