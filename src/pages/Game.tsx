@@ -39,6 +39,9 @@ export default function Game() {
   const [sendError, setSendError] = useState(''); // why the last message did not go, shown by the box
   const pending = useRef<{ cid: string; text: string; timer: number } | null>(null);
   const keptRun = useRef(0); // hints in a row the student turned down
+  // The student took a suggestion into the box: what they had written and what was suggested.
+  const usedHint = useRef<{ original: string; corrected: string } | null>(null);
+  const chatField = useRef<HTMLInputElement>(null);
   const [spelling, setSpelling] = useState<Misspelling[]>([]); // words that stopped the last message
   const [whisperTo, setWhisperTo] = useState(''); // a classmate's id; empty means nearby chat
   const [classmates, setClassmates] = useState<{ id: string; name: string }[]>([]);
@@ -170,24 +173,34 @@ export default function Game() {
         if (problems.length) return;
       } catch { /* offline dictionary: the teacher still reviews the message */ }
 
+      // The suggestion exactly as offered, now sent on purpose: no second opinion.
+      const taken = usedHint.current;
+      if (taken && chatInput === taken.corrected) { usedHint.current = null; return deliver(chatInput, { was: taken.original }); }
+
       // Then a grammar hint, once, and only if they have not been turning them all down.
-      if (keptRun.current >= 3) { keptRun.current = 2; return deliver(chatInput); }
+      if (keptRun.current >= 3) { keptRun.current = 2; return deliver(chatInput, taken ? { was: taken.original } : {}); }
       const hint = await connection.check(chatInput);
       if (!hint.ok && (!check || check(hint.corrected, names).length === 0)) {
         setNudge({ original: chatInput, corrected: hint.corrected, why: hint.why });
         return;
       }
       keptRun.current = 0;
-      deliver(chatInput);
+      usedHint.current = null;
+      deliver(chatInput, taken ? { was: taken.original } : {});
     } finally {
       setChecking(false);
     }
   };
 
+  // The suggestion goes into the box, not out to the class: the student reads it, changes
+  // what they like, and sends it themselves.
   const useHint = () => {
     if (!nudge) return;
     keptRun.current = 0;
-    deliver(nudge.corrected, { was: nudge.original });
+    usedHint.current = { original: nudge.original, corrected: nudge.corrected };
+    setChatInput(nudge.corrected);
+    setNudge(null);
+    chatField.current?.focus();
   };
 
   const keepMine = () => {
@@ -276,7 +289,7 @@ export default function Game() {
             <div><strong>Try this:</strong> <span className="grammar-fix">{nudge.corrected}</span></div>
             <div className="grammar-why">{nudge.why}</div>
             <div className="grammar-actions">
-              <button type="button" className="btn btn-primary" onClick={useHint} title="Send the sentence above">OK</button>
+              <button type="button" className="btn btn-primary" onClick={useHint} title="Put the sentence above in the box, so you can check it and send it">OK</button>
               <button type="button" className="spelling-fix" onClick={keepMine} title="Send my sentence as I wrote it">Ignore</button>
             </div>
           </div>}
@@ -292,12 +305,13 @@ export default function Game() {
             </select>
             <input 
               type="text" 
+              ref={chatField}
               className="chat-input"
               placeholder={whisperTo ? 'Whisper (your teacher can read it)...' : 'Message people nearby (teacher approves)...'}
               maxLength={200}
               value={chatInput}
               readOnly={sending}
-              onChange={(e) => { setChatInput(e.target.value); setNudge(null); setSendError(''); if (!e.target.value) setSpelling([]); }}
+              onChange={(e) => { setChatInput(e.target.value); setNudge(null); setSendError(''); if (!e.target.value) { setSpelling([]); usedHint.current = null; } }}
               onCopy={handlePreventClipboard}
               onPaste={handlePreventClipboard}
               onCut={handlePreventClipboard}
