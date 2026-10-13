@@ -39,6 +39,9 @@ export default class LobbyScene extends Phaser.Scene {
 
     if (this.input.keyboard) {
       this.cursors = this.input.keyboard.createCursorKeys();
+      // Phaser blocks the browser's own handling of the keys it is given, space and the arrows
+      // included, which would stop the chat box from taking a space or moving its cursor.
+      this.input.keyboard.removeCapture('SPACE,SHIFT,UP,DOWN,LEFT,RIGHT');
       // No capture, so typing w, a, s or d in the chat box still works.
       this.wasd = this.input.keyboard.addKeys('W,A,S,D', false) as typeof this.wasd;
     }
@@ -219,12 +222,12 @@ export default class LobbyScene extends Phaser.Scene {
 
     body.setVelocity(0);
 
-    // Letters walk only when the chat box is not being typed in.
+    // Keys walk only when the chat box is not being typed in.
     const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName ?? '');
-    const left = this.cursors.left.isDown || (!typing && this.wasd.A.isDown);
-    const right = this.cursors.right.isDown || (!typing && this.wasd.D.isDown);
-    const up = this.cursors.up.isDown || (!typing && this.wasd.W.isDown);
-    const down = this.cursors.down.isDown || (!typing && this.wasd.S.isDown);
+    const left = !typing && (this.cursors.left.isDown || this.wasd.A.isDown);
+    const right = !typing && (this.cursors.right.isDown || this.wasd.D.isDown);
+    const up = !typing && (this.cursors.up.isDown || this.wasd.W.isDown);
+    const down = !typing && (this.cursors.down.isDown || this.wasd.S.isDown);
 
     if (left) {
       body.setVelocityX(-speed);

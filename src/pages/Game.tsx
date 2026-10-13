@@ -69,6 +69,19 @@ export default function Game() {
     ? messages.slice(seenCount).filter(message => !message.sender.startsWith('System') && message.sender !== session?.student.displayName).length
     : 0;
 
+  // Enter jumps to the chat box from the map, and Escape leaves it, so a student never needs the mouse.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const field = chatField.current;
+      if (!field || event.ctrlKey || event.metaKey || event.altKey) return;
+      const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName ?? '');
+      if (event.key === 'Enter' && !typing) { event.preventDefault(); field.focus(); }
+      else if (event.key === 'Escape' && document.activeElement === field) field.blur();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const dragChat = (event: React.PointerEvent<HTMLDivElement>) => {
     const box = chatBox.current;
     if (!box || (event.target as HTMLElement).closest('button')) return;
@@ -113,6 +126,7 @@ export default function Game() {
         }
         setChatInput('');
         setSendError('');
+        chatField.current?.blur(); // sent: the keys walk again until Enter opens the box
       }
       if (event.t === 'result') return;
       if (event.t === 'quest') { setQuest(event.quest); setAnswered(null); return; }
