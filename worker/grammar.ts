@@ -82,6 +82,7 @@ export async function mayNeedHelp(text: string, env: GrammarEnv): Promise<boolea
 export async function checkGrammar(text: string, env: GrammarEnv): Promise<Grammar> {
     if (!env.OPENAI_API_KEY || words(text).length < MIN_WORDS || text.length > 200) return { ok: true };
     if (!(await mayNeedHelp(text, env))) return { ok: true };
+    const started = Date.now();
     try {
         const response = await fetch(`${env.OPENAI_BASE_URL || 'https://api.openai.com'}/v1/chat/completions`, {
             method: 'POST',
@@ -93,6 +94,7 @@ export async function checkGrammar(text: string, env: GrammarEnv): Promise<Gramm
             }),
             signal: AbortSignal.timeout(TIMEOUT_MS)
         });
+        console.log(`grammar chat: ${response.status} in ${Date.now() - started} ms`); // to compare with the gate's time
         if (!response.ok) return { ok: true };
         const content = ((await response.json()) as { choices?: { message?: { content?: string } }[] }).choices?.[0]?.message?.content;
         return verdict(text, content ? JSON.parse(content) : null);
