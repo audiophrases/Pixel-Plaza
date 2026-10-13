@@ -623,18 +623,18 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         assert.equal(chrisBack.quest.clues.length, 2);
 
         // Answers: a wrong one must wait before another try; a right one counts; 2 of 3 students finish the chapter.
-        const answer = (who, choice) => who.socket.send({ t: 'answer', objective: 'where', choice });
+        const answer = (who, text) => who.socket.send({ t: 'answer', objective: 'where', text });
         const result = who => who.socket.next(message => message.t === 'answered', 'answer result');
-        answer(alexBack, 'hotel');
+        answer(alexBack, 'In the hotel');
         assert.deepEqual((({ correct, wait }) => ({ correct, wait }))(await result(alexBack)), { correct: false, wait: false });
-        answer(alexBack, 'park');
+        answer(alexBack, 'the park');
         assert.equal((await result(alexBack)).wait, true);
         await pause(3200);
-        answer(alexBack, 'park');
+        answer(alexBack, 'It is in the park');
         assert.equal((await result(alexBack)).correct, true);
         let status = (await api(base, '/api/teacher/status', { session })).body.campaign;
         assert.equal(status.status, 'active');
-        answer(samBack, 'park');
+        answer(samBack, 'park!');
         assert.equal((await result(samBack)).correct, true);
         for (const who of [alexBack, samBack, chrisBack]) {
             const done = (await who.socket.next(message => message.t === 'quest' && message.quest.status === 'chapter_complete', 'chapter complete')).quest;

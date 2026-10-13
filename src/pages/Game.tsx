@@ -270,7 +270,7 @@ export default function Game() {
         </div>}
 
         {quest && <Journal quest={quest} feedback={answered}
-          onAnswer={(objective, choice) => connection?.send({ t: 'answer', objective, choice })} />}
+          onAnswer={(objective, text) => connection?.send({ t: 'answer', objective, text })} />}
 
         <div className={`chat-container glass-panel${chatSpot.folded ? ' chat-folded' : ''}`} ref={chatBox}
           style={{ transform: `translate(${chatSpot.x}px, ${chatSpot.y}px)` }}>

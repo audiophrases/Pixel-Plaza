@@ -3,7 +3,7 @@ import type { Env } from './index.ts';
 import type { PinPlayStudent } from './pinplay.ts';
 import { checkGrammar } from './grammar.ts';
 import { moderate } from './moderation.ts';
-import { campaignById, campaigns, chapterDone, pickRole, type QuestView } from '../shared/campaign.ts';
+import { answerMatches, campaignById, campaigns, chapterDone, pickRole, type QuestView } from '../shared/campaign.ts';
 import { wordDiff } from '../shared/diff.ts';
 import { zoneAt } from '../shared/plazaMap.ts';
 import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
@@ -284,8 +284,8 @@ export class PlazaRoom extends DurableObject<Env> {
             this.discover(seat);
             ws.serializeAttachment(seat);
             this.broadcast({ t: 'move', id: seat.id, ...position }, ws);
-        } else if (data?.t === 'answer' && typeof data.objective === 'string' && typeof data.choice === 'string') {
-            this.answer(ws, seat, data.objective, data.choice);
+        } else if (data?.t === 'answer' && typeof data.objective === 'string' && typeof data.text === 'string' && data.text.length <= 80) {
+            this.answer(ws, seat, data.objective, data.text);
         } else if (data?.t === 'emote' && EMOTES.includes(data.emote)) {
             this.broadcast({ t: 'emote', id: seat.id, emote: data.emote });
         } else if (data?.t === 'check') {
@@ -354,7 +354,7 @@ export class PlazaRoom extends DurableObject<Env> {
                 ending: row.status === 'active' ? null : chapter.ending },
             role: { id: role.id, name: role.name, card: role.card },
             clues: [{ id: `role-${role.id}`, text: role.clue, from: 'job' }, ...found.map(item => ({ id: item.id, text: item.text, from: item.zone }))],
-            objectives: chapter.objectives.map(objective => ({ id: objective.id, text: objective.text, choices: objective.choices, done: player.done.includes(objective.id) })),
+            objectives: chapter.objectives.map(objective => ({ id: objective.id, text: objective.text, done: player.done.includes(objective.id) })),
             finale: row.status === 'campaign_complete' ? campaign.finale : null
         };
     }
@@ -391,8 +391,8 @@ export class PlazaRoom extends DurableObject<Env> {
         for (const ws of this.ctx.getWebSockets(seat.studentKey)) this.sendQuest(ws, seat.game, seat.studentKey);
     }
 
-    // A student's answer to a chapter question. Wrong answers can be tried again after a short wait.
-    private answer(ws: WebSocket, seat: Seat, objectiveId: string, choice: string): void {
+    // A student's typed answer to a chapter question. A wrong one can be tried again after a short wait.
+    private answer(ws: WebSocket, seat: Seat, objectiveId: string, typed: string): void {
         const row = this.campaignRow(seat.game);
         const campaign = row && campaignById(row.campaign_id);
         const objective = campaign?.chapters[row?.chapter ?? 0]?.objectives.find(item => item.id === objectiveId);
@@ -402,7 +402,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const reply = (correct: boolean, wait = false) => ws.send(JSON.stringify({ t: 'answered', objective: objective.id, correct, wait }));
         const now = Date.now();
         if (now - player.last_wrong < WRONG_ANSWER_WAIT_MS) return reply(false, true);
-        if (choice !== objective.correct) {
+        if (!answerMatches(objective, typed)) {
             this.sql.exec('UPDATE campaign_players SET last_wrong = ? WHERE game_id = ? AND student_key = ?', now, seat.game, seat.studentKey);
             return reply(false);
         }

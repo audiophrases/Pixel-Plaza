@@ -6,7 +6,7 @@ type Props = {
   quest: QuestView;
   // What the last answer came to, so the student knows to wait or to think again.
   feedback: { objective: string; correct: boolean; wait: boolean } | null;
-  onAnswer: (objective: string, choice: string) => void;
+  onAnswer: (objective: string, text: string) => void;
 };
 
 // The student's side of the campaign, in short labelled blocks: the task, who you are, what
@@ -15,6 +15,7 @@ export default function Journal({ quest, feedback, onAnswer }: Props) {
   const [open, setOpen] = useState(true);
   const [fresh, setFresh] = useState(false); // something changed while the journal was shut
   const seen = useRef('');
+  const [typed, setTyped] = useState('');
 
   useEffect(() => {
     const now = JSON.stringify([quest.status, quest.chapter.index, quest.clues.length, quest.objectives.map(item => item.done)]);
@@ -53,10 +54,14 @@ export default function Journal({ quest, feedback, onAnswer }: Props) {
         <h3>Question</h3>
         <p className="journal-ask">{objective.text}</p>
         {objective.done ? <p className="journal-right">Correct. Help your classmates.</p> : <>
-          <div className="journal-choices">
-            {objective.choices.map(choice => <button key={choice.id} type="button" className="journal-choice"
-              onClick={() => onAnswer(objective.id, choice.id)}>{choice.text}</button>)}
-          </div>
+          <form className="journal-answer" onSubmit={event => {
+            event.preventDefault();
+            if (typed.trim()) { onAnswer(objective.id, typed.trim()); setTyped(''); }
+          }}>
+            <input value={typed} maxLength={80} placeholder="Type your answer in English" autoComplete="off"
+              aria-label="Your answer" onChange={event => setTyped(event.target.value)} />
+            <button className="journal-choice" disabled={!typed.trim()}>Answer</button>
+          </form>
           {feedback?.objective === objective.id && !feedback.correct &&
             <p className="journal-wrong">{feedback.wait ? 'Wait a moment.' : 'Not yet. Ask your classmates.'}</p>}
         </>}

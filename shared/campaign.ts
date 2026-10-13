@@ -7,8 +7,9 @@
 // each chapter's question. When enough of the class has answered, the chapter ends on a
 // cliffhanger, and the teacher starts the next one whenever the class is ready.
 
-export type Choice = { id: string; text: string };
-export type Objective = { id: string; text: string; choices: Choice[]; correct: string };
+// The student types the answer. `accept` lists the words or short phrases that make an answer right;
+// "the park", "In the park!" and "parc" (one slip) all count for "park".
+export type Objective = { id: string; text: string; accept: string[] };
 // A clue everyone finds by standing in a named place (see `zones` in plazaMap.ts).
 export type Discovery = { id: string; zone: string; text: string };
 export type Chapter = {
@@ -29,7 +30,7 @@ export type QuestView = {
     chapter: { index: number; of: number; title: string; intro: string; ending: string | null };
     role: { id: string; name: string; card: string };
     clues: { id: string; text: string; from: string }[];
-    objectives: { id: string; text: string; choices: Choice[]; done: boolean }[];
+    objectives: { id: string; text: string; done: boolean }[];
     finale: string | null;
 };
 
@@ -55,8 +56,7 @@ export const castanyada: Campaign = {
         ending: 'It was in the park. The lock is open. The box is empty! Who took the chestnuts?',
         objectives: [{
             id: 'where', text: 'Where is the blue box?',
-            choices: [{ id: 'hotel', text: 'Hotel' }, { id: 'cafe', text: 'Café' }, { id: 'shop', text: 'Shop' }, { id: 'park', text: 'Park' }],
-            correct: 'park',
+            accept: ['park', 'pond'],
         }],
         discoveries: [
             { id: 'hotel-note', zone: 'hotel', text: 'A note on the hotel door: "The chestnuts are safe."' },
@@ -82,4 +82,28 @@ export function chapterDone(chapter: Chapter, players: readonly { done: readonly
     if (players.length === 0 || chapter.objectives.length === 0) return false;
     const finished = players.filter(player => chapter.objectives.every(objective => player.done.includes(objective.id)));
     return finished.length / players.length >= chapter.share;
+}
+
+// Lower case, without accents or punctuation, as separate words.
+const wordsOf = (text: string) => text.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+
+// One slip in a word of five letters or more is forgiven; shorter words must be exact.
+function sameWord(typed: string, wanted: string): boolean {
+    if (typed === wanted) return true;
+    if (wanted.length < 5 || Math.abs(typed.length - wanted.length) > 1) return false;
+    const [short, long] = typed.length <= wanted.length ? [typed, wanted] : [wanted, typed];
+    let i = 0;
+    while (i < short.length && short[i] === long[i]) i++;
+    // One letter changed, added or missing: the rest must then match exactly.
+    return short.slice(i + (short.length === long.length ? 1 : 0)) === long.slice(i + 1);
+}
+
+// True when what the student typed contains one of the accepted answers as whole words.
+export function answerMatches(objective: Objective, typed: string): boolean {
+    const words = wordsOf(typed);
+    if (words.length === 0 || words.length > 12) return false;
+    return objective.accept.some(answer => {
+        const wanted = wordsOf(answer);
+        return wanted.length > 0 && words.some((_, start) => wanted.every((word, offset) => start + offset < words.length && sameWord(words[start + offset], word)));
+    });
 }
