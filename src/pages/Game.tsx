@@ -297,7 +297,8 @@ export default function Game() {
               
               return (
                 <div key={i} className={`chat-message ${isSystem ? 'system-msg' : ''} ${isWarning ? 'warning-msg' : ''} ${msg.whisper ? 'whisper-msg' : ''}`}>
-                  <span className="chat-sender">{msg.whisper ? `${msg.sender} → ${msg.to} (whisper)` : msg.sender}:</span>
+                  {/* Notices from the game are just the sentence, with no "System:" in front */}
+                  {!isSystem && <span className="chat-sender">{msg.whisper ? `${msg.sender} → ${msg.to} (whisper)` : msg.sender}:</span>}
                   <span className="chat-text"><Marked text={msg.text} marks={msg.marks} className="slip" /></span>
                 </div>
               );
