@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { joinLink } from '../studentAuth';
+import { WARMUP_KINDS } from '../../shared/warmupKinds';
+import type { WarmupKind } from '../../shared/warmupKinds';
 import './Teacher.css';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string };
@@ -14,7 +16,7 @@ type Game = { id: string; name: string; pin: string; lastOpened: number; open: b
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
   campaign: CampaignInfo | null; campaigns: { id: string; title: string }[];
-  warmup: { active: boolean; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
+  warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
   open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: { studentKey: string; name: string }[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
 };
@@ -38,6 +40,7 @@ export default function Teacher() {
   // A problem sending students to this laptop, from sign-in or opening the class.
   const [notice, setNotice] = useState('');
   const [newGameName, setNewGameName] = useState('');
+  const [warmupKind, setWarmupKind] = useState<WarmupKind>('facts');
   const [copied, setCopied] = useState(''); // the PIN whose link was just copied
   const [vision, setVision] = useState(450); // how far students see in a new game, in map pixels
   const [randomNames, setRandomNames] = useState(true); // students get made-up names, and the teacher sees who they are
@@ -198,9 +201,12 @@ export default function Teacher() {
       </section>
       {status.game && <section className="teacher-games">
         <h2>Warm-up</h2>
-        <p>Each student gets a made-up fun fact and has to find classmates who have other facts, by asking and typing their names. Good for the first few minutes.</p>
+        <p>{WARMUP_KINDS.find(kind => kind.id === warmupKind)?.blurb} Good for the first few minutes.</p>
         <div className="teacher-newgame">
-          <button className="btn btn-primary" disabled={!status.open} onClick={() => void action('warmup', { op: 'start' })}>
+          <select value={warmupKind} onChange={event => setWarmupKind(event.target.value as WarmupKind)} aria-label="Which warm-up">
+            {WARMUP_KINDS.map(kind => <option key={kind.id} value={kind.id}>{kind.label}</option>)}
+          </select>
+          <button className="btn btn-primary" disabled={!status.open} onClick={() => void action('warmup', { op: 'start', type: warmupKind })}>
             {status.warmup?.active ? 'Start again' : 'Start the warm-up'}</button>
           {status.warmup?.active && <button className="btn btn-secondary" onClick={() => void action('warmup', { op: 'end' })}>End the warm-up</button>}
         </div>

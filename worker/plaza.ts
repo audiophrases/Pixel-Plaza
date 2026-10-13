@@ -8,6 +8,7 @@ import { wordDiff } from '../shared/diff.ts';
 import { cleanName, shownNames } from '../shared/names.ts';
 import { fillThiefClue, lookOf, thiefCount } from '../shared/thief.ts';
 import { assignLateJoiner, assignWarmup, factById, type WarmupView } from '../shared/warmup.ts';
+import { assignIdentities, assignLateIdentity, assignLatePair, assignPairs, identityById, isWarmupKind, type WarmupKind } from '../shared/warmupKinds.ts';
 import { randomName } from '../shared/randomNames.ts';
 import { legalMove, zoneAt } from '../shared/plazaMap.ts';
 import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
@@ -43,7 +44,7 @@ export type TeacherAction =
     | { kind: 'open'; open: boolean; game?: string } // a saved game (the last played by default), or close the open one
     | { kind: 'newGame'; name: string; randomNames?: boolean; vision?: number } // a new game with its own PIN, opened at once
     | { kind: 'vision'; radius: number }                // how far a student sees, in map pixels; 0 shows everyone
-    | { kind: 'warmup'; op: 'start' | 'end' }          // the get-to-know-you warm-up at the start of a lesson
+    | { kind: 'warmup'; op: 'start' | 'end'; type?: WarmupKind } // a get-to-know-you warm-up at the start of a lesson
     | { kind: 'campaign'; op: 'start' | 'next' | 'reveal' | 'reset'; campaign?: string; confirm?: boolean }
     | { kind: 'review'; id: string; approve: boolean } // approve = false also takes down a message already posted
     | { kind: 'approveAll' }
@@ -61,7 +62,7 @@ export type CampaignStatus = {
 };
 
 export type TeacherStatus = {
-    warmup: { active: boolean; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
+    warmup: { active: boolean; kind: WarmupKind; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
     campaign: CampaignStatus | null; // the open game's campaign, once started
     campaigns: { id: string; title: string }[]; // those that can be started
     open: boolean;
@@ -140,6 +141,9 @@ export class PlazaRoom extends DurableObject<Env> {
         // Games from before limited vision show everyone.
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('games')").toArray().some(row => row.name === 'vision')) {
             this.sql.exec('ALTER TABLE games ADD COLUMN vision INTEGER NOT NULL DEFAULT 0');
+        }
+        if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('warmups')").toArray().some(row => row.name === 'kind')) {
+            this.sql.exec("ALTER TABLE warmups ADD COLUMN kind TEXT NOT NULL DEFAULT 'facts'");
         }
         this.adoptOldClass();
         // Keepalive pings are answered without waking the room.
@@ -227,7 +231,7 @@ export class PlazaRoom extends DurableObject<Env> {
             const game = this.activeGame();
             if (game === null) return { error: 'Open a game first.', status: 400 };
             if (action.op === 'start') {
-                const failed = this.startWarmup(game);
+                const failed = this.startWarmup(game, action.type ?? 'facts');
                 if (failed) return { error: failed, status: 400 };
             } else {
                 this.sql.exec('UPDATE warmups SET active = 0 WHERE game_id = ?', game);
@@ -758,13 +762,18 @@ export class PlazaRoom extends DurableObject<Env> {
             .map(row => ({ ...row, targets: JSON.parse(row.targets) }));
     }
 
-    // Starts afresh for the students who are here; anyone who arrives later is given a fact when they do.
-    private startWarmup(game: string): string | null {
+    private warmupKind(game: string): WarmupKind {
+        const kind = this.sql.exec<{ kind: string }>('SELECT kind FROM warmups WHERE game_id = ?', game).toArray()[0]?.kind;
+        return isWarmupKind(kind) ? kind : 'facts';
+    }
+
+    // Starts afresh for the students who are here; anyone who arrives later is given a part when they do.
+    private startWarmup(game: string, kind: WarmupKind): string | null {
         const here = this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey);
         if (here.length < 2) return 'At least two students need to be in the plaza.';
         this.sql.exec('DELETE FROM warmup_players WHERE game_id = ?', game);
-        this.sql.exec('INSERT INTO warmups (game_id, active, started) VALUES (?, 1, ?) ON CONFLICT (game_id) DO UPDATE SET active = 1, started = excluded.started', game, Date.now());
-        for (const [key, assignment] of assignWarmup(here)) {
+        this.sql.exec('INSERT INTO warmups (game_id, active, started, kind) VALUES (?, 1, ?, ?) ON CONFLICT (game_id) DO UPDATE SET active = 1, started = excluded.started, kind = excluded.kind', game, Date.now(), kind);
+        for (const [key, assignment] of (kind === 'identity' ? assignIdentities(here) : kind === 'pairs' ? assignPairs(here) : assignWarmup(here))) {
             this.sql.exec('INSERT INTO warmup_players (game_id, student_key, fact, targets) VALUES (?, ?, ?, ?)', game, key, assignment.fact, JSON.stringify(assignment.targets));
         }
         this.sendWarmupToAll(game);
@@ -773,19 +782,29 @@ export class PlazaRoom extends DurableObject<Env> {
 
     private warmupView(game: string, studentKey: string): WarmupView | null {
         if (!this.warmupActive(game)) return null;
+        const kind = this.warmupKind(game);
         let players = this.warmupPlayers(game);
         let me = players.find(player => player.student_key === studentKey);
         if (!me) {
-            // Arrived after the start: a fact already in play, so there is someone to find.
-            const late = assignLateJoiner(players.map(player => player.fact));
+            // Arrived after the start: a part that fits with those already in play, so there is someone to find.
+            const inPlay = players.map(player => player.fact);
+            const late = kind === 'identity' ? assignLateIdentity(inPlay, players.map(player => player.student_key))
+                : kind === 'pairs' ? assignLatePair(inPlay) : assignLateJoiner(inPlay);
             if (!late) return null;
             this.sql.exec('INSERT INTO warmup_players (game_id, student_key, fact, targets) VALUES (?, ?, ?, ?)', game, studentKey, late.fact, JSON.stringify(late.targets));
             players = this.warmupPlayers(game);
             me = players.find(player => player.student_key === studentKey)!;
         }
+        const open = me.step < me.targets.length;
+        const classmate = this.rosterNames(game).get(me.targets[0]) ?? 'a classmate';
+        const card = kind === 'identity' ? { fact: `You are ${identityById(me.fact)?.name ?? '?'}. Do not say your name! Answer yes or no.`,
+            task: `Find out who ${classmate} is. Ask yes or no questions. Then type their secret name.` }
+            : kind === 'pairs' ? { fact: `Your word is ${me.fact}.`, task: `Find the person with the word that goes with ${me.fact}. Then type their name.` }
+            : { fact: factById(me.fact)?.mine ?? '', task: `Find someone who ${factById(me.targets[me.step])?.find ?? ''}.` };
         return {
-            fact: factById(me.fact)?.mine ?? '',
-            task: me.step < me.targets.length ? `Find someone who ${factById(me.targets[me.step])?.find ?? ''}.` : null,
+            kind,
+            fact: card.fact,
+            task: open ? card.task : null,
             step: me.step, of: me.targets.length,
             team: { done: players.reduce((sum, player) => sum + player.step, 0), total: players.reduce((sum, player) => sum + player.targets.length, 0) },
         };
@@ -813,9 +832,19 @@ export class PlazaRoom extends DurableObject<Env> {
         const now = Date.now();
         if (now - me.last_wrong < WRONG_ANSWER_WAIT_MS) return reply(false, true);
         const names = this.rosterNames(seat.game);
-        const holders = players.filter(player => player.fact === me.targets[me.step] && player.student_key !== seat.studentKey)
-            .map(player => names.get(player.student_key) ?? '').filter(Boolean);
-        if (!answerMatches({ id: 'warmup', text: '', accept: acceptedNames(holders, [...names.values()]) }, typed)) {
+        let right: boolean;
+        if (view.kind === 'identity') {
+            // The secret identity of the classmate they were asked about
+            const partner = players.find(player => player.student_key === me.targets[me.step]);
+            const identity = partner && identityById(partner.fact);
+            right = !!identity && answerMatches({ id: 'warmup', text: '', accept: identity.accept }, typed);
+        } else {
+            // The name of a classmate who has the fact (or word) being looked for; never one's own.
+            const holders = players.filter(player => player.fact === me.targets[me.step] && player.student_key !== seat.studentKey)
+                .map(player => names.get(player.student_key) ?? '').filter(Boolean);
+            right = answerMatches({ id: 'warmup', text: '', accept: acceptedNames(holders, [...names.values()]) }, typed);
+        }
+        if (!right) {
             this.sql.exec('UPDATE warmup_players SET last_wrong = ? WHERE game_id = ? AND student_key = ?', now, seat.game, seat.studentKey);
             return reply(false);
         }
@@ -832,8 +861,11 @@ export class PlazaRoom extends DurableObject<Env> {
         const names = this.rosterNames(game);
         return {
             active: this.warmupActive(game),
+            kind: this.warmupKind(game),
             players: players.map(player => ({ studentKey: player.student_key, name: names.get(player.student_key) ?? 'Student',
-                fact: factById(player.fact)?.mine ?? '', found: player.step, of: player.targets.length })),
+                fact: this.warmupKind(game) === 'identity' ? `${identityById(player.fact)?.name ?? '?'} (finds out about ${names.get(player.targets[0]) ?? '?'})`
+                    : this.warmupKind(game) === 'pairs' ? `word: ${player.fact} (looks for ${player.targets[0]})`
+                    : factById(player.fact)?.mine ?? '', found: player.step, of: player.targets.length })),
             team: { done: players.reduce((sum, player) => sum + player.step, 0), total: players.reduce((sum, player) => sum + player.targets.length, 0) },
         };
     }

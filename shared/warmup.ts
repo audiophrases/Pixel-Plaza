@@ -2,6 +2,8 @@
 // classmates who have other facts, by asking around and typing the classmate's name. Nobody's real life is involved.
 // Plain data and functions, so the worker, the page and the tests use the same file.
 
+import type { WarmupKind } from './warmupKinds.ts';
+
 export type Fact = { id: string; mine: string; find: string };
 
 export const FACTS: Fact[] = [
@@ -77,6 +79,7 @@ export function assignLateJoiner(inUse: readonly string[], random: () => number 
 
 // What one student is shown: their own fact and the one they are looking for now.
 export type WarmupView = {
+    kind: WarmupKind;
     fact: string;                 // "You have a cat."
     task: string | null;          // "Find someone who plays football." or null when they have found everyone
     step: number;                 // people found so far

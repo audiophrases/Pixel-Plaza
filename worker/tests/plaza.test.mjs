@@ -12,6 +12,7 @@ import { spawn } from 'node:child_process';
 import { sha256Hex } from '../rules.ts';
 import { castanyada } from '../../shared/campaign.ts';
 import { FACTS } from '../../shared/warmup.ts';
+import { identityById } from '../../shared/warmupKinds.ts';
 
 const root = path.join(import.meta.dirname, '..', '..');
 const wrangler = path.join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
@@ -1183,6 +1184,84 @@ test('chapter 3: the thief hides the chestnuts, and the class opens the cellar w
         assert.equal((await result()).correct, true);
         await pause(300);
         assert.ok(lastQuest(solver.studentKey).objectives.some(item => item.id === 'report-3' && item.optional), 'the written bonus opens last');
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});
+
+test('the other warm-ups: Who am I? and Find your pair', { timeout: 180000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        PIN = (await api(base, '/api/teacher/game', { session, body: { name: '3A', randomNames: false } })).body.pin;
+        const players = {};
+        for (const token of ['signed-a', 'signed-b', 'signed-c', 'roger-1']) {
+            const socket = await enter(base, token, null);
+            sockets.push(socket);
+            players[students[token].studentKey] = socket;
+        }
+        await pause(300);
+        const start = type => api(base, '/api/teacher/warmup', { session, body: { op: 'start', type } });
+        const view = async key => (await players[key].next(message => message.t === 'warmup' && message.warmup, 'warm-up')).warmup;
+        const answer = (key, text) => players[key].send({ t: 'warmup-answer', text });
+        const result = key => players[key].next(message => message.t === 'warmup-answered', 'result');
+        const names = { stu_a: 'Alex', stu_b: 'Sam', stu_c: 'Chris', stu_r1: 'Roger' };
+
+        // Who am I?: you hold a secret identity, and find out who one classmate is by asking.
+        const started = (await start('identity')).body.warmup;
+        assert.equal(started.kind, 'identity');
+        const mine = {};
+        for (const key of Object.keys(players)) {
+            const card = await view(key);
+            assert.equal(card.kind, 'identity');
+            assert.match(card.fact, /^You are .*Do not say your name!/);
+            assert.match(card.task, /^Find out who \w+ is\./);
+            mine[key] = card;
+        }
+        // The teacher sees who is who and who asks about whom; the secret is not in anyone else's messages.
+        const rows = Object.fromEntries(started.players.map(player => [player.studentKey, player.fact]));
+        const secretOf = key => IDENTITIES_BY_NAME(rows[key].split(' (')[0]);
+        function IDENTITIES_BY_NAME(name) { return ['messi', 'ronaldo', 'nadal', 'gasol', 'shakira', 'rosalia', 'taylor', 'beyonce', 'mozart', 'picasso', 'dali', 'gaudi', 'einstein', 'curie', 'davinci', 'columbus', 'cleopatra', 'napoleon', 'batman', 'superman', 'spiderman', 'hermione', 'harry', 'vader', 'sherlock', 'mario', 'pikachu', 'shrek', 'elsa', 'simba', 'sponge', 'mickey', 'yamal'].find(id => identityById(id).name === name); }
+        const asker = 'stu_a';
+        const target = Object.keys(names).find(key => mine[asker].task.includes(`who ${names[key]} is`));
+        assert.ok(target && target !== asker, 'asked about a classmate, never themselves');
+        answer(asker, 'Batman or nobody');
+        assert.equal((await result(asker)).correct, secretOf(target) === 'batman');
+        await pause(3200);
+        answer(asker, identityById(secretOf(target)).name);
+        const found = await result(asker);
+        assert.ok(found.correct || found.wait === false);
+        if (!found.correct) { await pause(3200); answer(asker, identityById(secretOf(target)).name); assert.equal((await result(asker)).correct, true); }
+
+        // Find your pair: two words that go together; type the name of the person who has the other.
+        const pairsStarted = (await start('pairs')).body.warmup;
+        assert.equal(pairsStarted.kind, 'pairs');
+        const cards = {};
+        for (const key of Object.keys(players)) {
+            cards[key] = (await players[key].next(message => message.t === 'warmup' && message.warmup && message.warmup.kind === 'pairs', 'pair card')).warmup;
+            assert.match(cards[key].fact, /^Your word is \w+\./);
+        }
+        const wordOf = key => cards[key].fact.match(/word is (\w+)\./)[1];
+        const partnerWords = { salt: 'pepper', pepper: 'salt', fish: 'chips', chips: 'fish', bread: 'butter', butter: 'bread', black: 'white', white: 'black', day: 'night', night: 'day', knife: 'fork', fork: 'knife', hot: 'cold', cold: 'hot', up: 'down', down: 'up', left: 'right', right: 'left', sun: 'moon', moon: 'sun', boy: 'girl', girl: 'boy', cat: 'mouse', mouse: 'cat', pen: 'paper', paper: 'pen', shoes: 'socks', socks: 'shoes', summer: 'winter', winter: 'summer', yes: 'no', no: 'yes', in: 'out', out: 'in', north: 'south', south: 'north' };
+        const you = 'stu_b';
+        const partner = Object.keys(names).find(key => key !== you && wordOf(key) === partnerWords[wordOf(you)]);
+        assert.ok(partner, 'someone has the word that goes with yours');
+        const other = Object.keys(names).find(key => key !== you && key !== partner && wordOf(key) !== partnerWords[wordOf(you)]);
+        answer(you, names[other]);
+        assert.equal((await result(you)).correct, false, 'a classmate with the wrong word');
+        await pause(3200);
+        answer(you, names[partner]);
+        assert.equal((await result(you)).correct, true);
+        const done = (await players[you].next(message => message.t === 'warmup' && message.warmup && message.warmup.step === 1, 'done')).warmup;
+        assert.equal(done.task, null);
     } finally {
         for (const socket of sockets) socket.ws.close();
         await plaza.stop();
