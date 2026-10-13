@@ -60,7 +60,7 @@ export default class LobbyScene extends Phaser.Scene {
       this.walls.add(rect);
     }
 
-    this.addForegrounds();
+    this.addWalkBehind();
     this.setVision(this.connection.vision);
 
     // F2 shows where the walls (red) and named places (blue) are, to tune them against the art.
@@ -70,7 +70,7 @@ export default class LobbyScene extends Phaser.Scene {
     overlay.lineStyle(3, 0x3399ff, 1);
     for (const { rect: [x, y, w, h] } of worldZones) overlay.strokeRect(x, y, w, h);
     overlay.lineStyle(3, 0x00ff66, 1);
-    for (const piece of plazaMap.foreground) {
+    for (const piece of plazaMap.walkBehind) {
       if (piece.shape === 'ellipse') overlay.strokeEllipse((piece.rect[0] + piece.rect[2] / 2) * SCALE, (piece.rect[1] + piece.rect[3] / 2) * SCALE, piece.rect[2] * SCALE, piece.rect[3] * SCALE);
       else overlay.strokePoints(piece.points.map(([x, y]) => new Phaser.Math.Vector2(x * SCALE, y * SCALE)), true);
     }
@@ -86,10 +86,10 @@ export default class LobbyScene extends Phaser.Scene {
 
   // Trees and lamp posts are cut out of the background and drawn again at the depth of
   // the ground they stand on, so a player north of one is hidden behind it.
-  private addForegrounds() {
+  private addWalkBehind() {
     const source = this.textures.get('plaza_bg').getSourceImage() as HTMLImageElement;
     const pixels = source.width / ART; // the picture's own pixels per art pixel
-    plazaMap.foreground.forEach((piece, index) => {
+    plazaMap.walkBehind.forEach((piece, index) => {
       const points = piece.shape === 'poly' ? piece.points : null;
       const [x, y, w, h] = piece.shape === 'ellipse' ? piece.rect : [
         Math.min(...points!.map(point => point[0])), Math.min(...points!.map(point => point[1])),
