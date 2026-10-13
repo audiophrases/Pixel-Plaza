@@ -245,6 +245,11 @@ export default function Game() {
           </div>
         </header>
 
+        {status.state === 'stopped' && status.message && <div className="class-ended glass-panel" role="alert">
+          <p>{status.message}</p>
+          <button type="button" className="btn btn-primary" onClick={() => navigate('/')}>Back to the start</button>
+        </div>}
+
         {quest && <Journal quest={quest} feedback={answered}
           onAnswer={(objective, choice) => connection?.send({ t: 'answer', objective, choice })} />}
 

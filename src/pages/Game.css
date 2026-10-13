@@ -61,6 +61,23 @@
   overflow: hidden;
 }
 
+.class-ended {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(360px, calc(100vw - 2rem));
+  padding: 1.25rem;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.95);
+  pointer-events: auto;
+}
+
+.class-ended p {
+  margin: 0 0 1rem;
+  font-weight: 600;
+}
+
 .chat-handle {
   display: flex;
   align-items: center;

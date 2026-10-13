@@ -68,6 +68,8 @@ export default class LobbyScene extends Phaser.Scene {
       else overlay.strokePoints(piece.points.map(([x, y]) => new Phaser.Math.Vector2(x * SCALE, y * SCALE)), true);
     }
     this.input.keyboard?.on('keydown-F2', () => overlay.setVisible(!overlay.visible));
+    // Phaser swallows the click, so the chat box would keep the keyboard: hand it back.
+    this.input.on('pointerdown', () => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); });
 
     this.syncRoster();
     const unsubscribe = this.connection.subscribe(event => this.onPlazaEvent(event));
