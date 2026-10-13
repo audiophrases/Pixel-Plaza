@@ -69,12 +69,21 @@ The PIN changes every time the class is opened, so last lesson's PIN no longer w
 
 The class can play on the teacher's laptop instead, over the school network. Students still sign in with Google online, because Google sign-in needs HTTPS, and are then sent to the laptop with their PinPlay session, so their name comes with them.
 
-Once on the laptop: install Node.js and copy the project. The first time `classroom.bat` runs it asks for the teacher password (the same as online) and saves its hash in `.dev.vars`; delete that file to enter it again. Then, each lesson:
+### Setting up a laptop (once)
 
-1. Double-click `classroom.bat` (or run `npm run classroom`) and keep the window open. The batch file also opens the teacher controls when the server is ready. It prints the laptop's address on the school network, such as `http://192.168.1.20:8787`. The first time, allow Windows to let it through the firewall on private networks.
-2. On the laptop, open `http://localhost:8787/teacher` and sign in. This tells the online site to send students to the laptop. Then press **Open class** and write the class PIN it shows on the board.
-3. Students open the online site as usual and sign in with Google. They go straight to the laptop, type the class PIN there, and choose their avatar.
-4. **Close class** stops sending students to the laptop. The link also ends by itself after 12 hours. Until then, a student who signs in online is sent to the laptop's address even if it is switched off.
+1. Install Node.js (nodejs.org) and Git, then `git clone https://github.com/audiophrases/Pixel-Plaza.git`. To update later, run `git pull` in that folder.
+2. Double-click `classroom.bat`. The first time it asks for the teacher password. **Use the same password as the online site** (the online site only accepts the link from a laptop that knows it), and it saves a hash in `.dev.vars`. Allow Windows to let it through the firewall on private networks.
+3. Add your OpenAI key to `.dev.vars` as a line `OPENAI_API_KEY=sk-...` (the key is a secret, so it is not in git). Without it chat still works, but every message waits for you and there are no grammar hints. `PINPLAY_API_URL` is already written there by the setup.
+4. Progress (games, avatars, chat) is kept on that laptop in `.wrangler/classroom`, and is not in git, so it does not move to another laptop by itself.
+
+### Each lesson
+
+1. Double-click `classroom.bat` and keep the window open. It installs and rebuilds anything new, opens the teacher controls, and prints the laptop's address on the school network, such as `http://192.168.1.20:8787`.
+2. In the teacher controls (`http://localhost:8787/teacher`, on the laptop itself), sign in. That tells the online site to send students to the laptop.
+3. **Games:** pick an existing game from the list and press Open, or make a **New game** (name it, choose Random names and how far students see). A game keeps its own PIN, chat, avatars' positions and story, and you can close and reopen it in any later lesson. One game is open at a time.
+4. Write the game's PIN on the board. Students open the online site, sign in with Google, are sent to the laptop, type the PIN, and (with random names) choose a name to keep.
+5. When most of the class is in: **Start the warm-up** for the first few minutes, then **Start** the campaign (first time) or just let it resume; press **Start the next chapter** when the class is ready for the next one, so the thief is chosen from students who are there. Use **Reveal the next news** if the class is stuck, and **Vision** to widen or narrow how far students see.
+6. **Close class** saves everything and sends students out. Students who were absent join the game with its PIN the next time you open it.
 
 `PLAZA_LAN_URL` overrides the detected address, for example when the laptop has more than one network. `PORT` changes the port. Progress on the laptop is kept in `.wrangler/classroom`, separate from the online plaza: avatars chosen online are not carried over, and students choose them again the first time.
 
