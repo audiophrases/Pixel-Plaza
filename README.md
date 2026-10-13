@@ -89,6 +89,10 @@ The class can play on the teacher's laptop instead, over the school network. Stu
 
 The laptop's address is plain HTTP, so student sessions cross the school network unencrypted. Sign in to the teacher controls on the laptop itself (`localhost`), not from another device.
 
+## Editing the map (theme studio)
+
+Open `/studio` (for example `http://localhost:8787/studio`). It opens the plaza theme: draw or move **blocks** (where nobody can walk), **walk-behind areas** (trees and lamps that hide a student standing behind them, with a ground line), **zones** (named places for the story) and the **start**. **Check where students can walk** shows any place that is cut off, and **Walk around it** lets you try it. Then **Download the theme file** and run `npm run theme -- plaza`: it checks the newest `plaza.json` in your Downloads folder and installs it in `shared/themes/`. Restart the server to play it. `git checkout shared/themes/plaza.json` puts the old one back.
+
 ## Names in the plaza
 
 Each game is created with **Random names** on (the default) or off:

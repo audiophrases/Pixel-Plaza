@@ -12,7 +12,8 @@
     "test": "npm run build && node --test \"worker/tests/*.test.mjs\"",
     "deploy": "npm run build && wrangler deploy",
     "tester": "node scripts/tester.mjs",
-    "check:studio": "node scripts/check-studio.mjs"
+    "check:studio": "node scripts/check-studio.mjs",
+    "theme": "node scripts/install-theme.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",
