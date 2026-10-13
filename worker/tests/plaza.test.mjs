@@ -53,7 +53,8 @@ async function startPlaza(pinPlayUrl, persistTo, vars = {}) {
         '--persist-to', persistTo, '--show-interactive-dev-session=false',
         '--var', `CREATE_PASSWORD_HASH:${await sha256Hex(PASSWORD)}`,
         '--var', `PINPLAY_API_URL:${pinPlayUrl}`,
-        ...Object.entries(vars).flatMap(([key, value]) => ['--var', `${key}:${value}`])], {
+        // No OpenAI key unless a test brings its own: the one in .dev.vars must not change the results.
+        ...Object.entries({ OPENAI_API_KEY: '', ...vars }).flatMap(([key, value]) => ['--var', `${key}:${value}`])], {
         cwd: root, env: { ...process.env, WRANGLER_SEND_METRICS: 'false' }, stdio: ['ignore', 'pipe', 'pipe']
     });
     let log = '';
@@ -379,6 +380,9 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
         const { base } = plaza;
         const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
         PIN = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body.pin;
+        // With an OpenAI key the default is to post what it clears; these first steps want the teacher as the gate.
+        assert.equal((await api(base, '/api/teacher/status', { session })).body.mode, 'review');
+        assert.equal((await api(base, '/api/teacher/mode', { session, body: { mode: 'approve' } })).body.mode, 'approve');
         alex = await enter(base, 'signed-a', null);
         const entries = async () => (await api(base, '/api/teacher/status', { session })).body.entries;
         const send = async text => {
@@ -487,6 +491,7 @@ test('grammar hints advise, never block, and the teacher sees what the student c
         const { base } = plaza;
         const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
         PIN = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body.pin;
+        await api(base, '/api/teacher/mode', { session, body: { mode: 'approve' } }); // these steps want the teacher as the gate
         alex = await enter(base, 'signed-a', null);
         const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
         const hint = async (id, text) => {

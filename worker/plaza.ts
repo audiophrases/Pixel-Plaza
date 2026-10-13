@@ -463,8 +463,10 @@ export class PlazaRoom extends DurableObject<Env> {
         };
     }
 
+    // With an OpenAI key, nearby chat that OpenAI cleared posts at once and the teacher reviews afterwards,
+    // unless the teacher chose to approve everything first. Without a key every message waits.
     private mode(): ChatMode {
-        return this.setting('mode') === 'review' ? 'review' : 'approve';
+        return this.setting('mode') !== 'approve' && this.env.OPENAI_API_KEY ? 'review' : 'approve';
     }
 
     private isOpen(): boolean {

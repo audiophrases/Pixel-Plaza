@@ -58,7 +58,7 @@ Configure PinPlay's roster policy (**PinPlay → Students**) for the intended cl
 1. Open `/teacher`, sign in with the teacher password, and press **Open class**. The page shows a new 6-digit class PIN for this lesson; write it on the board.
 2. Students open the site, type the class PIN, and sign in with their school Google account (once per device; the session lasts as long as PinPlay's).
 3. Approve or reject chat as it arrives: **A** and **R** act on the oldest waiting message, **Approve all** clears the queue, and a beep and the tab title count what is waiting. A message that has already posted can be taken down with **Remove**, and it vanishes from every student's chat. **Mute student** follows the student across reconnects and lessons.
-   With an OpenAI key (see *AI moderation*), switch **How chat is moderated** to *post nearby chat after OpenAI checks it*: messages OpenAI cleared appear at once and you review afterwards. Whispers, flagged messages and anything it could not check still wait for you.
+   With an OpenAI key (see *AI moderation*), **How chat is moderated** starts on *post nearby chat after OpenAI checks it*: messages OpenAI cleared appear at once and you review afterwards. Whispers, flagged messages and anything it could not check still wait for you. Choose *approve every message first* to make every message wait. Without a key, every message waits.
 4. **Close class** at the end. Pending chat is rejected and nobody new can join.
 
 A dropped connection (a closed lid, Wi-Fi roaming) reconnects by itself. Opening the plaza in a second tab moves the student's avatar there and tells the first tab why.
