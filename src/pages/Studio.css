@@ -1,0 +1,45 @@
+.studio { display: flex; height: 100vh; background: #1f2430; color: #222; font-size: 0.9rem; }
+.studio-stage { flex: 1; min-width: 0; }
+.studio-scroll { width: 100%; height: 100%; overflow: auto; background: #11141b; }
+.studio-canvas { display: block; touch-action: none; }
+.studio-canvas.tool-block, .studio-canvas.tool-zone, .studio-canvas.tool-ellipse, .studio-canvas.tool-poly, .studio-canvas.tool-spawn { cursor: crosshair; }
+
+.studio-canvas .block { fill: rgba(255, 0, 0, 0.3); stroke: rgba(255, 220, 0, 0.9); stroke-width: 1; cursor: move; }
+.studio-canvas .zone { fill: rgba(60, 140, 255, 0.08); stroke: rgba(60, 140, 255, 0.95); stroke-width: 2; cursor: move; }
+.studio-canvas .behind { fill: rgba(0, 255, 120, 0.2); stroke: rgba(0, 255, 120, 0.95); stroke-width: 1.5; cursor: move; }
+.studio-canvas .ground { stroke: #00ffd0; stroke-width: 1.5; stroke-dasharray: 5 3; }
+.studio-canvas .spawn { fill: rgba(255, 255, 255, 0.9); stroke: #1677ff; stroke-width: 3; cursor: move; }
+.studio-canvas .picked { stroke: #fff; stroke-width: 3; }
+.studio-canvas .zone-label { fill: #fff; stroke: #000; stroke-width: 0.5; paint-order: stroke; font-weight: 700; }
+.studio-canvas .draft { fill: rgba(255, 255, 255, 0.15); stroke: #fff; stroke-width: 2; stroke-dasharray: 6 3; }
+.studio-canvas .handle { fill: #fff; stroke: #1677ff; stroke-width: 2; cursor: nwse-resize; }
+.studio-canvas .vertex { fill: #fff; stroke: #1677ff; stroke-width: 2; cursor: move; }
+.studio-canvas .feet { fill: rgba(255, 0, 100, 0.5); stroke: #ff0066; }
+.studio-canvas .head { fill: #ffd6a5; stroke: #333; }
+.studio-canvas .body { fill: #4a6fa5; stroke: #333; }
+
+.studio-panel { width: 340px; flex: none; overflow-y: auto; padding: 0.8rem 1rem 2rem; background: #f6f7fb; }
+.studio-panel header { display: flex; justify-content: space-between; align-items: baseline; }
+.studio-panel h1 { margin: 0 0 0.5rem; font-size: 1.2rem; }
+.studio-panel h2 { margin: 1.1rem 0 0.4rem; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: #667; }
+.studio-panel button, .studio-panel select, .studio-panel input[type="text"], .studio-panel input:not([type]), .studio-panel input[type="number"] {
+  font: inherit; padding: 0.35rem 0.6rem; border: 1px solid #c5cad6; border-radius: 6px; background: white;
+}
+.studio-panel button { cursor: pointer; font-weight: 600; }
+.studio-panel button:disabled { opacity: 0.45; cursor: default; }
+.studio-panel button.primary { background: #1677ff; border-color: #1677ff; color: white; }
+.studio-panel button.on { background: #222; border-color: #222; color: white; }
+.studio-row { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 0.4rem 0; }
+.studio-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+.studio-hint { color: #667; font-size: 0.8rem; margin: 0.3rem 0; }
+.studio-field { display: grid; gap: 0.2rem; margin: 0.4rem 0; font-size: 0.8rem; color: #445; }
+.studio-field input, .studio-field select { width: 100%; box-sizing: border-box; }
+.studio-zoom { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; font-size: 0.8rem; }
+.studio-report .ok { color: #237804; font-weight: 600; }
+.studio-report ul, .studio-errors, .studio-warnings { margin: 0.4rem 0; padding-left: 1.1rem; }
+.studio-report li { color: #a8071a; }
+.studio-errors li { color: #a8071a; font-weight: 600; }
+.studio-warnings li { color: #ad6800; }
+.studio-message { padding: 0.5rem 0.6rem; border-radius: 6px; background: #e6f4ff; color: #0958d9; }
+.file { position: relative; display: inline-block; padding: 0.35rem 0.6rem; border: 1px solid #c5cad6; border-radius: 6px; background: white; font-weight: 600; cursor: pointer; overflow: hidden; }
+.file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }

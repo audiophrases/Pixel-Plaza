@@ -147,7 +147,7 @@ export default function Teacher() {
   return <main className="teacher-page">
     <header className="teacher-header">
       <div><h1>Teacher controls</h1><p>{status?.mode === 'review' ? 'Nearby chat posts after an OpenAI check. Review it here and remove anything unsuitable.' : 'All student chat waits for your approval.'}</p></div>
-      <Link to="/">Student entrance</Link>
+      <span><Link to="/studio">Theme studio</Link> · <Link to="/">Student entrance</Link></span>
     </header>
     {!token || !status ? <form className="teacher-signin" onSubmit={event => { event.preventDefault(); void signIn(); }}>
       <label htmlFor="teacher-password">Teacher password (the same as PinPlay)</label>
