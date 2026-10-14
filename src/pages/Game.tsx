@@ -290,6 +290,7 @@ export default function Game() {
           onAnother={() => connection?.send({ t: 'reroll' })} onKeep={() => connection?.send({ t: 'keep' })} />}
 
         {quest && <Journal quest={quest} feedback={answered}
+          onTurn={turn => { connection?.send(turn); }}
           onAccept={(objective, changePartner) => connection?.send({ t: 'quest-accept', objective, changePartner })}
           onAnswer={(objective, text) => connection?.send({ t: 'answer', objective, text })} />}
 

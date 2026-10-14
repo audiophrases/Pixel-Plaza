@@ -6,12 +6,14 @@ import type { WarmupKind } from '../../shared/warmupKinds';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import './Teacher.css';
 import { MAP_SIZE, plazaMap } from '../../shared/plazaMap';
+import type { InterviewView } from '../../shared/campaign';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string };
 type CampaignInfo = {
   id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string;
   reveals: { shown: number; total: number; next: string | null };
   reports: { studentKey: string; objective: string; text: string; partner?: string }[];
+  interviews?: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
   board?: { id: string; text: string; teacherReleased: boolean; released: boolean; accepted: number; completed: number }[];
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
 };
@@ -294,6 +296,7 @@ export default function Teacher() {
             {status.campaigns.map(campaign => <button key={campaign.id} className="btn btn-primary"
               onClick={() => void action('campaign', { op: 'start', campaign: campaign.id })}>Start {campaign.title}</button>)}
           </div>
+          <p>Choose <strong>Castanyada: Witness Investigations</strong> to require approved clue exchanges before students can submit conclusions. Identifying the thief requires two witnesses.</p>
         </> : <>
           <p><strong>{status.campaign.title}</strong> · chapter {status.campaign.chapter + 1} of {status.campaign.chapters}: {status.campaign.chapterTitle} ·{' '}
             {{ active: 'in progress', chapter_complete: 'ready to advance: students can keep working', campaign_complete: 'finished' }[status.campaign.status]}</p>
@@ -316,6 +319,29 @@ export default function Teacher() {
               <span><strong>{who(report.studentKey, status.campaign?.players.find(player => player.studentKey === report.studentKey)?.name ?? 'Student')}</strong>{report.partner ? ` · partner: ${report.partner}` : ''}: {report.text}</span>
             </li>)}</ul>
           </>}
+          {!!status.campaign.interviews?.length && <details className="teacher-interviews"><summary>Witness exchanges ({status.campaign.interviews.length})</summary>
+            <p>Review questions and replies in the chat queue. These records verify participation; you assess the language and reasoning.</p>
+            {status.campaign.interviews.map(interview => <article key={interview.id} className="teacher-entry">
+              <strong>{who(interview.studentKey, status.campaign?.players.find(p => p.studentKey === interview.studentKey)?.name ?? 'Student')} → {who(interview.witnessKey, interview.name)}</strong>
+              <p>{interview.task}</p>
+              <p>Question ({interview.questionStatus}): {interview.question}</p>
+              {interview.shared && <p>Investigator evidence: {interview.shared}</p>}
+              {interview.answer && <p>Reply ({interview.answerStatus}): {interview.answer}</p>}
+              {interview.evidence && <p>Witness evidence: {interview.evidence}</p>}
+              <div className="teacher-actions">
+                {interview.questionStatus === 'pending' && <>
+                  <button onClick={() => void action('review', { id: interview.questionId, approve: true })}>Approve question</button>
+                  <button onClick={() => void action('review', { id: interview.questionId, approve: false })}>Reject question</button>
+                </>}
+                {interview.answerStatus === 'pending' && <>
+                  <button onClick={() => void action('review', { id: interview.answerId, approve: true })}>Approve reply</button>
+                  <button onClick={() => void action('review', { id: interview.answerId, approve: false })}>Reject reply</button>
+                </>}
+                {interview.questionStatus === 'approved' && <button onClick={() => void action('review', { id: interview.questionId, approve: false })}>Remove question</button>}
+                {interview.answerStatus === 'approved' && <button onClick={() => void action('review', { id: interview.answerId, approve: false })}>Remove reply</button>}
+              </div>
+            </article>)}
+          </details>}
           {status.campaign.status !== 'campaign_complete' && status.campaign.reveals.next && <p>Next news: <em>{status.campaign.reveals.next}</em></p>}
           {status.campaign.players.length > 0 && <ul>
             {status.campaign.players.map(player => <li key={player.studentKey}>
@@ -356,7 +382,7 @@ export default function Teacher() {
         {status.entries.map(entry => <article key={entry.id} className={`teacher-entry${entry === oldest ? ' teacher-oldest' : ''}`}>
           <div><strong>{who(entry.studentKey, entry.sender)}</strong>{entry.target && <> → <strong>{entry.target}</strong> <em>(whisper)</em></>} <small>{new Date(entry.timestamp).toLocaleTimeString()} · {entry.status}</small></div>
           <p>{entry.text}</p>
-          {entry.note && <p className="teacher-note">Grammar hint: {entry.note}</p>}
+          {entry.note && <p className="teacher-note">{entry.note.startsWith('Investigation:') ? entry.note : `Grammar hint: ${entry.note}`}</p>}
           {entry.flag && <p className="teacher-flag">{entry.status === 'blocked' ? 'Blocked by moderation' : 'Not checked by moderation'}: {entry.flag}</p>}
           <div className="teacher-actions">
             {entry.status === 'pending' && <>

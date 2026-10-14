@@ -95,3 +95,9 @@
 .journal-wrong { color: #a8071a; font-weight: 700; }
 .journal-ending { border-left-color: #52c41a; background: #f6ffed; font-weight: 700; }
 .journal-board { border-left-color: #389e8b; background: #effaf6; }.journal-board-card { border-top: 1px solid #bfddd2; margin-top: .8rem; padding-top: .8rem; }.journal-partner { line-height: 1.6; }.journal-partner button { display: block; margin-top: .4rem; }
+.journal-investigation { border: 1px solid #a7c1c4; border-radius: 8px; padding: .7rem; margin: .6rem 0; background: #edf7f6; }
+.journal-investigation label, .journal-evidence-form { display: grid; gap: .4rem; margin: .5rem 0; }
+.journal-investigation select, .journal-investigation textarea { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; padding: .4rem; border: 1px solid #8ba8ad; border-radius: 5px; }
+.journal-transcript { border-left: 3px solid #51848b; padding-left: .6rem; margin: .6rem 0; overflow-wrap: anywhere; }
+.journal-transcript small { color: #465e67; }
+.journal-answer button:disabled { opacity: .55; cursor: default; }

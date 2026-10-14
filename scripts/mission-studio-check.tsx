@@ -58,7 +58,8 @@ const button = (label: string) => {
     assert.ok(found, `Button exists: ${label}`); return found;
 };
 const field = (label: string, scope: ParentNode = document) => {
-    const found = [...scope.querySelectorAll('label')].find(l => l.querySelector('span')?.textContent === label)?.querySelector('input,textarea,select');
+    const found = [...scope.querySelectorAll('label')].find(l => l.querySelector('span')?.textContent === label)?.querySelector('input,textarea,select')
+        ?? [...scope.querySelectorAll('input,textarea,select')].find(input => input.getAttribute('aria-label') === label || input.closest('label')?.firstChild?.textContent?.trim() === label);
     assert.ok(found, `Field exists: ${label}`); return found as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 };
 const edit = async (label: string, value: string, scope: ParentNode = document) => {
@@ -145,10 +146,11 @@ await act(async () => { root.unmount(); });
 const { default: Journal } = await import('../src/components/Journal');
 const journalRoot = createRoot(document.getElementById('root')!);
 const accepted: string[] = []; const reports: string[] = [];
+const turns: Record<string, unknown>[] = [];
 const quest: QuestView = { campaign: { id: 'test', title: 'Test' }, status: 'active', chapter: { index: 0, of: 1, title: 'Investigation', intro: 'Find evidence.', ending: null },
     role: { id: 'baker', name: 'Baker', card: 'Ask a witness.' }, clues: [], secret: null, thieves: null, objectives: [], team: { done: 0, total: 0 }, recap: null, finale: null,
     board: [{ id: 'interview', text: 'Interview the witness.', kind: 'report', activity: 'interview', state: 'waiting', reason: 'Finish your main mystery first.', partner: null }] };
-const renderJournal = async () => { await act(async () => { journalRoot.render(<Journal quest={structuredClone(quest)} feedback={null} onAnswer={(_id, text) => reports.push(text)} onAccept={(id, change) => accepted.push(change ? `${id}-replace` : id)} />); }); };
+const renderJournal = async () => { await act(async () => { journalRoot.render(<Journal quest={structuredClone(quest)} feedback={null} onTurn={turn => turns.push(turn)} onAnswer={(_id, text) => reports.push(text)} onAccept={(id, change) => accepted.push(change ? `${id}-replace` : id)} />); }); };
 await renderJournal();
 assert.equal(button('Accept quest').disabled, true);
 quest.board![0].state = 'available'; quest.board![0].reason = null;
@@ -164,6 +166,26 @@ await act(async () => { document.querySelector('form')!.dispatchEvent(new dom.wi
 assert.deepEqual(reports, [reportText]);
 quest.status = 'campaign_complete'; await renderJournal();
 assert.ok(!document.querySelector('form'), 'closed campaigns do not offer report submission');
+quest.status = 'active';
+quest.clues = [{ id: 'role-baker', from: 'job', text: 'No blue box came to the cafe.' }];
+quest.board![0].conversation = { required: 1, completed: 0, witnesses: [{ id: 'sam-socket', name: 'Sam' }] };
+quest.board![0].partner!.online = true;
+await renderJournal();
+await edit('Your report', 'My partner saw a delivery at the hotel.');
+assert.equal(button('Send report').disabled, true, 'a report waits for verified participation');
+await edit('Your question about this mystery', 'What did you see at the hotel?');
+await click('Send for teacher approval');
+assert.deepEqual(turns.at(-1), { t: 'interview-ask', objective: 'interview', witness: 'sam-socket', clue: 'role-baker', text: 'What did you see at the hotel?' });
+quest.board![0].conversation!.completed = 1;
+await renderJournal(); assert.equal(button('Send report').disabled, false, 'an approved exchange unlocks the report');
+quest.interviews = [{ id: 'incoming-1', objective: 'interview', task: 'Investigate the hotel delivery.', incoming: true, name: 'Chris', question: 'What did you see?', questionStatus: 'approved', answer: null, answerStatus: null, evidence: null, shared: 'The driver left a parcel at the hotel.' }];
+await renderJournal();
+assert.ok(document.body.textContent?.includes('The driver left a parcel at the hotel.'));
+await edit('Your reply: explain what your evidence tells you', 'No blue box came to the cafe.');
+await click('Send for teacher approval');
+assert.deepEqual(turns.at(-1), { t: 'interview-reply', id: 'incoming-1', clue: 'role-baker', text: 'No blue box came to the cafe.' });
+quest.interviews[0].answerStatus = 'pending'; await renderJournal();
+assert.ok(!document.querySelector('textarea[maxlength="200"]'), 'a pending reply cannot be resubmitted');
 await act(async () => { journalRoot.unmount(); });
 dom.window.close();
 console.log('Mission Studio UI: authoring, imports, reviewed live release, inspection, withdrawal and student quest board controls pass.');

@@ -5,7 +5,7 @@ export const MISSION_MAX_BYTES = 512_000;
 export type MissionEnvelope = { format: 'pixel-plaza-campaign'; schemaVersion: 1 | 2; campaign: Campaign };
 export type MissionIssue = { path: string; message: string };
 export type MissionValidation = { campaign: Campaign | null; errors: MissionIssue[]; warnings: MissionIssue[] };
-export const missionEnvelope = (campaign: Campaign): MissionEnvelope => ({ format: 'pixel-plaza-campaign', schemaVersion: campaign.chapters.some(c => c.objectives.some(o => o.requires || o.board || o.activity)) ? 2 : 1, campaign });
+export const missionEnvelope = (campaign: Campaign): MissionEnvelope => ({ format: 'pixel-plaza-campaign', schemaVersion: campaign.chapters.some(c => c.objectives.some(o => o.requires || o.board || o.activity || o.conversation)) ? 2 : 1, campaign });
 export const missionJson = (campaign: Campaign) => JSON.stringify(missionEnvelope(campaign), null, 2);
 export const missionId = (value: string) => /^[a-z][a-z0-9-]{0,63}$/.test(value);
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -65,13 +65,18 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
         const c = obj(value, path, ['id', 'title', 'intro', 'recap', 'ending', 'share', 'objectives', 'discoveries', 'reveals', 'roleClues', 'thieves']);
         const objectives: Objective[] = list(c.objectives, `${path}.objectives`, 100).map((value, j) => {
             const p = `${path}.objectives[${j}]`;
-            const o = obj(value, p, ['id', 'text', 'accept', 'answerThief', 'thiefKnows', 'answerRole', 'kind', 'after', 'optional', 'rewards', 'requires', 'board', 'activity']);
+            const o = obj(value, p, ['id', 'text', 'accept', 'answerThief', 'thiefKnows', 'answerRole', 'kind', 'after', 'optional', 'rewards', 'requires', 'board', 'activity', 'conversation']);
             const result: Objective = { id: id(o.id, `${p}.id`), text: str(o.text, `${p}.text`), accept: list(o.accept, `${p}.accept`, 30).map((v, k) => str(v, `${p}.accept[${k}]`, 120)) };
             for (const key of ['answerThief', 'thiefKnows', 'optional'] as const) if (o[key] !== undefined) result[key] = boolean(o[key], `${p}.${key}`);
             for (const key of ['after', 'answerRole'] as const) if (o[key] !== undefined) result[key] = id(o[key], `${p}.${key}`);
             if (o.kind !== undefined) { if (o.kind !== 'report') fail(`${p}.kind`, 'Only report is supported; omit kind for typed or name answers.'); else result.kind = 'report'; }
             if (o.rewards !== undefined) result.rewards = clues(o.rewards, `${p}.rewards`);
-            if (o.requires !== undefined || o.board !== undefined || o.activity !== undefined) {
+            if (o.conversation !== undefined) {
+                const conversation = obj(o.conversation, `${p}.conversation`, ['witnesses']);
+                if (conversation.witnesses !== 1 && conversation.witnesses !== 2) fail(`${p}.conversation.witnesses`, 'Choose one or two witnesses.');
+                else result.conversation = { witnesses: conversation.witnesses };
+            }
+            if (o.requires !== undefined || o.board !== undefined || o.activity !== undefined || o.conversation !== undefined) {
                 if (envelope.schemaVersion !== 2) fail(p, 'Graph prerequisites and board quests require schema version 2.');
             }
             if (o.requires !== undefined) {
@@ -164,6 +169,7 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
                 if (o.board.differentRole && o.board.partnerRole && o.board.roles?.length && o.board.roles.every(role => role === o.board?.partnerRole)) content(`${p}.board`, 'The partner role must differ from the audience role.');
             }
             if (o.activity && (!o.board || o.kind !== 'report' || o.answerRole || o.answerThief)) content(`${p}.activity`, 'Social activities require an optional board quest with report answers.');
+            if (o.activity && o.conversation?.witnesses === 2) content(`${p}.conversation`, 'Assigned-partner activities support one witness. Use two witnesses on a main or optional question.');
             for (const role of Object.keys(o.rewards ?? {})) if (!roleIds.has(role)) content(`${p}.rewards.${role}`, 'Role does not exist.');
         }
         for (const role of Object.keys(c.roleClues ?? {})) if (!roleIds.has(role)) content(`${path}.roleClues.${role}`, 'Role does not exist.');

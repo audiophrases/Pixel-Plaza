@@ -6,6 +6,8 @@ import { moderate } from './moderation.ts';
 import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
 import { MissionRepository, type MissionResult } from './missions.ts';
 import { QuestBoard, type BoardContext } from './questBoard.ts';
+import { Interviews } from './interviews.ts';
+import type { ConversationView, Objective, InterviewView } from '../shared/campaign.ts';
 import { LiveMissions, type LiveMissionResult } from './liveMissions.ts';
 import type { LiveMissionTarget } from '../shared/missionTypes.ts';
 import { boardWait, type Campaign } from '../shared/campaign.ts';
@@ -66,6 +68,7 @@ export type CampaignStatus = {
     reveals: { shown: number; total: number; next: string | null }; // prepared news the teacher can release
     players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
     reports: { studentKey: string; objective: string; text: string; partner?: string }[]; // what students wrote for the written questions
+    interviews: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
     board?: ReturnType<QuestBoard['summary']>;
 };
 
@@ -94,6 +97,8 @@ export class PlazaRoom extends DurableObject<Env> {
     private sql: SqlStorage;
     private missions: MissionRepository;
     private questBoard: QuestBoard;
+    private interviews: Interviews;
+    private interviewSends = new Set<string>();
     private liveMissions: LiveMissions;
 
     constructor(ctx: DurableObjectState, env: Env) {
@@ -161,6 +166,8 @@ export class PlazaRoom extends DurableObject<Env> {
         this.missions.initialize();
         this.questBoard = new QuestBoard(this.sql);
         this.questBoard.initialize();
+        this.interviews = new Interviews(this.sql);
+        this.interviews.initialize();
         this.liveMissions = new LiveMissions(this.sql);
         this.liveMissions.initialize();
         // Keepalive pings are answered without waking the room.
@@ -467,6 +474,8 @@ export class PlazaRoom extends DurableObject<Env> {
             this.answer(ws, seat, data.objective, data.text);
         } else if (data?.t === 'quest-accept' && typeof data.objective === 'string') {
             this.claimQuest(ws, seat, data.objective, data.changePartner === true);
+        } else if (data?.t === 'interview-ask' || data?.t === 'interview-reply') {
+            await this.interviewTurn(ws, seat, data);
         } else if (data?.t === 'reroll' || data?.t === 'keep') {
             this.chooseAlias(ws, seat, data.t === 'keep');
         } else if (data?.t === 'emote' && EMOTES.includes(data.emote)) {
@@ -624,9 +633,14 @@ export class PlazaRoom extends DurableObject<Env> {
                     const fallback = objective.answerRole && this.meetingFallback(game, studentKey, objective.answerRole, campaign);
                     return { id: objective.id, text: objective.text + (fallback
                         ? ` No classmate with this role is available. Type the role name (${fallback}) to continue with the town notice.` : ''), done: player.done.includes(objective.id), optional: !!objective.optional,
-                        kind: objective.kind === 'report' ? 'report' as const : objective.answerRole ? 'name' as const : 'text' as const };
+                        kind: objective.kind === 'report' ? 'report' as const : objective.answerRole ? 'name' as const : 'text' as const,
+                        ...(objective.conversation ? { conversation: this.conversation(game, studentKey, objective) } : {}) };
                 }),
-            ...(chapter.objectives.some(o => o.board) ? { board: this.questBoard.view(this.boardContext(game, studentKey)!) } : {}),
+            ...(chapter.objectives.some(o => o.board) ? { board: this.questBoard.view(this.boardContext(game, studentKey)!).map(item => {
+                const objective = chapter.objectives.find(o => o.id === item.id)!;
+                return { ...item, ...(objective.activity || objective.conversation ? { conversation: this.conversation(game, studentKey, objective) } : {}) };
+            }) } : {}),
+            interviews: this.interviews.view(game, row.chapter, studentKey, names, new Map(chapter.objectives.map(o => [o.id, o.text]))),
             team: teamProgress(chapter, this.campaignPlayers(game).map(item => ({ done: item.done, thief: thieves.includes(item.student_key) }))),
             // "Previously", for a student coming back to a story that is already under way
             recap: !withRecap || row.status !== 'active' ? null
@@ -660,6 +674,68 @@ export class PlazaRoom extends DurableObject<Env> {
     private refreshBoard(game: string): void {
         // Presence changes both partner eligibility and absent-role clue notices.
         if (this.campaignRow(game)) this.sendQuestToAll(game);
+    }
+
+    private conversation(game: string, student: string, objective: Objective): ConversationView {
+        const row = this.campaignRow(game)!;
+        const assignment = objective.board ? this.questBoard.assignment(game, objective.id, student) : undefined;
+        const completed = this.interviews.completed(game, row.chapter, objective.id, student, assignment?.partner_key);
+        const players = this.campaignPlayers(game);
+        const role = players.find(p => p.student_key === student)?.role_id;
+        const seats = this.seats().filter(s => s.game === game && s.studentKey !== student
+            && (!objective.activity || s.studentKey === assignment?.partner_key)
+            && (!this.isRandom(game) || this.alias(game, s.studentKey).kept));
+        // Put classmates with a different perspective first; do not reveal their clues.
+        const peers = seats.sort((a, b) => Number(players.find(p => p.student_key === a.studentKey)?.role_id === role)
+            - Number(players.find(p => p.student_key === b.studentKey)?.role_id === role));
+        return { required: objective.conversation?.witnesses ?? 1, completed, witnesses: peers.map(s => ({ id: s.id, name: s.name })) };
+    }
+
+    private async interviewTurn(ws: WebSocket, seat: Seat, data: Record<string, unknown>): Promise<void> {
+        const warn = (text: string) => ws.send(JSON.stringify({ t: 'notice', level: 'warning', text }));
+        if (this.interviewSends.has(seat.studentKey)) return warn('Wait for your current message to be sent.');
+        const row = this.campaignRow(seat.game);
+        const ctx = this.boardContext(seat.game, seat.studentKey);
+        if (!this.isOpen() || !row || !ctx || ctx.status === 'campaign_complete') return;
+        const incoming = data.t === 'interview-reply' && typeof data.id === 'string' ? this.interviews.get(data.id) : undefined;
+        const objective = ctx.chapter.objectives.find(o => o.id === (incoming?.objective ?? data.objective));
+        if (!objective || (!objective.activity && !objective.conversation)) return;
+        const investigator = incoming ? incoming.investigator : seat.studentKey;
+        const student = this.campaignPlayers(seat.game).find(p => p.student_key === investigator);
+        if (!student || student.done.includes(objective.id) || !isUnlocked(objective, student.done)) return warn('That investigation is no longer available.');
+        const assignment = objective.board ? this.questBoard.assignment(seat.game, objective.id, investigator) : undefined;
+        if (objective.board && !assignment) return warn('Accept this quest first.');
+        const target = this.seats().find(s => s.game === seat.game && (incoming ? s.studentKey === incoming.investigator : s.id === data.witness));
+        if (!target || target.studentKey === seat.studentKey) return warn('Choose a classmate who is in the plaza.');
+        if (incoming && (incoming.game_id !== seat.game || incoming.chapter !== row.chapter || incoming.witness !== seat.studentKey
+            || incoming.question_status !== 'approved' || incoming.answer_status === 'approved' || incoming.answer_status === 'pending')) return warn('That question is not ready for a reply.');
+        if (!incoming && data.t !== 'interview-ask') return;
+        if (assignment?.partner_key && assignment.partner_key !== (incoming ? seat.studentKey : target.studentKey)) return warn('Exchange evidence with your assigned partner.');
+        const existing = !incoming && this.interviews.rows(seat.game, row.chapter).find(i => i.objective === objective.id && i.investigator === investigator && i.witness === target.studentKey);
+        if (existing && (existing.question_status === 'approved' || existing.question_status === 'pending')) return warn('You already asked this witness. Wait for their reply.');
+        const own = this.questView(seat.game, seat.studentKey);
+        const clue = own?.clues.find(c => c.id === data.clue && (c.from === 'job' || c.from === 'reward'));
+        if (!clue) return warn('Choose one of your private clues to share.');
+        if (typeof data.text !== 'string' || !data.text.trim() || data.text.length > 200) return warn('Write up to 200 characters about this investigation.');
+        const questionText = data.text.trim();
+        const epoch = row.live_epoch;
+        const valid = () => {
+            const current = this.campaignRow(seat.game);
+            const currentPlayer = this.campaignPlayers(seat.game).find(p => p.student_key === investigator);
+            const activePartner = objective.board ? this.questBoard.assignment(seat.game, objective.id, investigator)?.partner_key : null;
+            return !!current && current.chapter === row.chapter && current.live_epoch === epoch && current.status !== 'campaign_complete'
+                && !!currentPlayer && !currentPlayer.done.includes(objective.id) && (!objective.board || activePartner === assignment?.partner_key)
+                && (!incoming || this.interviews.get(incoming.id)?.question_status === 'approved');
+        };
+        this.interviewSends.add(seat.studentKey);
+        try {
+            const sent = await this.chat(ws, seat, questionText, target.id, `Investigation: ${objective.text}\nShared evidence: ${clue.text}`, undefined, undefined, valid);
+            if (!sent || sent.status === 'blocked' || !valid()) return;
+            if (incoming) this.interviews.reply(incoming.id, sent.id, questionText, clue.text, sent.status);
+            else this.interviews.ask({ id: crypto.randomUUID(), game_id: seat.game, chapter: row.chapter, objective: objective.id,
+                investigator, witness: target.studentKey, question_id: sent.id, question: questionText, question_status: sent.status, shared: clue.text });
+            this.sendQuestToAll(seat.game);
+        } finally { this.interviewSends.delete(seat.studentKey); }
     }
 
     // Everyone in the game gets their own view again, after the story moved on.
@@ -701,6 +777,13 @@ export class PlazaRoom extends DurableObject<Env> {
         // Board answers require a persisted assignment; clients cannot skip role or release gates.
         if (objective.board && !this.questBoard.assignment(seat.game, objective.id, seat.studentKey)) return;
         const reply = (correct: boolean, wait = false) => ws.send(JSON.stringify({ t: 'answered', objective: objective.id, correct, wait }));
+        if (objective.activity || objective.conversation) {
+            const conversation = this.conversation(seat.game, seat.studentKey, objective);
+            if (conversation.completed < conversation.required) {
+                ws.send(JSON.stringify({ t: 'notice', level: 'warning', text: `Exchange evidence with ${conversation.required} witness${conversation.required === 1 ? '' : 'es'} before submitting this conclusion. Teacher approval is required.` }));
+                return reply(false, true);
+            }
+        }
         const now = Date.now();
         if (now - player.last_wrong < WRONG_ANSWER_WAIT_MS) return reply(false, true);
         if (objective.kind !== 'report' && typed.length > 80) return;
@@ -771,6 +854,7 @@ export class PlazaRoom extends DurableObject<Env> {
             this.sql.exec('DELETE FROM campaigns WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM campaign_players WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM campaign_reports WHERE game_id = ?', game);
+            this.interviews.clear(game);
             this.sql.exec('DELETE FROM campaign_thieves WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM quest_assignments WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM quest_releases WHERE game_id = ?', game);
@@ -804,6 +888,11 @@ export class PlazaRoom extends DurableObject<Env> {
                 thief: this.chapterThieves(game, campaign, row.chapter).includes(item.student_key)
             })),
             ...(campaign.chapters[row.chapter].objectives.some(o => o.board) ? { board: this.questBoard.summary(game, campaign.chapters[row.chapter]) } : {}),
+            interviews: this.interviews.rows(game, row.chapter).map(i => ({
+                id: i.id, objective: i.objective, task: campaign.chapters[row.chapter].objectives.find(o => o.id === i.objective)?.text ?? i.objective,
+                incoming: false, studentKey: i.investigator, witnessKey: i.witness, questionId: i.question_id, answerId: i.answer_id, name: names.get(i.witness) ?? 'Classmate',
+                question: i.question, questionStatus: i.question_status, answer: i.answer, answerStatus: i.answer_status, evidence: i.evidence, shared: i.shared
+            })),
             reports: this.sql.exec<{ student_key: string; objective: string; text: string; partner_key: string | null }>(
                 `SELECT r.student_key, r.objective, r.text, a.partner_key FROM campaign_reports r
                 LEFT JOIN quest_assignments a ON r.game_id = a.game_id AND r.student_key = a.student_key AND r.objective = a.objective
@@ -890,7 +979,7 @@ export class PlazaRoom extends DurableObject<Env> {
             this.saveSetting('open', '0');
             this.closeRoom();
         }
-        for (const table of ['positions', 'chat', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'quest_releases', 'mission_live_quests', 'mission_live_previews', 'warmups', 'warmup_players']) {
+        for (const table of ['positions', 'chat', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'warmups', 'warmup_players']) {
             this.sql.exec(`DELETE FROM ${table} WHERE game_id = ?`, game);
         }
         this.sql.exec('DELETE FROM games WHERE id = ?', game);
@@ -1140,9 +1229,9 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // `cid` is the page's own id for this message: every answer carries it back, so a message that
     // did not go through can be given back to its writer, draft intact.
-    private async chat(ws: WebSocket, seat: Seat, value: unknown, to: unknown, note: string | null, cid?: string, better?: string | null): Promise<void> {
+    private async chat(ws: WebSocket, seat: Seat, value: unknown, to: unknown, note: string | null, cid?: string, better?: string | null, valid?: () => boolean): Promise<{ id: string; status: string } | void> {
         const reply = (level: 'info' | 'warning', text: string) => ws.send(JSON.stringify({ t: 'notice', level, text, cid }));
-        const unavailable = () => !this.isOpen() || this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', seat.studentKey).toArray().length > 0;
+        const unavailable = () => !this.isOpen() || (valid && !valid()) || this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', seat.studentKey).toArray().length > 0;
         if (unavailable()) return reply('warning', 'Chat is unavailable right now.');
         if (this.isRandom(seat.game) && !this.alias(seat.game, seat.studentKey).kept) return reply('warning', 'Choose your name first.');
 
@@ -1188,13 +1277,15 @@ export class PlazaRoom extends DurableObject<Env> {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             entry.id, entry.student_key, entry.sender, entry.text, now, problem ? 'blocked' : posts ? 'approved' : 'pending',
             entry.target_key, target?.name ?? null, entry.x, entry.y, flag, note, seat.game, entry.marks);
-        this.sql.exec('DELETE FROM chat WHERE game_id IS ? AND id NOT IN (SELECT id FROM chat WHERE game_id IS ? ORDER BY ts DESC LIMIT ?)',
+        this.sql.exec(`DELETE FROM chat WHERE game_id IS ? AND id NOT IN (SELECT id FROM chat WHERE game_id IS ? ORDER BY ts DESC LIMIT ?)
+            AND id NOT IN (SELECT question_id FROM interviews UNION SELECT answer_id FROM interviews WHERE answer_id IS NOT NULL)`,
             seat.game, seat.game, CHAT_KEEP);
         if (posts) {
             this.deliver(entry);
             if (cid) ws.send(JSON.stringify({ t: 'result', cid })); // posted at once: nothing else to say
         }
         else reply(problem ? 'warning' : 'info', problem ?? 'Sent to your teacher for approval.');
+        return { id: entry.id, status: problem ? 'blocked' : posts ? 'approved' : 'pending' };
     }
 
     private review(id: string, approve: boolean): boolean {
@@ -1206,6 +1297,9 @@ export class PlazaRoom extends DurableObject<Env> {
         // Taking down a message that already posted: it disappears from every screen.
         if (entry.status === 'approved' && !approve) {
             this.sql.exec("UPDATE chat SET status = 'removed' WHERE id = ?", id);
+            if (this.interviews.review(id, 'removed')) {
+                const game = this.activeGame(); if (game) this.sendQuestToAll(game);
+            }
             this.broadcast({ t: 'retract', id });
             this.notify(entry.student_key, 'warning', 'Your teacher removed one of your messages.');
             return true;
@@ -1214,6 +1308,9 @@ export class PlazaRoom extends DurableObject<Env> {
 
         const approved = approve && this.isOpen();
         this.sql.exec('UPDATE chat SET status = ? WHERE id = ?', approved ? 'approved' : 'rejected', id);
+        if (this.interviews.review(id, approved ? 'approved' : 'rejected')) {
+            const game = this.activeGame(); if (game) this.sendQuestToAll(game);
+        }
         if (!approved) {
             this.notify(entry.student_key, 'info', 'Your message was not posted.');
             return true;
@@ -1264,6 +1361,8 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     private closeRoom(): void {
+        this.sql.exec("UPDATE interviews SET question_status = 'rejected' WHERE question_status = 'pending'");
+        this.sql.exec("UPDATE interviews SET answer_status = 'rejected' WHERE answer_status = 'pending'");
         const rejected = this.sql.exec<{ student_key: string }>(
             "UPDATE chat SET status = 'rejected' WHERE status = 'pending' RETURNING student_key").toArray();
         for (const studentKey of new Set(rejected.map(row => row.student_key))) {

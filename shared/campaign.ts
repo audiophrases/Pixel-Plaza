@@ -26,6 +26,7 @@ export type Objective = {
     requires?: { mode: 'all' | 'any'; objectives: string[] };
     optional?: boolean;               // a bonus: it never holds the chapter up
     activity?: 'interview' | 'exchange'; // a partnered report on a quest board
+    conversation?: { witnesses: 1 | 2 }; // approved, quest-linked evidence exchanges before a conclusion
     board?: { roles?: string[]; afterMain?: boolean; minPlayers?: number; teacherReleased?: boolean; partnerRole?: string; differentRole?: boolean };
     rewards?: Record<string, string>; // the new clue each role earns by answering, by role id
 };
@@ -61,8 +62,9 @@ export type QuestView = {
     clues: { id: string; text: string; from: string }[];
     secret: { title: string; text: string } | null; // only for the thief
     thieves: string[] | null; // who it was, once the chapter is over
-    objectives: { id: string; text: string; done: boolean; optional: boolean; kind: 'text' | 'name' | 'report' }[];
+    objectives: { id: string; text: string; done: boolean; optional: boolean; kind: 'text' | 'name' | 'report'; conversation?: ConversationView }[];
     board?: BoardQuestView[];
+    interviews?: InterviewView[];
     team: { done: number; total: number }; // how far the whole class is through this chapter's main questions
     recap: string | null; // sent when the student comes back to a story already under way
     finale: string | null;
@@ -72,6 +74,17 @@ export type BoardQuestView = {
     id: string; text: string; kind: 'text' | 'name' | 'report'; activity: Objective['activity'] | null;
     state: 'available' | 'active' | 'done' | 'waiting'; reason: string | null;
     partner: { name: string; online: boolean } | null;
+    conversation?: ConversationView;
+};
+
+export type InterviewView = {
+    id: string; objective: string; task: string; incoming: boolean; name: string;
+    question: string; questionStatus: string; answer: string | null; answerStatus: string | null;
+    evidence: string | null; shared: string | null;
+};
+export type ConversationView = {
+    required: number; completed: number;
+    witnesses: { id: string; name: string }[];
 };
 
 export const castanyada: Campaign = {
@@ -233,7 +246,17 @@ castanyadaSideQuests.chapters[0].objectives.push(
     { id: 'festival-exchange', text: 'Compare two ideas for a secret festival surprise with your partner. Explain a problem with each idea and agree on one. Write your plan.', accept: [], kind: 'report', optional: true, activity: 'exchange', requires: { mode: 'any', objectives: ['delivery-interview', 'note'] }, board: { afterMain: true, teacherReleased: true, minPlayers: 2 } },
 );
 export const castanyadaComplete = buildCastanyadaComplete(castanyada);
-export const campaigns: Campaign[] = [castanyada, castanyadaSideQuests, castanyadaComplete];
+// A new template so lessons already in progress keep their saved mystery and progress.
+export const castanyadaInvestigations: Campaign = structuredClone(castanyadaComplete);
+castanyadaInvestigations.id = 'castanyada-investigations';
+castanyadaInvestigations.title = 'Castanyada: Witness Investigations';
+for (const chapter of castanyadaInvestigations.chapters) {
+    chapter.intro += ' Before each conclusion, ask a witness about this question and compare their private evidence with yours in your journal.';
+    for (const objective of chapter.objectives) {
+        if (!objective.optional) objective.conversation = { witnesses: objective.answerThief ? 2 : 1 };
+    }
+}
+export const campaigns: Campaign[] = [castanyadaInvestigations, castanyada, castanyadaSideQuests, castanyadaComplete];
 export const campaignById = (id: string): Campaign | undefined => campaigns.find(campaign => campaign.id === id);
 
 // The role the fewest students have so far, so a class is spread across the roles; ties are

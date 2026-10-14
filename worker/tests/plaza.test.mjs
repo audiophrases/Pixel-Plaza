@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { sha256Hex } from '../rules.ts';
-import { castanyada, castanyadaComplete } from '../../shared/campaign.ts';
+import { castanyada, castanyadaComplete, castanyadaInvestigations } from '../../shared/campaign.ts';
 import { FACTS } from '../../shared/warmup.ts';
 import { identityById } from '../../shared/warmupKinds.ts';
 import { missionEnvelope } from '../../shared/missionSchema.ts';
@@ -99,6 +99,7 @@ async function api(base, route, { token, session, body } = {}) {
 function openSocket(base, ticket) {
     const ws = new WebSocket(`${base.replace('http', 'ws')}/api/plaza/ws?ticket=${ticket}`);
     const inbox = [];
+    const state = { quest: null };
     const waiters = [];
     const deliver = () => {
         for (const waiter of [...waiters]) {
@@ -109,10 +110,10 @@ function openSocket(base, ticket) {
             waiter.resolve(inbox.splice(index, 1)[0]);
         }
     };
-    ws.onmessage = event => { if (event.data !== 'pong') { inbox.push(JSON.parse(event.data)); deliver(); } };
+    ws.onmessage = event => { if (event.data !== 'pong') { const message = JSON.parse(event.data); if (message.t === 'quest') state.quest = message.quest; inbox.push(message); deliver(); } };
     const closed = new Promise(resolve => { ws.onclose = event => resolve(event.code); });
     return {
-        ws, closed, inbox,
+        ws, closed, inbox, state,
         send: message => ws.send(JSON.stringify(message)),
         next: (match, what = 'a message') => new Promise((resolve, reject) => {
             const waiter = { match, resolve, timer: setTimeout(() => reject(new Error(`Timed out waiting for ${what}`)), 5000) };
@@ -129,6 +130,101 @@ async function enter(base, token, avatar) {
     const welcome = await socket.next(message => message.t === 'welcome', 'welcome');
     return { ...socket, welcome, me: welcome.players.find(player => player.id === welcome.id) };
 }
+
+async function exchangeEvidence(teacher, investigator, witness, objective) {
+    await new Promise(resolve => setTimeout(resolve, 1550)); // same rate limit as ordinary chat
+    const clue = investigator.state.quest.clues.filter(c => c.from === 'job' || c.from === 'reward').at(-1).id;
+    investigator.send({ t: 'interview-ask', objective, witness: witness.me.id, clue, text: 'What does your evidence tell us about this mystery?' });
+    await investigator.next(m => m.t === 'notice' && /Sent to your teacher/.test(m.text), 'question submitted');
+    const question = (await teacher('status')).body.entries.find(e => e.status === 'pending' && e.sender === investigator.me.name && e.note?.startsWith('Investigation:'));
+    assert.ok(question, 'the question uses the moderation queue');
+    await teacher('review', { id: question.id, approve: true });
+    const received = (await witness.next(m => m.t === 'quest' && m.quest?.interviews?.some(i => i.incoming && i.objective === objective && i.questionStatus === 'approved' && !i.answerStatus), 'witness question')).quest.interviews.find(i => i.incoming && i.objective === objective && !i.answerStatus);
+    await new Promise(resolve => setTimeout(resolve, 1550));
+    witness.send({ t: 'interview-reply', id: received.id, clue: witness.state.quest.clues.filter(c => c.from === 'job' || c.from === 'reward').at(-1).id,
+        text: 'My evidence helps explain what happened in the town.' });
+    await witness.next(m => m.t === 'notice' && /Sent to your teacher/.test(m.text), 'reply submitted');
+    const reply = (await teacher('status')).body.entries.find(e => e.status === 'pending' && e.sender === witness.me.name && e.note?.startsWith('Investigation:'));
+    assert.ok(reply, 'the reply uses the moderation queue');
+    const pending = (await investigator.next(m => m.t === 'quest' && m.quest?.interviews?.some(i => i.id === received.id && i.answerStatus === 'pending'), 'pending witness reply')).quest.interviews.find(i => i.id === received.id);
+    assert.equal(pending.answer, null); assert.equal(pending.evidence, null, 'unapproved evidence stays private');
+    await teacher('review', { id: reply.id, approve: true });
+    await investigator.next(m => m.t === 'quest' && m.quest?.interviews?.some(i => i.id === received.id && i.answerStatus === 'approved'), 'approved evidence exchange');
+    return { id: received.id, questionId: question.id, replyId: reply.id };
+}
+
+test('witness investigations block guesses and unrelated chat, keep evidence private and survive restart', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-interviews-'));
+    let plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    try {
+        let base = plaza.base;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (op, body) => api(base, `/api/teacher/${op}`, { session, body });
+        PIN = (await teacher('game', { name: 'Witness class', randomNames: false })).body.pin;
+        let alex = await enter(base, 'signed-a', null); let sam = await enter(base, 'signed-b', null); let chris = await enter(base, 'signed-c', null);
+        sockets.push(alex, sam, chris);
+        await teacher('campaign', { op: 'start', campaign: castanyadaInvestigations.id });
+        await alex.next(m => m.t === 'quest' && m.quest?.campaign.id === castanyadaInvestigations.id, 'witness campaign');
+        assert.equal(alex.state.quest.objectives.find(o => o.id === 'where').conversation.required, 1);
+        await teacher('campaign', { op: 'reset', confirm: true });
+        const created = (await teacher('missions/create', { id: 'two-witnesses', source: castanyadaInvestigations.id })).body.draft;
+        created.campaign.chapters[0].objectives.find(o => o.id === 'where').conversation.witnesses = 2;
+        created.campaign.chapters[0].objectives.push({ id: 'paper-check', text: 'Compare two witnesses before reporting the delivery.', accept: [], kind: 'report', optional: true, board: {}, conversation: { witnesses: 2 } });
+        const saved = await teacher('missions/save', { id: 'two-witnesses', version: created.version, envelope: missionEnvelope(created.campaign) }); assert.equal(saved.status, 200);
+        assert.equal((await teacher('missions/publish', { id: 'two-witnesses', version: saved.body.draft.version })).status, 200);
+        await teacher('campaign', { op: 'start', campaign: 'two-witnesses' });
+        await alex.next(m => m.t === 'quest' && m.quest?.campaign.id === 'two-witnesses', 'two witness campaign');
+        const answer = async () => { alex.send({ t: 'answer', objective: 'where', text: 'park' }); return alex.next(m => m.t === 'answered' && m.objective === 'where'); };
+        assert.equal((await answer()).correct, false, 'guessing the right answer cannot bypass witnesses');
+        alex.send({ t: 'chat', text: 'The blue box is in the park.' });
+        await alex.next(m => m.t === 'notice' && /Sent to your teacher/.test(m.text));
+        const unrelated = (await teacher('status')).body.entries.find(e => e.status === 'pending');
+        await teacher('review', { id: unrelated.id, approve: true });
+        assert.equal((await answer()).correct, false, 'an approved ordinary chat message does not count');
+        alex.send({ t: 'interview-ask', objective: 'where', witness: alex.me.id, clue: 'made-up', text: 'What did you see?' });
+        assert.match((await alex.next(m => m.t === 'notice' && /Choose a classmate/.test(m.text))).text, /classmate/);
+        alex.send({ t: 'interview-ask', objective: 'where', witness: sam.me.id, clue: 'made-up', text: 'What did you see?' });
+        assert.match((await alex.next(m => m.t === 'notice' && /private clues/.test(m.text))).text, /private clues/);
+        const first = await exchangeEvidence(teacher, alex, sam, 'where');
+        assert.equal((await answer()).correct, false, 'one witness is insufficient for a two-witness objective');
+        assert.ok(!chris.state.quest.interviews.some(i => i.id === first.id), 'bystanders cannot read the transcript');
+        chris.send({ t: 'interview-reply', id: first.id, clue: chris.state.quest.clues[0].id, text: 'I want to impersonate the witness.' });
+        await chris.next(m => m.t === 'notice' && /not ready/.test(m.text), 'forged reply rejected');
+        await teacher('review', { id: first.replyId, approve: false });
+        await alex.next(m => m.t === 'quest' && m.quest?.objectives.find(o => o.id === 'where')?.conversation.completed === 0, 'removed reply revokes participation');
+        assert.equal((await answer()).correct, false);
+        // The assigned witness can revise a removed reply, using their own server-known evidence.
+        await new Promise(resolve => setTimeout(resolve, 1550));
+        sam.send({ t: 'interview-reply', id: first.id, clue: sam.state.quest.clues[0].id, text: 'This is my corrected account of the delivery.' });
+        await sam.next(m => m.t === 'notice' && /Sent to your teacher/.test(m.text));
+        const corrected = (await teacher('status')).body.entries.find(e => e.status === 'pending' && e.sender === sam.me.name);
+        await teacher('review', { id: corrected.id, approve: true });
+        await exchangeEvidence(teacher, alex, chris, 'where');
+        assert.equal(alex.state.quest.objectives.find(o => o.id === 'where').conversation.completed, 2);
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); base = plaza.base;
+        alex = await enter(base, 'signed-a', null); sockets.push(alex);
+        await alex.next(m => m.t === 'quest' && m.quest?.campaign.id === 'two-witnesses');
+        assert.equal(alex.state.quest.objectives.find(o => o.id === 'where').conversation.completed, 2, 'approved participation persists while witnesses are offline');
+        assert.equal((await answer()).correct, true);
+        const evidence = (await teacher('status')).body.campaign.interviews;
+        assert.equal(evidence.length, 2); assert.ok(evidence.every(i => i.questionStatus === 'approved' && i.answerStatus === 'approved' && i.shared && i.evidence));
+        sam = await enter(base, 'signed-b', null); chris = await enter(base, 'signed-c', null); sockets.push(sam, chris);
+        alex.send({ t: 'quest-accept', objective: 'paper-check' });
+        await alex.next(m => m.t === 'quest' && m.quest?.board?.some(o => o.id === 'paper-check' && o.state === 'active'));
+        assert.equal(alex.state.quest.board.find(o => o.id === 'paper-check').conversation.completed, 0, 'a board quest cannot reuse main-objective exchanges');
+        await exchangeEvidence(teacher, alex, sam, 'paper-check'); await exchangeEvidence(teacher, alex, chris, 'paper-check');
+        alex.send({ t: 'answer', objective: 'paper-check', text: 'We compared the two witness accounts.' });
+        assert.equal((await alex.next(m => m.t === 'answered' && m.objective === 'paper-check')).correct, true, 'unassigned board questions can require two witnesses');
+        await teacher('campaign', { op: 'reset', confirm: true }); await teacher('campaign', { op: 'start', campaign: 'two-witnesses' });
+        assert.deepEqual((await teacher('status')).body.campaign.interviews, [], 'reset clears transcripts and credit');
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
 
 test('Live missions: reviewed additions preserve progress, enforce conflicts and survive restart', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-live-'));
@@ -322,12 +418,15 @@ test('Quest board: eligibility, release, assignments, partner replacement and re
         assert.equal(back.board.find(o => o.id === 'interview').partner.name, assignedName);
         byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'interview', changePartner: true });
         assert.match((await byKey[solver.studentKey].next(m => m.t === 'notice')).text, /still in the plaza/);
+        assert.equal((await answer(solver.studentKey, 'interview', 'The witness saw a large delivery.')).correct, false, 'a report cannot replace an evidence exchange');
+        await byKey[solver.studentKey].next(m => m.t === 'notice' && /Exchange evidence/.test(m.text), 'report gate warning');
+        await exchangeEvidence(teacher, byKey[solver.studentKey], byKey[partner.studentKey], 'interview');
         assert.equal((await answer(solver.studentKey, 'interview', 'The witness saw a large delivery.')).correct, true);
         const completed = await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.state === 'done'));
         assert.ok(completed.board.some(o => o.id === 'exchange' && o.state === 'available'), 'any prerequisite unlocks the next social quest');
         const report = (await teacher('status')).body.campaign.reports[0]; assert.equal(report.partner, assignedName);
         byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'interview' });
-        assert.match((await byKey[solver.studentKey].next(m => m.t === 'notice')).text, /already finished/);
+        assert.match((await byKey[solver.studentKey].next(m => m.t === 'notice' && /already finished/.test(m.text))).text, /already finished/);
         byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'exchange' });
         const exchange = await view(solver.studentKey, q => q.board?.some(o => o.id === 'exchange' && o.state === 'active'));
         const exchangePartner = status.players.find(p => p.name === exchange.board.find(o => o.id === 'exchange').partner.name);
@@ -336,6 +435,8 @@ test('Quest board: eligibility, release, assignments, partner replacement and re
         byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'exchange', changePartner: true });
         const reassigned = await view(solver.studentKey, q => q.board?.some(o => o.id === 'exchange' && o.partner?.online && o.partner.name !== exchangePartner.name));
         const replacementName = reassigned.board.find(o => o.id === 'exchange').partner.name;
+        const replacement = status.players.find(p => p.name === replacementName);
+        await exchangeEvidence(teacher, byKey[solver.studentKey], byKey[replacement.studentKey], 'exchange');
         assert.equal((await teacher('status')).body.campaign.board.find(o => o.id === 'exchange').accepted, 1, 'replacement keeps the same assignment');
         for (const socket of sockets) socket.ws.close(); await plaza.stop();
         plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); base = plaza.base;
@@ -938,7 +1039,7 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         const opened = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body;
         PIN = opened.pin;
         assert.equal(opened.campaign, null);
-        assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada', 'castanyada-complete', 'castanyada-side-quests']);
+        assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada', 'castanyada-complete', 'castanyada-investigations', 'castanyada-side-quests']);
 
         // No story yet: nothing is sent.
         const early = await enter(base, 'signed-a', null);
@@ -1178,7 +1279,8 @@ test('random names: a made-up name to keep, hidden from classmates, known to the
 
         // The teacher sees the made-up name with the real one beside it.
         const status = (await api(base, '/api/teacher/status', { session })).body;
-        assert.deepEqual(status.online.find(student => student.studentKey === 'stu_a'), { studentKey: 'stu_a', name: another.name });
+        const onlineAlex = status.online.find(student => student.studentKey === 'stu_a');
+        assert.deepEqual({ studentKey: onlineAlex.studentKey, name: onlineAlex.name }, { studentKey: 'stu_a', name: another.name });
         assert.equal(status.realNames.stu_a, 'Alex');
         assert.equal(status.entries.find(entry => entry.text === 'Hello there').sender, another.name);
 
@@ -1553,6 +1655,7 @@ test('five-chapter Castanyada: new mysteries, private side notes, partnered repo
                 alex.send({ t: 'quest-accept', objective: quest.id });
                 const active = await view(alex, index, q => q.board.some(o => o.id === quest.id && o.state === 'active'));
                 assert.equal(active.board.find(o => o.id === quest.id).partner.name, sam.me.name);
+                await exchangeEvidence(teacher, alex, sam, quest.id);
                 await answer(alex, quest.id, 'My partner explained their evidence and I asked a follow-up question. We compared two possibilities, changed one part of our proposal after listening and agreed on a recommendation for the festival committee. Our report records both contributions and the reason for our final decision.');
                 await view(alex, index, q => q.board.some(o => o.id === quest.id && o.state === 'done'));
             }

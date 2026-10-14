@@ -26,7 +26,7 @@ Town notices supply missing-role clues at the corresponding earned stage. For a 
 
 ## Teacher review and classroom trial
 
-Read reports in the teacher campaign controls. Chapters 4–5 end their main path with a proposal; report submission counts as an attempt after five words, not an automatically graded decision. Side reports likewise record a student's account and assigned partner. The engine does not verify that a conversation took place.
+Read reports and witness transcripts in the teacher campaign controls. Chapters 4–5 end their main path with a proposal; report submission counts as an attempt after five words, not an automatically graded decision. Social side reports now require a quest-linked question and reply, both with private evidence and teacher approval. The engine verifies those in-game events; the teacher assesses language, reasoning and any spoken conversation. Choose [Castanyada: Witness Investigations](witness-investigations.md) to require exchanges before the main conclusions as well.
 
 Before advancing, select a few reports to discuss with the class: What did your partner tell you? Which evidence changed your mind? What compromise did you make? Use students' recommendations to make a classroom decision about the festival; proposals do not automatically move map objects or change decorations.
 
