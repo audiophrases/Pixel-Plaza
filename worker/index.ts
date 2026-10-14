@@ -1,6 +1,7 @@
 import { PlazaRoom, type TeacherAction } from './plaza.ts';
 import { PinPlayAuthError, resolveStudent, studentConfig, studentLogin, testerMode } from './pinplay.ts';
 import { laptopOrigin, sanitizeAvatar, secretsMatch, teacherPasswordMatches } from './rules.ts';
+import { MISSION_MAX_BYTES } from '../shared/missionSchema.ts';
 
 export { PlazaRoom };
 
@@ -113,7 +114,24 @@ async function handle(request: Request, env: Env): Promise<Response> {
     const path = new URL(request.url).pathname;
     const get = request.method === 'GET';
     const post = request.method === 'POST';
-    const body: any = post ? await request.json().catch(() => ({})) : {};
+    const studio = path.startsWith('/api/teacher/missions/');
+    let body: any = {};
+    if (post && studio) {
+        // Bound authoring input before buffering or parsing JSON, even without Content-Length.
+        const reader = request.body?.getReader();
+        if (!reader) return json({ error: 'Expected JSON.' }, 400);
+        let size = 0; const chunks: Uint8Array[] = [];
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            size += value.byteLength;
+            if (size > MISSION_MAX_BYTES + 4096) { await reader.cancel(); return json({ error: 'Mission request exceeds 512 KB.' }, 413); }
+            chunks.push(value);
+        }
+        const bytes = new Uint8Array(size); let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+        try { body = JSON.parse(new TextDecoder().decode(bytes)); } catch { return json({ error: 'Invalid JSON.' }, 400); }
+    } else if (post) body = await request.json().catch(() => ({}));
 
     if (path === '/api/health') return json({ ok: true });
 
@@ -156,6 +174,13 @@ async function handle(request: Request, env: Env): Promise<Response> {
         if (refused) return refused;
         const token = await plaza(env).startTeacherSession();
         return json({ token, notice: await linkOnline(env, { password: body.password, url: env.LAN_URL ?? null }) });
+    }
+    if (studio) {
+        const op = path.slice('/api/teacher/missions/'.length);
+        if (!(get && (op === 'list' || op === 'get')) && !(post && ['create', 'save', 'publish'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
+        const args = get ? { id: new URL(request.url).searchParams.get('id') } : body;
+        const result = await plaza(env).missionStudio(request.headers.get('x-teacher-session') || '', op, args);
+        return 'error' in result ? json(result, result.status) : json(result);
     }
     if (path.startsWith('/api/teacher/')) {
         const action = teacherAction(path, request.method, body);

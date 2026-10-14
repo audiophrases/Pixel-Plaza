@@ -91,7 +91,9 @@ The laptop's address is plain HTTP, so student sessions cross the school network
 
 ## Editing the map (theme studio)
 
-Mission authoring is planned separately in [the Mission Studio implementation plan](docs/mission-studio-plan.md), including reuse of Pinplay's AI prompt creation and JSON import workflow.
+Open `/mission-studio` from the teacher controls to edit campaigns, chapters, roles, clues and accepted answers. Start from Castanyada or create a new draft. **Save draft** keeps work in progress; **Publish for new games** validates it and makes it available in the teacher's campaign list. Games already running keep their published story revision, including after a restart.
+
+**Create with an AI prompt** builds instructions to copy or download for your AI. Ask it to create an adventure, add chapters, or add quests to the selected chapter. Import its JSON by paste or file, inspect the preview, then **Apply to draft** and save. Imports can extend the selected chapter, append chapters, or replace draft content. **Export JSON** provides a backup. No AI key is needed for this workflow. Direct in-app AI generation and live quest release are future work; see [the Mission Studio implementation plan](docs/mission-studio-plan.md).
 
 Open `/studio` (for example `http://localhost:8787/studio`). It opens the plaza theme: draw or move **blocks** (where nobody can walk: rectangles, ovals or free shapes), **walk-behind areas** (trees and lamps that hide a student standing behind them, with a ground line), **zones** (named places for the story) and the **start**. **Check where students can walk** shows any place that is cut off, and **Walk around it** lets you try it. Then **Download the theme file** and run `npm run theme -- plaza`: it checks the newest `plaza.json` in your Downloads folder and installs it in `shared/themes/`. Restart the server to play it. `git checkout shared/themes/plaza.json` puts the old one back.
 
@@ -153,6 +155,7 @@ Google sign-in works locally only from an origin listed in the OAuth client (for
 ```powershell
 npm run lint
 npm test
+npm run check:missions
 ```
 
 `npm test` builds the app, runs the unit tests, then starts `wrangler dev` with a fake PinPlay for a full lesson: PIN and identity checks, moving, chat approval, mutes, a second window, and a restart that must keep every student's avatar and position.

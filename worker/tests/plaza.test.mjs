@@ -13,6 +13,7 @@ import { sha256Hex } from '../rules.ts';
 import { castanyada } from '../../shared/campaign.ts';
 import { FACTS } from '../../shared/warmup.ts';
 import { identityById } from '../../shared/warmupKinds.ts';
+import { missionEnvelope } from '../../shared/missionSchema.ts';
 
 const root = path.join(import.meta.dirname, '..', '..');
 const wrangler = path.join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
@@ -123,6 +124,122 @@ async function enter(base, token, avatar) {
     const welcome = await socket.next(message => message.t === 'welcome', 'welcome');
     return { ...socket, welcome, me: welcome.players.find(player => player.id === welcome.id) };
 }
+
+test('Mission Studio: authorization, draft conflicts, published privacy and revision persistence', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-missions-'));
+    let plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    try {
+        let base = plaza.base;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const mission = (op, body) => api(base, `/api/teacher/missions/${op}`, { session, body });
+        assert.equal((await api(base, '/api/teacher/missions/list')).status, 401);
+        assert.equal((await api(base, '/api/teacher/missions/create', { token: 'signed-a', body: { id: 'stolen' } })).status, 401);
+        assert.equal((await api(base, '/api/teacher/missions/save', { body: { id: 'castanyada', version: 1, envelope: missionEnvelope(castanyada) } })).status, 401);
+        assert.equal((await api(base, '/api/teacher/missions/publish', { body: { id: 'castanyada', version: 1 } })).status, 401);
+        assert.equal((await mission('list')).body.library[0].id, 'castanyada');
+        const initial = (await mission('get?id=castanyada')).body.draft;
+        assert.deepEqual(initial.campaign, castanyada);
+        const created = (await mission('create', { id: 'winter', source: 'castanyada' })).body.draft;
+        assert.equal(created.publishedRevision, null);
+        assert.equal((await mission('create', { id: 'winter' })).status, 409);
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+        PIN = (await teacher('game', { name: 'First revision', randomNames: false })).body.pin;
+        const firstGame = (await teacher('status')).body.game.id;
+        assert.equal((await teacher('campaign', { op: 'start', campaign: 'winter' })).status, 400, 'drafts cannot be played');
+        const content = created.campaign; content.title = 'Winter original'; content.chapters[0].objectives[0].accept = ['hotel'];
+        content.roles.forEach(role => { role.clue = 'The box is at the hotel.'; });
+        const saved = (await mission('save', { id: 'winter', version: created.version, envelope: missionEnvelope(content) })).body.draft;
+        assert.equal((await mission('save', { id: 'winter', version: created.version, envelope: missionEnvelope(content) })).status, 409);
+        const published = (await mission('publish', { id: 'winter', version: saved.version })).body.draft;
+        assert.ok(published.publishedRevision);
+        assert.equal((await mission('publish', { id: 'winter', version: saved.version })).status, 409);
+        await teacher('campaign', { op: 'start', campaign: 'winter' });
+        const student = await enter(base, 'signed-a', null); sockets.push(student);
+        const view = await student.next(m => m.t === 'quest' && m.quest, 'published quest');
+        assert.equal(view.quest.campaign.title, 'Winter original');
+        assert.equal(JSON.stringify(view).includes('"accept"'), false);
+        assert.equal(view.quest.clues.some(c => c.text === content.roles.find(r => r.id === view.quest.role.id).clue), true);
+        for (const other of content.roles.filter(r => r.id !== view.quest.role.id)) assert.equal(JSON.stringify(view).includes(other.card), false, 'other role cards stay private');
+        student.send({ t: 'answer', objective: 'where', text: 'hotel' });
+        assert.equal((await student.next(m => m.t === 'answered')).correct, true);
+        const edited = structuredClone(published.campaign); edited.title = 'Winter revised'; edited.chapters[0].objectives[0].accept = ['park'];
+        const savedAgain = (await mission('save', { id: 'winter', version: published.version, envelope: missionEnvelope(edited) })).body.draft;
+        const publishedAgain = (await mission('publish', { id: 'winter', version: savedAgain.version })).body.draft;
+        assert.notEqual(publishedAgain.publishedRevision, published.publishedRevision);
+        assert.equal((await teacher('status')).body.campaign.title, 'Winter original', 'open game remains pinned');
+        assert.ok((await teacher('status')).body.campaign.players[0].done.includes('where'));
+        const incomplete = structuredClone(edited); incomplete.chapters[0].objectives[0].accept = [];
+        const invalidDraft = (await mission('save', { id: 'winter', version: publishedAgain.version, envelope: missionEnvelope(incomplete) })).body.draft;
+        assert.equal((await mission('publish', { id: 'winter', version: invalidDraft.version })).status, 400);
+        assert.equal((await teacher('status')).body.campaigns.find(c => c.id === 'winter').title, 'Winter revised', 'invalid draft does not replace the published revision');
+        const oversized = await fetch(`${base}/api/teacher/missions/save`, { method: 'POST', headers: { 'x-teacher-session': session, 'content-type': 'application/json' }, body: JSON.stringify({ padding: 'x'.repeat(520000) }) });
+        assert.equal(oversized.status, 413);
+        await teacher('game', { name: 'Second revision', randomNames: false });
+        assert.equal((await teacher('campaign', { op: 'start', campaign: 'winter' })).body.campaign.title, 'Winter revised', 'new game uses latest published content');
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); base = plaza.base;
+        const reopened = (await teacher('class', { open: true, game: firstGame })).body;
+        PIN = reopened.pin;
+        assert.equal(reopened.campaign.title, 'Winter original');
+        assert.ok(reopened.campaign.players[0].done.includes('where'));
+        const returning = await enter(base, 'signed-a', null); sockets.push(returning);
+        const resumed = (await returning.next(m => m.t === 'quest' && m.quest)).quest;
+        assert.equal(resumed.campaign.title, 'Winter original');
+        assert.ok(resumed.objectives.find(o => o.id === 'where').done);
+        assert.equal((await mission('get?id=winter')).body.draft.version, invalidDraft.version);
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
+test('Mission Studio migration: legacy games retain roles, progress and thief assignments', { timeout: 120000 }, async () => {
+    const { DatabaseSync } = await import('node:sqlite');
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-legacy-missions-'));
+    let plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    try {
+        let base = plaza.base;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+        PIN = (await teacher('game', { name: 'Legacy class', randomNames: false })).body.pin;
+        for (const token of ['signed-a', 'signed-b', 'signed-c']) sockets.push(await enter(base, token, null));
+        await teacher('campaign', { op: 'start', campaign: 'castanyada' });
+        sockets[0].send({ t: 'answer', objective: 'where', text: 'park' });
+        assert.equal((await sockets[0].next(m => m.t === 'answered')).correct, true);
+        const before = (await teacher('campaign', { op: 'next' })).body.campaign;
+        assert.equal(before.players.filter(p => p.thief).length, 1);
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        const files = directory => fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);
+        let migrated = false;
+        for (const file of files(persistTo).filter(file => file.endsWith('.sqlite'))) {
+            assert.ok(path.resolve(file).startsWith(path.resolve(persistTo) + path.sep));
+            const db = new DatabaseSync(file);
+            try {
+                if (!db.prepare("SELECT name FROM sqlite_master WHERE name = 'campaigns'").get()) continue;
+                // Reconstruct the pre-Studio schema in this isolated test database.
+                db.exec('ALTER TABLE campaigns DROP COLUMN revision_id; DROP TABLE mission_drafts; DROP TABLE mission_revisions;');
+                migrated = true;
+            } finally { db.close(); }
+        }
+        assert.ok(migrated, 'test found the isolated PlazaRoom database');
+        plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); base = plaza.base;
+        const after = (await teacher('status')).body.campaign;
+        assert.deepEqual(after, before, 'migration preserves campaign state exactly');
+        const seed = (await api(base, '/api/teacher/missions/get?id=castanyada', { session })).body.draft;
+        const edit = structuredClone(seed.campaign); edit.title = 'A new template';
+        const saved = (await api(base, '/api/teacher/missions/save', { session, body: { id: 'castanyada', version: seed.version, envelope: missionEnvelope(edit) } })).body.draft;
+        await api(base, '/api/teacher/missions/publish', { session, body: { id: 'castanyada', version: saved.version } });
+        assert.equal((await teacher('status')).body.campaign.title, before.title, 'legacy game stays pinned after template publication');
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
 
 test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay();

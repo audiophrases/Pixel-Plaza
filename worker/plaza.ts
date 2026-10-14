@@ -3,7 +3,8 @@ import type { Env } from './index.ts';
 import type { PinPlayStudent } from './pinplay.ts';
 import { checkGrammar } from './grammar.ts';
 import { moderate } from './moderation.ts';
-import { acceptedNames, answerMatches, campaignById, campaigns, chapterDone, isUnlocked, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
+import { acceptedNames, answerMatches, chapterDone, isUnlocked, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
+import { MissionRepository, type MissionResult } from './missions.ts';
 import { wordDiff } from '../shared/diff.ts';
 import { cleanName, shownNames } from '../shared/names.ts';
 import { fillThiefClue, lookOf, thiefCount } from '../shared/thief.ts';
@@ -85,6 +86,7 @@ const publicSeat = (seat: Seat) => ({ id: seat.id, name: seat.name, x: seat.x, y
 // them, the chat log, mutes, and which game is open. One game is open at a time. Who is online right now is the set of open sockets.
 export class PlazaRoom extends DurableObject<Env> {
     private sql: SqlStorage;
+    private missions: MissionRepository;
 
     constructor(ctx: DurableObjectState, env: Env) {
         super(ctx, env);
@@ -147,6 +149,8 @@ export class PlazaRoom extends DurableObject<Env> {
             this.sql.exec("ALTER TABLE warmups ADD COLUMN kind TEXT NOT NULL DEFAULT 'facts'");
         }
         this.adoptOldClass();
+        this.missions = new MissionRepository(this.sql);
+        this.missions.initialize();
         // Keepalive pings are answered without waking the room.
         ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     }
@@ -217,6 +221,12 @@ export class PlazaRoom extends DurableObject<Env> {
         this.sql.exec('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value', key, value);
     }
 
+    missionStudio(token: string, op: string, body: unknown): MissionResult {
+        const session = this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray();
+        if (!token || session.length === 0) return { error: 'Please sign in again.', status: 401 };
+        return this.ctx.storage.transactionSync(() => this.missions.execute(op, body));
+    }
+
     teacher(token: string, action: TeacherAction): TeacherStatus | { error: string; status: number } {
         const session = this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray();
         if (!token || session.length === 0) return { error: 'Please sign in again.', status: 401 };
@@ -273,7 +283,7 @@ export class PlazaRoom extends DurableObject<Env> {
         return {
             warmup: this.warmupStatus(current?.id ?? null),
             campaign: this.campaignStatus(current?.id ?? null),
-            campaigns: campaigns.map(campaign => ({ id: campaign.id, title: campaign.title })),
+            campaigns: this.missions.published(),
             open: this.isOpen(),
             game: current && { id: current.id, name: current.name, randomNames: this.isRandom(current.id), vision: this.vision(current.id) },
             realNames: Object.fromEntries(this.sql.exec<{ student_key: string; full: string }>(
@@ -402,9 +412,9 @@ export class PlazaRoom extends DurableObject<Env> {
     // story up where it stopped. Each student's role and finds are saved too, and only that
     // student's own are ever sent to them.
 
-    private campaignRow(game: string | null): { campaign_id: string; chapter: number; status: QuestView['status']; revealed: number } | null {
-        return game === null ? null : this.sql.exec<{ campaign_id: string; chapter: number; status: QuestView['status']; revealed: number }>(
-            'SELECT campaign_id, chapter, status, revealed FROM campaigns WHERE game_id = ?', game).toArray()[0] ?? null;
+    private campaignRow(game: string | null): { campaign_id: string; chapter: number; status: QuestView['status']; revealed: number; revision_id: string | null } | null {
+        return game === null ? null : this.sql.exec<{ campaign_id: string; chapter: number; status: QuestView['status']; revealed: number; revision_id: string | null }>(
+            'SELECT campaign_id, chapter, status, revealed, revision_id FROM campaigns WHERE game_id = ?', game).toArray()[0] ?? null;
     }
 
     private campaignPlayers(game: string): { student_key: string; role_id: string; clues: string[]; done: string[]; last_wrong: number }[] {
@@ -417,8 +427,8 @@ export class PlazaRoom extends DurableObject<Env> {
     private player(game: string, studentKey: string, campaignId: string) {
         const existing = this.campaignPlayers(game).find(row => row.student_key === studentKey);
         if (existing) return existing;
-        const campaign = campaignById(campaignId);
-        if (!campaign) return null;
+        const campaign = this.missions.revision(this.campaignRow(game)?.revision_id ?? null);
+        if (!campaign || campaign.id !== campaignId) return null;
         const role = pickRole(campaign.roles, this.campaignPlayers(game).map(row => row.role_id), Math.random());
         this.sql.exec('INSERT INTO campaign_players (game_id, student_key, role_id) VALUES (?, ?, ?)', game, studentKey, role.id);
         return { student_key: studentKey, role_id: role.id, clues: [] as string[], done: [] as string[], last_wrong: 0 };
@@ -478,7 +488,7 @@ export class PlazaRoom extends DurableObject<Env> {
     // What this student may see of the campaign, or null before it starts.
     private questView(game: string, studentKey: string, withRecap = false): QuestView | null {
         const row = this.campaignRow(game);
-        const campaign = row && campaignById(row.campaign_id);
+        const campaign = row && this.missions.revision(row.revision_id);
         if (!row || !campaign) return null;
         const player = this.player(game, studentKey, row.campaign_id);
         const role = campaign.roles.find(item => item.id === player?.role_id);
@@ -542,7 +552,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (zone === (seat.zone ?? null)) return;
         seat.zone = zone;
         const row = zone ? this.campaignRow(seat.game) : null;
-        const campaign = row && campaignById(row.campaign_id);
+        const campaign = row && this.missions.revision(row.revision_id);
         if (!zone || !row || !campaign || row.status === 'campaign_complete') return;
         const player = this.player(seat.game, seat.studentKey, row.campaign_id);
         const fresh = campaign.chapters[row.chapter]?.discoveries.filter(item => item.zone === zone && !player?.clues.includes(item.id)) ?? [];
@@ -555,7 +565,7 @@ export class PlazaRoom extends DurableObject<Env> {
     // A student's typed answer to a chapter question. A wrong one can be tried again after a short wait.
     private answer(ws: WebSocket, seat: Seat, objectiveId: string, typed: string): void {
         const row = this.campaignRow(seat.game);
-        const campaign = row && campaignById(row.campaign_id);
+        const campaign = row && this.missions.revision(row.revision_id);
         const objective = campaign?.chapters[row?.chapter ?? 0]?.objectives.find(item => item.id === objectiveId);
         // Students can keep working after the class threshold, until the teacher moves on.
         if (!row || !campaign || !objective || row.status === 'campaign_complete') return;
@@ -604,15 +614,16 @@ export class PlazaRoom extends DurableObject<Env> {
         const row = this.campaignRow(game);
         if (action.op === 'start') {
             if (row) return 'This game already has a campaign.';
-            const campaign = campaignById(action.campaign ?? '');
-            if (!campaign) return 'That campaign does not exist.';
-            this.sql.exec("INSERT INTO campaigns (game_id, campaign_id, chapter, status, started) VALUES (?, ?, 0, 'active', ?)", game, campaign.id, Date.now());
+            const published = this.missions.latest(action.campaign ?? '');
+            if (!published) return 'Publish that campaign in Mission Studio first.';
+            const { campaign, revision } = published;
+            this.sql.exec("INSERT INTO campaigns (game_id, campaign_id, chapter, status, started, revision_id) VALUES (?, ?, 0, 'active', ?, ?)", game, campaign.id, Date.now(), revision);
             for (const seat of this.seats()) if (seat.game === game) this.player(game, seat.studentKey, campaign.id);
             this.pickThieves(game, 0, campaign.chapters[0]);
         } else if (!row) {
             return 'This game has no campaign.';
         } else if (action.op === 'next') {
-            const campaign = campaignById(row.campaign_id);
+            const campaign = this.missions.revision(row.revision_id);
             if (!campaign || row.status === 'campaign_complete') return 'The campaign is over.';
             if (row.chapter + 1 < campaign.chapters.length) {
                 this.sql.exec("UPDATE campaigns SET chapter = chapter + 1, status = 'active', revealed = 0 WHERE game_id = ?", game);
@@ -620,7 +631,7 @@ export class PlazaRoom extends DurableObject<Env> {
             } else this.sql.exec("UPDATE campaigns SET status = 'campaign_complete' WHERE game_id = ?", game);
         } else if (action.op === 'reveal') {
             // Prepared news goes to everyone, in the order the story gives it, when the class needs a nudge.
-            const chapter = campaignById(row.campaign_id)?.chapters[row.chapter];
+            const chapter = this.missions.revision(row.revision_id)?.chapters[row.chapter];
             if (!chapter || row.status === 'campaign_complete') return 'The chapter is not in progress.';
             if (row.revealed >= chapter.reveals.length) return 'There is no more news to reveal.';
             this.sql.exec('UPDATE campaigns SET revealed = revealed + 1 WHERE game_id = ?', game);
@@ -642,7 +653,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
     private campaignStatus(game: string | null): CampaignStatus | null {
         const row = this.campaignRow(game);
-        const campaign = row && campaignById(row.campaign_id);
+        const campaign = row && this.missions.revision(row.revision_id);
         if (!game || !row || !campaign) return null;
         const names = this.rosterNames(game);
         return {

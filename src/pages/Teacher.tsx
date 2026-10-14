@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { joinLink } from '../studentAuth';
 import { WARMUP_KINDS } from '../../shared/warmupKinds';
 import type { WarmupKind } from '../../shared/warmupKinds';
+import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import './Teacher.css';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string };
@@ -34,7 +35,7 @@ const VISION_CHOICES: [number, string][] = [[0, 'Everyone'], [650, 'Wide'], [450
 export default function Teacher() {
   const [password, setPassword] = useState('');
   // The password is checked once; the session token carries the rest.
-  const [token, setToken] = useState('');
+  const [token, setToken] = useState(readTeacherSession);
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState('');
   // A problem sending students to this laptop, from sign-in or opening the class.
@@ -54,7 +55,7 @@ export default function Teacher() {
 
   const failed = useCallback((cause: unknown) => {
     setError(cause instanceof Error ? cause.message : 'Connection failed.');
-    if ((cause as { status?: number }).status === 401) { setToken(''); setStatus(null); } // the session expired
+    if ((cause as { status?: number }).status === 401) { storeTeacherSession(''); setToken(''); setStatus(null); } // the session expired
   }, []);
 
   const refresh = useCallback(async () => {
@@ -64,6 +65,7 @@ export default function Teacher() {
 
   useEffect(() => {
     if (!token) return;
+    void refresh();
     const timer = window.setInterval(() => { void refresh(); }, 2000);
     return () => window.clearInterval(timer);
   }, [token, refresh]);
@@ -78,6 +80,7 @@ export default function Teacher() {
       setError('');
       setNotice(linked || '');
       setToken(session);
+      storeTeacherSession(session);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Sign-in failed.'); }
   };
 
@@ -169,7 +172,7 @@ export default function Teacher() {
   return <main className="teacher-page">
     <header className="teacher-header">
       <div><h1>Teacher controls</h1><p>{status?.mode === 'review' ? 'Nearby chat posts after an OpenAI check. Review it here and remove anything unsuitable.' : 'All student chat waits for your approval.'}</p></div>
-      <span><Link to="/studio">Theme studio</Link> · <Link to="/">Student entrance</Link></span>
+      <span><Link to="/mission-studio">Mission Studio</Link> · <Link to="/studio">Theme studio</Link> · <Link to="/">Student entrance</Link></span>
     </header>
     {!token || !status ? <form className="teacher-signin" onSubmit={event => { event.preventDefault(); void signIn(); }}>
       <label htmlFor="teacher-password">Teacher password (the same as PinPlay)</label>
@@ -185,7 +188,7 @@ export default function Teacher() {
         {status.game && <button className="btn btn-primary" onClick={() => void action('class', { open: !status.open })}>
           {status.open ? 'Close class' : 'Open class'}
         </button>}
-        <button className="btn btn-secondary" onClick={() => { setStatus(null); setToken(''); }}>Sign out</button>
+        <button className="btn btn-secondary" onClick={() => { storeTeacherSession(''); setStatus(null); setToken(''); }}>Sign out</button>
       </section>
       <section className="teacher-games">
         <h2>Games</h2>

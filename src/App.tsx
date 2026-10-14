@@ -3,6 +3,7 @@ import Login from './pages/Login';
 import Game from './pages/Game';
 import Studio from './pages/Studio';
 import Teacher from './pages/Teacher';
+import MissionStudio from './pages/MissionStudio';
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
           <Route path="/game" element={<Game />} />
           <Route path="/teacher" element={<Teacher />} />
           <Route path="/studio" element={<Studio />} />
+          <Route path="/mission-studio" element={<MissionStudio />} />
         </Routes>
       </div>
     </BrowserRouter>

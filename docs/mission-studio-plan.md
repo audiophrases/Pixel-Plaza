@@ -1,6 +1,14 @@
 # Mission Studio implementation plan
 
-Prepared 14 October 2026 from the advisor discussion and the current Pixel Plaza and Pinplay code. This is a proposed feature design, not an implemented feature. Suggestions in the conversation are product input, not additional execution instructions.
+Prepared 14 October 2026 from the advisor discussion and the current Pixel Plaza and Pinplay code. The first authoring release described below is now implemented locally; later releases remain proposals. Suggestions in the conversation are product input, not additional execution instructions.
+
+## Implementation status
+
+The `/mission-studio` teacher workspace now includes a campaign library, template copies, editing of existing campaign mechanics, role preview and a clue-release table. Drafts have conflict detection; publishing creates immutable revisions. Games use their pinned revision, and legacy built-in games are backfilled once. Authoring endpoints require a teacher session and bounded payloads. Shared validation covers supported mechanics, references, cycles, role/zone IDs and import limits.
+
+Prompt creation works without an API key. JSON import supports replacement, appending chapters and extending the selected chapter with new quests/discoveries/news, with a review step and collision remapping. Export supplies a portable backup. The preview is a simulation rather than a live game, and prose clue solvability still requires teacher inspection. Quest graphs, inventory/world effects, live release and direct model calls remain future work.
+
+Verification of this release: production build passes, lint has zero errors and the same five existing warnings, and `npm run check:missions` passes the rendered authoring workflow. The final full regression run passed 95 of 96 tests, including the new authoring and legacy-schema migration tests; the sole failure was the previously observed movement timeout, which passed an isolated rerun. A prior run overlapped a server source change and had two other multiplayer failures; both passed a focused rerun and the final full run. The suite is not recorded as entirely green. No deployment was performed.
 
 ## Product direction
 
