@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { QuestView } from '../../shared/campaign';
+import { REPORT_MAX_LENGTH } from '../../shared/campaign';
 import './Journal.css';
 
 type Props = {
@@ -24,10 +25,13 @@ function Question({ objective, feedback, onAnswer, closed = false }: { objective
         event.preventDefault();
         if (typed.trim()) { onAnswer(objective.id, typed.trim()); setTyped(''); }
       }}>
-        <input value={typed} maxLength={report ? 200 : 80} autoComplete="off"
-          placeholder={report ? 'Write 2 sentences in English' : objective.kind === 'name' ? 'Type their name' : 'Type your answer in English'}
-          aria-label="Your answer" onChange={event => setTyped(event.target.value)} />
-        <button className="journal-choice" disabled={!typed.trim()}>Answer</button>
+        {report ? <textarea value={typed} maxLength={REPORT_MAX_LENGTH} rows={4}
+          placeholder="Write your evidence and decision in English"
+          aria-label="Your report" onChange={event => setTyped(event.target.value)} /> :
+          <input value={typed} maxLength={80} autoComplete="off"
+            placeholder={objective.kind === 'name' ? 'Type their name' : 'Type your answer in English'}
+            aria-label="Your answer" onChange={event => setTyped(event.target.value)} />}
+        <button className="journal-choice" disabled={!typed.trim()}>{report ? 'Send report' : 'Answer'}</button>
       </form>
       {feedback?.objective === objective.id && !feedback.correct &&
         <p className="journal-wrong">{feedback.wait ? 'Wait a moment.' : report ? 'Write a little more.' : 'Not yet. Ask your classmates.'}</p>}

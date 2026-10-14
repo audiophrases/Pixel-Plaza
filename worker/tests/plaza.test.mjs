@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { sha256Hex } from '../rules.ts';
-import { castanyada } from '../../shared/campaign.ts';
+import { castanyada, castanyadaComplete } from '../../shared/campaign.ts';
 import { FACTS } from '../../shared/warmup.ts';
 import { identityById } from '../../shared/warmupKinds.ts';
 import { missionEnvelope } from '../../shared/missionSchema.ts';
@@ -935,7 +935,7 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         const opened = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body;
         PIN = opened.pin;
         assert.equal(opened.campaign, null);
-        assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada', 'castanyada-side-quests']);
+        assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada', 'castanyada-complete', 'castanyada-side-quests']);
 
         // No story yet: nothing is sent.
         const early = await enter(base, 'signed-a', null);
@@ -1497,6 +1497,73 @@ test('the warm-up: a secret fact, someone to find by name, progress for everyone
         await plaza.stop();
         await new Promise(resolve => pinPlay.close(resolve));
         removeTemp(persistTo);
+    }
+});
+
+test('five-chapter Castanyada: new mysteries, private side notes, partnered reports and finale', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-five-chapters-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (op, body) => api(base, `/api/teacher/${op}`, { session, body });
+        PIN = (await teacher('game', { name: 'Five-chapter class', randomNames: false })).body.pin;
+        const alex = await enter(base, 'signed-a', null); const sam = await enter(base, 'signed-b', null);
+        sockets.push(alex, sam);
+        const view = (socket, index, predicate) => socket.next(m => m.t === 'quest' && m.quest?.chapter.index === index && predicate(m.quest), 'five-chapter journal').then(m => m.quest);
+        const answer = async (socket, objective, text) => {
+            socket.send({ t: 'answer', objective, text });
+            assert.equal((await socket.next(m => m.t === 'answered' && m.objective === objective, `answer ${objective}`)).correct, true);
+        };
+        assert.equal((await teacher('missions/get?id=castanyada-complete')).body.draft.campaign.chapters.length, 5);
+        const started = (await teacher('campaign', { op: 'start', campaign: castanyadaComplete.id })).body.campaign;
+        assert.equal(started.chapters, 5);
+        await teacher('campaign', { op: 'next' }); await teacher('campaign', { op: 'next' });
+        assert.equal((await teacher('campaign', { op: 'next' })).body.campaign.chapter, 3);
+        const mainReport = 'We recommend the hotel hall for rehearsal at half past five. Keep both exits clear and use battery lights inside paper lanterns. The hot food table needs space away from decorations. We would discuss the delivery route and welcome area with the driver and receptionist before agreeing on the final layout.';
+        assert.ok(mainReport.length > 200 && mainReport.length < 1000);
+        const chapters = [
+            { index: 3, answers: [['plan-location', 'hotel'], ['plan-rehearsal', '5:30'], ['plan-venue', 'hotel'], ['plan-proposal', mainReport]] },
+            { index: 4, answers: [['lantern-location', 'park'], ['lantern-sound', 'wind'], ['festival-special-guests', 'new neighbors'], ['festival-welcome-proposal', 'Wind whistles through the torn paper lantern, and the sound stops when the wind stops. The surprise welcomes our new neighbors. We suggest offering a choice of conversation, food or a quiet seat so visitors can join comfortably.']] },
+        ];
+        for (const { index, answers } of chapters) {
+            const chapter = castanyadaComplete.chapters[index];
+            const boardQuests = chapter.objectives.filter(o => o.board);
+            const initial = await view(alex, index, q => q.objectives.length === 1);
+            assert.equal(initial.secret, null);
+            assert.equal(initial.chapter.of, 5);
+            assert.ok(initial.board.every(o => o.state === 'waiting'));
+            for (const [objective, text] of answers) await answer(alex, objective, text);
+            const waiting = await view(alex, index, q => q.board.some(o => o.reason?.includes('different role')));
+            assert.equal(waiting.chapter.ending, null, 'one of two finished students does not trigger readiness');
+            for (const [objective, text] of answers) await answer(sam, objective, text);
+            const ready = await view(alex, index, q => q.status === 'chapter_complete' && q.board.some(o => o.state === 'available'));
+            assert.ok(ready.chapter.ending);
+            const samReady = await view(sam, index, q => q.status === 'chapter_complete');
+            assert.notEqual(ready.role.id, samReady.role.id);
+            const dossier = chapter.objectives.find(o => o.id === answers.at(-1)[0]).rewards;
+            assert.ok(ready.clues.some(c => c.from === 'reward' && c.text === dossier[ready.role.id]));
+            assert.ok(!ready.clues.some(c => c.text === dossier[samReady.role.id]), 'online partner keeps their distinct side notes private');
+            for (const quest of boardQuests) {
+                alex.send({ t: 'quest-accept', objective: quest.id });
+                const active = await view(alex, index, q => q.board.some(o => o.id === quest.id && o.state === 'active'));
+                assert.equal(active.board.find(o => o.id === quest.id).partner.name, sam.me.name);
+                await answer(alex, quest.id, 'My partner explained their evidence and I asked a follow-up question. We compared two possibilities, changed one part of our proposal after listening and agreed on a recommendation for the festival committee. Our report records both contributions and the reason for our final decision.');
+                await view(alex, index, q => q.board.some(o => o.id === quest.id && o.state === 'done'));
+            }
+            const status = (await teacher('status')).body.campaign;
+            assert.ok(status.reports.some(r => r.text === answers.at(-1)[1]));
+            for (const quest of boardQuests) assert.equal(status.board.find(o => o.id === quest.id).completed, 1);
+            await teacher('campaign', { op: 'next' });
+        }
+        const finale = await view(alex, 4, q => q.status === 'campaign_complete');
+        assert.match(finale.finale, /welcomed the new neighbors/);
+        assert.equal(finale.thieves, null);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
     }
 });
 

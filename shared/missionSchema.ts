@@ -87,10 +87,10 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
                 else result.activity = o.activity;
             }
             if (o.board !== undefined) {
-                const b = obj(o.board, `${p}.board`, ['roles', 'afterMain', 'minPlayers', 'teacherReleased', 'partnerRole']);
+                const b = obj(o.board, `${p}.board`, ['roles', 'afterMain', 'minPlayers', 'teacherReleased', 'partnerRole', 'differentRole']);
                 result.board = {};
                 if (b.roles !== undefined) result.board.roles = list(b.roles, `${p}.board.roles`, 20).map((v, k) => id(v, `${p}.board.roles[${k}]`));
-                for (const key of ['afterMain', 'teacherReleased'] as const) if (b[key] !== undefined) result.board[key] = boolean(b[key], `${p}.board.${key}`);
+                for (const key of ['afterMain', 'teacherReleased', 'differentRole'] as const) if (b[key] !== undefined) result.board[key] = boolean(b[key], `${p}.board.${key}`);
                 if (b.partnerRole !== undefined) result.board.partnerRole = id(b.partnerRole, `${p}.board.partnerRole`);
                 if (b.minPlayers !== undefined) {
                     if (typeof b.minPlayers !== 'number' || !Number.isInteger(b.minPlayers) || b.minPlayers < 1 || b.minPlayers > 40) fail(`${p}.board.minPlayers`, 'Choose between 1 and 40 online students.');
@@ -159,6 +159,9 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
                 for (const role of o.board.roles ?? []) if (!roleIds.has(role)) content(`${p}.board.roles`, 'Audience role does not exist.');
                 if (o.board.partnerRole && !roleIds.has(o.board.partnerRole)) content(`${p}.board.partnerRole`, 'Partner role does not exist.');
                 if (o.board.partnerRole && !o.activity) content(`${p}.board.partnerRole`, 'Partner roles require a social activity.');
+                if (o.board.differentRole && !o.activity) content(`${p}.board.differentRole`, 'Different-role partners require a social activity.');
+                if (o.board.differentRole && roles.length < 2) content(`${p}.board.differentRole`, 'Different-role partners require at least two campaign roles.');
+                if (o.board.differentRole && o.board.partnerRole && o.board.roles?.length && o.board.roles.every(role => role === o.board?.partnerRole)) content(`${p}.board`, 'The partner role must differ from the audience role.');
             }
             if (o.activity && (!o.board || o.kind !== 'report' || o.answerRole || o.answerThief)) content(`${p}.activity`, 'Social activities require an optional board quest with report answers.');
             for (const role of Object.keys(o.rewards ?? {})) if (!roleIds.has(role)) content(`${p}.rewards.${role}`, 'Role does not exist.');

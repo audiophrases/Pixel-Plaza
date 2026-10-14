@@ -3,7 +3,7 @@ import type { Env } from './index.ts';
 import type { PinPlayStudent } from './pinplay.ts';
 import { checkGrammar } from './grammar.ts';
 import { moderate } from './moderation.ts';
-import { absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
+import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
 import { MissionRepository, type MissionResult } from './missions.ts';
 import { QuestBoard, type BoardContext } from './questBoard.ts';
 import { LiveMissions, type LiveMissionResult } from './liveMissions.ts';
@@ -461,7 +461,7 @@ export class PlazaRoom extends DurableObject<Env> {
             this.broadcast({ t: 'move', id: seat.id, ...position }, ws);
         } else if (data?.t === 'warmup-answer' && typeof data.text === 'string' && data.text.length <= 80) {
             this.warmupAnswer(ws, seat, data.text);
-        } else if (data?.t === 'answer' && typeof data.objective === 'string' && typeof data.text === 'string' && data.text.length <= 200) {
+        } else if (data?.t === 'answer' && typeof data.objective === 'string' && typeof data.text === 'string' && data.text.length <= REPORT_MAX_LENGTH) {
             this.answer(ws, seat, data.objective, data.text);
         } else if (data?.t === 'quest-accept' && typeof data.objective === 'string') {
             this.claimQuest(ws, seat, data.objective, data.changePartner === true);

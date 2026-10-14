@@ -22,13 +22,16 @@ export class QuestBoard {
     partners(ctx: BoardContext, objective: Objective): BoardPlayer[] {
         return ctx.players.filter(p => p.student_key !== ctx.player.student_key && ctx.online.has(p.student_key)
             && (!objective.board?.partnerRole || p.role_id === objective.board.partnerRole)
+            && (!objective.board?.differentRole || p.role_id !== ctx.player.role_id)
             && (!objective.board?.afterMain || mainFinished(ctx.chapter, p.done)));
     }
     wait(ctx: BoardContext, objective: Objective): string | null {
         if (ctx.status === 'campaign_complete') return 'The campaign has ended.';
         const reason = boardWait(objective, ctx.chapter, ctx.player.role_id, ctx.player.done, this.released(ctx.game, objective.id), ctx.online.size);
         if (reason) return reason;
-        if (objective.activity && !this.partners(ctx, objective).length) return objective.board?.afterMain ? 'Wait for another investigator who has finished the main mystery.' : 'Wait for a classmate with the right role.';
+        if (objective.activity && !this.partners(ctx, objective).length) return objective.board?.differentRole
+            ? 'Wait for an investigator with a different role' + (objective.board.afterMain ? ' who has finished the main mystery.' : '.')
+            : objective.board?.afterMain ? 'Wait for another investigator who has finished the main mystery.' : 'Wait for a classmate with the right role.';
         return null;
     }
     claim(ctx: BoardContext, objective: Objective, changePartner = false): string | null {

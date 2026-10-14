@@ -68,8 +68,10 @@
 .journal-question { border-left-color: #1677ff; background: #f0f7ff; }
 .journal-ask { font-size: 1.05rem; font-weight: 800; margin-bottom: 0.4rem !important; }
 .journal-answer { display: flex; gap: 0.4rem; }
-.journal-answer input { flex: 1; min-width: 0; padding: 0.45rem 0.6rem; border: 2px solid #d9d9d9; border-radius: 8px; font: inherit; }
-.journal-answer input:focus { outline: none; border-color: #1677ff; }
+.journal-answer input, .journal-answer textarea { flex: 1; min-width: 0; padding: 0.45rem 0.6rem; border: 2px solid #d9d9d9; border-radius: 8px; font: inherit; }
+.journal-answer input:focus, .journal-answer textarea:focus { outline: none; border-color: #1677ff; }
+.journal-answer:has(textarea) { flex-direction: column; }
+.journal-answer textarea { width: 100%; box-sizing: border-box; resize: vertical; }
 .journal-choice {
   padding: 0.5rem;
   border: 2px solid #d9d9d9;

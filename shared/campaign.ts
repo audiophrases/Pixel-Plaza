@@ -12,6 +12,10 @@
 
 // The student types the answer. `accept` lists the words or short phrases that make an answer right;
 // "the park", "In the park!" and a small spelling slip in a long word all count for "park".
+import { buildCastanyadaComplete } from './castanyadaComplete.ts';
+
+export const REPORT_MAX_LENGTH = 1000;
+
 export type Objective = {
     id: string; text: string; accept: string[];
     answerThief?: boolean;            // the answer is the name of the chapter's thief (the thief does not get this question)
@@ -22,7 +26,7 @@ export type Objective = {
     requires?: { mode: 'all' | 'any'; objectives: string[] };
     optional?: boolean;               // a bonus: it never holds the chapter up
     activity?: 'interview' | 'exchange'; // a partnered report on a quest board
-    board?: { roles?: string[]; afterMain?: boolean; minPlayers?: number; teacherReleased?: boolean; partnerRole?: string };
+    board?: { roles?: string[]; afterMain?: boolean; minPlayers?: number; teacherReleased?: boolean; partnerRole?: string; differentRole?: boolean };
     rewards?: Record<string, string>; // the new clue each role earns by answering, by role id
 };
 // A clue everyone finds by standing in a named place (see `zones` in plazaMap.ts).
@@ -228,7 +232,8 @@ castanyadaSideQuests.chapters[0].objectives.push(
     { id: 'delivery-interview', text: 'Interview your partner about a strange delivery. Ask where it went, when it arrived, and what was inside. Write what you learned.', accept: [], kind: 'report', optional: true, activity: 'interview', board: { afterMain: true, minPlayers: 2 } },
     { id: 'festival-exchange', text: 'Compare two ideas for a secret festival surprise with your partner. Explain a problem with each idea and agree on one. Write your plan.', accept: [], kind: 'report', optional: true, activity: 'exchange', requires: { mode: 'any', objectives: ['delivery-interview', 'note'] }, board: { afterMain: true, teacherReleased: true, minPlayers: 2 } },
 );
-export const campaigns: Campaign[] = [castanyada, castanyadaSideQuests];
+export const castanyadaComplete = buildCastanyadaComplete(castanyada);
+export const campaigns: Campaign[] = [castanyada, castanyadaSideQuests, castanyadaComplete];
 export const campaignById = (id: string): Campaign | undefined => campaigns.find(campaign => campaign.id === id);
 
 // The role the fewest students have so far, so a class is spread across the roles; ties are
