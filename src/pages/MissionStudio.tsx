@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Campaign } from '../../shared/campaign';
 import { missionEnvelope, missionId, missionJson, MISSION_MAX_BYTES, validateMission } from '../../shared/missionSchema';
@@ -6,6 +6,7 @@ import { importMission, type MissionImport } from '../../shared/missionImport';
 import { buildMissionPrompt } from '../../shared/missionPrompt';
 import type { MissionDraft, MissionSummary } from '../../shared/missionTypes';
 import MissionEditor, { MissionField, MissionPreview } from '../components/MissionEditor';
+import LiveMissionPanel from '../components/LiveMissionPanel';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import './MissionStudio.css';
 
@@ -29,10 +30,10 @@ export default function MissionStudio() {
     const [brief, setBrief] = useState(''); const [level, setLevel] = useState('A2'); const [promptMode, setPromptMode] = useState<'create' | 'extend' | 'quests'>('quests'); const [prompt, setPrompt] = useState('');
     const dirty = !!campaign && !!draft && JSON.stringify(campaign) !== JSON.stringify(draft.campaign);
     const checked = campaign ? validateMission(missionEnvelope(campaign)) : null;
-    const failed = (cause: unknown) => {
+    const failed = useCallback((cause: unknown) => {
         setError(cause instanceof Error ? cause.message : 'Connection failed.');
         if ((cause as { status?: number }).status === 401) { storeTeacherSession(''); setToken(''); }
-    };
+    }, []);
     useEffect(() => {
         if (!token) return;
         let active = true;
@@ -97,6 +98,7 @@ export default function MissionStudio() {
                     <ul className="mission-warning">{checked?.warnings.map((item, i) => <li key={i}>{item.message}</li>)}</ul></details>
                 <MissionEditor campaign={campaign} chapterIndex={chapterIndex} setChapterIndex={index => { setChapterIndex(index); setCandidate(null); setPrompt(''); }} onChange={edit} />
                 <MissionPreview campaign={campaign} chapter={campaign.chapters[chapterIndex]} />
+                <LiveMissionPanel token={token} campaign={campaign} chapter={campaign.chapters[chapterIndex]} version={draft.version} dirty={dirty} onError={failed} />
                 <section className="mission-card"><h2>Create with an AI prompt</h2><p>Describe your idea, copy or download the prompt, then import the AI's JSON response below.</p>
                     <div className="mission-two-columns"><label className="mission-field"><span>Language level</span><select value={level} onChange={e => { setLevel(e.target.value); setPrompt(''); }}>{['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map(l => <option key={l}>{l}</option>)}</select></label><label className="mission-field"><span>Task</span><select value={promptMode} onChange={e => { setPromptMode(e.target.value as 'create' | 'extend' | 'quests'); setPrompt(''); }}><option value="quests">Add quests to the selected chapter</option><option value="extend">Extend this campaign with chapters</option><option value="create">Create a new campaign</option></select></label></div>
                     <MissionField label="Your mission brief" value={brief} multiline onChange={text => { setBrief(text); setPrompt(''); }} />

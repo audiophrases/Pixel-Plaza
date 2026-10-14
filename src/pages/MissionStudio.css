@@ -30,4 +30,5 @@
 .mission-import-preview { background: #f5f9f8; padding: 1rem; border: 1px solid #d4e2df; border-radius: 12px; margin-top: 1rem; }.mission-page pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 500px; overflow: auto; font-size: .8rem; padding: 1rem; background: #edf2f3; }
 .mission-file { font-size: .85rem; display: grid; gap: .4rem; }.mission-login { max-width: 420px; }.mission-empty { padding: 3rem; }
 .mission-checklist { display: grid; gap: .5rem; margin: .8rem 0; }.mission-board-settings { display: grid; gap: .7rem; padding: 1rem; margin: 1rem 0; background: #eff8f6; border-radius: 10px; }
+.mission-live-controls { min-width: 0; border: 0; padding: 0; margin-top: 1rem; }
 @media (max-width: 900px) { .mission-workspace { grid-template-columns: 1fr; }.mission-library { position: static; }.mission-page { padding: 1rem; }.mission-two-columns { grid-template-columns: 1fr; }.mission-header { align-items: flex-start; flex-direction: column; gap: 1rem; }.mission-savebar { position: static; } }

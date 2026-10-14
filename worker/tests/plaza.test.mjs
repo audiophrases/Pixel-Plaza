@@ -71,10 +71,14 @@ async function startPlaza(pinPlayUrl, persistTo, vars = {}) {
     const base = `http://127.0.0.1:${port}`;
     const stop = () => new Promise(resolve => {
         if (child.exitCode !== null) return resolve();
-        child.once('exit', resolve);
         // wrangler runs workerd as a child process; take the whole tree down.
-        if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F']);
-        else child.kill('SIGTERM');
+        // On Windows the parent can exit before taskkill finishes the workerd children;
+        // wait for the tree cleanup too before a migration test opens its SQLite file.
+        if (process.platform === 'win32') {
+            const cleanup = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+            cleanup.once('exit', () => { if (child.exitCode !== null) resolve(); else child.once('exit', resolve); });
+            cleanup.once('error', () => { child.once('exit', resolve); child.kill(); });
+        } else { child.once('exit', resolve); child.kill('SIGTERM'); }
     });
     for (let attempt = 0; attempt < 120; attempt++) {
         try { if ((await fetch(`${base}/api/health`)).ok) return { base, stop }; } catch { /* starting */ }
@@ -125,6 +129,122 @@ async function enter(base, token, avatar) {
     const welcome = await socket.next(message => message.t === 'welcome', 'welcome');
     return { ...socket, welcome, me: welcome.players.find(player => player.id === welcome.id) };
 }
+
+test('Live missions: reviewed additions preserve progress, enforce conflicts and survive restart', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-live-'));
+    let plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); const sockets = [];
+    try {
+        let base = plaza.base;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+        const live = (op, body) => teacher(`missions/${op}`, body);
+        assert.equal((await api(base, '/api/teacher/missions/live')).status, 401);
+        assert.equal((await api(base, '/api/teacher/missions/live-preview', { body: {} })).status, 401);
+        assert.equal((await api(base, '/api/teacher/missions/live-release', { body: { previewId: 'fake' } })).status, 401);
+        assert.equal((await api(base, '/api/teacher/missions/live-withdraw', { body: {} })).status, 401);
+        assert.equal((await api(base, '/api/teacher/missions/live-inspect?id=live-puzzle')).status, 401);
+        assert.equal((await live('live')).body.target, null);
+        PIN = (await teacher('game', { name: 'Live class', randomNames: false })).body.pin;
+        const game = (await teacher('status')).body.game.id;
+        const solver = await enter(base, 'signed-a', null); const other = await enter(base, 'signed-b', null); sockets.push(solver, other);
+        await teacher('campaign', { op: 'start', campaign: 'castanyada' });
+        solver.send({ t: 'answer', objective: 'where', text: 'park' }); assert.equal((await solver.next(m => m.t === 'answered')).correct, true);
+        const before = (await teacher('status')).body.campaign;
+        const roleName = before.players.find(p => p.studentKey === 'stu_a').role;
+        const roleId = castanyada.roles.find(r => r.name === roleName).id;
+        let draft = (await teacher('missions/create', { id: 'live-source', source: 'castanyada' })).body.draft;
+        const content = draft.campaign;
+        content.title = 'A changed draft'; content.roles.forEach(r => { r.clue = 'Changed source secret'; }); content.chapters[0].objectives[0].accept = ['hotel'];
+        content.chapters[0].objectives.push(
+            { id: 'live-puzzle', text: 'How many invitations are missing?', accept: ['two', '2'], optional: true, after: 'where', board: { roles: [roleId], teacherReleased: true } },
+            { id: 'live-followup', text: 'Write a report about the invitations.', accept: [], kind: 'report', optional: true, after: 'live-puzzle', board: {} },
+            { id: 'next-live-quest', text: 'Write a report about the hotel.', accept: [], kind: 'report', optional: true, board: {} }
+        );
+        draft = (await teacher('missions/save', { id: content.id, version: draft.version, envelope: missionEnvelope(content) })).body.draft;
+        let target = (await live('live')).body.target;
+        const review = ids => live('live-preview', { gameId: target.game.id, targetVersion: target.version, targetEpoch: target.epoch, chapterId: target.chapter.id, sourceId: content.id, sourceVersion: draft.version, objectiveIds: ids });
+        assert.equal((await review(['where'])).status, 400, 'cannot replace a main question');
+        const reviewed = await review(['live-puzzle', 'live-followup']); assert.equal(reviewed.status, 200);
+        assert.equal(reviewed.body.preview.quests[0].eligibleNow, 1);
+        assert.equal(reviewed.body.preview.quests[0].audience, roleName);
+        assert.deepEqual((await teacher('status')).body.campaign.players, before.players, 'preview preserves progress');
+        const targetBeforePreview = (await live('live')).body.target; assert.deepEqual(targetBeforePreview.additions, []);
+        const released = await live('live-release', { previewId: reviewed.body.preview.id, objectiveIds: ['where'] }); assert.equal(released.status, 200);
+        assert.deepEqual(released.body.released, ['live-puzzle', 'live-followup']); target = released.body.target;
+        const solverView = (await solver.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === 'live-puzzle'), 'live quest')).quest;
+        assert.equal(solverView.board.find(q => q.id === 'live-puzzle').state, 'available');
+        assert.equal(solverView.campaign.title, castanyada.title); assert.equal(JSON.stringify(solverView).includes('Changed source secret'), false);
+        assert.equal(JSON.stringify(solverView).includes('"accept"'), false);
+        const otherView = (await other.next(m => m.t === 'quest' && m.quest.board, 'other student live view')).quest;
+        assert.equal(otherView.board.some(q => q.id === 'live-puzzle'), false, 'live audience restrictions stay private');
+        const afterRelease = (await teacher('status')).body.campaign;
+        assert.deepEqual(afterRelease.players, before.players); assert.equal(afterRelease.chapter, before.chapter);
+        assert.equal((await live('live-release', { previewId: reviewed.body.preview.id })).status, 409, 'review token cannot be replayed');
+        assert.equal((await review(['live-puzzle'])).status, 400, 'duplicate IDs cannot replace released content');
+        const withdraw = id => live('live-withdraw', { gameId: target.game.id, targetVersion: target.version, targetEpoch: target.epoch, objectiveId: id });
+        assert.equal((await withdraw('live-puzzle')).status, 409, 'dependencies prevent withdrawal');
+        const withdrawn = await withdraw('live-followup'); assert.equal(withdrawn.status, 200); target = withdrawn.body.target;
+        assert.equal((await review(['live-followup'])).status, 400, 'withdrawn IDs are reserved');
+        const liveDefinition = (await live('live-inspect?id=live-puzzle')).body.inspection; assert.deepEqual(liveDefinition.definition.accept, ['two', '2']);
+        solver.send({ t: 'quest-accept', objective: 'live-puzzle' });
+        await solver.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === 'live-puzzle' && q.state === 'active'));
+        assert.equal((await withdraw('live-puzzle')).status, 409, 'started quests cannot be withdrawn');
+        solver.send({ t: 'answer', objective: 'live-puzzle', text: '2' }); assert.equal((await solver.next(m => m.t === 'answered' && m.objective === 'live-puzzle')).correct, true);
+        const previewForChange = (await review(['next-live-quest'])).body.preview;
+        content.chapters[0].objectives.find(o => o.id === 'live-puzzle').accept = ['3'];
+        draft = (await teacher('missions/save', { id: content.id, version: draft.version, envelope: missionEnvelope(content) })).body.draft;
+        assert.equal((await live('live-release', { previewId: previewForChange.id })).status, 409, 'changing a saved draft invalidates its preview');
+        assert.deepEqual((await live('live-inspect?id=live-puzzle')).body.inspection.definition.accept, ['two', '2'], 'released definition stays frozen after edits');
+        const a = (await review(['next-live-quest'])).body.preview; const b = (await review(['next-live-quest'])).body.preview;
+        const added = await live('live-release', { previewId: a.id }); assert.equal(added.status, 200); target = added.body.target;
+        assert.equal((await live('live-release', { previewId: b.id })).status, 409, 'concurrent previews cannot overwrite one another');
+        content.chapters[0].objectives.push({ id: 'expiring-quest', text: 'Write another mystery report.', accept: [], kind: 'report', optional: true, board: {} });
+        draft = (await teacher('missions/save', { id: content.id, version: draft.version, envelope: missionEnvelope(content) })).body.draft;
+        const expiredPreview = (await review(['expiring-quest'])).body.preview;
+        const canceled = (await review(['expiring-quest'])).body.preview;
+        await live('live-cancel', { previewId: canceled.id });
+        assert.equal((await live('live-release', { previewId: canceled.id })).status, 409, 'canceled selections cannot be released');
+        await teacher('class', { open: false }); assert.equal((await review(['next-live-quest'])).status, 400, 'closed class cannot receive additions');
+        await teacher('class', { open: true, game });
+        await teacher('game', { name: 'Another class', randomNames: false }); await teacher('campaign', { op: 'start', campaign: 'castanyada' });
+        assert.deepEqual((await live('live')).body.target.additions, [], 'another game does not inherit additions');
+        assert.equal((await live('live-inspect?id=live-puzzle')).status, 404);
+        await teacher('class', { open: true, game });
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        // Expire only this preview in the isolated database; no real-time ten-minute sleep.
+        const { DatabaseSync } = await import('node:sqlite');
+        const files = directory => fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);
+        let expired = false;
+        for (const file of files(persistTo).filter(file => file.endsWith('.sqlite'))) {
+            assert.ok(path.resolve(file).startsWith(path.resolve(persistTo) + path.sep));
+            const db = new DatabaseSync(file);
+            try {
+                if (!db.prepare("SELECT name FROM sqlite_master WHERE name = 'mission_live_previews'").get()) continue;
+                expired = db.prepare('UPDATE mission_live_previews SET expires = 0 WHERE preview_id = ?').run(expiredPreview.id).changes === 1;
+            } finally { db.close(); }
+        }
+        assert.ok(expired);
+        plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); base = plaza.base;
+        assert.equal((await live('live-release', { previewId: expiredPreview.id })).status, 409, 'expired review is rejected after restart');
+        const resumed = await enter(base, 'signed-a', null); sockets.push(resumed);
+        const resumedView = (await resumed.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === 'live-puzzle'), 'persisted live quests')).quest;
+        assert.equal(resumedView.board.find(q => q.id === 'live-puzzle').state, 'done');
+        assert.ok(resumedView.objectives.find(o => o.id === 'where').done);
+        assert.ok(!resumedView.board.some(q => q.id === 'live-followup'));
+        assert.deepEqual((await live('live-inspect?id=live-puzzle')).body.inspection.definition.accept, ['two', '2']);
+        target = (await live('live')).body.target; const oldEpoch = target.epoch;
+        await teacher('campaign', { op: 'reset', confirm: true }); await teacher('campaign', { op: 'start', campaign: 'castanyada' });
+        const restarted = (await live('live')).body.target; assert.notEqual(restarted.epoch, oldEpoch); assert.deepEqual(restarted.additions, []);
+        assert.equal((await live('live-withdraw', { gameId: game, targetVersion: restarted.version, targetEpoch: oldEpoch, objectiveId: 'live-puzzle' })).status, 409, 'requests cannot cross campaign resets');
+        assert.equal((await live('live-inspect?id=live-puzzle')).status, 404);
+        await teacher('campaign', { op: 'next' });
+        assert.equal((await review(['next-live-quest'])).status, 409, 'chapter changes invalidate the old target');
+        await teacher('campaign', { op: 'next' }); await teacher('campaign', { op: 'next' });
+        assert.equal((await live('live-release', { previewId: 'old' })).status, 400, 'ended campaign cannot receive additions');
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
 
 test('Quest board: eligibility, release, assignments, partner replacement and restart persistence', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-board-'));

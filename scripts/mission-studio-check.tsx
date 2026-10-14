@@ -5,6 +5,7 @@ import { castanyada } from '../shared/campaign';
 import type { QuestView } from '../shared/campaign';
 import { missionEnvelope, missionJson } from '../shared/missionSchema';
 import type { MissionDraft } from '../shared/missionTypes';
+import type { LiveMissionTarget } from '../shared/missionTypes';
 
 const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true, url: 'http://localhost/mission-studio' });
 const g = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean };
@@ -14,11 +15,34 @@ dom.window.confirm = () => true;
 let saved: MissionDraft = { campaign: structuredClone(castanyada), version: 1, publishedRevision: 'builtin', updated: 0 };
 const writes: { op: string; body: Record<string, unknown> }[] = [];
 const summary = () => ({ id: saved.campaign.id, title: saved.campaign.title, version: saved.version, publishedRevision: saved.publishedRevision, updated: 0 });
+let liveTarget: LiveMissionTarget = { game: { id: 'live-game', name: 'Class 3A' }, campaign: { id: castanyada.id, title: castanyada.title, revision: 'builtin' }, chapter: { id: castanyada.chapters[0].id, title: castanyada.chapters[0].title, index: 0 }, version: 0, epoch: 'session-1', open: true, ended: false, objectiveIds: castanyada.chapters.flatMap(c => c.objectives.map(o => o.id)), additions: [] };
+let liveReleased = 0; let livePreview = false;
 g.fetch = async (url, init) => {
     const route = String(url); const body = init?.body ? JSON.parse(String(init.body)) : {};
     if (route === '/api/teacher/login') return Response.json({ token: 'teacher-test' });
     assert.equal((init?.headers as Record<string, string> | undefined)?.['x-teacher-session'], 'teacher-test');
     if (route.endsWith('/list')) return Response.json({ library: [summary()] });
+    if (route.endsWith('/live')) return Response.json({ target: liveTarget });
+    if (route.endsWith('/live-cancel')) return Response.json({ target: liveTarget });
+    if (route.endsWith('/live-preview')) {
+        livePreview = true;
+        assert.equal(body.sourceVersion, saved.version); assert.equal(body.targetEpoch, liveTarget.epoch);
+        const definition = saved.campaign.chapters[0].objectives.find(o => o.id === body.objectiveIds[0])!;
+        return Response.json({ target: liveTarget, preview: { id: 'preview-1', game: liveTarget.game, chapter: liveTarget.chapter, expires: Date.now() + 600000, quests: [{ id: definition.id, text: definition.text, activity: definition.activity, audience: 'All roles', eligibleNow: 2, definition }] } });
+    }
+    if (route.endsWith('/live-release')) {
+        assert.ok(livePreview); assert.equal(body.previewId, 'preview-1'); liveReleased++;
+        const definition = saved.campaign.chapters[0].objectives.find(o => o.id === 'hotel-interview')!;
+        liveTarget = { ...liveTarget, version: liveTarget.version + 1, objectiveIds: [...liveTarget.objectiveIds, definition.id], additions: [{ id: definition.id, text: definition.text, withdrawn: false, started: false }] };
+        return Response.json({ target: liveTarget, released: [definition.id] });
+    }
+    if (route.endsWith('/live-withdraw')) {
+        liveTarget = { ...liveTarget, version: liveTarget.version + 1, additions: liveTarget.additions.map(a => ({ ...a, withdrawn: true })) };
+        return Response.json({ target: liveTarget, withdrawn: body.objectiveId });
+    }
+    if (route.includes('/live-inspect?')) {
+        return Response.json({ target: liveTarget, inspection: { id: 'hotel-interview', definition: saved.campaign.chapters[0].objectives.find(o => o.id === 'hotel-interview'), sourceId: saved.campaign.id, sourceVersion: saved.version, created: Date.now(), withdrawn: false } });
+    }
     if (route.includes('/get?')) return Response.json({ draft: saved });
     if (route.endsWith('/save')) { writes.push({ op: 'save', body }); assert.equal(body.version, saved.version); saved = { ...saved, campaign: body.envelope.campaign, version: saved.version + 1 }; }
     else if (route.endsWith('/publish')) { writes.push({ op: 'publish', body }); assert.equal(body.version, saved.version); saved = { ...saved, version: saved.version + 1, publishedRevision: 'new-revision' }; }
@@ -89,6 +113,21 @@ await click('Save draft');
 const authored = saved.campaign.chapters[0].objectives.find(o => o.id === 'hotel-interview')!;
 assert.equal(authored.activity, 'exchange'); assert.equal(authored.board?.afterMain, true); assert.equal(authored.board?.teacherReleased, true);
 assert.deepEqual(authored.requires, { mode: 'all', objectives: ['where', 'when'] });
+const livePanel = [...document.querySelectorAll('section')].find(s => s.querySelector('h2')?.textContent === 'Add quests to a running game')!;
+const choice = [...livePanel.querySelectorAll('label')].find(l => l.textContent?.includes(authored.text))!.querySelector<HTMLInputElement>('input')!;
+await act(async () => { choice.click(); });
+assert.equal(liveReleased, 0);
+await click('Review live release'); assert.equal(liveReleased, 0, 'review does not alter the game');
+assert.ok(document.body.textContent?.includes('2 students can accept now'));
+await edit('Campaign title', 'Changed after review');
+assert.equal([...document.querySelectorAll('button')].some(b => b.textContent === 'Release reviewed quests'), false, 'unsaved edits invalidate the preview');
+await click('Save draft'); await click('Review live release');
+await click('Release reviewed quests'); assert.equal(liveReleased, 1);
+assert.ok(document.body.textContent?.includes('Student progress is preserved'));
+await click('Inspect released definition');
+assert.ok(document.body.textContent?.includes('Saved from castanyada, draft version'));
+await click('Withdraw unstarted quest');
+assert.ok(liveTarget.additions[0].withdrawn);
 
 await edit('Paste campaign JSON', JSON.stringify({ ...missionEnvelope(incoming), schemaVersion: 42 }));
 await click('Preview pasted JSON');
@@ -121,5 +160,5 @@ quest.status = 'campaign_complete'; await renderJournal();
 assert.ok(!document.querySelector('form'), 'closed campaigns do not offer report submission');
 await act(async () => { journalRoot.unmount(); });
 dom.window.close();
-console.log('Mission Studio UI: authoring, all/any links, social quest settings, imports and student quest board controls pass.');
+console.log('Mission Studio UI: authoring, imports, reviewed live release, inspection, withdrawal and student quest board controls pass.');
 process.exit(0);
