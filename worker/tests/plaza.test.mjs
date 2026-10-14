@@ -455,8 +455,15 @@ test('Mission Studio migration: legacy games retain roles, progress and thief as
             const db = new DatabaseSync(file);
             try {
                 if (!db.prepare("SELECT name FROM sqlite_master WHERE name = 'campaigns'").get()) continue;
-                // Reconstruct the pre-Studio schema in this isolated test database.
-                db.exec('ALTER TABLE campaigns DROP COLUMN revision_id; DROP TABLE mission_drafts; DROP TABLE mission_revisions;');
+                // Reconstruct the actual pre-Studio table, rather than asking Node's SQLite
+                // to rewrite a workerd table in place with DROP COLUMN.
+                db.exec(`CREATE TABLE campaigns_legacy (
+                    game_id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, chapter INTEGER NOT NULL,
+                    status TEXT NOT NULL, started INTEGER NOT NULL, revealed INTEGER NOT NULL DEFAULT 0);
+                    INSERT INTO campaigns_legacy SELECT game_id, campaign_id, chapter, status, started, revealed FROM campaigns;
+                    DROP TABLE campaigns;
+                    ALTER TABLE campaigns_legacy RENAME TO campaigns;
+                    DROP TABLE mission_drafts; DROP TABLE mission_revisions;`);
                 migrated = true;
             } finally { db.close(); }
         }
