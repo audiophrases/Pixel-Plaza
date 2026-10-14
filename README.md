@@ -91,6 +91,8 @@ The laptop's address is plain HTTP, so student sessions cross the school network
 
 ## Editing the map (theme studio)
 
+Mission authoring is planned separately in [the Mission Studio implementation plan](docs/mission-studio-plan.md), including reuse of Pinplay's AI prompt creation and JSON import workflow.
+
 Open `/studio` (for example `http://localhost:8787/studio`). It opens the plaza theme: draw or move **blocks** (where nobody can walk: rectangles, ovals or free shapes), **walk-behind areas** (trees and lamps that hide a student standing behind them, with a ground line), **zones** (named places for the story) and the **start**. **Check where students can walk** shows any place that is cut off, and **Walk around it** lets you try it. Then **Download the theme file** and run `npm run theme -- plaza`: it checks the newest `plaza.json` in your Downloads folder and installs it in `shared/themes/`. Restart the server to play it. `git checkout shared/themes/plaza.json` puts the old one back.
 
 ## Names in the plaza

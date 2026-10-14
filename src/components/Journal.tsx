@@ -77,7 +77,7 @@ export default function Journal({ quest, feedback, onAnswer }: Props) {
         <p>{quest.team.done} of {quest.team.total} answers</p>
       </section>}
 
-      {quest.status === 'active' && <section className="journal-block journal-task">
+      {quest.status !== 'campaign_complete' && <section className="journal-block journal-task">
         <h3>Task</h3>
         <p>{quest.chapter.intro}</p>
       </section>}
@@ -106,7 +106,8 @@ export default function Journal({ quest, feedback, onAnswer }: Props) {
       </section>}
 
       {quest.chapter.ending && <section className="journal-block journal-ending">
-        <h3>Chapter complete</h3>
+        <h3>{quest.status === 'chapter_complete' ? 'The class is ready to advance' : 'Chapter complete'}</h3>
+        {quest.status === 'chapter_complete' && <p>You can keep working until your teacher starts the next chapter.</p>}
         <p>{quest.chapter.ending}</p>
       </section>}
 

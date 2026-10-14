@@ -504,10 +504,10 @@ export class PlazaRoom extends DurableObject<Env> {
                 ...(isThief && chapter.thieves ? [] : rewardClues(chapter, role.id, player.done).map(item => ({ ...item, from: 'reward' }))),
                 ...chapter.reveals.slice(0, row.revealed).map(item => ({ id: `news-${item.id}`, text: item.text, from: 'news' })),
             ],
-            // Questions come one after another; once the chapter is finished only the bonus ones stay open.
+            // Reaching the class threshold does not close questions; the teacher advances the chapter.
             secret: isThief && chapter.thieves ? { title: 'You are the thief', text: chapter.thieves.card } : null,
             thieves: chapter.thieves && row.status !== 'active' ? thieves.map(key => names.get(key) ?? 'Student') : null,
-            objectives: chapter.objectives.filter(objective => isUnlocked(objective, player.done) && (row.status === 'active' || objective.optional)
+            objectives: chapter.objectives.filter(objective => isUnlocked(objective, player.done) && (row.status !== 'campaign_complete' || objective.optional)
                 && !(isThief && (objective.answerThief || objective.thiefKnows)))
                 .map(objective => ({ id: objective.id, text: objective.text, done: player.done.includes(objective.id), optional: !!objective.optional,
                     kind: objective.kind === 'report' ? 'report' as const : objective.answerRole ? 'name' as const : 'text' as const })),
@@ -543,7 +543,7 @@ export class PlazaRoom extends DurableObject<Env> {
         seat.zone = zone;
         const row = zone ? this.campaignRow(seat.game) : null;
         const campaign = row && campaignById(row.campaign_id);
-        if (!zone || !row || !campaign || row.status !== 'active') return;
+        if (!zone || !row || !campaign || row.status === 'campaign_complete') return;
         const player = this.player(seat.game, seat.studentKey, row.campaign_id);
         const fresh = campaign.chapters[row.chapter]?.discoveries.filter(item => item.zone === zone && !player?.clues.includes(item.id)) ?? [];
         if (!player || fresh.length === 0) return;
@@ -557,8 +557,8 @@ export class PlazaRoom extends DurableObject<Env> {
         const row = this.campaignRow(seat.game);
         const campaign = row && campaignById(row.campaign_id);
         const objective = campaign?.chapters[row?.chapter ?? 0]?.objectives.find(item => item.id === objectiveId);
-        // Bonus questions stay open after the chapter is finished; the main ones do not.
-        if (!row || !campaign || !objective || !(row.status === 'active' || (row.status === 'chapter_complete' && objective.optional))) return;
+        // Students can keep working after the class threshold, until the teacher moves on.
+        if (!row || !campaign || !objective || row.status === 'campaign_complete') return;
         const player = this.player(seat.game, seat.studentKey, row.campaign_id);
         if (!player || player.done.includes(objective.id) || !isUnlocked(objective, player.done)) return;
         const reply = (correct: boolean, wait = false) => ws.send(JSON.stringify({ t: 'answered', objective: objective.id, correct, wait }));
@@ -621,7 +621,7 @@ export class PlazaRoom extends DurableObject<Env> {
         } else if (action.op === 'reveal') {
             // Prepared news goes to everyone, in the order the story gives it, when the class needs a nudge.
             const chapter = campaignById(row.campaign_id)?.chapters[row.chapter];
-            if (!chapter || row.status !== 'active') return 'The chapter is not in progress.';
+            if (!chapter || row.status === 'campaign_complete') return 'The chapter is not in progress.';
             if (row.revealed >= chapter.reveals.length) return 'There is no more news to reveal.';
             this.sql.exec('UPDATE campaigns SET revealed = revealed + 1 WHERE game_id = ?', game);
         } else if (action.op === 'reset') {

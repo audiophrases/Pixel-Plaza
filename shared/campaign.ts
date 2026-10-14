@@ -6,8 +6,8 @@
 // more. The students must talk to each other to put the clues together and type the answer
 // to each question. Answering a question earns a new clue for your role, and unlocks the
 // next question. Bonus questions are for students who finish early and do not hold the
-// chapter up. When enough of the class has finished the main questions, the chapter ends on
-// a cliffhanger, and the teacher starts the next one whenever the class is ready. If the
+// chapter up. When enough of the class has finished the main questions, the class sees a
+// cliffhanger, but questions stay open until the teacher starts the next chapter. If the
 // class is stuck, the teacher can reveal a prepared piece of news to everyone.
 
 // The student types the answer. `accept` lists the words or short phrases that make an answer right;
@@ -176,10 +176,8 @@ export const castanyada: Campaign = {
             planner: 'The party starts at 6:00. The chestnuts must be ready before then.',
         },
         objectives: [
-            { id: 'hide', text: 'Where did the thief hide the chestnuts?', accept: ['cellar', 'basement'], thiefKnows: true },
             {
-                id: 'code', text: 'What is the code of the cellar door? Type the four numbers.', after: 'hide',
-                accept: ['7 4 3 1', '7431'],
+                id: 'hide', text: 'Where did the thief hide the chestnuts?', accept: ['cellar', 'basement'], thiefKnows: true,
                 rewards: {
                     baker: 'One number of the code is 4. It is the number of my oven.',
                     shopkeeper: 'One number of the code is 1. It is the number of doors in my shop.',
@@ -189,7 +187,8 @@ export const castanyada: Campaign = {
                 },
             },
             {
-                id: 'why', text: 'Why did the thief take the chestnuts?', after: 'code', accept: ['surprise', 'party', 'present', 'gift'],
+                id: 'code', text: 'What is the code of the cellar door? Type the four numbers.', after: 'hide',
+                accept: ['7 4 3 1', '7431'],
                 rewards: {
                     baker: 'In the cellar there is a note. It says: "I wanted a surprise..."',
                     shopkeeper: 'The note says: "...party for everyone..."',
@@ -198,6 +197,7 @@ export const castanyada: Campaign = {
                     planner: 'The note is signed by a friend of the town.',
                 },
             },
+            { id: 'why', text: 'Why did the thief take the chestnuts?', after: 'code', accept: ['surprise', 'party', 'present', 'gift'] },
             { id: 'report-3', text: 'Write 3 sentences. What happens at the celebration?', after: 'why', optional: true, kind: 'report', accept: [] },
         ],
         discoveries: [

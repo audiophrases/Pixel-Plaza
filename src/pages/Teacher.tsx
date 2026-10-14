@@ -266,9 +266,9 @@ export default function Teacher() {
           </div>
         </> : <>
           <p><strong>{status.campaign.title}</strong> · chapter {status.campaign.chapter + 1} of {status.campaign.chapters}: {status.campaign.chapterTitle} ·{' '}
-            {{ active: 'in progress', chapter_complete: 'chapter finished: the class has its cliffhanger', campaign_complete: 'finished' }[status.campaign.status]}</p>
+            {{ active: 'in progress', chapter_complete: 'ready to advance: students can keep working', campaign_complete: 'finished' }[status.campaign.status]}</p>
           <div className="teacher-newgame">
-            {status.campaign.status === 'active' && status.campaign.reveals.next && <button className="btn btn-secondary" title={status.campaign.reveals.next}
+            {status.campaign.status !== 'campaign_complete' && status.campaign.reveals.next && <button className="btn btn-secondary" title={status.campaign.reveals.next}
               onClick={() => void action('campaign', { op: 'reveal' })}>Reveal the next news ({status.campaign.reveals.shown} of {status.campaign.reveals.total} shown)</button>}
             {status.campaign.status !== 'campaign_complete' && <button className="btn btn-primary" onClick={() => void action('campaign', { op: 'next' })}>
               {status.campaign.chapter + 1 < status.campaign.chapters ? 'Start the next chapter' : 'End the campaign'}
@@ -283,7 +283,7 @@ export default function Teacher() {
               <span><strong>{who(report.studentKey, status.campaign?.players.find(player => player.studentKey === report.studentKey)?.name ?? 'Student')}</strong>: {report.text}</span>
             </li>)}</ul>
           </>}
-          {status.campaign.status === 'active' && status.campaign.reveals.next && <p>Next news: <em>{status.campaign.reveals.next}</em></p>}
+          {status.campaign.status !== 'campaign_complete' && status.campaign.reveals.next && <p>Next news: <em>{status.campaign.reveals.next}</em></p>}
           {status.campaign.players.length > 0 && <ul>
             {status.campaign.players.map(player => <li key={player.studentKey}>
               <span><strong>{who(player.studentKey, player.name)}</strong> · {player.role}{player.thief ? ' · THIEF' : ''} · {player.clues} place clue{player.clues === 1 ? '' : 's'} · {player.done.length ? `answered ${player.done.length}` : 'not answered yet'}</span>

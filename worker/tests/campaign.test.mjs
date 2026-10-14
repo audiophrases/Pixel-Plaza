@@ -147,12 +147,18 @@ test('the thief chapter is complete: a card, a story, a question to answer, and 
 test('chapter 3: the cellar code is made from every role\'s number, in the order the planner gives', () => {
     const chapter = castanyada.chapters[2];
     const code = chapter.objectives.find(objective => objective.id === 'code');
+    const hide = chapter.objectives.find(objective => objective.id === 'hide');
     const digit = text => text.match(/is (\d)\./)[1];
-    const byRole = Object.fromEntries(['baker', 'shopkeeper', 'driver', 'receptionist'].map(role => [role, digit(code.rewards[role])]));
-    const order = code.rewards.planner.match(/order: (.*)\./)[1].split(', ');
+    const byRole = Object.fromEntries(['baker', 'shopkeeper', 'driver', 'receptionist'].map(role => [role, digit(hide.rewards[role])]));
+    const order = hide.rewards.planner.match(/order: (.*)\./)[1].split(', ');
     const expected = order.map(role => byRole[role]).join('');
     assert.equal(order.length, 4);
     assert.ok(code.accept.includes(expected), `${expected} is accepted`);
+    for (const role of castanyada.roles) {
+        assert.deepEqual(rewardClues(chapter, role.id, []), []);
+        assert.equal(rewardClues(chapter, role.id, ['hide'])[0].text, hide.rewards[role.id], 'the code clue is available before answering code');
+        assert.equal(rewardClues(chapter, role.id, ['hide', 'code'])[1].text, code.rewards[role.id], 'the motive clue is available before answering why');
+    }
     assert.equal(answerMatches(code, 'the code is 7 4 3 1'), true);
     assert.equal(answerMatches(code, '1347'), false);
     // The thief already knows where the chestnuts are, and the other questions open one after another.

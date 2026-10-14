@@ -639,8 +639,7 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
             const news = (await who.socket.next(message => message.t === 'quest' && message.quest.clues.some(clue => clue.from === 'news'), 'news')).quest;
             assert.equal(news.clues.find(clue => clue.from === 'news').text, chapter.reveals[0].text);
         }
-        await reveal();
-        assert.equal((await reveal()).status, 400, 'no more news to reveal');
+        // Leave one news item for students who are still working after the threshold.
 
         // Answers: questions open one after another; a wrong one must wait before another try;
         // a right one earns a clue for your role and opens the next question.
@@ -677,20 +676,27 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         for (const who of [alexBack, samBack, chrisBack]) {
             const done = (await who.socket.next(message => message.t === 'quest' && message.quest.status === 'chapter_complete', 'chapter complete')).quest;
             assert.match(done.chapter.ending, /Who took the chestnuts/);
-            assert.equal(done.objectives.every(item => item.optional), true, 'only bonus questions stay open');
+            assert.ok(done.objectives.some(item => !item.optional), 'main questions remain available');
             assert.deepEqual(done.team, { done: 6, total: 9 }, 'six of nine main answers: two students finished all three');
         }
-        assert.equal((await reveal()).status, 400, 'no news once the chapter is over');
+        assert.equal((await reveal()).status, 200, 'teacher can still help students after the threshold');
+        assert.equal((await reveal()).status, 400, 'no more news to reveal');
 
-        // A bonus question can still be answered after the chapter is finished; a main one cannot.
+        // Both bonus questions and the remaining main questions can still be answered.
         answer(alexBack, 'a star', 'lock');
         assert.equal((await result(alexBack)).correct, true);
         answer(chrisBack, 'park', 'where');
-        await pause(300);
-        assert.equal(chrisBack.socket.inbox.some(message => message.t === 'answered'), false);
+        assert.equal((await result(chrisBack)).correct, true);
+        const catchUp = (await chrisBack.socket.next(message => message.t === 'quest' && message.quest.objectives.some(item => item.id === 'when'), 'catch-up question')).quest;
+        assert.equal(catchUp.status, 'chapter_complete');
+        assert.ok(catchUp.clues.some(clue => clue.from === 'reward'));
+        answer(chrisBack, '9:30', 'when');
+        assert.equal((await result(chrisBack)).correct, true);
+        answer(chrisBack, 'two', 'keys');
+        assert.equal((await result(chrisBack)).correct, true);
         status = (await api(base, '/api/teacher/status', { session })).body.campaign;
         assert.equal(status.status, 'chapter_complete');
-        assert.deepEqual(status.players.map(player => player.done.length).sort(), [0, 3, 4]);
+        assert.deepEqual(status.players.map(player => player.done.length).sort(), [3, 3, 4]);
 
         // The teacher moves the story on to chapter 2, and from there to the end of the campaign.
         const second = (await api(base, '/api/teacher/campaign', { session, body: { op: 'next' } })).body.campaign;
@@ -1173,6 +1179,7 @@ test('chapter 3: the thief hides the chestnuts, and the class opens the cellar w
         await pause(300);
         const afterHide = lastQuest(solver.studentKey);
         assert.deepEqual(afterHide.objectives.map(item => item.id), ['hide', 'code']);
+        assert.ok(afterHide.clues.some(clue => clue.from === 'reward' && clue.text === castanyada.chapters[2].objectives[0].rewards[afterHide.role.id]), 'code clue arrives before code is answered');
         answer('code', '1 3 4 7');
         assert.equal((await result()).correct, false, 'the right numbers in the wrong order');
         await pause(3200);
@@ -1180,6 +1187,7 @@ test('chapter 3: the thief hides the chestnuts, and the class opens the cellar w
         assert.equal((await result()).correct, true);
         await pause(300);
         assert.ok(lastQuest(solver.studentKey).objectives.some(item => item.id === 'why'));
+        assert.ok(lastQuest(solver.studentKey).clues.some(clue => clue.text === castanyada.chapters[2].objectives[1].rewards[afterHide.role.id]), 'motive clue arrives before why is answered');
         answer('why', 'For a surprise party');
         assert.equal((await result()).correct, true);
         await pause(300);

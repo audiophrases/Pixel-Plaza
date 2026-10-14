@@ -249,7 +249,7 @@ export default function Game() {
   };
 
   // Swaps one word for a suggestion and takes it off the list.
-  const useSuggestion = (word: string, suggestion: string) => {
+  const applySuggestion = (word: string, suggestion: string) => {
     const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     setChatInput(current => current.replace(new RegExp(`(?<![\\p{L}'’])${escaped}(?![\\p{L}'’])`, 'u'), suggestion));
     setSpelling(current => current.filter(item => item.word !== word));
@@ -334,7 +334,7 @@ export default function Game() {
               {item.suggestions.length ? <>
                 <span>try:</span>
                 {item.suggestions.map(suggestion => <button key={suggestion} type="button" className="spelling-fix"
-                  onClick={() => useSuggestion(item.word, suggestion)}>{suggestion}</button>)}
+                  onClick={() => applySuggestion(item.word, suggestion)}>{suggestion}</button>)}
               </> : <span>is not an English word. Try a different word.</span>}
             </div>)}
           </div>}
