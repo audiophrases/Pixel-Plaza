@@ -537,6 +537,9 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         assert.match((await alex.next(message => message.t === 'notice', 'pending notice')).text, /approval/);
         let status = (await api(base, '/api/teacher/status', { session })).body;
         assert.deepEqual(status.online.map(student => student.name).sort(), ['Alex', 'Sam']);
+        const alexLocation = status.online.find(student => student.studentKey === 'stu_a');
+        assert.deepEqual([alexLocation.x, alexLocation.y], [1100, 740]);
+        assert.equal(alexLocation.zone, null); // the path between the cafe and park
         assert.equal(status.entries[0].status, 'pending');
         assert.equal(status.entries[0].studentKey, 'stu_a');
         assert.equal(sam.inbox.some(message => message.t === 'chat' && message.text === 'Hello class!'), false);

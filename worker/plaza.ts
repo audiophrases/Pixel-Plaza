@@ -82,7 +82,7 @@ export type TeacherStatus = {
     mode: ChatMode;
     moderation: boolean; // an OpenAI key is set, so 'review' mode can post anything
     muted: string[];
-    online: { studentKey: string; name: string }[];
+    online: { studentKey: string; name: string; x: number; y: number; zone: string | null }[];
 };
 
 const publicSeat = (seat: Seat) => ({ id: seat.id, name: seat.name, x: seat.x, y: seat.y, ...seat.avatar });
@@ -381,7 +381,9 @@ export class PlazaRoom extends DurableObject<Env> {
             mode: this.mode(),
             moderation: !!this.env.OPENAI_API_KEY,
             muted: this.sql.exec<{ student_key: string }>('SELECT student_key FROM mutes').toArray().map(row => row.student_key),
-            online: this.seats().map(seat => ({ studentKey: seat.studentKey, name: seat.name }))
+            online: this.seats().filter(seat => seat.game === current?.id).map(seat => ({
+                studentKey: seat.studentKey, name: seat.name, x: seat.x, y: seat.y, zone: zoneAt(seat.x, seat.y)
+            }))
         };
     }
 

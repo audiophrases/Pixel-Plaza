@@ -5,6 +5,7 @@ import { WARMUP_KINDS } from '../../shared/warmupKinds';
 import type { WarmupKind } from '../../shared/warmupKinds';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import './Teacher.css';
+import { MAP_SIZE, plazaMap } from '../../shared/plazaMap';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string };
 type CampaignInfo = {
@@ -15,11 +16,12 @@ type CampaignInfo = {
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
 };
 type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean };
+type LiveStudent = { studentKey: string; name: string; x: number; y: number; zone: string | null };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
   campaign: CampaignInfo | null; campaigns: { id: string; title: string }[];
   warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
-  open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: { studentKey: string; name: string }[];
+  open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: LiveStudent[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
 };
 
@@ -35,6 +37,7 @@ const VISION_CHOICES: [number, string][] = [[0, 'Everyone'], [650, 'Wide'], [450
 
 export default function Teacher() {
   const [password, setPassword] = useState('');
+  const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
   // The password is checked once; the session token carries the rest.
   const [token, setToken] = useState(readTeacherSession);
   const [status, setStatus] = useState<Status | null>(null);
@@ -191,6 +194,29 @@ export default function Teacher() {
         </button>}
         <button className="btn btn-secondary" onClick={() => { storeTeacherSession(''); setStatus(null); setToken(''); }}>Sign out</button>
       </section>
+      {status.game && <section className="teacher-online teacher-live">
+        <h2>Live plaza ({status.online.length} students)</h2>
+        <p>{status.open ? 'Updates every 2 seconds. Select a student to find them on the map.' : 'The class is closed.'}</p>
+        <div className="teacher-map" aria-label="Live student locations in the plaza">
+          <img src={plazaMap.image} alt="Plaza map" />
+          {status.online.map((student, index) => <button key={student.studentKey} type="button"
+            className={`teacher-map-marker${selectedStudent === student.studentKey ? ' selected' : ''}`}
+            style={{ left: `${student.x / MAP_SIZE * 100}%`, top: `${student.y / MAP_SIZE * 100}%` }}
+            onClick={() => setSelectedStudent(student.studentKey)}
+            aria-pressed={selectedStudent === student.studentKey}
+            aria-label={`${who(student.studentKey, student.name)}: ${student.zone ?? 'plaza'}`}
+            title={`${who(student.studentKey, student.name)} · ${student.zone ?? 'plaza'}`}>
+            {index + 1}
+            {selectedStudent === student.studentKey && <span className="teacher-map-label">{who(student.studentKey, student.name)}</span>}
+          </button>)}
+        </div>
+        {status.online.length ? <ul className="teacher-map-roster">{status.online.map((student, index) => <li key={student.studentKey}>
+          <button type="button" aria-pressed={selectedStudent === student.studentKey}
+            onClick={() => setSelectedStudent(student.studentKey)}>
+            <strong>{index + 1}. {who(student.studentKey, student.name)}</strong> · {student.zone ?? 'plaza'}
+          </button>
+        </li>)}</ul> : <p>No students in the plaza right now.</p>}
+      </section>}
       <section className="teacher-games">
         <h2>Games</h2>
         {status.pin && <label className="teacher-linkbox">The join link for {status.game?.name ?? 'the open game'}
