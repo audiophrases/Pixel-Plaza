@@ -3,7 +3,7 @@ import type { Env } from './index.ts';
 import type { PinPlayStudent } from './pinplay.ts';
 import { checkGrammar } from './grammar.ts';
 import { moderate } from './moderation.ts';
-import { acceptedNames, answerMatches, chapterDone, isUnlocked, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
+import { absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
 import { MissionRepository, type MissionResult } from './missions.ts';
 import { QuestBoard, type BoardContext } from './questBoard.ts';
 import { LiveMissions, type LiveMissionResult } from './liveMissions.ts';
@@ -569,42 +569,61 @@ export class PlazaRoom extends DurableObject<Env> {
         return (row?.avatar && sanitizeAvatar(JSON.parse(row.avatar))) || defaultAvatar();
     }
 
+    private meetingFallback(game: string, studentKey: string, roleId: string, campaign: { roles: { id: string; name: string }[] }): string | null {
+        const online = new Set(this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey));
+        const peer = this.campaignPlayers(game).some(player => player.role_id === roleId && player.student_key !== studentKey && online.has(player.student_key));
+        return peer ? null : campaign.roles.find(role => role.id === roleId)?.name ?? null;
+    }
+
     // What this student may see of the campaign, or null before it starts.
     private questView(game: string, studentKey: string, withRecap = false): QuestView | null {
         const row = this.campaignRow(game);
         const campaign = row && this.gameCampaign(game);
         if (!row || !campaign) return null;
-        const player = this.player(game, studentKey, row.campaign_id);
+        let player = this.player(game, studentKey, row.campaign_id);
         const role = campaign.roles.find(item => item.id === player?.role_id);
         const chapter = campaign.chapters[Math.min(row.chapter, campaign.chapters.length - 1)];
         if (!player || !role) return null;
         this.pickThieves(game, row.chapter, campaign.chapters[row.chapter]);
         this.settleThieves(game, campaign, row.chapter);
+        // Thief selection can mark already-known objectives done in this view.
+        player = this.campaignPlayers(game).find(item => item.student_key === studentKey) ?? player;
         const thieves = this.chapterThieves(game, campaign, row.chapter);
         const isThief = thieves.includes(studentKey);
         const looks = thieves.map(key => lookOf(this.avatarOf(key)));
         const names = this.rosterNames(game);
         const found = campaign.chapters.flatMap(item => item.discoveries).filter(discovery => player.clues.includes(discovery.id));
+        const online = new Set(this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey));
+        const present = this.campaignPlayers(game).filter(item => online.has(item.student_key));
+        const fallback = absentRoleClues(campaign, chapter, role.id, player.done,
+            present.filter(item => !chapter.thieves || !thieves.includes(item.student_key)).map(item => item.role_id),
+            present.map(item => item.role_id));
+        const showResolution = row.status === 'campaign_complete' || mainFinished(chapter, player.done);
         return {
             campaign: { id: campaign.id, title: campaign.title },
             status: row.status,
             chapter: { index: row.chapter, of: campaign.chapters.length, title: chapter.title, intro: chapter.intro,
-                ending: row.status === 'active' ? null : chapter.ending },
+                ending: row.status === 'active' || !showResolution ? null : chapter.ending },
             role: { id: role.id, name: role.name, card: role.card },
             clues: [
                 { id: `role-${role.id}`, from: 'job',
                     text: isThief && chapter.thieves ? `${chapter.thieves.label ?? 'Your story'}: ${chapter.thieves.story}` : fillThiefClue(chapter.roleClues?.[role.id] ?? role.clue, looks) },
                 ...found.map(item => ({ id: item.id, text: item.text, from: item.zone })),
-                ...(isThief && chapter.thieves ? [] : rewardClues(chapter, role.id, player.done).map(item => ({ ...item, from: 'reward' }))),
+                ...rewardClues(chapter, role.id, player.done).map(item => ({ ...item, from: 'reward' })),
+                ...fallback.map(item => ({ ...item, text: fillThiefClue(item.text, looks) })),
                 ...chapter.reveals.slice(0, row.revealed).map(item => ({ id: `news-${item.id}`, text: item.text, from: 'news' })),
             ],
             // Reaching the class threshold does not close questions; the teacher advances the chapter.
             secret: isThief && chapter.thieves ? { title: 'You are the thief', text: chapter.thieves.card } : null,
-            thieves: chapter.thieves && row.status !== 'active' ? thieves.map(key => names.get(key) ?? 'Student') : null,
+            thieves: chapter.thieves && row.status !== 'active' && showResolution ? thieves.map(key => names.get(key) ?? 'Student') : null,
             objectives: chapter.objectives.filter(objective => !objective.board && isUnlocked(objective, player.done) && (row.status !== 'campaign_complete' || objective.optional)
                 && !(isThief && (objective.answerThief || objective.thiefKnows)))
-                .map(objective => ({ id: objective.id, text: objective.text, done: player.done.includes(objective.id), optional: !!objective.optional,
-                    kind: objective.kind === 'report' ? 'report' as const : objective.answerRole ? 'name' as const : 'text' as const })),
+                .map(objective => {
+                    const fallback = objective.answerRole && this.meetingFallback(game, studentKey, objective.answerRole, campaign);
+                    return { id: objective.id, text: objective.text + (fallback
+                        ? ` No classmate with this role is available. Type the role name (${fallback}) to continue with the town notice.` : ''), done: player.done.includes(objective.id), optional: !!objective.optional,
+                        kind: objective.kind === 'report' ? 'report' as const : objective.answerRole ? 'name' as const : 'text' as const };
+                }),
             ...(chapter.objectives.some(o => o.board) ? { board: this.questBoard.view(this.boardContext(game, studentKey)!) } : {}),
             team: teamProgress(chapter, this.campaignPlayers(game).map(item => ({ done: item.done, thief: thieves.includes(item.student_key) }))),
             // "Previously", for a student coming back to a story that is already under way
@@ -637,8 +656,8 @@ export class PlazaRoom extends DurableObject<Env> {
         for (const socket of this.ctx.getWebSockets(seat.studentKey)) this.sendQuest(socket, seat.game, seat.studentKey);
     }
     private refreshBoard(game: string): void {
-        const row = this.campaignRow(game);
-        if (row && this.gameCampaign(game)?.chapters[row.chapter]?.objectives.some(o => o.board)) this.sendQuestToAll(game);
+        // Presence changes both partner eligibility and absent-role clue notices.
+        if (this.campaignRow(game)) this.sendQuestToAll(game);
     }
 
     // Everyone in the game gets their own view again, after the story moved on.
@@ -699,7 +718,8 @@ export class PlazaRoom extends DurableObject<Env> {
             const names = this.rosterNames(seat.game);
             const holders = this.campaignPlayers(seat.game).filter(other => other.role_id === objective.answerRole && other.student_key !== seat.studentKey)
                 .map(other => names.get(other.student_key) ?? '');
-            right = answerMatches({ ...objective, accept: acceptedNames(holders.filter(Boolean), [...names.values()]) }, typed);
+            const fallback = this.meetingFallback(seat.game, seat.studentKey, objective.answerRole, campaign);
+            right = answerMatches({ ...objective, accept: [...acceptedNames(holders.filter(Boolean), [...names.values()]), ...(fallback ? [fallback] : [])] }, typed);
         } else right = answerMatches(objective, typed);
         if (!right) {
             this.sql.exec('UPDATE campaign_players SET last_wrong = ? WHERE game_id = ? AND student_key = ?', now, seat.game, seat.studentKey);

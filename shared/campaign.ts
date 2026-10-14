@@ -6,7 +6,7 @@
 // more. The students must talk to each other to put the clues together and type the answer
 // to each question. Answering a question earns a new clue for your role, and unlocks the
 // next question. Bonus questions are for students who finish early and do not hold the
-// chapter up. When enough of the class has finished the main questions, the class sees a
+// chapter up. When enough of the class has finished the main questions, finished students see a
 // cliffhanger, but questions stay open until the teacher starts the next chapter. If the
 // class is stuck, the teacher can reveal a prepared piece of news to everyone.
 
@@ -272,6 +272,17 @@ export function rewardClues(chapter: Chapter, roleId: string, done: readonly str
         const text = objective.rewards?.[roleId];
         return text && done.includes(objective.id) ? [{ id: `reward-${objective.id}`, text }] : [];
     });
+}
+
+// Missing classmates must not make a mystery impossible. Reward fallbacks still
+// require this investigator to finish the objective that earns the information.
+export function absentRoleClues(campaign: Campaign, chapter: Chapter, roleId: string, done: readonly string[], startingRoles: readonly string[], rewardRoles: readonly string[]) {
+    return campaign.roles.flatMap(role => [
+        ...(!startingRoles.includes(role.id) && role.id !== roleId
+            ? [{ id: `fallback-role-${role.id}`, text: chapter.roleClues?.[role.id] ?? role.clue, from: 'town notice' }] : []),
+        ...(!rewardRoles.includes(role.id) && role.id !== roleId
+            ? rewardClues(chapter, role.id, done).map(clue => ({ ...clue, id: `fallback-${role.id}-${clue.id}`, from: 'town notice' })) : []),
+    ]);
 }
 
 // Lower case, without accents or punctuation, as separate words.

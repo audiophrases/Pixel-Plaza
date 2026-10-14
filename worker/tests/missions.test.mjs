@@ -9,7 +9,8 @@ test('campaign export and import preserve every answer, role secret and prerequi
     const result = parseMission(missionJson(castanyada));
     assert.deepEqual(result.errors, []);
     assert.deepEqual(result.campaign, castanyada);
-    assert.ok(result.warnings.some(w => w.message.includes('Thieves')));
+    assert.ok(!result.warnings.some(w => w.message.includes('Thieves do not receive')));
+    assert.ok(result.warnings.some(w => w.message.includes('clue coverage')));
 });
 
 test('malformed or unsupported AI output cannot become a published campaign', () => {

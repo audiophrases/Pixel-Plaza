@@ -2,8 +2,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fillThiefClue, lookOf, thiefCount } from '../../shared/thief.ts';
-import { acceptedNames, answerMatches, castanyada, chapterDone, isUnlocked, pickRole, rewardClues, teamProgress } from '../../shared/campaign.ts';
+import { absentRoleClues, acceptedNames, answerMatches, castanyada, chapterDone, isUnlocked, pickRole, rewardClues, teamProgress } from '../../shared/campaign.ts';
 import { zoneAt, worldZones } from '../../shared/plazaMap.ts';
+
+test('absent-role notices preserve clue timing and restore every missing code fragment', () => {
+    const chapter = castanyada.chapters[2];
+    const before = absentRoleClues(castanyada, chapter, 'baker', [], ['baker'], ['baker']);
+    assert.equal(before.filter(c => c.id.includes('reward')).length, 0);
+    const earned = absentRoleClues(castanyada, chapter, 'baker', ['hide'], ['baker'], ['baker']);
+    const code = [...rewardClues(chapter, 'baker', ['hide']), ...earned];
+    for (const text of Object.values(chapter.objectives[0].rewards)) assert.ok(code.some(c => c.text === text));
+    assert.ok(!code.some(c => c.text.includes('note says')));
+    assert.deepEqual(absentRoleClues(castanyada, chapter, 'baker', ['hide'], castanyada.roles.map(r => r.id), castanyada.roles.map(r => r.id)), []);
+    const thiefOnly = absentRoleClues(castanyada, chapter, 'baker', [], ['baker'], ['baker', 'driver']);
+    assert.ok(thiefOnly.some(c => c.id === 'fallback-role-driver'));
+});
 
 test('roles are spread across the class before any repeats, with ties broken at random', () => {
     const taken = [];

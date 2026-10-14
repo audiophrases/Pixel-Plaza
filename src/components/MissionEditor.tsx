@@ -127,7 +127,7 @@ export function MissionPreview({ campaign, chapter }: { campaign: Campaign; chap
         {rosterSize < campaign.roles.length && <p className="mission-warning">Some roles will be missing. Prepare news with the clues they would hold.</p>}
         <div className="mission-journal"><h3>{chapter.title}</h3><p>{chapter.intro}</p><h4>You are {role.name}</h4><p>{role.card}</p><h4>What you know</h4><ul>
             <li>{thief && chapter.thieves ? chapter.thieves.story : chapter.roleClues?.[role.id] ?? role.clue}</li>
-            {!(thief && chapter.thieves) && chapter.objectives.filter(o => done.includes(o.id) && o.rewards?.[role.id]).map(o => <li key={o.id}>{o.rewards![role.id]}</li>)}
+            {chapter.objectives.filter(o => done.includes(o.id) && o.rewards?.[role.id]).map(o => <li key={o.id}>{o.rewards![role.id]}</li>)}
         </ul>{thief && chapter.thieves && <><h4>Your secret</h4><p>{chapter.thieves.card}</p></>}
             <h4>Available objectives</h4><ul>{chapter.objectives.filter(o => !o.board && isUnlocked(o, done) && !(thief && chapter.thieves && (o.thiefKnows || o.answerThief))).map(o => <li key={o.id}>{done.includes(o.id) ? '✓ ' : ''}{o.text}{o.optional ? ' (optional)' : ''}</li>)}</ul>
             {chapter.objectives.some(o => o.board) && <><h4>Quest board offers</h4><p>This preview assumes teacher-gated quests have been released. The game checks partner availability.</p><ul>{chapter.objectives.filter(o => o.board && (!o.board.roles?.length || o.board.roles.includes(role.id))).map(o => <li key={o.id}>{o.text} — {done.includes(o.id) ? 'Report submitted' : boardWait(o, chapter, role.id, done, true, rosterSize) ?? 'Available to accept'}</li>)}</ul></>}

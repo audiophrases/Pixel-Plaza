@@ -954,20 +954,19 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         const quests = { alex: alexQuest, sam: sam.quest, chris: chris.quest };
         assert.equal(new Set(Object.values(quests).map(quest => quest.role.id)).size, 3, 'three students, three different roles');
 
-        // Each student is handed only their own job's clue, never anyone else's.
-        const clueOf = quest => quest.clues[0].text;
+        // Each student keeps their own job clue; missing roles have labeled notices.
         for (const quest of Object.values(quests)) {
-            assert.equal(quest.clues.length, 1);
+            assert.equal(quest.clues.filter(clue => clue.from === 'job').length, 1);
             assert.equal(quest.status, 'active');
             assert.equal(quest.chapter.ending, null);
-            const others = Object.values(quests).filter(other => other !== quest);
-            for (const other of others) assert.equal(JSON.stringify(quest).includes(clueOf(other)), false);
+            assert.ok(quest.clues.filter(clue => clue.id.startsWith('fallback-')).every(clue => clue.from === 'town notice'));
         }
-        assert.equal(JSON.stringify(sam.socket.inbox).includes(clueOf(quests.alex)), false);
 
         // Walking into a named place reveals a clue, once.
+        await pause(300); // Joining classmates also refresh absent-role notices.
+        chris.socket.inbox.splice(0, chris.socket.inbox.length);
         chris.socket.send({ t: 'move', x: 1470, y: 1241 });
-        const found = (await chris.socket.next(message => message.t === 'quest' && message.quest.clues.length === 2, 'park clue')).quest;
+        const found = (await chris.socket.next(message => message.t === 'quest' && message.quest.clues.some(c => c.from === 'park'), 'park clue')).quest;
         assert.match(found.clues[1].text, /blue lock/);
         chris.socket.send({ t: 'move', x: 5, y: 5 });
         chris.socket.send({ t: 'move', x: 1470, y: 1241 });
@@ -984,7 +983,7 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         assert.equal(alexBack.quest.role.id, quests.alex.role.id);
         assert.equal(samBack.quest.role.id, quests.sam.role.id);
         assert.equal(chrisBack.quest.role.id, quests.chris.role.id);
-        assert.equal(chrisBack.quest.clues.length, 2);
+        assert.ok(chrisBack.quest.clues.some(c => c.from === 'park'));
         assert.equal(alexBack.quest.recap, null, 'nothing to recall yet');
         assert.match(chrisBack.quest.recap, /Last time/);
 
@@ -1033,7 +1032,8 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         assert.equal((await result(alexBack)).correct, true);
         for (const who of [alexBack, samBack, chrisBack]) {
             const done = (await who.socket.next(message => message.t === 'quest' && message.quest.status === 'chapter_complete', 'chapter complete')).quest;
-            assert.match(done.chapter.ending, /Who took the chestnuts/);
+            if (who === chrisBack) assert.equal(done.chapter.ending, null, 'unfinished students do not see the ending at the class threshold');
+            else assert.match(done.chapter.ending, /Who took the chestnuts/);
             assert.ok(done.objectives.some(item => !item.optional), 'main questions remain available');
             assert.deepEqual(done.team, { done: 6, total: 9 }, 'six of nine main answers: two students finished all three');
         }
@@ -1047,11 +1047,14 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         assert.equal((await result(chrisBack)).correct, true);
         const catchUp = (await chrisBack.socket.next(message => message.t === 'quest' && message.quest.objectives.some(item => item.id === 'when'), 'catch-up question')).quest;
         assert.equal(catchUp.status, 'chapter_complete');
+        assert.equal(catchUp.chapter.ending, null);
         assert.ok(catchUp.clues.some(clue => clue.from === 'reward'));
         answer(chrisBack, '9:30', 'when');
         assert.equal((await result(chrisBack)).correct, true);
         answer(chrisBack, 'two', 'keys');
         assert.equal((await result(chrisBack)).correct, true);
+        const personalEnding = (await chrisBack.socket.next(message => message.t === 'quest' && message.quest.chapter.ending !== null, 'personal ending after catch-up')).quest;
+        assert.match(personalEnding.chapter.ending, /Who took the chestnuts/);
         status = (await api(base, '/api/teacher/status', { session })).body.campaign;
         assert.equal(status.status, 'chapter_complete');
         assert.deepEqual(status.players.map(player => player.done.length).sort(), [3, 3, 4]);
@@ -1360,7 +1363,7 @@ test('the thief is never a student who is not there', { timeout: 240000 }, async
             await new Promise(resolve => setTimeout(resolve, 200));
             const campaign = (await teacher({ op: 'next' })).body.campaign;
             const thieves = campaign.players.filter(player => player.thief).map(player => player.studentKey);
-            assert.equal(thieves.length, 1, 'one thief for a small class');
+            assert.equal(thieves.length, 1, `one thief for a small class, round ${round}: ${JSON.stringify(campaign.players)}`);
             assert.notEqual(thieves[0], 'stu_c', 'the student who went home is never the thief');
             c = await join('signed-c');
         }
@@ -1516,7 +1519,13 @@ test('chapter 3: the thief hides the chestnuts, and the class opens the cellar w
         const teacher = body => api(base, '/api/teacher/campaign', { session, body });
         const lastQuest = key => [...byKey[key].inbox].reverse().find(message => message.t === 'quest' && message.quest)?.quest;
         await teacher({ op: 'start', campaign: 'castanyada' });
-        await teacher({ op: 'next' });
+        const chapter2 = (await teacher({ op: 'next' })).body.campaign;
+        await pause(300);
+        // A sole holder cannot name themself, and an absent holder cannot be met.
+        const meetingSolver = chapter2.players.find(p => p.role === 'Shopkeeper') ?? chapter2.players[0];
+        assert.match(lastQuest(meetingSolver.studentKey).objectives.find(o => o.id === 'meet-shop').text, /Type the role name \(Shopkeeper\)/);
+        byKey[meetingSolver.studentKey].send({ t: 'answer', objective: 'meet-shop', text: 'Shopkeeper' });
+        assert.equal((await byKey[meetingSolver.studentKey].next(m => m.t === 'answered' && m.objective === 'meet-shop', 'absent-role meeting substitute')).correct, true);
         const chapter3 = (await teacher({ op: 'next' })).body.campaign;
         assert.deepEqual([chapter3.chapter, chapter3.status], [2, 'active']);
         await pause(500);
@@ -1527,6 +1536,7 @@ test('chapter 3: the thief hides the chestnuts, and the class opens the cellar w
         assert.match(lastQuest(thieves[0].studentKey).secret.text, /You hid the chestnuts in the hotel cellar/);
         assert.match(lastQuest(thieves[0].studentKey).clues[0].text, /^Your plan: /);
         assert.equal(lastQuest(thieves[0].studentKey).objectives.some(item => item.id === 'hide'), false);
+        assert.ok(lastQuest(thieves[0].studentKey).clues.some(c => c.from === 'reward' && c.text === castanyada.chapters[2].objectives[0].rewards[lastQuest(thieves[0].studentKey).role.id]), 'thief receives the code fragment from their already-known hiding-place objective');
         const solver = chapter3.players.find(player => !player.thief);
         assert.equal(lastQuest(solver.studentKey).secret, null);
         assert.deepEqual(lastQuest(solver.studentKey).objectives.map(item => item.id), ['hide']);
@@ -1544,6 +1554,10 @@ test('chapter 3: the thief hides the chestnuts, and the class opens the cellar w
         const afterHide = lastQuest(solver.studentKey);
         assert.deepEqual(afterHide.objectives.map(item => item.id), ['hide', 'code']);
         assert.ok(afterHide.clues.some(clue => clue.from === 'reward' && clue.text === castanyada.chapters[2].objectives[0].rewards[afterHide.role.id]), 'code clue arrives before code is answered');
+        const presentRoles = chapter3.players.map(p => lastQuest(p.studentKey).role.id);
+        for (const role of castanyada.roles.filter(r => !presentRoles.includes(r.id))) {
+            assert.ok(afterHide.clues.some(c => c.from === 'town notice' && c.text === castanyada.chapters[2].objectives[0].rewards[role.id]), 'absent roles supply their code fragments at the earned stage');
+        }
         answer('code', '1 3 4 7');
         assert.equal((await result()).correct, false, 'the right numbers in the wrong order');
         await pause(3200);

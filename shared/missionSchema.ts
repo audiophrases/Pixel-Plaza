@@ -166,7 +166,6 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
         for (const role of Object.keys(c.roleClues ?? {})) if (!roleIds.has(role)) content(`${path}.roleClues.${role}`, 'Role does not exist.');
         c.discoveries.forEach((d, j) => { if (!zones.has(d.zone)) content(`${path}.discoveries[${j}].zone`, 'Choose a zone on the current map.'); });
         if (c.thieves?.carry && (i === 0 || !chapters[i - 1].thieves)) content(`${path}.thieves.carry`, 'Carry requires a preceding thief chapter.');
-        if (c.thieves && c.objectives.some(o => o.rewards)) warnings.push({ path, message: 'Thieves do not receive reward clues. Check that other students can supply every needed clue.' });
     });
     warnings.push({ path: 'roles', message: `This campaign uses ${roles.length} roles. Check clue coverage for small groups and absences; prose clues cannot be verified automatically.` });
     return { campaign: errors.length ? null : campaign, errors, warnings };
