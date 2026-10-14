@@ -43,6 +43,7 @@ export type TeacherAction =
     | { kind: 'status' }
     | { kind: 'open'; open: boolean; game?: string } // a saved game (the last played by default), or close the open one
     | { kind: 'newGame'; name: string; randomNames?: boolean; vision?: number } // a new game with its own PIN, opened at once
+    | { kind: 'deleteGame'; game: string; confirm?: boolean } // erases a game and everything saved in it
     | { kind: 'vision'; radius: number }                // how far a student sees, in map pixels; 0 shows everyone
     | { kind: 'warmup'; op: 'start' | 'end'; type?: WarmupKind } // a get-to-know-you warm-up at the start of a lesson
     | { kind: 'campaign'; op: 'start' | 'next' | 'reveal' | 'reset'; campaign?: string; confirm?: boolean }
@@ -237,6 +238,11 @@ export class PlazaRoom extends DurableObject<Env> {
                 this.sql.exec('UPDATE warmups SET active = 0 WHERE game_id = ?', game);
                 this.sendWarmupToAll(game);
             }
+        }
+        if (action.kind === 'deleteGame') {
+            if (action.confirm !== true) return { error: 'Confirm to delete the game.', status: 400 };
+            if (!this.game(action.game)) return { error: 'That game does not exist.', status: 400 };
+            this.deleteGame(action.game);
         }
         if (action.kind === 'vision') {
             const game = this.activeGame();
@@ -725,6 +731,23 @@ export class PlazaRoom extends DurableObject<Env> {
 
     private sendVision(target: WebSocket, game: string): void {
         try { target.send(JSON.stringify({ t: 'vision', radius: this.vision(game) })); } catch { /* closing */ }
+    }
+
+    // Everything saved in a game goes with it: where students stood, chat, made-up names, the story and the warm-up.
+    // Students' own avatars are theirs and stay. An open game is closed first, which sends everyone out.
+    private deleteGame(game: string): void {
+        if (this.activeGame() === game && this.isOpen()) {
+            this.saveSetting('open', '0');
+            this.closeRoom();
+        }
+        for (const table of ['positions', 'chat', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'warmups', 'warmup_players']) {
+            this.sql.exec(`DELETE FROM ${table} WHERE game_id = ?`, game);
+        }
+        this.sql.exec('DELETE FROM games WHERE id = ?', game);
+        // The teacher page then shows the game played most recently, if any are left.
+        const latest = this.sql.exec<{ id: string }>('SELECT id FROM games ORDER BY last_opened DESC LIMIT 1').toArray()[0];
+        if (latest) this.saveSetting('active_game', latest.id);
+        else this.sql.exec("DELETE FROM settings WHERE key = 'active_game'");
     }
 
     private isRandom(game: string | null): boolean {

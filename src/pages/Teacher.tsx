@@ -41,6 +41,7 @@ export default function Teacher() {
   const [notice, setNotice] = useState('');
   const [newGameName, setNewGameName] = useState('');
   const [warmupKind, setWarmupKind] = useState<WarmupKind>('facts');
+  const [copyNote, setCopyNote] = useState(''); // shown when the browser would not copy
   const [copied, setCopied] = useState(''); // the PIN whose link was just copied
   const [vision, setVision] = useState(450); // how far students see in a new game, in map pixels
   const [randomNames, setRandomNames] = useState(true); // students get made-up names, and the teacher sees who they are
@@ -89,8 +90,29 @@ export default function Teacher() {
   // The link for a game: students open it, sign in, and arrive with the PIN already filled in. It is the online
   // site that signs them in, so on the laptop it points there; the PIN stays the same for every lesson.
   const linkFor = (pin: string) => joinLink(status?.laptop?.signInUrl ?? window.location.origin, pin);
-  const copyLink = (pin: string) => {
-    void navigator.clipboard?.writeText(linkFor(pin)).then(() => { setCopied(pin); window.setTimeout(() => setCopied(''), 2500); });
+  // The clipboard is only offered on https pages and on exactly "localhost", not on the laptop's network address, so
+  // there is an older way to try next, and a message when neither works.
+  const copyText = async (text: string): Promise<boolean> => {
+    try {
+      if (window.isSecureContext && navigator.clipboard) { await navigator.clipboard.writeText(text); return true; }
+    } catch { /* try the other way */ }
+    try {
+      const box = document.createElement('textarea');
+      box.value = text;
+      box.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(box);
+      box.select();
+      const done = document.execCommand('copy');
+      box.remove();
+      return done;
+    } catch { return false; }
+  };
+  const copyLink = async (pin: string) => {
+    if (await copyText(linkFor(pin))) {
+      setCopied(pin);
+      setCopyNote('');
+      window.setTimeout(() => setCopied(''), 2500);
+    } else setCopyNote('Your browser would not copy it. Select the link above and press Ctrl+C.');
   };
 
   // The plaza may show made-up names; the teacher always sees the real one beside them.
@@ -158,7 +180,7 @@ export default function Teacher() {
       <section className="teacher-controls">
         <strong>{status.game ? `${status.game.name} is ${status.open ? 'open' : 'closed'}` : 'No game yet'}</strong>
         {status.pin && <span className="teacher-pin">Class PIN <strong>{status.pin}</strong></span>}
-        {status.pin && <button className="btn btn-secondary" onClick={() => copyLink(status.pin!)} title={linkFor(status.pin)}>
+        {status.pin && <button className="btn btn-secondary" onClick={() => void copyLink(status.pin!)} title={linkFor(status.pin)}>
           {copied === status.pin ? 'Link copied' : 'Copy the join link'}</button>}
         {status.game && <button className="btn btn-primary" onClick={() => void action('class', { open: !status.open })}>
           {status.open ? 'Close class' : 'Open class'}
@@ -167,6 +189,10 @@ export default function Teacher() {
       </section>
       <section className="teacher-games">
         <h2>Games</h2>
+        {status.pin && <label className="teacher-linkbox">The join link for {status.game?.name ?? 'the open game'}
+          <input readOnly value={linkFor(status.pin)} onFocus={event => event.currentTarget.select()} onClick={event => event.currentTarget.select()} />
+        </label>}
+        {copyNote && <p className="teacher-flag">{copyNote}</p>}
         <p>Each game keeps its own PIN, chat and where everyone stood. Close one and reopen it any later lesson; one game is open at a time.</p>
         <form className="teacher-newgame" onSubmit={event => {
           event.preventDefault();
@@ -192,7 +218,12 @@ export default function Teacher() {
         {status.games.length > 0 && <ul>
           {status.games.map(game => <li key={game.id}>
             <span><strong>{game.name}</strong> · PIN {game.pin} · {game.randomNames ? 'random names' : 'real first names'} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
-            <button className="btn btn-secondary" onClick={() => copyLink(game.pin)} title={linkFor(game.pin)}>{copied === game.pin ? 'Link copied' : 'Copy join link'}</button>
+            <button className="btn btn-secondary" onClick={() => void copyLink(game.pin)} title={linkFor(game.pin)}>{copied === game.pin ? 'Link copied' : 'Copy join link'}</button>
+            <button className="btn btn-secondary teacher-danger" onClick={() => {
+              if (window.confirm(`Delete "${game.name}"?\n\nThis erases its chat, where everyone stood, their made-up names and its story. The join link stops working. This cannot be undone.`)) {
+                void action('game/delete', { game: game.id, confirm: true });
+              }
+            }}>Delete</button>
             {!game.open && <button className="btn btn-secondary" onClick={() => void action('class', { open: true, game: game.id })}>
               {status.open ? 'Switch to this game' : 'Open'}
             </button>}

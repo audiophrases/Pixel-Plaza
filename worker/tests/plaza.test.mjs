@@ -1269,3 +1269,64 @@ test('the other warm-ups: Who am I? and Find your pair', { timeout: 180000 }, as
         removeTemp(persistTo);
     }
 });
+
+test('deleting a game: it needs confirming, erases the game and what is saved in it, and keeps the others', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const remove = body => api(base, '/api/teacher/game/delete', { session, body });
+
+        // Two games; the first gets some life: a student, chat, a story and a warm-up.
+        const first = (await api(base, '/api/teacher/game', { session, body: { name: 'Doomed', randomNames: false } })).body;
+        const firstId = first.game.id;
+        PIN = first.pin;
+        const alex = await enter(base, 'signed-a', null);
+        sockets.push(alex);
+        await api(base, '/api/teacher/campaign', { session, body: { op: 'start', campaign: 'castanyada' } });
+        alex.send({ t: 'move', x: 600, y: 900 });
+        const second = (await api(base, '/api/teacher/game', { session, body: { name: 'Keeper', randomNames: false } })).body;
+        assert.equal(await alex.closed, 4002, 'opening another game sent the first one out');
+        const secondId = second.game.id;
+        assert.equal(second.games.length, 2);
+
+        // Nothing happens without confirming, or for a game that is not there.
+        assert.equal((await remove({ game: firstId })).status, 400);
+        assert.equal((await remove({ game: firstId, confirm: false })).status, 400);
+        assert.equal((await remove({ game: 'nope', confirm: true })).status, 400);
+        assert.equal((await api(base, '/api/teacher/status', { session })).body.games.length, 2);
+
+        // Deleting the closed game removes it, and the open one carries on.
+        const afterFirst = (await remove({ game: firstId, confirm: true })).body;
+        assert.deepEqual(afterFirst.games.map(game => game.name), ['Keeper']);
+        assert.equal(afterFirst.game.id, secondId);
+        assert.equal(afterFirst.open, true, 'the open game was not touched');
+        PIN = first.pin;
+        assert.equal((await api(base, '/api/plaza/join', { token: 'signed-b', body: { pin: first.pin } })).status, 403, 'its PIN no longer lets anyone in');
+
+        // Deleting the open game closes it, sends students out, and leaves nothing open.
+        PIN = second.pin;
+        const sam = await enter(base, 'signed-b', null);
+        sockets.push(sam);
+        const afterSecond = (await remove({ game: secondId, confirm: true })).body;
+        assert.equal(await sam.closed, 4002);
+        assert.deepEqual([afterSecond.games.length, afterSecond.open, afterSecond.game], [0, false, null]);
+        assert.equal((await api(base, '/api/plaza/join', { token: 'signed-b', body: { pin: second.pin } })).status, 403);
+        assert.equal(afterSecond.campaign, null);
+
+        // Students keep their avatars, and a new game starts clean.
+        assert.equal((await api(base, '/api/student/me', { token: 'signed-a' })).status, 200);
+        const fresh = (await api(base, '/api/teacher/game', { session, body: { name: 'Fresh', randomNames: false } })).body;
+        assert.equal(fresh.campaign, null);
+        assert.equal(fresh.warmup, null);
+        assert.equal(fresh.entries.length, 0);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});
