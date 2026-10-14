@@ -25,9 +25,11 @@ class Socket {
   open() { this.readyState = 1; this.onopen?.(); }
   receive(message: object) { this.onmessage?.({ data: JSON.stringify(message) }); }
   close() { this.readyState = 3; }
+  drop() { this.readyState = 3; this.onclose?.({ code: 1006 }); }
   send(raw: string) {
     const message = JSON.parse(raw);
     this.sent.push(message);
+    if (message.t === 'attempt' || message.t === 'attempt-outcome') queueMicrotask(() => this.receive({ t: 'attempt-recorded', id: message.id, kind: message.t }));
     if (message.t === 'check') queueMicrotask(() => this.receive({ t: 'checked', id: message.id, ok: false,
       corrected: 'He walks home.', why: 'Use walks with he.' }));
     if (message.t === 'chat') queueMicrotask(() => this.receive({ t: 'result', cid: message.cid }));
@@ -55,13 +57,14 @@ async function select(field: HTMLSelectElement, value: string) {
   await act(async () => { field.value = value; field.dispatchEvent(new dom.window.Event('change', { bubbles: true })); });
 }
 async function click(label: string) { await act(async () => { assert.ok(button(label), `button ${label} exists`); button(label).click(); }); }
+async function submit(form: HTMLFormElement) { await act(async () => form.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }))); }
 
 try {
   await act(async () => {
     root.render(<MemoryRouter initialEntries={[{ pathname: '/game', state: { roomCode: '123456', avatarConfig: null } }]}><Game /></MemoryRouter>);
   });
   const socket = sockets[0];
-  await act(async () => { socket.open(); socket.receive({ t: 'welcome', id: 'socket-a', players: [{ id: 'socket-a', name: 'Alex', x: 100, y: 100 }] }); });
+  await act(async () => { socket.open(); socket.receive({ t: 'welcome', id: 'socket-a', gameId: 'game-a', players: [{ id: 'socket-a', name: 'Alex', x: 100, y: 100 }] }); });
 
   await type(input(), 'No entenc');
   assert.equal(socket.sent.length, 0, 'typing an unsent draft never creates a teacher log');
@@ -82,6 +85,9 @@ try {
   assert.equal(help.t, 'help-request');
   assert.equal(help.topic, 'instructions');
   assert.equal(help.text, 'No entenc què he de fer.', 'a help note can use the student’s own language');
+  assert.equal(socket.sent.at(-2).source, 'help');
+  assert.equal(socket.sent.at(-2).objective, 'instructions');
+  assert.equal(help.attemptId, socket.sent.at(-2).id);
   assert.ok(document.body.textContent?.includes('Teacher notified'));
 
   const support = { request: { id: 'request-a', topic: 'instructions', status: 'acknowledged' }, messages: [{ id: 'reply-a', text: 'Tell me your idea and we can write it together.', timestamp: 100 }] };
@@ -122,7 +128,73 @@ try {
   await act(async () => socket.receive({ t: 'support', support: { ...support, request: { ...support.request, status: 'resolved' } } }));
   assert.ok(document.body.textContent?.includes('Help completed'));
   assert.equal(document.querySelectorAll('.teacher-msg').length, 1);
-  console.log('Student support UI checks pass: prefilter audit, retries, help requests, private teacher chat, message deduplication, and grammar corrections.');
+  assert.ok(!Object.keys(localStorage).some(key => key.startsWith('pixelplaza.pending-attempts')), 'acknowledged audit records leave no pending message text in browser storage');
+
+  const quest = { campaign: { id: 'test-mystery', title: 'A mystery' }, status: 'active',
+    chapter: { index: 0, of: 1, title: 'Find the box', intro: 'Ask classmates about the box.', ending: null },
+    role: { id: 'baker', name: 'Baker', card: 'You baked this morning.' }, clues: [{ id: 'clue-baker', text: 'I saw a box near the pond.', from: 'job' }],
+    secret: null, thieves: null, objectives: [{ id: 'where', text: 'Where is the box?', kind: 'text', done: false, optional: false },
+      { id: 'interview', text: 'Ask a witness.', kind: 'report', done: false, optional: false, conversation: { required: 1, completed: 0, witnesses: [{ id: 'socket-b', name: 'Sam' }] } }],
+    interviews: [{ id: 'incoming-1', objective: 'interview', task: 'Help Chris investigate.', incoming: true, name: 'Chris', question: 'What did you see?', questionStatus: 'approved', answer: null, answerStatus: null, evidence: null, shared: null }],
+    team: { done: 0, total: 1 }, recap: null, finale: null };
+  await act(async () => {
+    socket.receive({ t: 'join', player: { id: 'socket-b', name: 'Sam', x: 100, y: 100 } });
+    socket.receive({ t: 'join', player: { id: 'socket-c', name: 'Chris', x: 100, y: 100 } });
+    socket.receive({ t: 'quest', quest });
+    socket.receive({ t: 'warmup', warmup: { kind: 'facts', fact: 'I like oranges.', task: 'Find someone who likes oranges.', step: 0, of: 1, team: { done: 0, total: 1 } } });
+  });
+  const theirName = document.querySelector('input[aria-label="Their name"]') as HTMLInputElement;
+  await type(theirName, 'Sam');
+  await submit(theirName.closest('form')!);
+  assert.equal(socket.sent.at(-1).t, 'warmup-answer');
+  assert.equal(socket.sent.at(-2).source, 'warmup');
+  assert.equal(socket.sent.at(-1).attemptId, socket.sent.at(-2).id);
+
+  const answer = document.querySelector('input[aria-label="Your answer"]') as HTMLInputElement;
+  await type(answer, 'Near the pond');
+  await submit(answer.closest('form')!);
+  assert.equal(socket.sent.at(-1).t, 'answer');
+  assert.equal(socket.sent.at(-2).source, 'answer');
+  assert.equal(socket.sent.at(-2).objective, 'where');
+  assert.equal(socket.sent.at(-1).attemptId, socket.sent.at(-2).id);
+
+  const evidenceField = (label: string) => [...document.querySelectorAll('label')].find(item => item.textContent?.includes(label))!.querySelector('textarea')!;
+  const question = evidenceField('Your question about this mystery');
+  await type(question, 'Did you see the box?');
+  await submit(question.closest('form')!);
+  assert.equal(socket.sent.at(-1).t, 'interview-ask');
+  assert.equal(socket.sent.at(-2).source, 'interview');
+  assert.equal(socket.sent.at(-2).to, 'socket-b');
+  assert.equal(socket.sent.at(-2).objective, 'interview');
+  assert.equal(socket.sent.at(-1).attemptId, socket.sent.at(-2).id);
+  const reply = evidenceField('Your reply: explain what your evidence tells you');
+  await type(reply, 'I saw it by the pond.');
+  await submit(reply.closest('form')!);
+  assert.equal(socket.sent.at(-1).t, 'interview-reply');
+  assert.equal(socket.sent.at(-2).to, 'socket-c');
+  assert.equal(socket.sent.at(-2).objective, 'interview');
+  assert.equal(socket.sent.at(-1).attemptId, socket.sent.at(-2).id);
+
+  await act(async () => socket.drop());
+  await type(answer, 'Offline journal conclusion');
+  const beforeOffline = socket.sent.length;
+  await submit(answer.closest('form')!);
+  assert.equal(socket.sent.length, beforeOffline, 'an offline submission is not delivered to its game recipient');
+  const stored = () => JSON.parse(localStorage.getItem(Object.keys(localStorage).find(key => key.startsWith('pixelplaza.pending-attempts'))!)!);
+  assert.equal(stored()[0].source, 'answer');
+  assert.equal(stored()[0].objective, 'where');
+  assert.equal(stored()[0].text, 'Offline journal conclusion');
+  assert.equal(stored()[1].status, 'not-sent');
+  await click('I need help');
+  await select(document.querySelector('.student-help-panel select') as HTMLSelectElement, 'classmate-message');
+  await type(document.querySelector('.student-help-panel textarea') as HTMLTextAreaElement, '');
+  await click('Notify my teacher');
+  assert.equal(stored()[2].source, 'help');
+  assert.equal(stored()[2].objective, 'classmate-message');
+  assert.equal(stored()[2].text, "I need help understanding a classmate's message.");
+  assert.equal(stored()[3].status, 'not-sent');
+  assert.ok(document.querySelector('.student-help-panel'), 'an offline help request keeps its form open for a manual retry');
+  console.log('Student support UI checks pass: prefilter audit, retries, private teacher chat, hints, help, warm-up, interviews, journal answers, and offline persistence.');
 } finally {
   await act(async () => root.unmount());
   dom.window.close();

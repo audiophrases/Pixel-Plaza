@@ -19,8 +19,8 @@ const records: MessageAttempt[] = Array.from({ length: 610 }, (_, index) => ({
   id: `audit-${index}`, studentKey: index % 2 ? 'sam' : 'ada', sender: index % 2 ? 'Sam' : 'Ada',
   text: index === 0 ? 'Original blocked idea' : `Submitted idea ${index}`,
   finalText: index === 0 ? 'I saw the thief in the plaza.' : null,
-  timestamp: 1000 - index, source: 'chat', status: index === 0 ? 'blocked' : 'approved',
-  reason: index === 0 ? 'Try writing in English.' : null, target: null, objective: null,
+  timestamp: 1000 - index, source: index === 1 ? 'teacher' : 'chat', status: index === 0 ? 'language-blocked' : index === 1 ? 'delivered' : index === 2 ? 'hint-offered' : 'approved',
+  reason: index === 0 ? 'Try writing in English.' : null, target: index === 1 ? 'sam' : null, objective: null,
   chatId: null, correction: index === 0 ? 'Try using the past tense.' : null
 }));
 const requests: URL[] = [];
@@ -74,6 +74,11 @@ await render();
 assert.ok(document.body.textContent?.includes('Suggested check-in'));
 assert.ok(document.body.textContent?.includes('Original blocked idea'));
 assert.ok(document.body.textContent?.includes('Revised submission: I saw the thief in the plaza.'));
+assert.ok(document.querySelector('.teacher-attempt-teacher > div')?.textContent?.startsWith('Teacher → Sam (real name)'), 'private teacher replies show the named student recipient instead of the stored student key');
+assert.ok(document.body.textContent?.includes('Stopped by language check'));
+assert.ok(document.body.textContent?.includes('Language hint offered'));
+assert.equal(document.body.textContent?.includes('language-blocked'), false, 'status codes are explained in ordinary language');
+assert.ok(document.body.textContent?.includes('Three related language blocks, grammar hints or incorrect answers within five minutes'));
 assert.equal(document.querySelectorAll('.teacher-attempt').length, 50);
 while ([...document.querySelectorAll('button')].some(item => item.textContent === 'Load older messages')) await click('Load older messages');
 assert.equal(document.querySelectorAll('.teacher-attempt').length, 610, 'all older submissions remain available beyond 500 records');

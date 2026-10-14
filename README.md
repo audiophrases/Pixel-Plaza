@@ -89,6 +89,12 @@ The class can play on the teacher's laptop instead, over the school network. Stu
 
 The laptop's address is plain HTTP, so student sessions cross the school network unencrypted. Sign in to the teacher controls on the laptop itself (`localhost`), not from another device.
 
+## Student assistance
+
+**I need help** lets students ask about writing, game instructions or a classmate's message. Teacher controls shows explicit requests and suggested check-ins after repeated blocked attempts, grammar hints or incorrect answers. You can help in person, acknowledge/complete a check-in, or send a private message that appears in the student's chatbox. Students can reply through **Teacher (private help)** using their own words without English checks blocking that explanation.
+
+**Message history** retains every recorded submission, including browser-filtered drafts, server refusals, whispers, witness exchanges, answers and private assistance. It preserves originals, suggested corrections and revised text, with student filtering and pagination past 500 records. Pending audit records survive browser reopening until acknowledged. See the [student assistance guide](docs/student-assistance.md) for detection, retention and offline behavior.
+
 ## Editing the map (theme studio)
 
 Open `/mission-studio` from the teacher controls to edit campaigns, chapters, roles, clues and accepted answers. Start from Castanyada or create a new draft. **Save draft** keeps work in progress; **Publish for new games** validates it and makes it available in the teacher's campaign list. Games already running keep their published story revision, including after a restart.

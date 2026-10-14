@@ -62,7 +62,7 @@ export default function HelpRequest({ support, online, onRequest, onOpenChat }: 
       {error && <p className="student-help-error" role="alert">{error}</p>}
       {!online && <p className="student-help-error" role="status">Reconnecting to your teacher…</p>}
       <div className="student-help-actions">
-        <button type="submit" className="btn btn-primary" disabled={sending || !online}>
+        <button type="submit" className="btn btn-primary" disabled={sending}>
           {sending ? 'Sending…' : 'Notify my teacher'}
         </button>
         <button type="button" className="spelling-fix" onClick={() => setOpen(false)}>Close</button>

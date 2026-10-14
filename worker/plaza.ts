@@ -485,7 +485,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const others = this.seats();
         this.ctx.acceptWebSocket(server, [seat.studentKey]);
         server.serializeAttachment(seat);
-        server.send(JSON.stringify({ t: 'welcome', id: seat.id, players: [...others, seat].map(publicSeat) }));
+        server.send(JSON.stringify({ t: 'welcome', id: seat.id, gameId: seat.game, players: [...others, seat].map(publicSeat) }));
         this.broadcast({ t: 'join', player: publicSeat(seat) }, server);
         if (replaced.length === 0) this.systemChat(`${seat.name} has joined the Plaza.`, server);
         this.sendQuest(server, seat.game, seat.studentKey, true);
@@ -504,21 +504,32 @@ export class PlazaRoom extends DurableObject<Env> {
         let data: any;
         try { data = JSON.parse(message); } catch { return; }
 
+        if ((data?.t === 'attempt' || data?.t === 'attempt-outcome') && typeof data.id === 'string'
+            && typeof data.gameId === 'string' && data.gameId !== seat.game) {
+            ws.send(JSON.stringify({ t: 'attempt-recorded', id: data.id, kind: data.t }));
+            return;
+        }
         if (data?.t === 'attempt' && typeof data.id === 'string' && data.id.length <= 80 && typeof data.text === 'string' && data.text.length <= 1000) {
-            this.beginAttempt(seat, data.text, 'chat', data.id, data.to);
+            const sources: AttemptSource[] = ['chat', 'interview', 'answer', 'warmup', 'help'];
+            if (sources.includes(data.source)) this.beginAttempt(seat, data.text, data.source, data.id, data.to, typeof data.objective === 'string' ? data.objective.slice(0, 64) : undefined);
+            ws.send(JSON.stringify({ t: 'attempt-recorded', id: data.id, kind: 'attempt' }));
         } else if (data?.t === 'attempt-outcome' && typeof data.id === 'string') {
             const id = this.assistance.owned(seat.game, seat.studentKey, data.id);
             const attempt = id && this.assistance.get(id);
             if (id && attempt && ['submitted', 'hint-offered', 'language-checked'].includes(attempt.status)
-                && data.status === 'language-blocked' && typeof data.reason === 'string') {
+                && ['language-blocked', 'not-sent'].includes(data.status) && typeof data.reason === 'string') {
                 const reason = data.reason.slice(0, 500);
-                this.attemptStatus(id, 'language-blocked', reason);
-                this.assistance.signal(seat.game, seat.studentKey, seat.name, `Word check: ${reason}`, attempt.text);
+                this.attemptStatus(id, data.status, reason);
+                if (data.status === 'language-blocked') this.assistance.signal(seat.game, seat.studentKey, seat.name, `Word check: ${reason}`, attempt.text);
             }
+            ws.send(JSON.stringify({ t: 'attempt-recorded', id: data.id, kind: 'attempt-outcome' }));
         } else if (data?.t === 'help-request') {
             const topics: HelpTopic[] = ['writing', 'instructions', 'classmate-message', 'other'];
             if (topics.includes(data.topic) && (data.text === undefined || typeof data.text === 'string')) {
-                this.assistance.request(seat.game, seat.studentKey, seat.name, data.topic, (data.text ?? '').slice(0, 500));
+                const note = (data.text ?? '').slice(0, 500);
+                const audit = this.beginAttempt(seat, note || `Help requested: ${data.topic}`, 'help', typeof data.attemptId === 'string' ? data.attemptId : undefined);
+                this.attemptStatus(audit, 'help-requested', `Help with ${data.topic}.`);
+                this.assistance.request(seat.game, seat.studentKey, seat.name, data.topic, note, false);
                 this.sendSupport(seat.game, seat.studentKey);
             }
         } else if (data?.t === 'move') {
@@ -537,9 +548,9 @@ export class PlazaRoom extends DurableObject<Env> {
             ws.serializeAttachment(seat);
             this.broadcast({ t: 'move', id: seat.id, ...position }, ws);
         } else if (data?.t === 'warmup-answer' && typeof data.text === 'string') {
-            this.warmupAnswer(ws, seat, data.text);
+            this.warmupAnswer(ws, seat, data.text, typeof data.attemptId === 'string' ? data.attemptId : undefined);
         } else if (data?.t === 'answer' && typeof data.objective === 'string' && typeof data.text === 'string') {
-            this.answer(ws, seat, data.objective, data.text);
+            this.answer(ws, seat, data.objective, data.text, typeof data.attemptId === 'string' ? data.attemptId : undefined);
         } else if (data?.t === 'quest-accept' && typeof data.objective === 'string') {
             this.claimQuest(ws, seat, data.objective, data.changePartner === true);
         } else if (data?.t === 'interview-ask' || data?.t === 'interview-reply') {
@@ -761,13 +772,14 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     private async interviewTurn(ws: WebSocket, seat: Seat, data: Record<string, unknown>): Promise<void> {
-        const audit = typeof data.text === 'string' ? this.beginAttempt(seat, data.text, 'interview', undefined, data.witness, typeof data.objective === 'string' ? data.objective : undefined) : null;
+        const incoming = data.t === 'interview-reply' && typeof data.id === 'string' ? this.interviews.get(data.id) : undefined;
+        const auditTarget = incoming ? this.seats().find(s => s.game === seat.game && s.studentKey === incoming.investigator)?.id : data.witness;
+        const audit = typeof data.text === 'string' ? this.beginAttempt(seat, data.text, 'interview', typeof data.attemptId === 'string' ? data.attemptId : undefined, auditTarget, incoming?.objective ?? (typeof data.objective === 'string' ? data.objective : undefined)) : null;
         const warn = (text: string) => { if (audit) this.attemptStatus(audit, 'invalid', text); ws.send(JSON.stringify({ t: 'notice', level: 'warning', text })); };
         if (this.interviewSends.has(seat.studentKey)) return warn('Wait for your current message to be sent.');
         const row = this.campaignRow(seat.game);
         const ctx = this.boardContext(seat.game, seat.studentKey);
         if (!this.isOpen() || !row || !ctx || ctx.status === 'campaign_complete') return warn('That investigation is not available right now.');
-        const incoming = data.t === 'interview-reply' && typeof data.id === 'string' ? this.interviews.get(data.id) : undefined;
         const objective = ctx.chapter.objectives.find(o => o.id === (incoming?.objective ?? data.objective));
         if (!objective || (!objective.activity && !objective.conversation)) return warn('That investigation was not found.');
         const investigator = incoming ? incoming.investigator : seat.studentKey;
@@ -836,8 +848,8 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     // A student's typed answer to a chapter question. A wrong one can be tried again after a short wait.
-    private answer(ws: WebSocket, seat: Seat, objectiveId: string, typed: string): void {
-        const audit = this.beginAttempt(seat, typed, 'answer', undefined, undefined, objectiveId);
+    private answer(ws: WebSocket, seat: Seat, objectiveId: string, typed: string, attemptId?: string): void {
+        const audit = this.beginAttempt(seat, typed, 'answer', attemptId, undefined, objectiveId);
         const unavailable = (reason: string) => { this.attemptStatus(audit, 'invalid', reason); };
         if (typed.length > REPORT_MAX_LENGTH) return unavailable('The answer exceeds the maximum length.');
         const row = this.campaignRow(seat.game);
@@ -851,7 +863,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (objective.board && !this.questBoard.assignment(seat.game, objective.id, seat.studentKey)) return unavailable('Accept this quest before answering.');
         const reply = (correct: boolean, wait = false) => {
             this.attemptStatus(audit, correct ? 'correct' : wait ? 'waiting' : 'incorrect', correct ? undefined : wait ? 'Wait or complete the required witness exchange.' : 'The answer was not accepted.');
-            if (!correct && !wait) this.assistance.signal(seat.game, seat.studentKey, seat.name, 'The game answer was not accepted.', typed, 'instructions');
+            if (!correct && !wait) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Answer not accepted: ${objective.text}`, typed, 'instructions');
             ws.send(JSON.stringify({ t: 'answered', objective: objective.id, correct, wait }));
         };
         if (objective.activity || objective.conversation) {
@@ -1056,6 +1068,7 @@ export class PlazaRoom extends DurableObject<Env> {
             this.saveSetting('open', '0');
             this.closeRoom();
         }
+        this.assistance.clear(game);
         for (const table of ['positions', 'chat', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'warmups', 'warmup_players']) {
             this.sql.exec(`DELETE FROM ${table} WHERE game_id = ?`, game);
         }
@@ -1162,8 +1175,8 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     // The name of a classmate who has the fact being looked for; never one's own.
-    private warmupAnswer(ws: WebSocket, seat: Seat, typed: string): void {
-        const audit = this.beginAttempt(seat, typed, 'warmup');
+    private warmupAnswer(ws: WebSocket, seat: Seat, typed: string, attemptId?: string): void {
+        const audit = this.beginAttempt(seat, typed, 'warmup', attemptId);
         if (typed.length > 80) { this.attemptStatus(audit, 'invalid', 'Use up to 80 characters.'); return; }
         const view = this.warmupView(seat.game, seat.studentKey);
         const players = this.warmupPlayers(seat.game);
@@ -1312,7 +1325,7 @@ export class PlazaRoom extends DurableObject<Env> {
             const existing = this.assistance.get(audit);
             if (existing && ['submitted', 'language-checked', 'hint-offered'].includes(existing.status)) {
                 this.assistance.update(audit, answer.ok ? 'language-checked' : 'hint-offered', answer.ok ? undefined : answer.why, answer.ok ? existing.correction : answer.corrected);
-                if (!answer.ok && existing.status !== 'hint-offered') this.assistance.signal(seat.game, seat.studentKey, seat.name, `Grammar hint: ${answer.why}`, String(text));
+                if (!answer.ok && !existing.correction) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Grammar hint: ${answer.why}`, String(text));
             }
         }
         try { ws.send(JSON.stringify({ t: 'checked', id, ...answer })); } catch { /* closing */ }
@@ -1328,10 +1341,10 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         if (audit && typeof value === 'string') this.assistance.submitted(audit, value);
         const refused = (reason: string, status = 'invalid') => { if (audit) this.attemptStatus(audit, status, reason); };
-        const reply = (level: 'info' | 'warning', text: string) => ws.send(JSON.stringify({ t: 'notice', level, text, cid }));
+        const reply = (level: 'info' | 'warning', text: string) => { try { ws.send(JSON.stringify({ t: 'notice', level, text, cid })); } catch { /* the class changed while checking */ } };
         if (to === 'teacher' && typeof value === 'string') {
             if (!value.trim() || value.length > 200) { refused('Write up to 200 characters.'); return reply('warning', 'Write up to 200 characters.'); }
-            if (!this.isOpen()) { refused('The class is closed.', 'unavailable'); return reply('warning', 'The class is closed.'); }
+            if (!this.isOpen() || this.activeGame() !== seat.game || (ws.deserializeAttachment() as Seat | null)?.left) { refused('The class is closed.', 'unavailable'); return reply('warning', 'The class is closed.'); }
             if (audit) this.attemptStatus(audit, 'teacher-inbox', 'Private message to your teacher.');
             this.assistance.request(seat.game, seat.studentKey, seat.name, 'writing', value.trim(), false);
             this.sendSupport(seat.game, seat.studentKey);
@@ -1339,7 +1352,8 @@ export class PlazaRoom extends DurableObject<Env> {
             if (cid) ws.send(JSON.stringify({ t: 'result', cid }));
             return;
         }
-        const unavailable = () => !this.isOpen() || (valid && !valid()) || this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', seat.studentKey).toArray().length > 0;
+        const unavailable = () => !this.isOpen() || this.activeGame() !== seat.game || (ws.deserializeAttachment() as Seat | null)?.left
+            || (valid && !valid()) || this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', seat.studentKey).toArray().length > 0;
         if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
         if (this.isRandom(seat.game) && !this.alias(seat.game, seat.studentKey).kept) { refused('Choose your name first.'); return reply('warning', 'Choose your name first.'); }
 
@@ -1347,6 +1361,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (typeof value === 'string' && this.env.LAN_URL) {
             const { notEnglish } = await import('./english.ts');
             const words = notEnglish(value, this.seats().map(other => other.name));
+            if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
             if (words.length) {
                 const reason = `Use English words only: ${words.map(item => item.word).join(', ')}.`;
                 refused(reason, 'language-blocked'); this.assistance.signal(seat.game, seat.studentKey, seat.name, reason, value);
@@ -1380,7 +1395,7 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         // Review mode posts only what OpenAI cleared, and never a whisper.
         const posts = !problem && cleared && !target && this.mode() === 'review';
-        const entry = { id: crypto.randomUUID(), student_key: seat.studentKey, sender: seat.name, text: value.trim().slice(0, 200),
+        const entry = { id: crypto.randomUUID(), game_id: seat.game, student_key: seat.studentKey, sender: seat.name, text: value.trim().slice(0, 200),
             target_key: target?.studentKey ?? null, x: seat.x, y: seat.y, marks: null as string | null };
         // Sent as written although a better version was offered: mark the words that differ, for everyone who reads it.
         const slips = better ? wordDiff(entry.text, better).original : [];
@@ -1390,7 +1405,7 @@ export class PlazaRoom extends DurableObject<Env> {
             entry.id, entry.student_key, entry.sender, entry.text, now, problem ? 'blocked' : posts ? 'approved' : 'pending',
             entry.target_key, target?.name ?? null, entry.x, entry.y, flag, note, seat.game, entry.marks);
         if (audit) this.attemptStatus(audit, problem ? 'blocked' : posts ? 'approved' : 'pending', problem ?? note ?? flag ?? undefined, entry.id);
-        if (problem) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Message filter: ${problem}`, String(value));
+        if (problem) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Message filter: ${problem}`, String(value), 'other');
         this.sql.exec(`DELETE FROM chat WHERE game_id IS ? AND id NOT IN (SELECT id FROM chat WHERE game_id IS ? ORDER BY ts DESC LIMIT ?)
             AND id NOT IN (SELECT question_id FROM interviews UNION SELECT answer_id FROM interviews WHERE answer_id IS NOT NULL)`,
             seat.game, seat.game, CHAT_KEEP);
@@ -1404,8 +1419,8 @@ export class PlazaRoom extends DurableObject<Env> {
 
     private review(id: string, approve: boolean): boolean {
         const entry = this.sql.exec<{ id: string; student_key: string; sender: string; text: string; status: string;
-            target_key: string | null; x: number | null; y: number | null; marks: string | null }>(
-            'SELECT id, student_key, sender, text, status, target_key, x, y, marks FROM chat WHERE id = ?', id).toArray()[0];
+            target_key: string | null; x: number | null; y: number | null; marks: string | null; game_id: string | null }>(
+            'SELECT id, student_key, sender, text, status, target_key, x, y, marks, game_id FROM chat WHERE id = ?', id).toArray()[0];
         if (!entry) return false;
 
         // Taking down a message that already posted: it disappears from every screen.
@@ -1440,9 +1455,11 @@ export class PlazaRoom extends DurableObject<Env> {
     // A whisper goes to its two students, nearby chat to whoever stands within
     // earshot of where the sender stood; the sender always sees their own.
     // False when a whisper had nobody to reach.
-    private deliver(entry: { id: string; student_key: string; sender: string; text: string; target_key: string | null; x: number | null; y: number | null; marks?: string | null }): boolean {
+    private deliver(entry: { id: string; student_key: string; sender: string; text: string; target_key: string | null; x: number | null; y: number | null; marks?: string | null; game_id?: string | null }): boolean {
+        const game = entry.game_id ?? this.activeGame();
         const recipients = new Set([entry.student_key]);
         for (const seat of this.seats()) {
+            if (seat.game !== game) continue;
             const heard = entry.target_key !== null ? seat.studentKey === entry.target_key
                 : entry.x === null || entry.y === null || Math.hypot(seat.x - entry.x, seat.y - entry.y) <= HEARING_RANGE;
             if (heard) recipients.add(seat.studentKey);
@@ -1452,6 +1469,8 @@ export class PlazaRoom extends DurableObject<Env> {
             ...(entry.target_key !== null ? { whisper: true, to: this.rosterNames(this.activeGame() ?? '').get(entry.target_key) ?? 'a classmate' } : {}) });
         for (const studentKey of recipients) {
             for (const ws of this.ctx.getWebSockets(studentKey)) {
+                const seat = ws.deserializeAttachment() as Seat | null;
+                if (!seat || seat.left || seat.game !== game) continue;
                 try { ws.send(message); } catch { /* closing */ }
             }
         }
@@ -1479,8 +1498,9 @@ export class PlazaRoom extends DurableObject<Env> {
     private closeRoom(): void {
         this.sql.exec("UPDATE interviews SET question_status = 'rejected' WHERE question_status = 'pending'");
         this.sql.exec("UPDATE interviews SET answer_status = 'rejected' WHERE answer_status = 'pending'");
-        const rejected = this.sql.exec<{ student_key: string }>(
-            "UPDATE chat SET status = 'rejected' WHERE status = 'pending' RETURNING student_key").toArray();
+        const rejected = this.sql.exec<{ id: string; student_key: string }>(
+            "UPDATE chat SET status = 'rejected' WHERE status = 'pending' RETURNING id, student_key").toArray();
+        for (const row of rejected) this.assistance.chatStatus(row.id, 'rejected');
         for (const studentKey of new Set(rejected.map(row => row.student_key))) {
             this.notify(studentKey, 'info', 'Your message was not posted.');
         }

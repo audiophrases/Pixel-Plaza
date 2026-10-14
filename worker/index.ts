@@ -86,9 +86,9 @@ async function linkOnline(env: Env, body: { password?: unknown; url: string | nu
 
 function teacherAction(path: string, method: string, body: any): TeacherAction | null {
     if (path === '/api/teacher/status' && method === 'GET') return { kind: 'status' };
-    if (path === '/api/teacher/help-status' && ['acknowledged', 'resolved'].includes(body?.status) && typeof body?.id === 'string') return { kind: 'helpStatus', id: body.id, status: body.status, gameId: body.gameId };
-    if (path === '/api/teacher/help-message' && typeof body?.studentKey === 'string' && typeof body?.text === 'string') return { kind: 'helpMessage', studentKey: body.studentKey, text: body.text, gameId: body.gameId };
     if (method !== 'POST') return null;
+    if (path === '/api/teacher/help-status' && ['acknowledged', 'resolved'].includes(body?.status) && typeof body?.id === 'string') return { kind: 'helpStatus', id: body.id, status: body.status, gameId: typeof body.gameId === 'string' ? body.gameId : undefined };
+    if (path === '/api/teacher/help-message' && typeof body?.studentKey === 'string' && typeof body?.text === 'string') return { kind: 'helpMessage', studentKey: body.studentKey, text: body.text, gameId: typeof body.gameId === 'string' ? body.gameId : undefined };
     if (path === '/api/teacher/class' && typeof body?.open === 'boolean') {
         return { kind: 'open', open: body.open, ...(typeof body.game === 'string' ? { game: body.game } : {}) };
     }

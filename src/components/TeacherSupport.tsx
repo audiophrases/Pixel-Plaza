@@ -25,7 +25,11 @@ const statuses: Record<string, string> = {
   'teacher-inbox': 'Sent privately to teacher', delivered: 'Delivered',
   approved: 'Approved', pending: 'Waiting for review', blocked: 'Blocked',
   rejected: 'Rejected', accepted: 'Accepted', incorrect: 'Incorrect',
-  sent: 'Sent', 'not-sent': 'Not sent'
+  sent: 'Sent', submitted: 'Submitted', 'not-sent': 'Not sent',
+  'language-blocked': 'Stopped by language check', 'language-checked': 'Language checked',
+  'hint-offered': 'Language hint offered', 'rate-limited': 'Too many messages at once',
+  invalid: 'Could not submit', waiting: 'Waiting to submit', correct: 'Correct answer',
+  'help-requested': 'Help requested', unavailable: 'Could not complete this action', removed: 'Removed from chat'
 };
 
 function time(timestamp: number) {
@@ -168,13 +172,16 @@ export default function TeacherSupport({ gameId, token, support, students, who, 
 
   const active = support.alerts.filter(alert => alert.status !== 'resolved');
   const alerts = showResolved ? support.alerts : active;
+  const teacherRecipient = (attempt: MessageAttempt) => who(attempt.studentKey,
+    students.find(student => student.studentKey === attempt.studentKey)?.name
+    ?? support.alerts.find(alert => alert.studentKey === attempt.studentKey)?.name ?? 'Student');
 
   return <section className="teacher-support" aria-labelledby="teacher-support-heading">
     <div className="teacher-support-heading">
       <h2 id="teacher-support-heading">Student help {active.length > 0 && <span className="teacher-help-count">{active.length} to follow up</span>}</h2>
       <a href="#teacher-help-history" onClick={() => setHistoryOpen(true)}>Message history</a>
     </div>
-    <p>Students can ask for help. Repeated language checks, grammar hints or incorrect answers also suggest a check-in. You decide what support they need.</p>
+    <p>Students can ask for help. Three related language blocks, grammar hints or incorrect answers within five minutes suggest a check-in. You decide what support they need.</p>
     {active.length === 0 && <p>No students waiting for help.</p>}
     {support.alerts.some(alert => alert.status === 'resolved') && <label className="teacher-help-toggle">
       <input type="checkbox" checked={showResolved} onChange={event => setShowResolved(event.target.checked)} /> Show completed check-ins
@@ -243,7 +250,7 @@ export default function TeacherSupport({ gameId, token, support, students, who, 
       {!attempts.length && <p role="status">{loading ? 'Loading messages…' : 'No submitted messages yet.'}</p>}
       <ol className="teacher-attempts">{attempts.map(attempt => <li key={attempt.id} className={`teacher-attempt teacher-attempt-${attempt.source}`}>
         <div><strong>{attempt.source === 'teacher' ? 'Teacher' : who(attempt.studentKey, attempt.sender)}</strong>
-          {attempt.target && <> → {attempt.target}</>}
+          {attempt.target && <> → {attempt.source === 'teacher' ? teacherRecipient(attempt) : attempt.target}</>}
           <small>{time(attempt.timestamp)} · {sources[attempt.source]} · {statuses[attempt.status] ?? attempt.status.replaceAll('_', ' ').replaceAll('-', ' ')}</small>
         </div>
         {attempt.objective && <p className="teacher-attempt-context">Task: {attempt.objective}</p>}

@@ -134,7 +134,7 @@ export default function Game() {
       return;
     }
 
-    const plaza = new PlazaConnection(state.roomCode, session.studentToken, state.avatarConfig);
+    const plaza = new PlazaConnection(state.roomCode, session.studentToken, state.avatarConfig, session.student.studentKey);
     plazaRef.current = plaza;
     const say = (message: ChatMessage) => setMessages(prev => [...prev, message]);
     const unsubscribe = plaza.subscribe(event => {
@@ -204,12 +204,20 @@ export default function Game() {
 
   if (!state?.roomCode || !session) return null;
 
+  const sendRecorded = (plaza: PlazaConnection, message: object, attemptId: string): boolean => {
+    const sent = plaza.send(message);
+    if (!sent) plaza.recordAttemptOutcome(attemptId, 'not-sent', 'Not connected; this submission did not reach its recipient.');
+    return sent;
+  };
+
   // Sends a message; `extra` tells the teacher what the student did with a hint.
   const deliver = (text: string, extra: object = {}) => {
     const plaza = plazaRef.current;
     if (!plaza) return;
     const cid = crypto.randomUUID();
-    if (plaza.send({ t: 'chat', text, cid, ...(submissionAttemptId.current ? { attemptId: submissionAttemptId.current } : {}), ...(whisperTo ? { to: whisperTo } : {}), ...extra })) {
+    const attemptId = submissionAttemptId.current;
+    const message = { t: 'chat', text, cid, ...(attemptId ? { attemptId } : {}), ...(whisperTo ? { to: whisperTo } : {}), ...extra };
+    if (attemptId ? sendRecorded(plaza, message, attemptId) : plaza.send(message)) {
       // The draft stays (as what is being sent) until the server answers.
       setChatInput(text);
       setNudge(null);
@@ -319,7 +327,14 @@ export default function Game() {
         </header>
 
         <HelpRequest support={support} online={status.state === 'online'}
-          onRequest={(topic, text) => plazaRef.current?.send({ t: 'help-request', topic, text }) ?? false}
+          onRequest={(topic, text) => {
+            const plaza = plazaRef.current;
+            if (!plaza) return false;
+            const topics = { writing: 'I need help writing my ideas in English.', instructions: 'I need help understanding game instructions.',
+              'classmate-message': "I need help understanding a classmate's message.", other: 'I need help.' };
+            const attemptId = plaza.recordAttempt(text || topics[topic], 'teacher', 'help', topic);
+            return sendRecorded(plaza, { t: 'help-request', topic, text, attemptId }, attemptId);
+          }}
           onOpenChat={openTeacherChat} />
 
         {status.state === 'stopped' && status.message && <div className="class-ended glass-panel" role="alert">
@@ -328,15 +343,33 @@ export default function Game() {
         </div>}
 
         {warmup && (!alias || alias.kept) && <Warmup warmup={warmup} feedback={warmupFeedback}
-          onAnswer={text => connection?.send({ t: 'warmup-answer', text })} />}
+          onAnswer={text => {
+            const plaza = plazaRef.current;
+            if (!plaza) return;
+            const attemptId = plaza.recordAttempt(text, undefined, 'warmup');
+            sendRecorded(plaza, { t: 'warmup-answer', text, attemptId }, attemptId);
+          }} />}
 
         {alias && !alias.kept && <NamePicker name={alias.name}
           onAnother={() => connection?.send({ t: 'reroll' })} onKeep={() => connection?.send({ t: 'keep' })} />}
 
         {quest && <Journal quest={quest} feedback={answered}
-          onTurn={turn => { connection?.send(turn); }}
+          onTurn={turn => {
+            const plaza = plazaRef.current;
+            if (!plaza) return;
+            const interview = turn.t === 'interview-reply' ? quest.interviews?.find(item => item.id === turn.id) : undefined;
+            const objective = turn.t === 'interview-ask' ? turn.objective : interview?.objective;
+            const target = turn.t === 'interview-ask' ? turn.witness : [...plaza.players.values()].find(player => player.name === interview?.name)?.id;
+            const attemptId = plaza.recordAttempt(turn.text, target, 'interview', objective);
+            sendRecorded(plaza, { ...turn, attemptId }, attemptId);
+          }}
           onAccept={(objective, changePartner) => connection?.send({ t: 'quest-accept', objective, changePartner })}
-          onAnswer={(objective, text) => connection?.send({ t: 'answer', objective, text })} />}
+          onAnswer={(objective, text) => {
+            const plaza = plazaRef.current;
+            if (!plaza) return;
+            const attemptId = plaza.recordAttempt(text, undefined, 'answer', objective);
+            sendRecorded(plaza, { t: 'answer', objective, text, attemptId }, attemptId);
+          }} />}
 
         <div className={`chat-container glass-panel${chatSpot.folded ? ' chat-folded' : ''}`} ref={chatBox}
           style={{ transform: `translate(${chatSpot.x}px, ${chatSpot.y}px)` }}>

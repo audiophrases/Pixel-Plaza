@@ -1,7 +1,7 @@
 import type { AvatarConfig } from './utils/AvatarRenderer';
 import type { QuestView } from '../shared/campaign';
 import type { WarmupView } from '../shared/warmup';
-import type { StudentSupport } from '../shared/support';
+import type { AttemptSource, StudentSupport } from '../shared/support';
 
 export type PlazaPlayer = AvatarConfig & { id: string; name: string; x: number; y: number };
 // A hint on one chat message, from the server. Never a refusal.
@@ -36,6 +36,9 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
 const CLOSE_REPLACED = 4009;
 const CLOSE_CLASS_CLOSED = 4002;
 const HINT_WAIT_MS = 4000; // a slow hint is dropped: the message is sent as it is
+type ClientAttemptSource = Exclude<AttemptSource, 'teacher'>;
+type PendingAttempt = ({ t: 'attempt'; id: string; text: string; source: ClientAttemptSource; to?: string; objective?: string }
+  | { t: 'attempt-outcome'; id: string; status: string; reason?: string }) & { gameId?: string };
 
 // A refusal that retrying cannot fix, such as a wrong PIN or a closed class.
 class Refused extends Error {}
@@ -60,15 +63,21 @@ export class PlazaConnection {
   private pongTimer = 0;
   private retryTimer = 0;
   private hints = new Map<string, (hint: GrammarHint) => void>();
-  // Only explicit submissions are recorded. Disconnected submissions wait in
-  // memory for this connection's next welcome; no drafts or credentials are stored.
-  private pendingAttempts: object[] = [];
+  // Explicit submissions remain here and in scoped browser storage until the
+  // server acknowledges them. A socket send alone does not prove receipt.
+  private pendingAttempts: PendingAttempt[] = [];
+  private sentAttempts = new Set<string>();
+  private attemptStorageKey: string | null;
+  private currentGameId = '';
 
   // A null avatar keeps the one saved on the server.
-  constructor(pin: string, token: string, avatar: AvatarConfig | null) {
+  constructor(pin: string, token: string, avatar: AvatarConfig | null, studentKey?: string) {
     this.pin = pin;
     this.token = token;
     this.avatar = avatar;
+    // Use the public student identity, never the authentication credential.
+    this.attemptStorageKey = studentKey ? `pixelplaza.pending-attempts.v1:${JSON.stringify([pin, studentKey])}` : null;
+    this.pendingAttempts = this.readStoredAttempts();
     document.addEventListener('visibilitychange', this.wake);
     window.addEventListener('online', this.wake);
     void this.open();
@@ -92,23 +101,70 @@ export class PlazaConnection {
     } catch { return false; }
   }
 
-  recordAttempt(text: string, to?: string): string {
+  recordAttempt(text: string, to?: string, source: ClientAttemptSource = 'chat', objective?: string): string {
     const id = crypto.randomUUID();
-    this.record({ t: 'attempt', id, text: text.slice(0, 1000), source: 'chat', ...(to ? { to } : {}) });
+    this.record({ t: 'attempt', id, text: text.slice(0, 1000), source, ...(to ? { to } : {}),
+      ...(objective ? { objective: objective.slice(0, 200) } : {}), ...(this.currentGameId ? { gameId: this.currentGameId } : {}) });
     return id;
   }
 
   recordAttemptOutcome(id: string, status: string, reason?: string): void {
-    this.record({ t: 'attempt-outcome', id, status, ...(reason ? { reason: reason.slice(0, 500) } : {}) });
+    this.record({ t: 'attempt-outcome', id, status, ...(reason ? { reason: reason.slice(0, 500) } : {}), ...(this.currentGameId ? { gameId: this.currentGameId } : {}) });
   }
 
-  private record(message: object): void {
+  private record(message: PendingAttempt): void {
     this.pendingAttempts.push(message);
+    this.syncStoredAttempts();
     this.flushAttempts();
   }
 
   private flushAttempts(): void {
-    while (this.pendingAttempts.length && this.send(this.pendingAttempts[0])) this.pendingAttempts.shift();
+    for (const message of this.pendingAttempts) {
+      const key = this.attemptKey(message);
+      if (this.sentAttempts.has(key)) continue;
+      if (!this.send(message)) break;
+      this.sentAttempts.add(key);
+    }
+  }
+
+  private attemptKey(message: Pick<PendingAttempt, 't' | 'id'>): string { return `${message.t}:${message.id}`; }
+
+  private readStoredAttempts(): PendingAttempt[] {
+    if (!this.attemptStorageKey) return [];
+    try {
+      const saved: unknown = JSON.parse(window.localStorage.getItem(this.attemptStorageKey) ?? '[]');
+      if (!Array.isArray(saved)) return [];
+      return saved.flatMap((value: any): PendingAttempt[] => {
+        if (!value || typeof value.id !== 'string' || value.id.length > 80) return [];
+        const game = typeof value.gameId === 'string' && value.gameId.length <= 128 ? { gameId: value.gameId } : {};
+        if (value.t === 'attempt' && typeof value.text === 'string' && value.text.length <= 1000
+          && ['chat', 'interview', 'answer', 'warmup', 'help'].includes(value.source)) {
+          return [{ t: 'attempt', id: value.id, text: value.text, source: value.source,
+            ...(typeof value.to === 'string' ? { to: value.to.slice(0, 100) } : {}),
+            ...(typeof value.objective === 'string' ? { objective: value.objective.slice(0, 200) } : {}), ...game }];
+        }
+        if (value.t === 'attempt-outcome' && typeof value.status === 'string' && value.status.length <= 80) {
+          return [{ t: 'attempt-outcome', id: value.id, status: value.status, ...(typeof value.reason === 'string' ? { reason: value.reason.slice(0, 500) } : {}), ...game }];
+        }
+        return [];
+      });
+    } catch { return []; } // storage unavailable: keep the in-memory queue
+  }
+
+  private syncStoredAttempts(acknowledged?: string): void {
+    // Another tab for this same student may have queued a submission. Preserve
+    // those records when this tab adds or acknowledges one of its own.
+    const merged = new Map<string, PendingAttempt>();
+    for (const message of [...this.readStoredAttempts(), ...this.pendingAttempts]) {
+      const key = this.attemptKey(message);
+      if (key !== acknowledged) merged.set(key, message);
+    }
+    this.pendingAttempts = [...merged.values()];
+    if (!this.attemptStorageKey) return;
+    try {
+      if (this.pendingAttempts.length) window.localStorage.setItem(this.attemptStorageKey, JSON.stringify(this.pendingAttempts));
+      else window.localStorage.removeItem(this.attemptStorageKey);
+    } catch { /* storage disabled or full: the in-memory queue still reconnects */ }
   }
 
   // Asks whether a message has a clear grammar mistake. Resolves to "fine" when
@@ -209,9 +265,25 @@ export class PlazaConnection {
       this.selfId = message.id;
       this.players = new Map((message.players as PlazaPlayer[]).map(player => [player.id, player]));
       this.fails = 0;
+      if (typeof message.gameId === 'string') this.currentGameId = message.gameId;
+      this.syncStoredAttempts();
+      if (this.currentGameId) {
+        for (const pending of this.pendingAttempts) pending.gameId ??= this.currentGameId;
+        this.syncStoredAttempts();
+      }
+      this.sentAttempts.clear();
       this.flushAttempts();
       this.setStatus({ state: 'online' });
       this.emit({ t: 'roster' });
+      return;
+    }
+    if (message.t === 'attempt-recorded' && typeof message.id === 'string'
+      && (message.kind === 'attempt' || message.kind === 'attempt-outcome')) {
+      const key = `${message.kind}:${message.id}`;
+      this.pendingAttempts = this.pendingAttempts.filter(pending => this.attemptKey(pending) !== key);
+      this.sentAttempts.delete(key);
+      this.syncStoredAttempts(key);
+      this.flushAttempts();
       return;
     }
     if (message.t === 'checked') {

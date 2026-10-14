@@ -153,6 +153,135 @@ async function exchangeEvidence(teacher, investigator, witness, objective) {
     return { id: received.id, questionId: question.id, replyId: reply.id };
 }
 
+test('student assistance: blocked submissions, help requests, private replies and complete history persist', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-assistance-'));
+    let plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    try {
+        let base = plaza.base;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (op, body) => api(base, `/api/teacher/${op}`, { session, body });
+        const opened = (await teacher('game', { name: 'Student assistance', randomNames: false })).body;
+        const gameId = opened.game.id; PIN = opened.pin;
+        let alex = await enter(base, 'signed-a', null); const sam = await enter(base, 'signed-b', null); sockets.push(alex, sam);
+        await alex.next(m => m.t === 'support', 'initial help state');
+        const sync = async () => { alex.send({ t: 'emote', emote: '❓' }); await sam.next(m => m.t === 'emote', 'audit processed'); };
+        for (let index = 0; index < 3; index++) {
+            alex.send({ t: 'attempt', id: `word-block-${index}`, text: `Quero explicar a minha ideia ${index}`, source: 'chat' });
+            alex.send({ t: 'attempt-outcome', id: `word-block-${index}`, status: 'language-blocked', reason: 'Quero was not recognised as an English word.' });
+        }
+        await sync();
+        assert.ok(alex.inbox.some(m => m.t === 'attempt-recorded' && m.id === 'word-block-0' && m.kind === 'attempt'));
+        assert.ok(alex.inbox.some(m => m.t === 'attempt-recorded' && m.id === 'word-block-0' && m.kind === 'attempt-outcome'));
+        let status = (await teacher('status')).body;
+        assert.equal(status.support.alerts.length, 1); assert.equal(status.support.alerts[0].kind, 'suggested');
+        assert.equal(status.support.alerts[0].studentKey, 'stu_a'); assert.equal(status.support.alerts[0].evidence.length, 3);
+        assert.equal((await api(base, '/api/teacher/attempts')).status, 401, 'students cannot read teacher history');
+        let page = (await teacher(`attempts?studentKey=stu_a&gameId=${gameId}`)).body;
+        assert.equal(page.attempts.length, 3); assert.ok(page.attempts.every(a => a.status === 'language-blocked' && a.text.startsWith('Quero')));
+        sam.send({ t: 'attempt-outcome', id: 'word-block-0', status: 'language-blocked', reason: 'Forged student outcome.' });
+        await sync();
+        assert.ok(!(await teacher('attempts?studentKey=stu_a')).body.attempts.some(a => a.reason === 'Forged student outcome.'), 'client IDs are scoped to the sender');
+        alex.send({ t: 'help-request', topic: 'instructions', text: 'No entiendo qué tengo que hacer.' });
+        const requested = (await alex.next(m => m.t === 'support' && m.support.request?.topic === 'instructions', 'manual request')).support;
+        status = (await teacher('status')).body;
+        assert.equal(status.support.alerts.length, 1, 'manual help coalesces the existing suggestion');
+        assert.equal(status.support.alerts[0].kind, 'requested'); assert.match(status.support.alerts[0].note, /No entiendo/);
+        assert.equal((await teacher('help-status', { gameId: 'old-game', id: requested.request.id, status: 'acknowledged' })).status, 409);
+        await teacher('help-status', { gameId, id: requested.request.id, status: 'acknowledged' });
+        await alex.next(m => m.t === 'support' && m.support.request?.status === 'acknowledged', 'teacher acknowledged');
+        await teacher('help-message', { gameId, studentKey: 'stu_a', text: 'Tell me your idea in your own words. I can help you write it in English.' });
+        const assisted = (await alex.next(m => m.t === 'support' && m.support.messages.length === 1, 'private teacher reply')).support;
+        assert.match(assisted.messages[0].text, /your own words/);
+        assert.equal(sam.inbox.some(m => m.t === 'support' && m.support.messages.some(reply => reply.id === assisted.messages[0].id)), false, 'teacher help remains private');
+        alex.send({ t: 'chat', cid: 'teacher-reply', to: 'teacher', text: 'Mi idea es hablar con el conductor.' });
+        assert.equal((await alex.next(m => m.t === 'chat' && m.to === 'Teacher', 'student private reply')).text, 'Mi idea es hablar con el conductor.');
+        await alex.next(m => m.t === 'result' && m.cid === 'teacher-reply');
+        assert.equal(sam.inbox.some(m => m.t === 'chat' && m.text === 'Mi idea es hablar con el conductor.'), false);
+        alex.send({ t: 'attempt', id: 'stale-class', gameId: 'deleted-game', source: 'chat', text: 'An old class draft must not enter a new class.' });
+        await alex.next(m => m.t === 'attempt-recorded' && m.id === 'stale-class', 'stale queue acknowledged');
+        assert.ok(!(await teacher('attempts?studentKey=stu_a')).body.attempts.some(a => a.text === 'An old class draft must not enter a new class.'));
+        alex.send({ t: 'chat', cid: 'first-chat', text: 'Hello class!' });
+        await alex.next(m => m.t === 'notice' && m.cid === 'first-chat' && /approval/.test(m.text));
+        const chat = (await teacher('status')).body.entries.find(e => e.text === 'Hello class!');
+        await teacher('review', { id: chat.id, approve: true });
+        assert.equal((await teacher('attempts?studentKey=stu_a')).body.attempts.find(a => a.chatId === chat.id).status, 'approved');
+        await teacher('review', { id: chat.id, approve: false });
+        assert.equal((await teacher('attempts?studentKey=stu_a')).body.attempts.find(a => a.chatId === chat.id).status, 'removed');
+        alex.send({ t: 'chat', cid: 'too-soon', text: 'Please help me with this sentence.' });
+        await alex.next(m => m.t === 'notice' && m.cid === 'too-soon' && /wait/.test(m.text));
+        assert.ok((await teacher('attempts?studentKey=stu_a')).body.attempts.some(a => a.text === 'Please help me with this sentence.' && a.status === 'rate-limited'));
+        for (let index = 0; index < 605; index++) alex.send({ t: 'attempt', id: `history-${index}`, source: 'chat', text: `Submitted draft ${index}` });
+        await sync();
+        let cursor = null; const seen = new Set(); let count = 0;
+        do {
+            page = (await teacher(`attempts?studentKey=stu_a&gameId=${gameId}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)).body;
+            assert.ok(Array.isArray(page.attempts));
+            for (const attempt of page.attempts) { assert.equal(seen.has(attempt.id), false); seen.add(attempt.id); count++; }
+            cursor = page.next;
+        } while (cursor);
+        assert.ok(count > 610, 'every record is accessible beyond the old 500-message cap');
+        await teacher('help-status', { gameId, id: requested.request.id, status: 'resolved' });
+        await alex.next(m => m.t === 'support' && m.support.request?.status === 'resolved', 'help completed');
+        alex.send({ t: 'attempt-outcome', id: 'word-block-0', status: 'language-blocked', reason: 'Retrying an old signal cannot create another alert.' });
+        await sync(); assert.equal((await teacher('status')).body.support.alerts.length, 0);
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); base = plaza.base;
+        alex = await enter(base, 'signed-a', null); sockets.push(alex);
+        const resumed = (await alex.next(m => m.t === 'support', 'persisted assistance')).support;
+        assert.equal(resumed.request.status, 'resolved'); assert.equal(resumed.messages[0].id, assisted.messages[0].id);
+        assert.equal((await teacher('attempts?studentKey=stu_a')).body.attempts.length, 50);
+        assert.equal((await teacher('help-message', { gameId, studentKey: 'stu_b', text: 'I will help you when you return.' })).status, 200, 'offline students can receive help');
+        await teacher('class', { open: false });
+        const second = (await teacher('game', { name: 'Other class', randomNames: false })).body;
+        assert.deepEqual((await teacher('attempts')).body.attempts, []);
+        assert.equal((await teacher(`attempts?gameId=${gameId}`)).status, 409, 'stale game history requests cannot leak the new game');
+        await teacher('game/delete', { game: gameId, confirm: true });
+        assert.equal(second.game.id, (await teacher('status')).body.game.id);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
+test('moderation in flight stays in its original game and retains the refused submission', { timeout: 120000 }, async () => {
+    let release; let started;
+    const checking = new Promise(resolve => { started = resolve; });
+    const openai = http.createServer((req, res) => {
+        req.resume();
+        req.on('end', () => { release = () => { if (!res.destroyed) { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ results: [{ flagged: false, categories: {} }] })); } }; started(); });
+    });
+    await new Promise(resolve => openai.listen(0, '127.0.0.1', resolve));
+    const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-chat-isolation-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, { OPENAI_API_KEY: 'test-key', OPENAI_BASE_URL: `http://127.0.0.1:${openai.address().port}/v1` });
+    const sockets = [];
+    try {
+        const base = plaza.base;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (op, body) => api(base, `/api/teacher/${op}`, { session, body });
+        const first = (await teacher('game', { name: 'Original class', randomNames: false })).body;
+        PIN = first.pin;
+        const alex = await enter(base, 'signed-a', null); sockets.push(alex);
+        await teacher('mode', { mode: 'review' });
+        alex.send({ t: 'chat', text: 'This message belongs to the original class.', cid: 'held-message' });
+        await checking;
+        const nextGame = (await teacher('game', { name: 'Other class', randomNames: false })).body;
+        release(); PIN = nextGame.pin;
+        const currentAlex = await enter(base, 'signed-a', null); const sam = await enter(base, 'signed-b', null); sockets.push(currentAlex, sam);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        assert.deepEqual((await teacher('status')).body.entries, []);
+        assert.equal(currentAlex.inbox.some(m => m.t === 'chat' && m.text === 'This message belongs to the original class.'), false);
+        assert.equal(sam.inbox.some(m => m.t === 'chat' && m.text === 'This message belongs to the original class.'), false);
+        await teacher('class', { open: true, game: first.game.id });
+        const audit = (await teacher('attempts')).body.attempts.find(a => a.text === 'This message belongs to the original class.');
+        assert.equal(audit.status, 'unavailable'); assert.match(audit.reason, /unavailable/);
+    } finally {
+        release?.(); for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); await new Promise(resolve => openai.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('witness investigations block guesses and unrelated chat, keep evidence private and survive restart', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay();
     const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-interviews-'));
@@ -962,9 +1091,9 @@ test('grammar hints advise, never block, and the teacher sees what the student c
         await api(base, '/api/teacher/mode', { session, body: { mode: 'approve' } }); // these steps want the teacher as the gate
         alex = await enter(base, 'signed-a', null);
         const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-        const hint = async (id, text) => {
+        const hint = async (id, text, attemptId) => {
             await pause(900); // one hint at a time
-            alex.send({ t: 'check', id, text });
+            alex.send({ t: 'check', id, text, ...(attemptId ? { attemptId } : {}) });
             return alex.next(message => message.t === 'checked' && message.id === id, `hint ${id}`);
         };
 
@@ -1013,6 +1142,35 @@ test('grammar hints advise, never block, and the teacher sees what the student c
         await api(base, '/api/teacher/review', { session, body: { id: used.id, approve: true } });
         const clean = await alex.next(message => message.t === 'chat' && message.text === used.text, 'corrected message shown');
         assert.equal(clean.marks, undefined);
+        // One original attempt counts once even when its checker toggles between results.
+        const nextGame = (await api(base, '/api/teacher/game', { session, body: { name: 'Grammar assistance', randomNames: false } })).body;
+        PIN = nextGame.pin; alex = await enter(base, 'signed-a', null);
+        for (let index = 0; index < 3; index++) {
+            const attemptId = `hint-attempt-${index}`;
+            alex.send({ t: 'attempt', id: attemptId, source: 'chat', text: 'She go to school every day' });
+            assert.equal((await hint(`new-hint-${index}`, 'She go to school every day', attemptId)).ok, false);
+        }
+        let support = (await api(base, '/api/teacher/status', { session })).body.support;
+        assert.equal(support.alerts.length, 1); assert.equal(support.alerts[0].topic, 'writing');
+        await api(base, '/api/teacher/help-status', { session, body: { id: support.alerts[0].id, status: 'resolved', gameId: nextGame.game.id } });
+        assert.equal((await hint('repeat-fine', 'I like to play games with you', 'hint-attempt-2')).ok, true);
+        assert.equal((await hint('repeat-hint', 'She go to school every day', 'hint-attempt-2')).ok, false);
+        assert.equal((await api(base, '/api/teacher/status', { session })).body.support.alerts.length, 0, 'replaying a hint does not count again after resolution');
+        alex.send({ t: 'chat', text: 'She goes to school every day', was: 'She go to school every day', attemptId: 'hint-attempt-2', cid: 'corrected-assistance' });
+        await alex.next(m => m.t === 'notice' && m.cid === 'corrected-assistance');
+        const audit = (await api(base, '/api/teacher/attempts?studentKey=stu_a', { session })).body.attempts;
+        const corrected = audit.find(a => a.finalText === 'She goes to school every day');
+        assert.equal(corrected.text, 'She go to school every day'); assert.equal(corrected.correction, 'She goes to school every day');
+        assert.equal(corrected.status, 'pending');
+        await api(base, '/api/teacher/campaign', { session, body: { op: 'start', campaign: 'castanyada' } });
+        for (let index = 0; index < 3; index++) {
+            if (index) await pause(3100);
+            alex.send({ t: 'answer', objective: 'where', text: 'moon' });
+            assert.equal((await alex.next(m => m.t === 'answered' && m.objective === 'where')).correct, false);
+        }
+        support = (await api(base, '/api/teacher/status', { session })).body.support;
+        assert.equal(support.alerts.length, 1); assert.equal(support.alerts[0].topic, 'instructions');
+        assert.ok(support.alerts[0].evidence.every(e => e.reason.includes('Where is the blue box?')));
     } finally {
         alex?.ws.close();
         await plaza.stop();
@@ -1792,8 +1950,9 @@ test('the other warm-ups: Who am I? and Find your pair', { timeout: 180000 }, as
         const asker = 'stu_a';
         const target = Object.keys(names).find(key => mine[asker].task.includes(`who ${names[key]} is`));
         assert.ok(target && target !== asker, 'asked about a classmate, never themselves');
-        answer(asker, 'Batman or nobody');
-        assert.equal((await result(asker)).correct, secretOf(target) === 'batman');
+        // An actual identity can finish the task before the retry when roles are random.
+        answer(asker, 'zzzzzzzzzzzzzzz');
+        assert.equal((await result(asker)).correct, false);
         await pause(3200);
         answer(asker, identityById(secretOf(target)).name);
         const found = await result(asker);
