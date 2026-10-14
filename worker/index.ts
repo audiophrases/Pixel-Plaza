@@ -99,6 +99,7 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     if (path === '/api/teacher/campaign' && ['start', 'next', 'reveal', 'reset'].includes(body?.op)) {
         return { kind: 'campaign', op: body.op, ...(typeof body.campaign === 'string' ? { campaign: body.campaign } : {}), confirm: body.confirm === true };
     }
+    if (path === '/api/teacher/quest-release' && typeof body?.objective === 'string') return { kind: 'questRelease', objective: body.objective };
     if (path === '/api/teacher/review' && typeof body?.id === 'string' && typeof body?.approve === 'boolean') {
         return { kind: 'review', id: body.id, approve: body.approve };
     }

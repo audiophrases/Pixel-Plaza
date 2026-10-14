@@ -37,7 +37,11 @@ export function importMission(current: Campaign, text: string, mode: 'replace' |
     for (const chapter of incoming.campaign.chapters) {
         const copy = structuredClone(chapter);
         copy.id = target ? target.id : remap.get(copy.id)!;
-        for (const objective of copy.objectives) { objective.id = remap.get(objective.id)!; if (objective.after) objective.after = remap.get(objective.after) ?? objective.after; }
+        for (const objective of copy.objectives) {
+            objective.id = remap.get(objective.id)!;
+            if (objective.after) objective.after = remap.get(objective.after) ?? objective.after;
+            if (objective.requires) objective.requires.objectives = objective.requires.objectives.map(id => remap.get(id) ?? id);
+        }
         for (const item of [...copy.discoveries, ...copy.reveals]) item.id = remap.get(item.id)!;
         if (target) {
             target.objectives.push(...copy.objectives); target.discoveries.push(...copy.discoveries); target.reveals.push(...copy.reveals);

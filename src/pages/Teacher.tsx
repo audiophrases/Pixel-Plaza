@@ -10,7 +10,8 @@ type Entry = { id: string; studentKey: string; sender: string; target: string | 
 type CampaignInfo = {
   id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string;
   reveals: { shown: number; total: number; next: string | null };
-  reports: { studentKey: string; objective: string; text: string }[];
+  reports: { studentKey: string; objective: string; text: string; partner?: string }[];
+  board?: { id: string; text: string; teacherReleased: boolean; released: boolean; accepted: number; completed: number }[];
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
 };
 type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean };
@@ -280,10 +281,13 @@ export default function Teacher() {
               if (window.confirm('Erase the campaign for this game, including every role and clue?')) void action('campaign', { op: 'reset', confirm: true });
             }}>Erase campaign</button>
           </div>
+          {!!status.campaign.board?.length && <><h3>Quest board</h3><p>Release prepared quests when the class needs another mystery.</p><ul>{status.campaign.board.map(quest => <li key={quest.id}><span>{quest.text} · {quest.accepted} accepted · {quest.completed} completed</span>
+            {quest.teacherReleased && !quest.released && status.campaign?.status !== 'campaign_complete' && <button className="btn btn-secondary" onClick={() => void action('quest-release', { objective: quest.id })}>Release quest</button>}
+            {quest.teacherReleased && quest.released && <small>Released</small>}</li>)}</ul></>}
           {status.campaign.reports.length > 0 && <>
             <h3>What students wrote</h3>
             <ul>{status.campaign.reports.map(report => <li key={report.studentKey + report.objective}>
-              <span><strong>{who(report.studentKey, status.campaign?.players.find(player => player.studentKey === report.studentKey)?.name ?? 'Student')}</strong>: {report.text}</span>
+              <span><strong>{who(report.studentKey, status.campaign?.players.find(player => player.studentKey === report.studentKey)?.name ?? 'Student')}</strong>{report.partner ? ` · partner: ${report.partner}` : ''}: {report.text}</span>
             </li>)}</ul>
           </>}
           {status.campaign.status !== 'campaign_complete' && status.campaign.reveals.next && <p>Next news: <em>{status.campaign.reveals.next}</em></p>}

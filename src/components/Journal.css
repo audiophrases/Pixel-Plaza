@@ -92,3 +92,4 @@
 .journal-right { color: #237804; font-weight: 700; }
 .journal-wrong { color: #a8071a; font-weight: 700; }
 .journal-ending { border-left-color: #52c41a; background: #f6ffed; font-weight: 700; }
+.journal-board { border-left-color: #389e8b; background: #effaf6; }.journal-board-card { border-top: 1px solid #bfddd2; margin-top: .8rem; padding-top: .8rem; }.journal-partner { line-height: 1.6; }.journal-partner button { display: block; margin-top: .4rem; }

@@ -14,6 +14,7 @@ import { castanyada } from '../../shared/campaign.ts';
 import { FACTS } from '../../shared/warmup.ts';
 import { identityById } from '../../shared/warmupKinds.ts';
 import { missionEnvelope } from '../../shared/missionSchema.ts';
+import { legalMove } from '../../shared/plazaMap.ts';
 
 const root = path.join(import.meta.dirname, '..', '..');
 const wrangler = path.join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
@@ -124,6 +125,119 @@ async function enter(base, token, avatar) {
     const welcome = await socket.next(message => message.t === 'welcome', 'welcome');
     return { ...socket, welcome, me: welcome.players.find(player => player.id === welcome.id) };
 }
+
+test('Quest board: eligibility, release, assignments, partner replacement and restart persistence', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-board-'));
+    let plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); const sockets = [];
+    try {
+        let base = plaza.base;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+        const content = {
+            id: 'board-test', title: 'Interview mystery', finale: 'The end.', roles: [
+                { id: 'investigator', name: 'Investigator', card: 'Investigate the delivery.', clue: 'Ask about the hotel.' },
+                { id: 'witness', name: 'Witness', card: 'Tell what you saw.', clue: 'A delivery arrived at the hotel.' }
+            ], chapters: [{ id: 'interviews', title: 'Interviews', intro: 'Find the delivery.', recap: 'The delivery is missing.', ending: 'You found it.', share: 0.6,
+                objectives: [
+                    { id: 'location', text: 'Where did it go?', accept: ['hotel'] },
+                    { id: 'time', text: 'When did it arrive?', accept: ['nine'], requires: { mode: 'all', objectives: ['location'] } },
+                    { id: 'interview', text: 'Interview your assigned witness. Write what you learned.', accept: [], kind: 'report', optional: true, activity: 'interview', board: { roles: ['investigator'], partnerRole: 'witness', afterMain: true, minPlayers: 2, teacherReleased: true } },
+                    { id: 'exchange', text: 'Compare your evidence with a partner.', accept: [], kind: 'report', optional: true, activity: 'exchange', requires: { mode: 'any', objectives: ['interview'] }, board: { afterMain: true } }
+                ], discoveries: [], reveals: [] }]
+        };
+        const created = (await teacher('missions/create', { id: content.id })).body.draft;
+        const saved = (await teacher('missions/save', { id: content.id, version: created.version, envelope: missionEnvelope(content) })).body.draft;
+        assert.equal((await teacher('missions/publish', { id: content.id, version: saved.version })).status, 200);
+        PIN = (await teacher('game', { name: 'Board class', randomNames: false })).body.pin;
+        const game = (await teacher('status')).body.game.id;
+        const byKey = {};
+        for (const token of ['signed-a', 'signed-b', 'signed-c']) { const socket = await enter(base, token, null); sockets.push(socket); byKey[students[token].studentKey] = socket; }
+        const status = (await teacher('campaign', { op: 'start', campaign: content.id })).body.campaign;
+        const solver = status.players.find(p => p.role === 'Investigator');
+        let partner = status.players.find(p => p.role === 'Witness');
+        const spare = status.players.find(p => p.studentKey !== solver.studentKey && p.studentKey !== partner.studentKey);
+        const view = (key, predicate) => byKey[key].next(m => m.t === 'quest' && m.quest && predicate(m.quest), 'board update').then(m => m.quest);
+        const answer = async (key, objective, text) => {
+            byKey[key].send({ t: 'answer', objective, text }); return byKey[key].next(m => m.t === 'answered' && m.objective === objective, 'answer');
+        };
+        const initial = await view(solver.studentKey, q => q.board && !q.board.some(o => o.id === 'interview'));
+        assert.ok(!initial.objectives.some(o => o.id === 'time'), 'all prerequisite blocks time until location');
+        assert.equal(JSON.stringify(initial).includes('"accept"'), false);
+        assert.equal((await api(base, '/api/teacher/quest-release', { body: { objective: 'interview' } })).status, 401);
+        assert.equal((await teacher('quest-release', { objective: 'location' })).status, 400, 'main questions cannot be released as quests');
+        assert.equal((await teacher('quest-release', { objective: 'interview' })).status, 200);
+        const released = await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.state === 'waiting'));
+        assert.match(released.board.find(o => o.id === 'interview').reason, /main mystery/);
+        const witnessView = await view(partner.studentKey, q => q.board);
+        assert.ok(!witnessView.board.some(o => o.id === 'interview'), 'role-limited content stays hidden');
+        byKey[partner.studentKey].send({ t: 'quest-accept', objective: 'interview' });
+        assert.match((await byKey[partner.studentKey].next(m => m.t === 'notice')).text, /another role/);
+        assert.equal((await answer(solver.studentKey, 'location', 'hotel')).correct, true);
+        assert.equal((await answer(solver.studentKey, 'time', 'nine')).correct, true);
+        const waiting = await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.reason?.includes('another investigator')));
+        assert.ok(waiting.board.find(o => o.id === 'interview').reason, 'slow students are not assigned as fast-finisher partners');
+        for (const key of [partner.studentKey, spare.studentKey]) {
+            assert.equal((await answer(key, 'location', 'hotel')).correct, true);
+            assert.equal((await answer(key, 'time', 'nine')).correct, true);
+        }
+        await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.state === 'available'));
+        byKey[solver.studentKey].send({ t: 'answer', objective: 'interview', text: 'The witness saw a large delivery.' });
+        await new Promise(resolve => setTimeout(resolve, 200));
+        assert.equal((await teacher('status')).body.campaign.reports.length, 0, 'cannot bypass acceptance');
+        byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'interview' });
+        const accepted = await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.state === 'active'));
+        const assignedName = accepted.board.find(o => o.id === 'interview').partner.name;
+        partner = status.players.find(p => p.name === assignedName);
+        assert.notEqual(partner.studentKey, solver.studentKey);
+        assert.ok(!JSON.stringify(accepted).includes('student_key'), 'assignment identities remain server-side');
+        byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'interview' });
+        assert.equal((await teacher('status')).body.campaign.board.find(o => o.id === 'interview').accepted, 1, 'claim is idempotent');
+        const assignedSocket = byKey[partner.studentKey]; assignedSocket.ws.close(); await assignedSocket.closed;
+        const away = await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.partner && !o.partner.online));
+        assert.equal(away.board.find(o => o.id === 'interview').partner.name, assignedName);
+        // Keep the original partner on reconnect; replacement is optional and only possible if a matching peer is there.
+        const tokenFor = key => Object.keys(students).find(token => students[token].studentKey === key);
+        byKey[partner.studentKey] = await enter(base, tokenFor(partner.studentKey), null); sockets.push(byKey[partner.studentKey]);
+        const back = await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.partner?.online));
+        assert.equal(back.board.find(o => o.id === 'interview').partner.name, assignedName);
+        byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'interview', changePartner: true });
+        assert.match((await byKey[solver.studentKey].next(m => m.t === 'notice')).text, /still in the plaza/);
+        assert.equal((await answer(solver.studentKey, 'interview', 'The witness saw a large delivery.')).correct, true);
+        const completed = await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.state === 'done'));
+        assert.ok(completed.board.some(o => o.id === 'exchange' && o.state === 'available'), 'any prerequisite unlocks the next social quest');
+        const report = (await teacher('status')).body.campaign.reports[0]; assert.equal(report.partner, assignedName);
+        byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'interview' });
+        assert.match((await byKey[solver.studentKey].next(m => m.t === 'notice')).text, /already finished/);
+        byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'exchange' });
+        const exchange = await view(solver.studentKey, q => q.board?.some(o => o.id === 'exchange' && o.state === 'active'));
+        const exchangePartner = status.players.find(p => p.name === exchange.board.find(o => o.id === 'exchange').partner.name);
+        const departing = byKey[exchangePartner.studentKey]; departing.ws.close(); await departing.closed;
+        await view(solver.studentKey, q => q.board?.some(o => o.id === 'exchange' && o.partner && !o.partner.online));
+        byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'exchange', changePartner: true });
+        const reassigned = await view(solver.studentKey, q => q.board?.some(o => o.id === 'exchange' && o.partner?.online && o.partner.name !== exchangePartner.name));
+        const replacementName = reassigned.board.find(o => o.id === 'exchange').partner.name;
+        assert.equal((await teacher('status')).body.campaign.board.find(o => o.id === 'exchange').accepted, 1, 'replacement keeps the same assignment');
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); base = plaza.base;
+        byKey[solver.studentKey] = await enter(base, tokenFor(solver.studentKey), null); sockets.push(byKey[solver.studentKey]);
+        const resumed = await view(solver.studentKey, q => q.board?.some(o => o.id === 'exchange' && o.state === 'active'));
+        assert.equal(resumed.board.find(o => o.id === 'interview').state, 'done');
+        assert.equal(resumed.board.find(o => o.id === 'interview').partner.name, assignedName);
+        assert.equal(resumed.board.find(o => o.id === 'exchange').partner.name, replacementName);
+        assert.equal((await teacher('status')).body.campaign.board.find(o => o.id === 'interview').released, true);
+        // A report remains submit-able after the conversation partner goes offline.
+        assert.equal((await answer(solver.studentKey, 'exchange', 'We compared evidence and agreed on a plan.')).correct, true);
+        await teacher('campaign', { op: 'reset', confirm: true });
+        await teacher('campaign', { op: 'start', campaign: content.id });
+        const reset = (await teacher('status')).body.campaign;
+        assert.equal(reset.board.find(o => o.id === 'interview').accepted, 0); assert.equal(reset.board.find(o => o.id === 'interview').released, false);
+        assert.deepEqual(reset.reports, []);
+        await teacher('class', { open: false }); await teacher('class', { open: true, game });
+        assert.equal((await teacher('status')).body.campaign.board.find(o => o.id === 'exchange').completed, 0);
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
 
 test('Mission Studio: authorization, draft conflicts, published privacy and revision persistence', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay();
@@ -694,7 +808,7 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         const opened = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body;
         PIN = opened.pin;
         assert.equal(opened.campaign, null);
-        assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada']);
+        assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada', 'castanyada-side-quests']);
 
         // No story yet: nothing is sent.
         const early = await enter(base, 'signed-a', null);
@@ -986,9 +1100,15 @@ test('movement: no walking through walls, no teleporting, but real walking is be
         assert.equal(sam.inbox.filter(message => message.t === 'move' && message.id === alex.welcome.id && message.y !== y).length, 0, 'refused moves never reach anyone');
 
         // The same distance walked over time is fine: a long walk, given the seconds it takes.
+        // Spawn positions vary; north can cross a tree. Choose a clear 100-pixel path so this
+        // checks the server's timing allowance rather than assuming the terrain is empty.
+        const destination = [{ x: x + 20, y: y - 100 }, { x: x + 120, y }, { x: x - 80, y }]
+            .find(point => legalMove(x + 20, y, point.x, point.y, 1500));
+        assert.ok(destination, 'there is a clear path for the timing check');
         await pause(1500);
-        alex.send({ t: 'move', x: x + 20, y: y - 100 });
-        assert.equal((await sam.next(message => message.t === 'move' && message.id === alex.welcome.id, 'a longer walk')).y, y - 100);
+        alex.send({ t: 'move', ...destination });
+        const walked = await sam.next(message => message.t === 'move' && message.id === alex.welcome.id, 'a longer walk');
+        assert.deepEqual([walked.x, walked.y], [destination.x, destination.y]);
     } finally {
         for (const socket of sockets) socket.ws.close();
         await plaza.stop();

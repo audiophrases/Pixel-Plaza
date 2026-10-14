@@ -290,6 +290,7 @@ export default function Game() {
           onAnother={() => connection?.send({ t: 'reroll' })} onKeep={() => connection?.send({ t: 'keep' })} />}
 
         {quest && <Journal quest={quest} feedback={answered}
+          onAccept={(objective, changePartner) => connection?.send({ t: 'quest-accept', objective, changePartner })}
           onAnswer={(objective, text) => connection?.send({ t: 'answer', objective, text })} />}
 
         <div className={`chat-container glass-panel${chatSpot.folded ? ' chat-folded' : ''}`} ref={chatBox}

@@ -1,11 +1,11 @@
-import type { Campaign, Chapter, Objective, Role } from './campaign.ts';
+import { isUnlocked, prerequisiteIds, type Campaign, type Chapter, type Objective, type Role } from './campaign.ts';
 import { plazaMap } from './plazaMap.ts';
 
 export const MISSION_MAX_BYTES = 512_000;
-export type MissionEnvelope = { format: 'pixel-plaza-campaign'; schemaVersion: 1; campaign: Campaign };
+export type MissionEnvelope = { format: 'pixel-plaza-campaign'; schemaVersion: 1 | 2; campaign: Campaign };
 export type MissionIssue = { path: string; message: string };
 export type MissionValidation = { campaign: Campaign | null; errors: MissionIssue[]; warnings: MissionIssue[] };
-export const missionEnvelope = (campaign: Campaign): MissionEnvelope => ({ format: 'pixel-plaza-campaign', schemaVersion: 1, campaign });
+export const missionEnvelope = (campaign: Campaign): MissionEnvelope => ({ format: 'pixel-plaza-campaign', schemaVersion: campaign.chapters.some(c => c.objectives.some(o => o.requires || o.board || o.activity)) ? 2 : 1, campaign });
 export const missionJson = (campaign: Campaign) => JSON.stringify(missionEnvelope(campaign), null, 2);
 export const missionId = (value: string) => /^[a-z][a-z0-9-]{0,63}$/.test(value);
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -53,7 +53,7 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
     } catch { fail('file', 'Campaign must be JSON data.'); return { campaign: null, errors, warnings }; }
     const envelope = obj(input, 'file', ['format', 'schemaVersion', 'campaign']);
     if (envelope.format !== 'pixel-plaza-campaign') fail('format', 'Expected pixel-plaza-campaign.');
-    if (envelope.schemaVersion !== 1) fail('schemaVersion', 'Only schema version 1 is supported.');
+    if (envelope.schemaVersion !== 1 && envelope.schemaVersion !== 2) fail('schemaVersion', 'Only schema versions 1 and 2 are supported.');
     const raw = obj(envelope.campaign, 'campaign', ['id', 'title', 'roles', 'chapters', 'finale']);
     const roles: Role[] = list(raw.roles, 'roles', 20).map((value, i) => {
         const path = `roles[${i}]`;
@@ -65,12 +65,38 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
         const c = obj(value, path, ['id', 'title', 'intro', 'recap', 'ending', 'share', 'objectives', 'discoveries', 'reveals', 'roleClues', 'thieves']);
         const objectives: Objective[] = list(c.objectives, `${path}.objectives`, 100).map((value, j) => {
             const p = `${path}.objectives[${j}]`;
-            const o = obj(value, p, ['id', 'text', 'accept', 'answerThief', 'thiefKnows', 'answerRole', 'kind', 'after', 'optional', 'rewards']);
+            const o = obj(value, p, ['id', 'text', 'accept', 'answerThief', 'thiefKnows', 'answerRole', 'kind', 'after', 'optional', 'rewards', 'requires', 'board', 'activity']);
             const result: Objective = { id: id(o.id, `${p}.id`), text: str(o.text, `${p}.text`), accept: list(o.accept, `${p}.accept`, 30).map((v, k) => str(v, `${p}.accept[${k}]`, 120)) };
             for (const key of ['answerThief', 'thiefKnows', 'optional'] as const) if (o[key] !== undefined) result[key] = boolean(o[key], `${p}.${key}`);
             for (const key of ['after', 'answerRole'] as const) if (o[key] !== undefined) result[key] = id(o[key], `${p}.${key}`);
             if (o.kind !== undefined) { if (o.kind !== 'report') fail(`${p}.kind`, 'Only report is supported; omit kind for typed or name answers.'); else result.kind = 'report'; }
             if (o.rewards !== undefined) result.rewards = clues(o.rewards, `${p}.rewards`);
+            if (o.requires !== undefined || o.board !== undefined || o.activity !== undefined) {
+                if (envelope.schemaVersion !== 2) fail(p, 'Graph prerequisites and board quests require schema version 2.');
+            }
+            if (o.requires !== undefined) {
+                const r = obj(o.requires, `${p}.requires`, ['mode', 'objectives']);
+                if (r.mode !== 'all' && r.mode !== 'any') fail(`${p}.requires.mode`, 'Choose all or any.');
+                const ids = list(r.objectives, `${p}.requires.objectives`, 100).map((v, k) => id(v, `${p}.requires.objectives[${k}]`));
+                if (!ids.length || new Set(ids).size !== ids.length) content(`${p}.requires.objectives`, 'Choose distinct prerequisite objectives.');
+                result.requires = { mode: r.mode === 'any' ? 'any' : 'all', objectives: ids };
+                if (result.after) content(p, 'Use after or requires, not both.');
+            }
+            if (o.activity !== undefined) {
+                if (o.activity !== 'interview' && o.activity !== 'exchange') fail(`${p}.activity`, 'Choose interview or exchange.');
+                else result.activity = o.activity;
+            }
+            if (o.board !== undefined) {
+                const b = obj(o.board, `${p}.board`, ['roles', 'afterMain', 'minPlayers', 'teacherReleased', 'partnerRole']);
+                result.board = {};
+                if (b.roles !== undefined) result.board.roles = list(b.roles, `${p}.board.roles`, 20).map((v, k) => id(v, `${p}.board.roles[${k}]`));
+                for (const key of ['afterMain', 'teacherReleased'] as const) if (b[key] !== undefined) result.board[key] = boolean(b[key], `${p}.board.${key}`);
+                if (b.partnerRole !== undefined) result.board.partnerRole = id(b.partnerRole, `${p}.board.partnerRole`);
+                if (b.minPlayers !== undefined) {
+                    if (typeof b.minPlayers !== 'number' || !Number.isInteger(b.minPlayers) || b.minPlayers < 1 || b.minPlayers > 40) fail(`${p}.board.minPlayers`, 'Choose between 1 and 40 online students.');
+                    else result.board.minPlayers = b.minPlayers;
+                }
+            }
             return result;
         });
         const share = typeof c.share === 'number' ? c.share : NaN;
@@ -105,17 +131,36 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
     chapters.forEach((c, i) => {
         const path = `chapters[${i}]`; const byId = new Map(c.objectives.map(o => [o.id, o]));
         if (!c.objectives.some(o => !o.optional)) content(`${path}.objectives`, 'Add at least one main objective.');
-        if (!c.objectives.some(o => !o.optional && !o.after)) content(`${path}.objectives`, 'A main objective must be available at the start.');
+        if (!c.objectives.some(o => !o.optional && isUnlocked(o, []))) content(`${path}.objectives`, 'A main objective must be available at the start.');
         for (const [j, o] of c.objectives.entries()) {
             const p = `${path}.objectives[${j}]`;
-            if (o.after && !byId.has(o.after)) content(`${p}.after`, 'Prerequisite must be an objective in this chapter.');
-            const seen = new Set<string>(); let cursor: Objective | undefined = o;
-            while (cursor) { if (seen.has(cursor.id)) { content(`${p}.after`, 'Prerequisites contain a cycle.'); break; } seen.add(cursor.id); cursor = cursor.after ? byId.get(cursor.after) : undefined; }
+            for (const id of prerequisiteIds(o)) {
+                const prerequisite = byId.get(id);
+                if (!prerequisite) content(`${p}.requires`, 'Prerequisite must be an objective in this chapter.');
+                if (!o.optional && prerequisite?.optional) content(`${p}.requires`, 'Optional quests cannot gate the main story.');
+            }
+            const visiting = new Set<string>(); const visited = new Set<string>();
+            const cycle = (id: string): boolean => {
+                if (visiting.has(id)) return true;
+                if (visited.has(id)) return false;
+                visiting.add(id);
+                if (prerequisiteIds(byId.get(id) ?? { id, text: '', accept: [] }).some(cycle)) return true;
+                visiting.delete(id); visited.add(id); return false;
+            };
+            if (cycle(o.id)) content(`${p}.requires`, 'Prerequisites contain a cycle.');
             if (o.answerRole && !roleIds.has(o.answerRole)) content(`${p}.answerRole`, 'Role does not exist.');
             if ([!!o.answerRole, !!o.answerThief, o.kind === 'report'].filter(Boolean).length > 1) content(p, 'Choose one answer mode.');
             if (!o.answerRole && !o.answerThief && !o.kind && !o.accept.some(a => a.trim())) content(`${p}.accept`, 'Add an accepted answer.');
             if ((o.kind || o.answerRole || o.answerThief) && o.accept.length) content(`${p}.accept`, 'Dynamic names and reports must have an empty accepted-answer list.');
             if ((o.answerThief || o.thiefKnows) && !c.thieves) content(p, 'This objective requires a thief chapter.');
+            if (o.board) {
+                if (!o.optional) content(`${p}.board`, 'Board quests must be optional.');
+                if (o.answerThief || o.thiefKnows) content(`${p}.board`, 'Board quests cannot use thief-specific answer exclusions.');
+                for (const role of o.board.roles ?? []) if (!roleIds.has(role)) content(`${p}.board.roles`, 'Audience role does not exist.');
+                if (o.board.partnerRole && !roleIds.has(o.board.partnerRole)) content(`${p}.board.partnerRole`, 'Partner role does not exist.');
+                if (o.board.partnerRole && !o.activity) content(`${p}.board.partnerRole`, 'Partner roles require a social activity.');
+            }
+            if (o.activity && (!o.board || o.kind !== 'report' || o.answerRole || o.answerThief)) content(`${p}.activity`, 'Social activities require an optional board quest with report answers.');
             for (const role of Object.keys(o.rewards ?? {})) if (!roleIds.has(role)) content(`${p}.rewards.${role}`, 'Role does not exist.');
         }
         for (const role of Object.keys(c.roleClues ?? {})) if (!roleIds.has(role)) content(`${path}.roleClues.${role}`, 'Role does not exist.');

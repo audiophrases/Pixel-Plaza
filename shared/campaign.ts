@@ -19,7 +19,10 @@ export type Objective = {
     answerRole?: string;              // the answer is the name of a classmate who has this role (so students must meet people)
     kind?: 'report';                  // a few written sentences, which the teacher reads; any real attempt counts
     after?: string;                   // asked only once this question has been answered
+    requires?: { mode: 'all' | 'any'; objectives: string[] };
     optional?: boolean;               // a bonus: it never holds the chapter up
+    activity?: 'interview' | 'exchange'; // a partnered report on a quest board
+    board?: { roles?: string[]; afterMain?: boolean; minPlayers?: number; teacherReleased?: boolean; partnerRole?: string };
     rewards?: Record<string, string>; // the new clue each role earns by answering, by role id
 };
 // A clue everyone finds by standing in a named place (see `zones` in plazaMap.ts).
@@ -55,9 +58,16 @@ export type QuestView = {
     secret: { title: string; text: string } | null; // only for the thief
     thieves: string[] | null; // who it was, once the chapter is over
     objectives: { id: string; text: string; done: boolean; optional: boolean; kind: 'text' | 'name' | 'report' }[];
+    board?: BoardQuestView[];
     team: { done: number; total: number }; // how far the whole class is through this chapter's main questions
     recap: string | null; // sent when the student comes back to a story already under way
     finale: string | null;
+};
+
+export type BoardQuestView = {
+    id: string; text: string; kind: 'text' | 'name' | 'report'; activity: Objective['activity'] | null;
+    state: 'available' | 'active' | 'done' | 'waiting'; reason: string | null;
+    partner: { name: string; online: boolean } | null;
 };
 
 export const castanyada: Campaign = {
@@ -210,7 +220,15 @@ export const castanyada: Campaign = {
     }],
 };
 
-export const campaigns: Campaign[] = [castanyada];
+// A separate template: never changes a revision already played by an existing class.
+export const castanyadaSideQuests: Campaign = {
+    ...structuredClone(castanyada), id: 'castanyada-side-quests', title: 'Castanyada: Side Mysteries',
+};
+castanyadaSideQuests.chapters[0].objectives.push(
+    { id: 'delivery-interview', text: 'Interview your partner about a strange delivery. Ask where it went, when it arrived, and what was inside. Write what you learned.', accept: [], kind: 'report', optional: true, activity: 'interview', board: { afterMain: true, minPlayers: 2 } },
+    { id: 'festival-exchange', text: 'Compare two ideas for a secret festival surprise with your partner. Explain a problem with each idea and agree on one. Write your plan.', accept: [], kind: 'report', optional: true, activity: 'exchange', requires: { mode: 'any', objectives: ['delivery-interview', 'note'] }, board: { afterMain: true, teacherReleased: true, minPlayers: 2 } },
+);
+export const campaigns: Campaign[] = [castanyada, castanyadaSideQuests];
 export const campaignById = (id: string): Campaign | undefined => campaigns.find(campaign => campaign.id === id);
 
 // The role the fewest students have so far, so a class is spread across the roles; ties are
@@ -223,7 +241,22 @@ export function pickRole(roles: readonly Role[], taken: readonly string[], rando
 }
 
 // A question can be asked once the one it follows has been answered.
-export const isUnlocked = (objective: Objective, done: readonly string[]) => !objective.after || done.includes(objective.after);
+export const prerequisiteIds = (objective: Objective): readonly string[] => objective.requires?.objectives ?? (objective.after ? [objective.after] : []);
+export const isUnlocked = (objective: Objective, done: readonly string[]) => {
+    const ids = prerequisiteIds(objective);
+    return !ids.length || (objective.requires?.mode === 'any' ? ids.some(id => done.includes(id)) : ids.every(id => done.includes(id)));
+};
+export const mainFinished = (chapter: Chapter, done: readonly string[]) => chapter.objectives.filter(o => !o.optional).every(o => done.includes(o.id));
+
+export function boardWait(objective: Objective, chapter: Chapter, role: string, done: readonly string[], released: boolean, online: number): string | null {
+    if (!objective.board || !objective.optional) return 'This is not a board quest.';
+    if (objective.board.roles?.length && !objective.board.roles.includes(role)) return 'This quest is for another role.';
+    if (!isUnlocked(objective, done)) return 'Finish the linked objectives first.';
+    if (objective.board.afterMain && !mainFinished(chapter, done)) return 'Finish your main mystery first.';
+    if (objective.board.teacherReleased && !released) return 'Your teacher will release this quest.';
+    if (online < (objective.board.minPlayers ?? (objective.activity ? 2 : 1))) return 'Wait for more classmates to join.';
+    return null;
+}
 
 // True when enough of the class has finished every main question in the chapter. Bonus questions never count.
 export function chapterDone(chapter: Chapter, players: readonly { done: readonly string[] }[]): boolean {

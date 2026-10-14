@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { castanyada } from '../shared/campaign';
+import type { QuestView } from '../shared/campaign';
 import { missionEnvelope, missionJson } from '../shared/missionSchema';
 import type { MissionDraft } from '../shared/missionTypes';
 
@@ -32,12 +33,12 @@ const button = (label: string) => {
     const found = [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === label);
     assert.ok(found, `Button exists: ${label}`); return found;
 };
-const field = (label: string) => {
-    const found = [...document.querySelectorAll('label')].find(l => l.querySelector('span')?.textContent === label)?.querySelector('input,textarea,select');
+const field = (label: string, scope: ParentNode = document) => {
+    const found = [...scope.querySelectorAll('label')].find(l => l.querySelector('span')?.textContent === label)?.querySelector('input,textarea,select');
     assert.ok(found, `Field exists: ${label}`); return found as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 };
-const edit = async (label: string, value: string) => {
-    const input = field(label);
+const edit = async (label: string, value: string, scope: ParentNode = document) => {
+    const input = field(label, scope);
     const proto = input.tagName === 'TEXTAREA' ? dom.window.HTMLTextAreaElement.prototype : input.tagName === 'SELECT' ? dom.window.HTMLSelectElement.prototype : dom.window.HTMLInputElement.prototype;
     await act(async () => { Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(input, value); input.dispatchEvent(new dom.window.Event(input.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); });
 };
@@ -76,6 +77,19 @@ await click('Save draft');
 assert.ok(saved.campaign.chapters[0].objectives.find(o => o.id === 'hotel-interview'));
 assert.equal(saved.campaign.chapters.length, 3);
 
+const socialEditor = [...document.querySelectorAll('fieldset')].find(f => f.querySelector('small')?.textContent === 'ID: hotel-interview')!;
+assert.ok(socialEditor);
+await edit('Answer mode', 'exchange', socialEditor);
+await edit('Unlock rule', 'all', socialEditor);
+const timePrerequisite = [...socialEditor.querySelectorAll('label')].find(l => l.textContent?.includes('What time did the box get to the park?'))!.querySelector<HTMLInputElement>('input')!;
+await act(async () => { timePrerequisite.click(); });
+const releaseToggle = [...socialEditor.querySelectorAll('label')].find(l => l.textContent?.includes('Hide until the teacher releases it'))!.querySelector<HTMLInputElement>('input')!;
+await act(async () => { releaseToggle.click(); });
+await click('Save draft');
+const authored = saved.campaign.chapters[0].objectives.find(o => o.id === 'hotel-interview')!;
+assert.equal(authored.activity, 'exchange'); assert.equal(authored.board?.afterMain, true); assert.equal(authored.board?.teacherReleased, true);
+assert.deepEqual(authored.requires, { mode: 'all', objectives: ['where', 'when'] });
+
 await edit('Paste campaign JSON', JSON.stringify({ ...missionEnvelope(incoming), schemaVersion: 42 }));
 await click('Preview pasted JSON');
 assert.equal(button('Apply to draft').disabled, true, 'malformed import cannot be applied');
@@ -85,6 +99,27 @@ assert.equal(button('Publish for new games').disabled, true, 'incomplete draft c
 await click('Save draft');
 assert.equal(saved.campaign.title, '', 'incomplete draft remains saveable');
 await act(async () => { root.unmount(); });
+
+const { default: Journal } = await import('../src/components/Journal');
+const journalRoot = createRoot(document.getElementById('root')!);
+const accepted: string[] = []; const reports: string[] = [];
+const quest: QuestView = { campaign: { id: 'test', title: 'Test' }, status: 'active', chapter: { index: 0, of: 1, title: 'Investigation', intro: 'Find evidence.', ending: null },
+    role: { id: 'baker', name: 'Baker', card: 'Ask a witness.' }, clues: [], secret: null, thieves: null, objectives: [], team: { done: 0, total: 0 }, recap: null, finale: null,
+    board: [{ id: 'interview', text: 'Interview the witness.', kind: 'report', activity: 'interview', state: 'waiting', reason: 'Finish your main mystery first.', partner: null }] };
+const renderJournal = async () => { await act(async () => { journalRoot.render(<Journal quest={structuredClone(quest)} feedback={null} onAnswer={(_id, text) => reports.push(text)} onAccept={(id, change) => accepted.push(change ? `${id}-replace` : id)} />); }); };
+await renderJournal();
+assert.equal(button('Accept quest').disabled, true);
+quest.board![0].state = 'available'; quest.board![0].reason = null;
+await renderJournal(); await click('Accept quest'); assert.deepEqual(accepted, ['interview']);
+quest.board![0].state = 'active'; quest.board![0].partner = { name: 'Sam', online: false };
+await renderJournal(); await click('Find another partner'); assert.equal(accepted.at(-1), 'interview-replace');
+const answerInput = document.querySelector<HTMLInputElement>('input[aria-label="Your answer"]')!;
+await act(async () => { Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!.call(answerInput, 'Sam saw a box at the hotel.'); answerInput.dispatchEvent(new dom.window.Event('input', { bubbles: true })); });
+await act(async () => { document.querySelector('form')!.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })); });
+assert.deepEqual(reports, ['Sam saw a box at the hotel.']);
+quest.status = 'campaign_complete'; await renderJournal();
+assert.ok(!document.querySelector('form'), 'closed campaigns do not offer report submission');
+await act(async () => { journalRoot.unmount(); });
 dom.window.close();
-console.log('Mission Studio UI: sign-in, editor, clue table, save/publish, AI prompt, reviewed chapter extension and invalid-input guards pass.');
+console.log('Mission Studio UI: authoring, all/any links, social quest settings, imports and student quest board controls pass.');
 process.exit(0);

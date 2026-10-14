@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Campaign, Chapter, Objective, Role } from '../../shared/campaign';
+import { boardWait, isUnlocked, prerequisiteIds, type Campaign, type Chapter, type Objective, type Role } from '../../shared/campaign';
 import { plazaMap } from '../../shared/plazaMap';
 
 export function MissionField({ label, value, onChange, multiline = false, maxLength = 6000 }: { label: string; value: string; onChange: (value: string) => void; multiline?: boolean; maxLength?: number }) {
@@ -8,6 +8,17 @@ export function MissionField({ label, value, onChange, multiline = false, maxLen
         : <input value={value} maxLength={maxLength} onChange={e => onChange(e.target.value)} />}</label>;
 }
 const freshId = (prefix: string) => `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
+
+function Prerequisites({ objective, chapter, onChange }: { objective: Objective; chapter: Chapter; onChange: (patch: Partial<Objective>) => void }) {
+    const ids = prerequisiteIds(objective); const mode = objective.requires?.mode ?? (objective.after ? 'single' : 'start');
+    return <div><label className="mission-field"><span>Unlock rule</span><select value={mode} onChange={e => {
+        const next = e.target.value;
+        onChange(next === 'start' ? { after: undefined, requires: undefined } : next === 'single' ? { after: ids[0], requires: undefined } : { after: undefined, requires: { mode: next as 'all' | 'any', objectives: [...ids] } });
+    }}><option value="start">Available from the start</option>{objective.after && <option value="single">After one objective (existing rule)</option>}<option value="all">After all selected objectives</option><option value="any">After any selected objective</option></select></label>
+        {mode === 'single' ? <label className="mission-field"><span>Unlock after</span><select value={objective.after} onChange={e => onChange({ after: e.target.value || undefined })}><option value="">Available from the start</option>{chapter.objectives.filter(o => o.id !== objective.id).map(o => <option key={o.id} value={o.id}>{o.text.slice(0, 65) || o.id}</option>)}</select></label>
+        : mode !== 'start' && <div className="mission-checklist">{chapter.objectives.filter(o => o.id !== objective.id).map(o => <label key={o.id}><input type="checkbox" checked={ids.includes(o.id)} onChange={e => onChange({ after: undefined, requires: { mode: mode as 'all' | 'any', objectives: e.target.checked ? [...ids, o.id] : ids.filter(id => id !== o.id) } })} />{o.text.slice(0, 80) || o.id}{o.optional ? ' (optional)' : ''}</label>)}</div>}
+    </div>;
+}
 
 function RoleClues({ roles, value, onChange, label }: { roles: Role[]; value?: Record<string, string>; onChange: (value: Record<string, string>) => void; label: string }) {
     return <details className="mission-details"><summary>{label}</summary>{roles.map(role => <MissionField key={role.id} label={role.name || role.id} multiline value={value?.[role.id] ?? ''} onChange={text => {
@@ -58,15 +69,29 @@ export default function MissionEditor({ campaign, chapterIndex, setChapterIndex,
                     </>}
                 </details>
                 <h3>Objectives and answers</h3>
+                <details className="mission-details"><summary>Quest links</summary><div className="mission-table-wrap"><table><thead><tr><th>Objective</th><th>Unlock rule</th><th>Prerequisites</th><th>Audience</th></tr></thead><tbody>{chapter.objectives.map(o => <tr key={o.id}><td>{o.text || o.id}</td><td>{prerequisiteIds(o).length ? o.requires?.mode === 'any' ? 'Any selected' : 'All selected' : 'From the start'}</td><td>{prerequisiteIds(o).map(id => chapter.objectives.find(q => q.id === id)?.text || id).join('; ') || '—'}</td><td>{o.board ? 'Quest board' : o.optional ? 'Optional question' : 'Main story'}</td></tr>)}</tbody></table></div></details>
                 {chapter.objectives.map((objective, i) => <fieldset key={objective.id}><legend>{i + 1}. {objective.optional ? 'Optional quest' : 'Main objective'}</legend><small>ID: {objective.id}</small>
                     <MissionField label="Student instructions" value={objective.text} multiline onChange={text => updateObjective(i, { text })} />
-                    <div className="mission-two-columns"><label className="mission-field"><span>Answer mode</span><select value={objective.kind === 'report' ? 'report' : objective.answerRole ? 'role' : objective.answerThief ? 'thief' : 'text'} onChange={e => updateObjective(i, { kind: e.target.value === 'report' ? 'report' : undefined, answerThief: e.target.value === 'thief' ? true : undefined, answerRole: e.target.value === 'role' ? campaign.roles[0]?.id : undefined, accept: [] })}>
-                        <option value="text">Accepted phrase</option><option value="role">Name of a classmate with a role</option><option value="thief">Name of the thief</option><option value="report">Written report</option></select></label>
-                        <label className="mission-field"><span>Unlock after</span><select value={objective.after ?? ''} onChange={e => updateObjective(i, { after: e.target.value || undefined })}><option value="">Available from the start</option>{chapter.objectives.filter(o => o.id !== objective.id).map(o => <option key={o.id} value={o.id}>{o.text.slice(0, 65) || o.id}</option>)}</select></label></div>
+                    <label className="mission-field"><span>Answer mode</span><select value={objective.activity ?? (objective.kind === 'report' ? 'report' : objective.answerRole ? 'role' : objective.answerThief ? 'thief' : 'text')} onChange={e => {
+                        const value = e.target.value; const social = value === 'interview' || value === 'exchange';
+                        updateObjective(i, { kind: value === 'report' || social ? 'report' : undefined, activity: social ? value : undefined,
+                            answerThief: value === 'thief' ? true : undefined, answerRole: value === 'role' ? campaign.roles[0]?.id : undefined, accept: [],
+                            board: value === 'thief' ? undefined : social ? objective.board ?? { afterMain: true, minPlayers: 2 } : objective.board ? { ...objective.board, partnerRole: undefined } : undefined,
+                            ...(social ? { optional: true, thiefKnows: undefined } : {}) });
+                    }}><option value="text">Accepted phrase</option><option value="role">Name of a classmate with a role</option><option value="thief">Name of the thief</option><option value="report">Written report</option><option value="interview">Interview a partner</option><option value="exchange">Exchange information with a partner</option></select></label>
+                    <Prerequisites objective={objective} chapter={chapter} onChange={patch => updateObjective(i, patch)} />
                     {objective.answerRole && <label className="mission-field"><span>Find a classmate with this role</span><select value={objective.answerRole} onChange={e => updateObjective(i, { answerRole: e.target.value })}>{campaign.roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>}
                     {!objective.kind && !objective.answerThief && !objective.answerRole && <MissionField label="Accepted answers (one per line)" value={objective.accept.join('\n')} multiline maxLength={3630} onChange={text => updateObjective(i, { accept: text.split('\n') })} />}
                     {objective.kind === 'report' && <p className="mission-muted">Five words count as an attempt. The teacher reads the report.</p>}
-                    <div className="mission-toolbar"><label><input type="checkbox" checked={!!objective.optional} onChange={e => updateObjective(i, { optional: e.target.checked })} /> Optional quest</label><label><input type="checkbox" checked={!!objective.thiefKnows} onChange={e => updateObjective(i, { thiefKnows: e.target.checked })} /> Thief already knows the answer</label></div>
+                    <div className="mission-toolbar"><label><input type="checkbox" checked={!!objective.optional} onChange={e => updateObjective(i, { optional: e.target.checked, ...(!e.target.checked ? { board: undefined, activity: undefined } : {}) })} /> Optional quest</label><label><input type="checkbox" checked={!!objective.thiefKnows} onChange={e => updateObjective(i, { thiefKnows: e.target.checked })} /> Thief already knows the answer</label></div>
+                    <label><input type="checkbox" checked={!!objective.board} onChange={e => updateObjective(i, e.target.checked ? { optional: true, board: { afterMain: true } } : { board: undefined, activity: undefined })} /> Offer on the quest board</label>
+                    {objective.board && <div className="mission-board-settings"><p className="mission-muted">Each student can accept this quest once in a game.</p>
+                        <label><input type="checkbox" checked={!!objective.board.afterMain} onChange={e => updateObjective(i, { board: { ...objective.board, afterMain: e.target.checked } })} /> For investigators who have finished the main mystery (including their partners)</label>
+                        <label><input type="checkbox" checked={!!objective.board.teacherReleased} onChange={e => updateObjective(i, { board: { ...objective.board, teacherReleased: e.target.checked } })} /> Hide until the teacher releases it</label>
+                        <label className="mission-field"><span>Minimum online students</span><input type="number" min={1} max={40} value={objective.board.minPlayers ?? (objective.activity ? 2 : 1)} onChange={e => updateObjective(i, { board: { ...objective.board, minPlayers: Number(e.target.value) } })} /></label>
+                        <p>Who can accept it? Leave all roles unchecked to include everyone.</p><div className="mission-checklist">{campaign.roles.map(role => <label key={role.id}><input type="checkbox" checked={objective.board?.roles?.includes(role.id) ?? false} onChange={e => updateObjective(i, { board: { ...objective.board, roles: e.target.checked ? [...(objective.board?.roles ?? []), role.id] : objective.board?.roles?.filter(id => id !== role.id) } })} />{role.name}</label>)}</div>
+                        {objective.activity && <><label className="mission-field"><span>Partner role</span><select value={objective.board.partnerRole ?? ''} onChange={e => updateObjective(i, { board: { ...objective.board, partnerRole: e.target.value || undefined } })}><option value="">Any other investigator</option>{campaign.roles.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}</select></label><p className="mission-muted">The report records the assigned partner but does not verify speaking.</p></>}
+                    </div>}
                     <RoleClues roles={campaign.roles} value={objective.rewards} label="Clues awarded after this answer" onChange={rewards => updateObjective(i, { rewards })} />
                     <div className="mission-toolbar"><button className="mission-button" disabled={i === 0} onClick={() => updateChapter({ objectives: move(chapter.objectives, i, -1) })}>Move earlier</button><button className="mission-button" disabled={i === chapter.objectives.length - 1} onClick={() => updateChapter({ objectives: move(chapter.objectives, i, 1) })}>Move later</button>
                         <button className="mission-button" disabled={chapter.objectives.length >= 100} onClick={() => updateChapter({ objectives: [...chapter.objectives, { ...structuredClone(objective), id: freshId('quest') }] })}>Duplicate quest</button>
@@ -104,7 +129,8 @@ export function MissionPreview({ campaign, chapter }: { campaign: Campaign; chap
             <li>{thief && chapter.thieves ? chapter.thieves.story : chapter.roleClues?.[role.id] ?? role.clue}</li>
             {!(thief && chapter.thieves) && chapter.objectives.filter(o => done.includes(o.id) && o.rewards?.[role.id]).map(o => <li key={o.id}>{o.rewards![role.id]}</li>)}
         </ul>{thief && chapter.thieves && <><h4>Your secret</h4><p>{chapter.thieves.card}</p></>}
-            <h4>Available objectives</h4><ul>{chapter.objectives.filter(o => (!o.after || done.includes(o.after)) && !(thief && chapter.thieves && (o.thiefKnows || o.answerThief))).map(o => <li key={o.id}>{done.includes(o.id) ? '✓ ' : ''}{o.text}{o.optional ? ' (optional)' : ''}</li>)}</ul>
+            <h4>Available objectives</h4><ul>{chapter.objectives.filter(o => !o.board && isUnlocked(o, done) && !(thief && chapter.thieves && (o.thiefKnows || o.answerThief))).map(o => <li key={o.id}>{done.includes(o.id) ? '✓ ' : ''}{o.text}{o.optional ? ' (optional)' : ''}</li>)}</ul>
+            {chapter.objectives.some(o => o.board) && <><h4>Quest board offers</h4><p>This preview assumes teacher-gated quests have been released. The game checks partner availability.</p><ul>{chapter.objectives.filter(o => o.board && (!o.board.roles?.length || o.board.roles.includes(role.id))).map(o => <li key={o.id}>{o.text} — {done.includes(o.id) ? 'Report submitted' : boardWait(o, chapter, role.id, done, true, rosterSize) ?? 'Available to accept'}</li>)}</ul></>}
         </div>
     </section>;
 }
