@@ -1,0 +1,130 @@
+import { JSDOM } from 'jsdom';
+import assert from 'node:assert/strict';
+
+// Run the real game UI and connection, replacing only the canvas, dictionary,
+// and network. This checks student interactions without starting workerd.
+const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true, url: 'http://localhost/game' });
+const global = globalThis as any;
+Object.assign(global, { window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement,
+  localStorage: dom.window.localStorage, sessionStorage: dom.window.sessionStorage, IS_REACT_ACT_ENVIRONMENT: true });
+Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true });
+dom.window.HTMLElement.prototype.scrollIntoView = () => {};
+localStorage.setItem('pixelplaza.student.v1', JSON.stringify({ studentToken: 'test-credential', expiresAt: Date.now() + 60000,
+  student: { studentKey: 'student-a', displayName: 'Alex', className: '4B' } }));
+global.fetch = async () => ({ ok: true, json: async () => ({ ticket: 'join-ticket' }) });
+
+const sockets: Socket[] = [];
+class Socket {
+  static OPEN = 1;
+  readyState = 0;
+  sent: any[] = [];
+  onopen?: () => void;
+  onmessage?: (event: { data: string }) => void;
+  onclose?: (event: { code: number }) => void;
+  constructor() { sockets.push(this); }
+  open() { this.readyState = 1; this.onopen?.(); }
+  receive(message: object) { this.onmessage?.({ data: JSON.stringify(message) }); }
+  close() { this.readyState = 3; }
+  send(raw: string) {
+    const message = JSON.parse(raw);
+    this.sent.push(message);
+    if (message.t === 'check') queueMicrotask(() => this.receive({ t: 'checked', id: message.id, ok: false,
+      corrected: 'He walks home.', why: 'Use walks with he.' }));
+    if (message.t === 'chat') queueMicrotask(() => this.receive({ t: 'result', cid: message.cid }));
+    if (message.t === 'help-request') queueMicrotask(() => this.receive({ t: 'support', support: {
+      request: { id: 'request-a', topic: message.topic, status: 'open' }, messages: [] } }));
+  }
+}
+global.WebSocket = Socket;
+
+const { createRoot } = await import('react-dom/client');
+const { act } = await import('react');
+const { MemoryRouter } = await import('react-router-dom');
+const { default: Game } = await import('../src/pages/Game');
+const root = createRoot(document.getElementById('root')!);
+const button = (text: string) => [...document.querySelectorAll('button')].find(item => item.textContent?.trim() === text) as HTMLButtonElement;
+const input = () => document.querySelector('.chat-input') as HTMLInputElement;
+async function type(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
+  await act(async () => {
+    const prototype = field instanceof dom.window.HTMLTextAreaElement ? dom.window.HTMLTextAreaElement.prototype : dom.window.HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(field, value);
+    field.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+  });
+}
+async function select(field: HTMLSelectElement, value: string) {
+  await act(async () => { field.value = value; field.dispatchEvent(new dom.window.Event('change', { bubbles: true })); });
+}
+async function click(label: string) { await act(async () => { assert.ok(button(label), `button ${label} exists`); button(label).click(); }); }
+
+try {
+  await act(async () => {
+    root.render(<MemoryRouter initialEntries={[{ pathname: '/game', state: { roomCode: '123456', avatarConfig: null } }]}><Game /></MemoryRouter>);
+  });
+  const socket = sockets[0];
+  await act(async () => { socket.open(); socket.receive({ t: 'welcome', id: 'socket-a', players: [{ id: 'socket-a', name: 'Alex', x: 100, y: 100 }] }); });
+
+  await type(input(), 'No entenc');
+  assert.equal(socket.sent.length, 0, 'typing an unsent draft never creates a teacher log');
+  await click('Send');
+  assert.deepEqual(socket.sent.map(event => event.t), ['attempt', 'attempt-outcome'], 'a blocked Send is logged before the language outcome');
+  assert.equal(socket.sent[0].text, 'No entenc');
+  assert.equal(socket.sent[1].status, 'language-blocked');
+  const firstId = socket.sent[0].id;
+  await click('Send');
+  assert.notEqual(socket.sent[2].id, firstId, 'retrying the same draft creates a distinct attempt');
+  assert.ok(button('I need help'), 'the help button stays available beside a blocked draft');
+
+  await click('I need help');
+  await select(document.querySelector('.student-help-panel select') as HTMLSelectElement, 'instructions');
+  await type(document.querySelector('.student-help-panel textarea') as HTMLTextAreaElement, 'No entenc què he de fer.');
+  await click('Notify my teacher');
+  const help = socket.sent.at(-1);
+  assert.equal(help.t, 'help-request');
+  assert.equal(help.topic, 'instructions');
+  assert.equal(help.text, 'No entenc què he de fer.', 'a help note can use the student’s own language');
+  assert.ok(document.body.textContent?.includes('Teacher notified'));
+
+  const support = { request: { id: 'request-a', topic: 'instructions', status: 'acknowledged' }, messages: [{ id: 'reply-a', text: 'Tell me your idea and we can write it together.', timestamp: 100 }] };
+  await act(async () => { socket.receive({ t: 'support', support }); socket.receive({ t: 'support', support }); });
+  assert.equal(document.querySelectorAll('.teacher-msg').length, 1, 'replayed teacher messages appear once by persisted id');
+  assert.ok(document.body.textContent?.includes('Teacher (private)'));
+  assert.ok(document.body.textContent?.includes('Teacher is helping'));
+  await click('I need help');
+  await type(document.querySelector('.student-help-panel textarea') as HTMLTextAreaElement, 'Another idea I need help with');
+  await act(async () => socket.receive({ t: 'support', support }));
+  assert.equal((document.querySelector('.student-help-panel textarea') as HTMLTextAreaElement).value, 'Another idea I need help with', 'incoming status updates do not discard an unsent help note');
+  await click('Close');
+  await click('Reply to teacher');
+  assert.equal((document.querySelector('.chat-target') as HTMLSelectElement).value, 'teacher');
+  await type(input(), 'No entenc');
+  const start = socket.sent.length;
+  await click('Send');
+  assert.deepEqual(socket.sent.slice(start).map(event => event.t), ['attempt', 'chat'], 'private teacher replies bypass language filters while preserving the original attempt');
+  assert.equal(socket.sent.at(-1).to, 'teacher');
+  assert.equal(socket.sent.at(-1).attemptId, socket.sent.at(-2).id);
+
+  await select(document.querySelector('.chat-target') as HTMLSelectElement, '');
+  await type(input(), 'He walk home');
+  await click('Send');
+  const hintedAttempt = socket.sent.findLast(event => event.t === 'attempt');
+  assert.equal(socket.sent.at(-1).attemptId, hintedAttempt.id, 'the grammar check keeps the original attempt id');
+  await click('OK');
+  assert.equal(socket.sent.at(-1).attemptId, hintedAttempt.id);
+  assert.equal(socket.sent.at(-1).was, 'He walk home');
+  assert.equal(socket.sent.at(-1).text, 'He walks home.');
+  await type(input(), 'He walk home');
+  await click('Send');
+  const keptAttempt = socket.sent.findLast(event => event.t === 'attempt');
+  await click('Ignore');
+  assert.equal(socket.sent.at(-1).attemptId, keptAttempt.id);
+  assert.equal(socket.sent.at(-1).text, 'He walk home');
+  assert.equal(socket.sent.at(-1).better, 'He walks home.');
+  await act(async () => socket.receive({ t: 'support', support: { ...support, request: { ...support.request, status: 'resolved' } } }));
+  assert.ok(document.body.textContent?.includes('Help completed'));
+  assert.equal(document.querySelectorAll('.teacher-msg').length, 1);
+  console.log('Student support UI checks pass: prefilter audit, retries, help requests, private teacher chat, message deduplication, and grammar corrections.');
+} finally {
+  await act(async () => root.unmount());
+  dom.window.close();
+}
+process.exit(0);

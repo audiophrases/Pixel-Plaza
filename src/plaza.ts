@@ -1,6 +1,7 @@
 import type { AvatarConfig } from './utils/AvatarRenderer';
 import type { QuestView } from '../shared/campaign';
 import type { WarmupView } from '../shared/warmup';
+import type { StudentSupport } from '../shared/support';
 
 export type PlazaPlayer = AvatarConfig & { id: string; name: string; x: number; y: number };
 // A hint on one chat message, from the server. Never a refusal.
@@ -23,7 +24,8 @@ export type PlazaEvent =
   | { t: 'alias'; name: string; kept: boolean }                            // your made-up name, and whether you have kept it
   | { t: 'rename'; id: string; name: string }                              // a namesake arrived: this player's shown name changed
   | { t: 'quest'; quest: QuestView | null }                                  // this student's view of the campaign
-  | { t: 'answered'; objective: string; correct: boolean; wait: boolean };                                          // that message was posted at once
+  | { t: 'answered'; objective: string; correct: boolean; wait: boolean }
+  | { t: 'support'; support: StudentSupport };
 
 // As in PinPlay's live-socket.js: a connection can die without closing (a laptop
 // lid, Wi-Fi roaming), and only a missing pong shows it. The room answers
@@ -58,6 +60,9 @@ export class PlazaConnection {
   private pongTimer = 0;
   private retryTimer = 0;
   private hints = new Map<string, (hint: GrammarHint) => void>();
+  // Only explicit submissions are recorded. Disconnected submissions wait in
+  // memory for this connection's next welcome; no drafts or credentials are stored.
+  private pendingAttempts: object[] = [];
 
   // A null avatar keeps the one saved on the server.
   constructor(pin: string, token: string, avatar: AvatarConfig | null) {
@@ -81,13 +86,34 @@ export class PlazaConnection {
 
   send(message: object): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.selfId) return false;
-    this.ws.send(JSON.stringify(message));
-    return true;
+    try {
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch { return false; }
+  }
+
+  recordAttempt(text: string, to?: string): string {
+    const id = crypto.randomUUID();
+    this.record({ t: 'attempt', id, text: text.slice(0, 1000), source: 'chat', ...(to ? { to } : {}) });
+    return id;
+  }
+
+  recordAttemptOutcome(id: string, status: string, reason?: string): void {
+    this.record({ t: 'attempt-outcome', id, status, ...(reason ? { reason: reason.slice(0, 500) } : {}) });
+  }
+
+  private record(message: object): void {
+    this.pendingAttempts.push(message);
+    this.flushAttempts();
+  }
+
+  private flushAttempts(): void {
+    while (this.pendingAttempts.length && this.send(this.pendingAttempts[0])) this.pendingAttempts.shift();
   }
 
   // Asks whether a message has a clear grammar mistake. Resolves to "fine" when
   // anything is slow, offline or unsure, so it can never stop a message.
-  check(text: string): Promise<GrammarHint> {
+  check(text: string, attemptId?: string): Promise<GrammarHint> {
     return new Promise(resolve => {
       const id = crypto.randomUUID();
       let timer = 0;
@@ -97,7 +123,7 @@ export class PlazaConnection {
       };
       timer = window.setTimeout(() => finish({ ok: true }), HINT_WAIT_MS);
       this.hints.set(id, finish);
-      if (!this.send({ t: 'check', id, text })) finish({ ok: true });
+      if (!this.send({ t: 'check', id, text, ...(attemptId ? { attemptId } : {}) })) finish({ ok: true });
     });
   }
 
@@ -183,6 +209,7 @@ export class PlazaConnection {
       this.selfId = message.id;
       this.players = new Map((message.players as PlazaPlayer[]).map(player => [player.id, player]));
       this.fails = 0;
+      this.flushAttempts();
       this.setStatus({ state: 'online' });
       this.emit({ t: 'roster' });
       return;

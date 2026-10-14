@@ -86,6 +86,8 @@ async function linkOnline(env: Env, body: { password?: unknown; url: string | nu
 
 function teacherAction(path: string, method: string, body: any): TeacherAction | null {
     if (path === '/api/teacher/status' && method === 'GET') return { kind: 'status' };
+    if (path === '/api/teacher/help-status' && ['acknowledged', 'resolved'].includes(body?.status) && typeof body?.id === 'string') return { kind: 'helpStatus', id: body.id, status: body.status, gameId: body.gameId };
+    if (path === '/api/teacher/help-message' && typeof body?.studentKey === 'string' && typeof body?.text === 'string') return { kind: 'helpMessage', studentKey: body.studentKey, text: body.text, gameId: body.gameId };
     if (method !== 'POST') return null;
     if (path === '/api/teacher/class' && typeof body?.open === 'boolean') {
         return { kind: 'open', open: body.open, ...(typeof body.game === 'string' ? { game: body.game } : {}) };
@@ -182,6 +184,11 @@ async function handle(request: Request, env: Env): Promise<Response> {
         const args = get ? { id: new URL(request.url).searchParams.get('id') } : body;
         const result = await plaza(env).missionStudio(request.headers.get('x-teacher-session') || '', op, args);
         return 'error' in result ? json(result, result.status) : json(result);
+    }
+    if (path === '/api/teacher/attempts' && get) {
+        const query = new URL(request.url).searchParams;
+        const result = await plaza(env).teacherAttempts(request.headers.get('x-teacher-session') || '', query.get('studentKey') || undefined, query.get('cursor'), query.get('gameId') || undefined);
+        return 'error' in result ? json({ error: result.error }, result.status) : json(result);
     }
     if (path.startsWith('/api/teacher/')) {
         const action = teacherAction(path, request.method, body);

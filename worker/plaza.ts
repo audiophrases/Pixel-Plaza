@@ -7,6 +7,8 @@ import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapt
 import { MissionRepository, type MissionResult } from './missions.ts';
 import { QuestBoard, type BoardContext } from './questBoard.ts';
 import { Interviews } from './interviews.ts';
+import { StudentAssistance } from './support.ts';
+import type { AttemptPage, AttemptSource, HelpStatus, HelpTopic, TeacherSupport } from '../shared/support.ts';
 import type { ConversationView, Objective, InterviewView } from '../shared/campaign.ts';
 import { LiveMissions, type LiveMissionResult } from './liveMissions.ts';
 import type { LiveMissionTarget } from '../shared/missionTypes.ts';
@@ -58,7 +60,9 @@ export type TeacherAction =
     | { kind: 'review'; id: string; approve: boolean } // approve = false also takes down a message already posted
     | { kind: 'approveAll' }
     | { kind: 'mode'; mode: ChatMode }
-    | { kind: 'mute'; studentKey: string; muted: boolean };
+    | { kind: 'mute'; studentKey: string; muted: boolean }
+    | { kind: 'helpStatus'; id: string; status: HelpStatus; gameId?: string }
+    | { kind: 'helpMessage'; studentKey: string; text: string; gameId?: string };
 
 export type GameSummary = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean };
 
@@ -73,6 +77,7 @@ export type CampaignStatus = {
 };
 
 export type TeacherStatus = {
+    support: TeacherSupport;
     warmup: { active: boolean; kind: WarmupKind; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
     campaign: CampaignStatus | null; // the open game's campaign, once started
     campaigns: { id: string; title: string }[]; // those that can be started
@@ -98,6 +103,7 @@ export class PlazaRoom extends DurableObject<Env> {
     private missions: MissionRepository;
     private questBoard: QuestBoard;
     private interviews: Interviews;
+    private assistance: StudentAssistance;
     private interviewSends = new Set<string>();
     private liveMissions: LiveMissions;
 
@@ -168,6 +174,8 @@ export class PlazaRoom extends DurableObject<Env> {
         this.questBoard.initialize();
         this.interviews = new Interviews(this.sql);
         this.interviews.initialize();
+        this.assistance = new StudentAssistance(this.sql);
+        this.assistance.initialize();
         this.liveMissions = new LiveMissions(this.sql);
         this.liveMissions.initialize();
         // Keepalive pings are answered without waking the room.
@@ -312,6 +320,19 @@ export class PlazaRoom extends DurableObject<Env> {
     teacher(token: string, action: TeacherAction): TeacherStatus | { error: string; status: number } {
         const session = this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray();
         if (!token || session.length === 0) return { error: 'Please sign in again.', status: 401 };
+        if (action.kind === 'helpStatus' || action.kind === 'helpMessage') {
+            const game = this.activeGame();
+            if (!game || (action.gameId && action.gameId !== game)) return { error: 'The selected game changed. Refresh the controls.', status: 409 };
+            if (action.kind === 'helpStatus') {
+                if (!this.assistance.helpStatus(game, action.id, action.status)) return { error: 'That help request was not found.', status: 404 };
+                for (const student of this.rosterNames(game).keys()) this.sendSupport(game, student);
+            } else {
+                if (!this.rosterNames(game).has(action.studentKey)) return { error: 'That student is not in this game.', status: 404 };
+                if (!action.text.trim() || action.text.length > 1000) return { error: 'Write up to 1,000 characters.', status: 400 };
+                this.assistance.teacherMessage(game, action.studentKey, action.text.trim());
+                this.sendSupport(game, action.studentKey);
+            }
+        }
         if (action.kind === 'open') {
             if (action.open && action.game !== undefined && !this.game(action.game)) return { error: 'That game does not exist.', status: 400 };
             this.setOpen(action.open, action.game);
@@ -369,6 +390,8 @@ export class PlazaRoom extends DurableObject<Env> {
         // recent history, read through the indexes, not the whole log each time.
         const current = this.game(this.activeGame());
         return {
+            support: { alerts: current ? this.assistance.alerts(current.id, this.rosterNames(current.id)) : [],
+                students: current ? [...this.rosterNames(current.id)].map(([studentKey, name]) => ({ studentKey, name })) : [] },
             warmup: this.warmupStatus(current?.id ?? null),
             campaign: this.campaignStatus(current?.id ?? null),
             campaigns: this.missions.published(),
@@ -395,6 +418,33 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     // ---------- The plaza socket ----------
+
+    teacherAttempts(token: string, studentKey?: string, cursor?: string | null, gameId?: string): AttemptPage | { error: string; status: number } {
+        if (!token || !this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray().length) return { error: 'Please sign in again.', status: 401 };
+        const game = this.activeGame();
+        if (gameId && gameId !== game) return { error: 'The selected game changed. Refresh the controls.', status: 409 };
+        if (!game) return { attempts: [], next: null };
+        try { return this.assistance.page(game, studentKey, cursor); }
+        catch { return { error: 'That history cursor is no longer valid. Refresh the history.', status: 400 }; }
+    }
+
+    private sendSupport(game: string, student: string): void {
+        const support = this.assistance.studentState(game, student);
+        for (const ws of this.ctx.getWebSockets(student)) {
+            const seat = ws.deserializeAttachment() as Seat | null;
+            if (seat?.game === game && !seat.left) try { ws.send(JSON.stringify({ t: 'support', support })); } catch { /* reconnect will replay */ }
+        }
+    }
+
+    private beginAttempt(seat: Seat, text: string, source: AttemptSource, id?: string, to?: unknown, objective?: string): string {
+        const target = to === 'teacher' ? 'Teacher' : this.seats().find(s => s.game === seat.game && s.id === to)?.name;
+        return this.assistance.begin({ game: seat.game, studentKey: seat.studentKey, name: seat.name,
+            text, source, id: id && id.length <= 80 ? id : undefined, target, objective });
+    }
+
+    private attemptStatus(id: string, status: string, reason?: string, chatId?: string): void {
+        this.assistance.update(id, status, reason, this.assistance.get(id)?.correction, chatId);
+    }
 
     async fetch(request: Request): Promise<Response> {
         const { 0: client, 1: server } = new WebSocketPair();
@@ -442,18 +492,36 @@ export class PlazaRoom extends DurableObject<Env> {
         this.sendAlias(server, seat.game, seat.studentKey);
         this.sendVision(server, seat.game);
         this.sendWarmup(server, seat.game, seat.studentKey);
+        this.sendSupport(seat.game, seat.studentKey);
         this.refreshBoard(seat.game);
         return new Response(null, { status: 101, webSocket: client });
     }
 
     async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-        if (typeof message !== 'string' || message.length > 1000) return;
+        if (typeof message !== 'string' || message.length > 8192) return;
         const seat = ws.deserializeAttachment() as Seat | null;
         if (!seat || seat.left) return;
         let data: any;
         try { data = JSON.parse(message); } catch { return; }
 
-        if (data?.t === 'move') {
+        if (data?.t === 'attempt' && typeof data.id === 'string' && data.id.length <= 80 && typeof data.text === 'string' && data.text.length <= 1000) {
+            this.beginAttempt(seat, data.text, 'chat', data.id, data.to);
+        } else if (data?.t === 'attempt-outcome' && typeof data.id === 'string') {
+            const id = this.assistance.owned(seat.game, seat.studentKey, data.id);
+            const attempt = id && this.assistance.get(id);
+            if (id && attempt && ['submitted', 'hint-offered', 'language-checked'].includes(attempt.status)
+                && data.status === 'language-blocked' && typeof data.reason === 'string') {
+                const reason = data.reason.slice(0, 500);
+                this.attemptStatus(id, 'language-blocked', reason);
+                this.assistance.signal(seat.game, seat.studentKey, seat.name, `Word check: ${reason}`, attempt.text);
+            }
+        } else if (data?.t === 'help-request') {
+            const topics: HelpTopic[] = ['writing', 'instructions', 'classmate-message', 'other'];
+            if (topics.includes(data.topic) && (data.text === undefined || typeof data.text === 'string')) {
+                this.assistance.request(seat.game, seat.studentKey, seat.name, data.topic, (data.text ?? '').slice(0, 500));
+                this.sendSupport(seat.game, seat.studentKey);
+            }
+        } else if (data?.t === 'move') {
             const position = clampPosition(data.x, data.y);
             if (!position) return;
             // A move through a wall, or further than anyone can walk, puts the student back where they were.
@@ -468,9 +536,9 @@ export class PlazaRoom extends DurableObject<Env> {
             this.discover(seat);
             ws.serializeAttachment(seat);
             this.broadcast({ t: 'move', id: seat.id, ...position }, ws);
-        } else if (data?.t === 'warmup-answer' && typeof data.text === 'string' && data.text.length <= 80) {
+        } else if (data?.t === 'warmup-answer' && typeof data.text === 'string') {
             this.warmupAnswer(ws, seat, data.text);
-        } else if (data?.t === 'answer' && typeof data.objective === 'string' && typeof data.text === 'string' && data.text.length <= REPORT_MAX_LENGTH) {
+        } else if (data?.t === 'answer' && typeof data.objective === 'string' && typeof data.text === 'string') {
             this.answer(ws, seat, data.objective, data.text);
         } else if (data?.t === 'quest-accept' && typeof data.objective === 'string') {
             this.claimQuest(ws, seat, data.objective, data.changePartner === true);
@@ -481,13 +549,14 @@ export class PlazaRoom extends DurableObject<Env> {
         } else if (data?.t === 'emote' && EMOTES.includes(data.emote)) {
             this.broadcast({ t: 'emote', id: seat.id, emote: data.emote });
         } else if (data?.t === 'check') {
-            await this.grammar(ws, seat, data.id, data.text);
+            await this.grammar(ws, seat, data.id, data.text, typeof data.attemptId === 'string' ? data.attemptId : undefined);
         } else if (data?.t === 'chat') {
             // What the student did with a grammar hint, for the teacher to see.
             const text = (value: unknown) => (typeof value === 'string' ? value.slice(0, 200) : null);
             const note = text(data.was) ? `Used the suggestion. They wrote: "${text(data.was)}"`
                 : text(data.better) ? `Kept their own words. Suggested: "${text(data.better)}"` : null;
-            await this.chat(ws, seat, data.text, data.to, note, typeof data.cid === 'string' ? data.cid.slice(0, 64) : undefined, text(data.better));
+            await this.chat(ws, seat, data.text, data.to, note, typeof data.cid === 'string' ? data.cid.slice(0, 64) : undefined, text(data.better), undefined,
+                typeof data.attemptId === 'string' ? data.attemptId : typeof data.cid === 'string' ? data.cid : undefined);
         }
     }
 
@@ -692,14 +761,15 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     private async interviewTurn(ws: WebSocket, seat: Seat, data: Record<string, unknown>): Promise<void> {
-        const warn = (text: string) => ws.send(JSON.stringify({ t: 'notice', level: 'warning', text }));
+        const audit = typeof data.text === 'string' ? this.beginAttempt(seat, data.text, 'interview', undefined, data.witness, typeof data.objective === 'string' ? data.objective : undefined) : null;
+        const warn = (text: string) => { if (audit) this.attemptStatus(audit, 'invalid', text); ws.send(JSON.stringify({ t: 'notice', level: 'warning', text })); };
         if (this.interviewSends.has(seat.studentKey)) return warn('Wait for your current message to be sent.');
         const row = this.campaignRow(seat.game);
         const ctx = this.boardContext(seat.game, seat.studentKey);
-        if (!this.isOpen() || !row || !ctx || ctx.status === 'campaign_complete') return;
+        if (!this.isOpen() || !row || !ctx || ctx.status === 'campaign_complete') return warn('That investigation is not available right now.');
         const incoming = data.t === 'interview-reply' && typeof data.id === 'string' ? this.interviews.get(data.id) : undefined;
         const objective = ctx.chapter.objectives.find(o => o.id === (incoming?.objective ?? data.objective));
-        if (!objective || (!objective.activity && !objective.conversation)) return;
+        if (!objective || (!objective.activity && !objective.conversation)) return warn('That investigation was not found.');
         const investigator = incoming ? incoming.investigator : seat.studentKey;
         const student = this.campaignPlayers(seat.game).find(p => p.student_key === investigator);
         if (!student || student.done.includes(objective.id) || !isUnlocked(objective, student.done)) return warn('That investigation is no longer available.');
@@ -709,7 +779,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!target || target.studentKey === seat.studentKey) return warn('Choose a classmate who is in the plaza.');
         if (incoming && (incoming.game_id !== seat.game || incoming.chapter !== row.chapter || incoming.witness !== seat.studentKey
             || incoming.question_status !== 'approved' || incoming.answer_status === 'approved' || incoming.answer_status === 'pending')) return warn('That question is not ready for a reply.');
-        if (!incoming && data.t !== 'interview-ask') return;
+        if (!incoming && data.t !== 'interview-ask') return warn('That question was not found.');
         if (assignment?.partner_key && assignment.partner_key !== (incoming ? seat.studentKey : target.studentKey)) return warn('Exchange evidence with your assigned partner.');
         const existing = !incoming && this.interviews.rows(seat.game, row.chapter).find(i => i.objective === objective.id && i.investigator === investigator && i.witness === target.studentKey);
         if (existing && (existing.question_status === 'approved' || existing.question_status === 'pending')) return warn('You already asked this witness. Wait for their reply.');
@@ -729,7 +799,7 @@ export class PlazaRoom extends DurableObject<Env> {
         };
         this.interviewSends.add(seat.studentKey);
         try {
-            const sent = await this.chat(ws, seat, questionText, target.id, `Investigation: ${objective.text}\nShared evidence: ${clue.text}`, undefined, undefined, valid);
+            const sent = await this.chat(ws, seat, questionText, target.id, `Investigation: ${objective.text}\nShared evidence: ${clue.text}`, undefined, undefined, valid, undefined, audit ?? undefined);
             if (!sent || sent.status === 'blocked' || !valid()) return;
             if (incoming) this.interviews.reply(incoming.id, sent.id, questionText, clue.text, sent.status);
             else this.interviews.ask({ id: crypto.randomUUID(), game_id: seat.game, chapter: row.chapter, objective: objective.id,
@@ -767,16 +837,23 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // A student's typed answer to a chapter question. A wrong one can be tried again after a short wait.
     private answer(ws: WebSocket, seat: Seat, objectiveId: string, typed: string): void {
+        const audit = this.beginAttempt(seat, typed, 'answer', undefined, undefined, objectiveId);
+        const unavailable = (reason: string) => { this.attemptStatus(audit, 'invalid', reason); };
+        if (typed.length > REPORT_MAX_LENGTH) return unavailable('The answer exceeds the maximum length.');
         const row = this.campaignRow(seat.game);
         const campaign = row && this.gameCampaign(seat.game);
         const objective = campaign?.chapters[row?.chapter ?? 0]?.objectives.find(item => item.id === objectiveId);
         // Students can keep working after the class threshold, until the teacher moves on.
-        if (!row || !campaign || !objective || row.status === 'campaign_complete') return;
+        if (!row || !campaign || !objective || row.status === 'campaign_complete') return unavailable('That question is not available right now.');
         const player = this.player(seat.game, seat.studentKey, row.campaign_id);
-        if (!player || player.done.includes(objective.id) || !isUnlocked(objective, player.done)) return;
+        if (!player || player.done.includes(objective.id) || !isUnlocked(objective, player.done)) return unavailable('That question is finished or not unlocked yet.');
         // Board answers require a persisted assignment; clients cannot skip role or release gates.
-        if (objective.board && !this.questBoard.assignment(seat.game, objective.id, seat.studentKey)) return;
-        const reply = (correct: boolean, wait = false) => ws.send(JSON.stringify({ t: 'answered', objective: objective.id, correct, wait }));
+        if (objective.board && !this.questBoard.assignment(seat.game, objective.id, seat.studentKey)) return unavailable('Accept this quest before answering.');
+        const reply = (correct: boolean, wait = false) => {
+            this.attemptStatus(audit, correct ? 'correct' : wait ? 'waiting' : 'incorrect', correct ? undefined : wait ? 'Wait or complete the required witness exchange.' : 'The answer was not accepted.');
+            if (!correct && !wait) this.assistance.signal(seat.game, seat.studentKey, seat.name, 'The game answer was not accepted.', typed, 'instructions');
+            ws.send(JSON.stringify({ t: 'answered', objective: objective.id, correct, wait }));
+        };
         if (objective.activity || objective.conversation) {
             const conversation = this.conversation(seat.game, seat.studentKey, objective);
             if (conversation.completed < conversation.required) {
@@ -786,7 +863,7 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         const now = Date.now();
         if (now - player.last_wrong < WRONG_ANSWER_WAIT_MS) return reply(false, true);
-        if (objective.kind !== 'report' && typed.length > 80) return;
+        if (objective.kind !== 'report' && typed.length > 80) return unavailable('Use up to 80 characters for a short answer.');
         let right: boolean;
         if (objective.kind === 'report') {
             // Any real attempt in a few words counts; the teacher reads what was written.
@@ -1086,11 +1163,17 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // The name of a classmate who has the fact being looked for; never one's own.
     private warmupAnswer(ws: WebSocket, seat: Seat, typed: string): void {
+        const audit = this.beginAttempt(seat, typed, 'warmup');
+        if (typed.length > 80) { this.attemptStatus(audit, 'invalid', 'Use up to 80 characters.'); return; }
         const view = this.warmupView(seat.game, seat.studentKey);
         const players = this.warmupPlayers(seat.game);
         const me = players.find(player => player.student_key === seat.studentKey);
-        if (!view || !me || me.step >= me.targets.length) return;
-        const reply = (correct: boolean, wait = false) => ws.send(JSON.stringify({ t: 'warmup-answered', correct, wait }));
+        if (!view || !me || me.step >= me.targets.length) { this.attemptStatus(audit, 'invalid', 'The warm-up is not available.'); return; }
+        const reply = (correct: boolean, wait = false) => {
+            this.attemptStatus(audit, correct ? 'correct' : wait ? 'waiting' : 'incorrect', correct ? undefined : wait ? 'Wait before trying again.' : 'The warm-up answer was not accepted.');
+            if (!correct && !wait) this.assistance.signal(seat.game, seat.studentKey, seat.name, 'The warm-up answer was not accepted.', typed, 'instructions');
+            ws.send(JSON.stringify({ t: 'warmup-answered', correct, wait }));
+        };
         const now = Date.now();
         if (now - me.last_wrong < WRONG_ANSWER_WAIT_MS) return reply(false, true);
         const names = this.rosterNames(seat.game);
@@ -1216,7 +1299,8 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     // A hint before sending, never a block: whatever goes wrong, the answer is "fine".
-    private async grammar(ws: WebSocket, seat: Seat, id: unknown, text: unknown): Promise<void> {
+    private async grammar(ws: WebSocket, seat: Seat, id: unknown, text: unknown, attemptId?: string): Promise<void> {
+        const audit = typeof text === 'string' ? this.beginAttempt(seat, text, 'chat', attemptId) : null;
         const now = Date.now();
         let answer: Awaited<ReturnType<typeof checkGrammar>> = { ok: true };
         if (typeof text === 'string' && now - (seat.lastCheck ?? 0) >= CHECK_GAP_MS && this.isOpen()) {
@@ -1224,25 +1308,53 @@ export class PlazaRoom extends DurableObject<Env> {
             ws.serializeAttachment(seat);
             answer = await checkGrammar(text, this.env);
         }
+        if (audit) {
+            const existing = this.assistance.get(audit);
+            if (existing && ['submitted', 'language-checked', 'hint-offered'].includes(existing.status)) {
+                this.assistance.update(audit, answer.ok ? 'language-checked' : 'hint-offered', answer.ok ? undefined : answer.why, answer.ok ? existing.correction : answer.corrected);
+                if (!answer.ok && existing.status !== 'hint-offered') this.assistance.signal(seat.game, seat.studentKey, seat.name, `Grammar hint: ${answer.why}`, String(text));
+            }
+        }
         try { ws.send(JSON.stringify({ t: 'checked', id, ...answer })); } catch { /* closing */ }
     }
 
     // `cid` is the page's own id for this message: every answer carries it back, so a message that
     // did not go through can be given back to its writer, draft intact.
-    private async chat(ws: WebSocket, seat: Seat, value: unknown, to: unknown, note: string | null, cid?: string, better?: string | null, valid?: () => boolean): Promise<{ id: string; status: string } | void> {
+    private async chat(ws: WebSocket, seat: Seat, value: unknown, to: unknown, note: string | null, cid?: string, better?: string | null, valid?: () => boolean, attemptId?: string, linkedAudit?: string): Promise<{ id: string; status: string } | void> {
+        let audit = linkedAudit ?? (typeof value === 'string' ? this.beginAttempt(seat, value, 'chat', attemptId, to) : null);
+        if (audit && !linkedAudit) {
+            const existing = this.assistance.get(audit);
+            if (existing && !['submitted', 'language-checked', 'hint-offered'].includes(existing.status)) audit = this.beginAttempt(seat, String(value), 'chat', undefined, to);
+        }
+        if (audit && typeof value === 'string') this.assistance.submitted(audit, value);
+        const refused = (reason: string, status = 'invalid') => { if (audit) this.attemptStatus(audit, status, reason); };
         const reply = (level: 'info' | 'warning', text: string) => ws.send(JSON.stringify({ t: 'notice', level, text, cid }));
+        if (to === 'teacher' && typeof value === 'string') {
+            if (!value.trim() || value.length > 200) { refused('Write up to 200 characters.'); return reply('warning', 'Write up to 200 characters.'); }
+            if (!this.isOpen()) { refused('The class is closed.', 'unavailable'); return reply('warning', 'The class is closed.'); }
+            if (audit) this.attemptStatus(audit, 'teacher-inbox', 'Private message to your teacher.');
+            this.assistance.request(seat.game, seat.studentKey, seat.name, 'writing', value.trim(), false);
+            this.sendSupport(seat.game, seat.studentKey);
+            for (const socket of this.ctx.getWebSockets(seat.studentKey)) try { socket.send(JSON.stringify({ t: 'chat', id: audit, sender: seat.name, text: value.trim(), ts: Date.now(), whisper: true, to: 'Teacher' })); } catch { /* reconnect */ }
+            if (cid) ws.send(JSON.stringify({ t: 'result', cid }));
+            return;
+        }
         const unavailable = () => !this.isOpen() || (valid && !valid()) || this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', seat.studentKey).toArray().length > 0;
-        if (unavailable()) return reply('warning', 'Chat is unavailable right now.');
-        if (this.isRandom(seat.game) && !this.alias(seat.game, seat.studentKey).kept) return reply('warning', 'Choose your name first.');
+        if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
+        if (this.isRandom(seat.game) && !this.alias(seat.game, seat.studentKey).kept) { refused('Choose your name first.'); return reply('warning', 'Choose your name first.'); }
 
         // On the teacher's laptop every word must be English, whatever the page did.
         if (typeof value === 'string' && this.env.LAN_URL) {
             const { notEnglish } = await import('./english.ts');
             const words = notEnglish(value, this.seats().map(other => other.name));
-            if (words.length) return reply('warning', `Use English words only: ${words.map(item => item.word).join(', ')}.`);
+            if (words.length) {
+                const reason = `Use English words only: ${words.map(item => item.word).join(', ')}.`;
+                refused(reason, 'language-blocked'); this.assistance.signal(seat.game, seat.studentKey, seat.name, reason, value);
+                return reply('warning', reason);
+            }
         }
         const now = Date.now();
-        if (now - seat.lastChat < CHAT_GAP_MS) return reply('warning', 'Please wait before sending another message.');
+        if (now - seat.lastChat < CHAT_GAP_MS) { refused('Please wait before sending another message.', 'rate-limited'); return reply('warning', 'Please wait before sending another message.'); }
         seat.lastChat = now;
         ws.serializeAttachment(seat);
         if (typeof value !== 'string') return reply('warning', 'Enter a text message.');
@@ -1250,8 +1362,8 @@ export class PlazaRoom extends DurableObject<Env> {
         // `to` is the id of the classmate being whispered to; without it, the message is for whoever is nearby.
         let target: Seat | undefined;
         if (to !== undefined && to !== null) {
-            target = this.seats().find(other => other.id === to);
-            if (!target || target.studentKey === seat.studentKey) return reply('warning', 'That student is not in the Plaza right now.');
+            target = this.seats().find(other => other.game === seat.game && other.id === to);
+            if (!target || target.studentKey === seat.studentKey) { refused('That student is not in the Plaza right now.'); return reply('warning', 'That student is not in the Plaza right now.'); }
         }
 
         // Blocked messages are kept too, so the teacher sees what was attempted.
@@ -1264,7 +1376,7 @@ export class PlazaRoom extends DurableObject<Env> {
             if (verdict.result === 'flagged') { problem = 'That message cannot be sent. Please rewrite it.'; flag = verdict.categories.join(', '); }
             else if (verdict.result === 'unchecked') flag = 'moderation unavailable';
             // The class may have closed or the student been muted while OpenAI answered.
-            if (unavailable()) return reply('warning', 'Chat is unavailable right now.');
+            if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
         }
         // Review mode posts only what OpenAI cleared, and never a whisper.
         const posts = !problem && cleared && !target && this.mode() === 'review';
@@ -1277,6 +1389,8 @@ export class PlazaRoom extends DurableObject<Env> {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             entry.id, entry.student_key, entry.sender, entry.text, now, problem ? 'blocked' : posts ? 'approved' : 'pending',
             entry.target_key, target?.name ?? null, entry.x, entry.y, flag, note, seat.game, entry.marks);
+        if (audit) this.attemptStatus(audit, problem ? 'blocked' : posts ? 'approved' : 'pending', problem ?? note ?? flag ?? undefined, entry.id);
+        if (problem) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Message filter: ${problem}`, String(value));
         this.sql.exec(`DELETE FROM chat WHERE game_id IS ? AND id NOT IN (SELECT id FROM chat WHERE game_id IS ? ORDER BY ts DESC LIMIT ?)
             AND id NOT IN (SELECT question_id FROM interviews UNION SELECT answer_id FROM interviews WHERE answer_id IS NOT NULL)`,
             seat.game, seat.game, CHAT_KEEP);
@@ -1297,6 +1411,7 @@ export class PlazaRoom extends DurableObject<Env> {
         // Taking down a message that already posted: it disappears from every screen.
         if (entry.status === 'approved' && !approve) {
             this.sql.exec("UPDATE chat SET status = 'removed' WHERE id = ?", id);
+            this.assistance.chatStatus(id, 'removed');
             if (this.interviews.review(id, 'removed')) {
                 const game = this.activeGame(); if (game) this.sendQuestToAll(game);
             }
@@ -1308,6 +1423,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
         const approved = approve && this.isOpen();
         this.sql.exec('UPDATE chat SET status = ? WHERE id = ?', approved ? 'approved' : 'rejected', id);
+        this.assistance.chatStatus(id, approved ? 'approved' : 'rejected');
         if (this.interviews.review(id, approved ? 'approved' : 'rejected')) {
             const game = this.activeGame(); if (game) this.sendQuestToAll(game);
         }

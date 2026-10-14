@@ -1,0 +1,55 @@
+.student-help {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 12.5rem;
+  display: grid;
+  justify-items: end;
+  gap: .25rem;
+  z-index: 50;
+}
+
+.student-help-toggle {
+  padding: .65rem 1rem;
+  border: 2px solid #735017;
+  border-radius: 10px;
+  background: #fff4d1;
+  color: #573b12;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.student-help-toggle:hover { background: #ffecad; }
+.student-help-status { padding: .2rem .45rem; border-radius: 6px; font-size: .75rem; font-weight: 700; background: #fff9e5; color: #573b12; }
+.student-help-acknowledged, .student-help-resolved { background: #eaf7e6; color: #285726; }
+
+.student-help-panel {
+  position: absolute;
+  top: 3rem;
+  right: 0;
+  width: min(340px, calc(100vw - 2rem));
+  max-height: calc(100vh - 6rem);
+  overflow-y: auto;
+  padding: 1rem;
+  background: #fffdf7;
+  box-shadow: 0 6px 20px #0002;
+  font-size: .9rem;
+}
+
+.student-help-panel h2 { margin: 0 0 .5rem; font-size: 1.05rem; }
+.student-help-panel p { margin: .5rem 0; }
+.student-help-panel label { display: grid; gap: .35rem; margin: .8rem 0; font-weight: 700; }
+.student-help-panel select, .student-help-panel textarea { width: 100%; min-width: 0; padding: .5rem; border: 1px solid #afae9e; border-radius: 6px; background: white; font: inherit; font-weight: 400; }
+.student-help-panel textarea { resize: vertical; }
+.student-help-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.student-help-actions .btn { padding: .5rem .7rem; font-size: .9rem; }
+.student-help-actions button:disabled { opacity: .6; cursor: default; }
+.student-help-error { color: #a8071a; }
+.student-help-chat { border: 0; background: none; padding: .7rem 0 0; color: #315873; font: inherit; text-decoration: underline; cursor: pointer; }
+
+@media (max-width: 640px) {
+  .student-help { width: 8rem; }
+  .student-help-toggle { padding: .5rem .65rem; font-size: .9rem; }
+  .student-help-status { font-size: .68rem; }
+}

@@ -4,10 +4,12 @@ import Journal from '../components/Journal';
 import Warmup from '../components/Warmup';
 import type { WarmupView } from '../../shared/warmup';
 import NamePicker from '../components/NamePicker';
+import HelpRequest from '../components/HelpRequest';
 import { wordDiff } from '../../shared/diff';
 import { firstName } from '../../shared/names';
 import PhaserGame from '../components/PhaserGame';
 import type { QuestView } from '../../shared/campaign';
+import type { StudentSupport } from '../../shared/support';
 import { PlazaConnection } from '../plaza';
 import { loadChecker } from '../spellingData';
 import type { Checker, Misspelling } from '../spelling';
@@ -29,6 +31,7 @@ interface ChatMessage {
   whisper?: boolean;
   to?: string;
   marks?: [number, number][]; // words the sender was offered a better version of and kept
+  teacher?: boolean;
 }
 
 // Text with some character ranges wrapped, so a changed or mistaken word can have its own shade.
@@ -66,6 +69,10 @@ export default function Game() {
   const [quest, setQuest] = useState<QuestView | null>(null); // this student's part of the campaign, if one is running
   const [answered, setAnswered] = useState<{ objective: string; correct: boolean; wait: boolean } | null>(null);
   const [sendError, setSendError] = useState(''); // why the last message did not go, shown by the box
+  const [support, setSupport] = useState<StudentSupport>({ request: null, messages: [] });
+  const teacherMessageIds = useRef(new Set<string>());
+  const submissionAttemptId = useRef<string | null>(null);
+  const plazaRef = useRef<PlazaConnection | null>(null);
   const pending = useRef<{ cid: string; text: string; timer: number } | null>(null);
   const keptRun = useRef(0); // hints in a row the student turned down
   const chatField = useRef<HTMLInputElement>(null);
@@ -128,6 +135,7 @@ export default function Game() {
     }
 
     const plaza = new PlazaConnection(state.roomCode, session.studentToken, state.avatarConfig);
+    plazaRef.current = plaza;
     const say = (message: ChatMessage) => setMessages(prev => [...prev, message]);
     const unsubscribe = plaza.subscribe(event => {
       if (event.t === 'roster' || event.t === 'join' || event.t === 'leave' || event.t === 'rename') {
@@ -154,6 +162,16 @@ export default function Game() {
         chatField.current?.blur(); // sent: the keys walk again until Enter opens the box
       }
       if (event.t === 'result') return;
+      if (event.t === 'support') {
+        setSupport(event.support);
+        const unseen = event.support.messages.filter(message => !teacherMessageIds.current.has(message.id));
+        for (const message of unseen) {
+          teacherMessageIds.current.add(message.id);
+          say({ id: `teacher:${message.id}`, sender: 'Teacher', text: message.text, timestamp: message.timestamp, teacher: true });
+        }
+        if (unseen.length) setChatSpot(spot => ({ ...spot, folded: false }));
+        return;
+      }
       if (event.t === 'warmup') { setWarmup(event.warmup); setWarmupFeedback(null); return; }
       if (event.t === 'warmup-answered') { setWarmupFeedback({ correct: event.correct, wait: event.wait }); return; }
       if (event.t === 'alias') { setAlias({ name: event.name, kept: event.kept }); return; }
@@ -174,6 +192,7 @@ export default function Game() {
       unwatch();
       if (pending.current) window.clearTimeout(pending.current.timer);
       pending.current = null;
+      if (plazaRef.current === plaza) plazaRef.current = null;
       plaza.close();
     };
   }, [state, session, navigate]);
@@ -187,9 +206,10 @@ export default function Game() {
 
   // Sends a message; `extra` tells the teacher what the student did with a hint.
   const deliver = (text: string, extra: object = {}) => {
-    if (!connection) return;
+    const plaza = plazaRef.current;
+    if (!plaza) return;
     const cid = crypto.randomUUID();
-    if (connection.send({ t: 'chat', text, cid, ...(whisperTo ? { to: whisperTo } : {}), ...extra })) {
+    if (plaza.send({ t: 'chat', text, cid, ...(submissionAttemptId.current ? { attemptId: submissionAttemptId.current } : {}), ...(whisperTo ? { to: whisperTo } : {}), ...extra })) {
       // The draft stays (as what is being sent) until the server answers.
       setChatInput(text);
       setNudge(null);
@@ -202,34 +222,43 @@ export default function Game() {
         setSendError('No answer from the server. Your message is still here; check the chat before sending it again.');
       }, 15000);
       pending.current = { cid, text, timer };
-    } else setMessages(prev => [...prev, { sender: 'System Warning', text: 'Not connected. Try again in a moment.' }]);
+    } else setSendError('Not connected. Your message is still here; try again in a moment.');
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim() || !connection || checking || sending || nudge) return;
+    const plaza = plazaRef.current;
+    if (!chatInput.trim() || !plaza || checking || sending || nudge) return;
+    const text = chatInput;
+    const attemptId = plaza.recordAttempt(text, whisperTo || undefined);
+    submissionAttemptId.current = attemptId;
+    // Asking a teacher for help must still work when a student cannot write in English.
+    if (whisperTo === 'teacher') return deliver(text);
     setChecking(true);
     try {
       // Every word must be English. Names of people in the Plaza are fine.
       // If the dictionary cannot load, chat carries on rather than stopping.
-      const names = [session.student.displayName, ...[...connection.players.values()].map(player => player.name)];
+      const names = [session.student.displayName, ...[...plaza.players.values()].map(player => player.name)];
       let check: Checker | null = null;
       try {
         check = await loadChecker();
-        const problems = check(chatInput, names);
+        const problems = check(text, names);
         setSpelling(problems);
-        if (problems.length) return;
+        if (problems.length) {
+          plaza.recordAttemptOutcome(attemptId, 'language-blocked', `English word check: ${problems.map(problem => problem.word).join(', ')}`);
+          return;
+        }
       } catch { /* offline dictionary: the teacher still reviews the message */ }
 
       // Then a grammar hint, once, and only if they have not been turning them all down.
-      if (keptRun.current >= 3) { keptRun.current = 2; return deliver(chatInput); }
-      const hint = await connection.check(chatInput);
+      if (keptRun.current >= 3) { keptRun.current = 2; return deliver(text); }
+      const hint = await plaza.check(text, attemptId);
       if (!hint.ok && (!check || check(hint.corrected, names).length === 0)) {
-        setNudge({ original: chatInput, corrected: hint.corrected });
+        setNudge({ original: text, corrected: hint.corrected });
         return;
       }
       keptRun.current = 0;
-      deliver(chatInput);
+      deliver(text);
     } finally {
       setChecking(false);
     }
@@ -259,6 +288,17 @@ export default function Game() {
     e.preventDefault();
   };
 
+  const openTeacherChat = () => {
+    setChatSpot(spot => ({ ...spot, folded: false }));
+    if (!checking && !sending) {
+      setWhisperTo('teacher');
+      setNudge(null);
+      setSpelling([]);
+      submissionAttemptId.current = null;
+    }
+    window.requestAnimationFrame(() => chatField.current?.focus());
+  };
+
   return (
     <div className="game-container">
       {/* Background Phaser Canvas */}
@@ -277,6 +317,10 @@ export default function Game() {
             </span>}
           </div>
         </header>
+
+        <HelpRequest support={support} online={status.state === 'online'}
+          onRequest={(topic, text) => plazaRef.current?.send({ t: 'help-request', topic, text }) ?? false}
+          onOpenChat={openTeacherChat} />
 
         {status.state === 'stopped' && status.message && <div className="class-ended glass-panel" role="alert">
           <p>{status.message}</p>
@@ -307,10 +351,12 @@ export default function Game() {
               const isSystem = msg.sender.startsWith('System');
               
               return (
-                <div key={i} className={`chat-message ${isSystem ? 'system-msg' : ''} ${isWarning ? 'warning-msg' : ''} ${msg.whisper ? 'whisper-msg' : ''}`}>
+                <div key={msg.id ?? i} className={`chat-message ${isSystem ? 'system-msg' : ''} ${isWarning ? 'warning-msg' : ''} ${msg.whisper ? 'whisper-msg' : ''} ${msg.teacher ? 'teacher-msg' : ''}`}>
                   {/* Notices from the game are just the sentence, with no "System:" in front */}
-                  {!isSystem && <span className="chat-sender">{msg.whisper ? `${msg.sender} → ${msg.to} (whisper)` : msg.sender}:</span>}
+                  {!isSystem && <span className="chat-sender">{msg.teacher ? 'Teacher (private)' : msg.whisper ? `${msg.sender} → ${msg.to} (whisper)` : msg.sender}:</span>}
                   <span className="chat-text"><Marked text={msg.text} marks={msg.marks} className="slip" /></span>
+                  {msg.teacher && <button type="button" className="teacher-reply" disabled={checking || sending}
+                    onClick={openTeacherChat}>Reply to teacher</button>}
                 </div>
               );
             })}
@@ -352,21 +398,23 @@ export default function Game() {
             <select
               className="chat-target"
               value={whisperTo}
-              onChange={(e) => setWhisperTo(e.target.value)}
+              onChange={(e) => { setWhisperTo(e.target.value); setNudge(null); setSpelling([]); submissionAttemptId.current = null; }}
+              disabled={checking || sending}
               title="Who can read this message"
             >
               <option value="">Nearby</option>
+              <option value="teacher">Teacher (private help)</option>
               {classmates.map(player => <option key={player.id} value={player.id}>Whisper: {player.name}</option>)}
             </select>
             <input 
               type="text" 
               ref={chatField}
               className="chat-input"
-              placeholder={whisperTo ? 'Whisper (your teacher can read it)...' : 'Message people nearby (teacher approves)...'}
+              placeholder={whisperTo === 'teacher' ? 'Ask your teacher in any language…' : whisperTo ? 'Whisper (your teacher can read it)...' : 'Message people nearby (teacher approves)...'}
               maxLength={200}
               value={chatInput}
-              readOnly={sending}
-              onChange={(e) => { setChatInput(e.target.value); setNudge(null); setSendError(''); if (!e.target.value) setSpelling([]); }}
+              readOnly={checking || sending}
+              onChange={(e) => { setChatInput(e.target.value); setNudge(null); submissionAttemptId.current = null; setSendError(''); if (!e.target.value) setSpelling([]); }}
               onCopy={handlePreventClipboard}
               onPaste={handlePreventClipboard}
               onCut={handlePreventClipboard}

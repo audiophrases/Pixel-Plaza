@@ -7,6 +7,8 @@ import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import './Teacher.css';
 import { MAP_SIZE, plazaMap } from '../../shared/plazaMap';
 import type { InterviewView } from '../../shared/campaign';
+import type { TeacherSupport as Support } from '../../shared/support';
+import TeacherSupport from '../components/TeacherSupport';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string };
 type CampaignInfo = {
@@ -25,6 +27,7 @@ type Status = {
   warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
   open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: LiveStudent[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
+  support: Support;
 };
 
 async function call<T>(path: string, init: RequestInit): Promise<T> {
@@ -134,11 +137,16 @@ export default function Teacher() {
   const waiting = status ? status.entries.filter(entry => entry.status === 'pending').reverse() : [];
   const oldest = waiting[0];
   const waitingBefore = useRef(0);
+  const helpBefore = useRef<Set<string>>(new Set());
+  const openHelp = status?.support?.alerts.filter(alert => alert.status === 'open') ?? [];
+  const helpSignature = openHelp.map(alert => alert.id).join(',');
 
   // A soft beep and the tab title tell the teacher something is waiting, even from another window.
   useEffect(() => {
-    document.title = waiting.length ? `(${waiting.length}) Teacher controls` : 'Teacher controls';
-    if (waiting.length > waitingBefore.current) {
+    const helpIds = helpSignature ? helpSignature.split(',') : [];
+    const count = waiting.length + helpIds.length;
+    document.title = count ? `(${count}) Teacher controls${helpIds.length ? ' · help needed' : ''}` : 'Teacher controls';
+    if (waiting.length > waitingBefore.current || helpIds.some(id => !helpBefore.current.has(id))) {
       try {
         const audio = new AudioContext();
         const tone = audio.createOscillator();
@@ -152,7 +160,8 @@ export default function Teacher() {
       } catch { /* sound is optional */ }
     }
     waitingBefore.current = waiting.length;
-  }, [waiting.length]);
+    helpBefore.current = new Set(helpIds);
+  }, [waiting.length, helpSignature]);
 
   const action = async (path: string, body: object) => {
     try {
@@ -160,8 +169,20 @@ export default function Teacher() {
       setStatus(result);
       setError('');
       if (result.notice !== undefined) setNotice(result.notice);
-    } catch (cause) { failed(cause); }
+      return true;
+    } catch (cause) { failed(cause); return false; }
   };
+
+  // Saved classmates remain available for private help even when they are offline or have no alert.
+  const supportStudents = new Map<string, { studentKey: string; name: string }>();
+  if (status) {
+    for (const student of status.support?.students ?? []) supportStudents.set(student.studentKey, student);
+    for (const student of status.online) supportStudents.set(student.studentKey, student);
+    for (const player of status.campaign?.players ?? []) if (!supportStudents.has(player.studentKey)) supportStudents.set(player.studentKey, player);
+    for (const player of status.warmup?.players ?? []) if (!supportStudents.has(player.studentKey)) supportStudents.set(player.studentKey, player);
+    for (const alert of status.support?.alerts ?? []) if (!supportStudents.has(alert.studentKey)) supportStudents.set(alert.studentKey, alert);
+    for (const entry of status.entries) if (!supportStudents.has(entry.studentKey)) supportStudents.set(entry.studentKey, { studentKey: entry.studentKey, name: entry.sender });
+  }
 
   // A approves and R rejects the oldest waiting message.
   useEffect(() => {
@@ -196,6 +217,10 @@ export default function Teacher() {
         </button>}
         <button className="btn btn-secondary" onClick={() => { storeTeacherSession(''); setStatus(null); setToken(''); }}>Sign out</button>
       </section>
+      {status.game && <TeacherSupport key={status.game.id} gameId={status.game.id} token={token}
+        support={status.support ?? { alerts: [], students: [] }}
+        students={[...supportStudents.values()].sort((a, b) => who(a.studentKey, a.name).localeCompare(who(b.studentKey, b.name)))}
+        who={who} action={action} failed={failed} />}
       {status.game && <section className="teacher-online teacher-live">
         <h2>Live plaza ({status.online.length} students)</h2>
         <p>{status.open ? 'Updates every 2 seconds. Select a student to find them on the map.' : 'The class is closed.'}</p>
@@ -252,7 +277,7 @@ export default function Teacher() {
             <span><strong>{game.name}</strong> · PIN {game.pin} · {game.randomNames ? 'random names' : 'real first names'} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
             <button className="btn btn-secondary" onClick={() => void copyLink(game.pin)} title={linkFor(game.pin)}>{copied === game.pin ? 'Link copied' : 'Copy join link'}</button>
             <button className="btn btn-secondary teacher-danger" onClick={() => {
-              if (window.confirm(`Delete "${game.name}"?\n\nThis erases its chat, where everyone stood, their made-up names and its story. The join link stops working. This cannot be undone.`)) {
+              if (window.confirm(`Delete "${game.name}"?\n\nThis erases its chat, full submission history, help requests, where everyone stood, their made-up names and its story. The join link stops working. This cannot be undone.`)) {
                 void action('game/delete', { game: game.id, confirm: true });
               }
             }}>Delete</button>

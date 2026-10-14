@@ -31,8 +31,18 @@
   padding: 1rem 1.5rem;
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(10px);
-  max-width: 600px;
+  max-width: min(600px, calc(100% - 14rem));
   border-radius: 12px;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.room-info { display: flex; flex-wrap: wrap; gap: .25rem; }
+.room-info .badge { margin-left: 0; }
+
+@media (max-width: 640px) {
+  .game-header { max-width: calc(100% - 9rem); padding: .5rem; }
+  .game-header .badge { padding: 3px 6px; font-size: .7rem; }
 }
 
 .badge {
@@ -141,6 +151,11 @@
   font-size: 0.95rem;
   line-height: 1.4;
 }
+
+.teacher-msg { padding: .4rem .5rem; border-radius: 7px; border-left: 3px solid #327b54; background: #ecf7ec; }
+.teacher-msg .chat-sender { color: #21573b; }
+.teacher-reply { display: block; margin-top: .25rem; border: 0; padding: 0; background: none; color: #21573b; font: inherit; font-size: .8rem; text-decoration: underline; cursor: pointer; }
+.teacher-reply:disabled { opacity: .5; cursor: default; }
 
 .chat-sender {
   font-weight: 700;

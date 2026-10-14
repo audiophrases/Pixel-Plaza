@@ -1,0 +1,46 @@
+.teacher-support { background: white; border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; }
+.teacher-support-heading, .teacher-help-alert-heading, .teacher-help-history-controls, .teacher-help-send { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
+.teacher-support-heading { justify-content: space-between; }
+.teacher-support h2 { margin: 0; }
+.teacher-support h3 { margin-bottom: .5rem; }
+.teacher-support > p, .teacher-help-compose > p, .teacher-help-history > p { color: #4c5360; }
+.teacher-help-count { display: inline-block; font-size: .8rem; border-radius: 1rem; padding: .25rem .6rem; background: #fff0cc; color: #764500; vertical-align: middle; }
+.teacher-help-toggle { display: flex; align-items: center; gap: .5rem; font-size: .9rem; margin-bottom: 1rem; }
+.teacher-help-alerts { display: grid; gap: .8rem; }
+.teacher-help-alert { padding: 1rem; background: #fff8e6; border: 1px solid #ebcd89; border-radius: 10px; overflow-wrap: anywhere; }
+.teacher-help-acknowledged { background: #f1f7ff; border-color: #a8bddb; }
+.teacher-help-resolved.teacher-help-alert { background: #f4f5f6; border-color: #d6d8dc; }
+.teacher-help-alert-heading { justify-content: space-between; }
+.teacher-help-alert-heading span, .teacher-help-alert small { font-size: .8rem; color: #58616e; }
+.teacher-help-alert p { margin: .5rem 0; }
+.teacher-help-alert .teacher-actions { margin-top: .8rem; }
+.teacher-help-alert details { margin-top: .5rem; }
+.teacher-help-alert summary { cursor: pointer; }
+.teacher-help-alert ul { list-style: none; padding: 0; }
+.teacher-help-alert blockquote { margin: .25rem 0 .75rem; white-space: pre-wrap; border-left: 3px solid #b7bcc4; padding-left: .6rem; }
+.teacher-help-compose { margin-top: 1.5rem; padding-top: .75rem; border-top: 1px solid #ddd; display: grid; gap: .5rem; }
+.teacher-help-compose h3, .teacher-help-compose p { margin: .5rem 0; }
+.teacher-help-compose select, .teacher-help-compose textarea, .teacher-help-history-controls select { border: 1px solid #aab3c1; border-radius: 8px; padding: .55rem .7rem; font: inherit; max-width: 100%; }
+.teacher-help-compose textarea { resize: vertical; width: 100%; box-sizing: border-box; }
+.teacher-help-send { margin-top: .3rem; }
+.teacher-help-send span { color: #0b6b61; }
+.teacher-help-history { padding-top: .75rem; margin-top: 1.5rem; border-top: 1px solid #ddd; scroll-margin-top: 1rem; }
+.teacher-help-history > summary { font-size: 1.1rem; font-weight: bold; cursor: pointer; padding: .5rem 0; }
+.teacher-help-history-controls { margin-bottom: 1rem; }
+.teacher-help-history-controls select { flex: 1 1 10rem; }
+.teacher-attempts { list-style: none; padding: 0; margin: 0 0 1rem; }
+.teacher-attempt { border-top: 1px solid #ddd; padding: 1rem 0; overflow-wrap: anywhere; }
+.teacher-attempt small { display: block; color: #58616e; margin-top: .25rem; }
+.teacher-attempt p { margin: .5rem 0; }
+.teacher-attempt .teacher-attempt-text { white-space: pre-wrap; }
+.teacher-attempt .teacher-attempt-context { color: #58616e; font-size: .9rem; }
+.teacher-attempt-reason { color: #9a4510; font-size: .9rem; }
+.teacher-attempt-teacher { background: #f2f8ff; padding: 1rem .75rem; }
+.teacher-attempt .teacher-note { color: #0b6b61; font-size: .9rem; }
+.teacher-attempt > button { padding: .4rem .65rem; cursor: pointer; }
+.teacher-history-end { font-size: .85rem; }
+@media (max-width: 600px) {
+  .teacher-support { padding: 1rem; }
+  .teacher-help-alert-heading { display: block; }
+  .teacher-help-alert-heading span { display: block; margin-top: .3rem; }
+}
