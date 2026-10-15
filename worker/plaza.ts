@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './index.ts';
 import type { PinPlayStudent } from './pinplay.ts';
 import { checkGrammar } from './grammar.ts';
+import { languageHelp } from './aiHelp.ts';
 import { moderate } from './moderation.ts';
 import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
 import { MissionRepository, type MissionResult } from './missions.ts';
@@ -399,6 +400,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const current = this.game(this.activeGame());
         return {
             support: { alerts: current ? this.assistance.alerts(current.id, this.rosterNames(current.id)) : [],
+                ai: this.assistance.aiCount(this.helpSession()),
                 students: current ? [...this.rosterNames(current.id)].map(([studentKey, name]) => ({ studentKey, name })) : [] },
             warmup: this.warmupStatus(current?.id ?? null),
             campaign: this.campaignStatus(current?.id ?? null),
@@ -471,10 +473,48 @@ export class PlazaRoom extends DurableObject<Env> {
 
     private sendSupport(game: string, student: string, history = false): void {
         const support = this.assistance.studentState(game, student);
+        support.ai = this.assistance.aiState(this.helpSession(), student, !!this.env.OPENAI_API_KEY);
         for (const ws of this.ctx.getWebSockets(student)) {
             const seat = ws.deserializeAttachment() as Seat | null;
             if (seat?.game === game && !seat.left) try { ws.send(JSON.stringify({ t: 'support', support, ...(history ? { history: true } : {}) })); } catch { /* reconnect will replay */ }
         }
+    }
+
+    private helpSession(): string {
+        const existing = this.setting('help_session');
+        if (existing) return existing;
+        const id = crypto.randomUUID(); this.saveSetting('help_session', id); return id;
+    }
+
+    private async requestHelp(seat: Seat, data: Record<string, unknown>): Promise<void> {
+        const topics: HelpTopic[] = ['writing', 'instructions', 'classmate-message', 'other'];
+        if (!topics.includes(data.topic as HelpTopic) || (data.text !== undefined && typeof data.text !== 'string')
+            || (typeof data.text === 'string' && data.text.length > 500) || !this.isOpen() || seat.game !== this.activeGame()) return;
+        const topic = data.topic as HelpTopic; const note = typeof data.text === 'string' ? data.text : '';
+        const audit = this.beginAttempt(seat, note || `Help requested: ${topic}`, 'help', typeof data.attemptId === 'string' ? data.attemptId : undefined, 'teacher', topic);
+        const session = this.helpSession();
+        this.assistance.joinSession(session, seat.game, seat.studentKey);
+        const teacher = (reason: string) => {
+            this.attemptStatus(audit, 'help-requested', reason);
+            this.assistance.request(seat.game, seat.studentKey, seat.name, topic, note, false);
+            this.sendSupport(seat.game, seat.studentKey);
+        };
+        // Older clients cannot display AI hints, so only an explicit new-UI
+        // request opts into AI. All routes still share the same server quota.
+        if (data.route !== 'auto' || !this.env.OPENAI_API_KEY || !this.assistance.reserveAi(session, seat.studentKey, audit)) {
+            teacher(data.route === 'teacher' ? 'Student requested the teacher directly.' : 'Personal teacher assistance.'); return;
+        }
+        this.attemptStatus(audit, 'ai-help-pending', 'Preparing one language hint.');
+        this.sendSupport(seat.game, seat.studentKey);
+        const tip = await languageHelp(note, topic, this.env);
+        if (!this.isOpen() || this.activeGame() !== seat.game || this.helpSession() !== session) {
+            this.assistance.finishAi(session, seat.studentKey, audit, null);
+            this.attemptStatus(audit, 'unavailable', 'The classroom session ended before help was ready.'); return;
+        }
+        if (!this.assistance.finishAi(session, seat.studentKey, audit, tip)) return;
+        if (!tip) { teacher('AI help was unavailable; teacher notified. AI allowance remains unused.'); return; }
+        this.attemptStatus(audit, 'ai-help', tip);
+        this.sendSupport(seat.game, seat.studentKey);
     }
 
     private beginAttempt(seat: Seat, text: string, source: AttemptSource, id?: string, to?: unknown, objective?: string): string {
@@ -508,6 +548,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const game = this.activeGame() ?? '';
         // Joining may make two students share a first name: everyone already here is told their new name.
         this.sql.exec('INSERT OR IGNORE INTO game_students (game_id, student_key) VALUES (?, ?)', game, row.student_key);
+        this.assistance.joinSession(this.helpSession(), game, row.student_key);
         this.refreshNames(game);
         const saved = this.sql.exec<{ name: string; avatar: string | null; x: number | null; y: number | null }>(
             `SELECT s.name AS name, s.avatar AS avatar, p.x AS x, p.y AS y FROM students s
@@ -565,14 +606,7 @@ export class PlazaRoom extends DurableObject<Env> {
             }
             ws.send(JSON.stringify({ t: 'attempt-recorded', id: data.id, kind: 'attempt-outcome' }));
         } else if (data?.t === 'help-request') {
-            const topics: HelpTopic[] = ['writing', 'instructions', 'classmate-message', 'other'];
-            if (topics.includes(data.topic) && (data.text === undefined || typeof data.text === 'string')) {
-                const note = (data.text ?? '').slice(0, 500);
-                const audit = this.beginAttempt(seat, note || `Help requested: ${data.topic}`, 'help', typeof data.attemptId === 'string' ? data.attemptId : undefined);
-                this.attemptStatus(audit, 'help-requested', `Help with ${data.topic}.`);
-                this.assistance.request(seat.game, seat.studentKey, seat.name, data.topic, note, false);
-                this.sendSupport(seat.game, seat.studentKey);
-            }
+            await this.requestHelp(seat, data);
         } else if (data?.t === 'move') {
             const position = clampPosition(data.x, data.y);
             if (!position) return;
@@ -1545,7 +1579,10 @@ export class PlazaRoom extends DurableObject<Env> {
         const reopening = !this.isOpen() || switching;
         this.saveSetting('open', '1');
         this.saveSetting('active_game', target);
-        if (reopening) this.sql.exec('UPDATE games SET last_opened = ? WHERE id = ?', Date.now(), target);
+        if (reopening) {
+            this.sql.exec('UPDATE games SET last_opened = ? WHERE id = ?', Date.now(), target);
+            this.saveSetting('help_session', crypto.randomUUID());
+        }
     }
 
     private closeRoom(): void {

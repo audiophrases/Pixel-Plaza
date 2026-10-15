@@ -14,7 +14,7 @@ const alert: HelpAlert = {
   note: 'Repeated language checks', timestamp: 100, updated: 100,
   evidence: [{ reason: 'Try writing in English.', text: 'Original blocked idea', timestamp: 90 }]
 };
-const support: Support = { alerts: [alert], students };
+const support: Support = { alerts: [alert], students, ai: { used: 1, students: 2 } };
 const records: MessageAttempt[] = Array.from({ length: 610 }, (_, index) => ({
   id: `audit-${index}`, studentKey: index % 2 ? 'sam' : 'ada', sender: index % 2 ? 'Sam' : 'Ada',
   text: index === 0 ? 'Original blocked idea' : `Submitted idea ${index}`,
@@ -71,6 +71,7 @@ const edit = async (id: string, value: string) => {
 const submit = async () => { await act(async () => { document.querySelector('form')!.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })); }); };
 
 await render();
+assert.ok(document.querySelector('.teacher-ai-count')?.textContent?.includes('1 / 2'));
 assert.ok(document.body.textContent?.includes('Suggested check-in'));
 assert.ok(document.body.textContent?.includes('Original blocked idea'));
 assert.ok(document.body.textContent?.includes('Revised submission: I saw the thief in the plaza.'));

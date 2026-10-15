@@ -18,6 +18,29 @@ function repository() {
 const attempt = (support, overrides = {}) => support.begin({ game: 'game', studentKey: 'alex', name: 'Alex',
     text: 'I want tell my clue.', source: 'chat', ...overrides });
 
+test('AI help allowance is atomic, durable, scoped to a classroom session and not consumed on failure', t => {
+    const { support, db, sql } = repository(); t.after(() => db.close());
+    support.joinSession('session-one', 'game', 'alex'); support.joinSession('session-one', 'game', 'sam');
+    support.joinSession('session-one', 'game', 'alex');
+    assert.deepEqual({ ...support.aiCount('session-one') }, { used: 0, students: 2 });
+    assert.equal(support.reserveAi('session-one', 'alex', 'first', 100000), true);
+    assert.equal(support.reserveAi('session-one', 'alex', 'concurrent', 100001), false);
+    assert.equal(support.aiState('session-one', 'alex', true, 100001).pending, true);
+    const restored = new StudentAssistance(sql); restored.initialize();
+    assert.equal(restored.reserveAi('session-one', 'alex', 'reconnected', 100002), false);
+    assert.equal(restored.finishAi('session-one', 'alex', 'wrong-reservation', 'wrong'), false);
+    assert.equal(restored.finishAi('session-one', 'alex', 'first', null), true);
+    assert.equal(restored.aiState('session-one', 'alex', true).used, false);
+    assert.equal(restored.reserveAi('session-one', 'alex', 'retry-too-soon', 100003), false);
+    assert.equal(restored.reserveAi('session-one', 'alex', 'retry', 131000), true);
+    assert.equal(restored.finishAi('session-one', 'alex', 'retry', 'Try: “I want to ___.”'), true);
+    assert.equal(restored.reserveAi('session-one', 'alex', 'third', 200000), false);
+    assert.deepEqual({ ...restored.aiCount('session-one') }, { used: 1, students: 2 });
+    restored.joinSession('session-two', 'game', 'alex');
+    assert.equal(restored.reserveAi('session-two', 'alex', 'new-class', 200000), true);
+    assert.equal(restored.reserveAi('session-two', 'sam', 'forged-student', 200000), false);
+});
+
 test('every original submission remains available after corrections, filtering, review, and restart', t => {
     const { support, db, sql } = repository(); t.after(() => db.close());
     const original = '  i want tell my clue.  ';

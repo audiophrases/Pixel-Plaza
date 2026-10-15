@@ -374,14 +374,14 @@ export default function Game() {
           {!sound.muted && sound.error && <p className="sound-error" role="status">{sound.error}</p>}
         </header>
 
-        <HelpRequest support={support} online={status.state === 'online'}
-          onRequest={(topic, text) => {
+        <HelpRequest support={support} online={status.state === 'online'} chatDraft={chatInput}
+          onRequest={(topic, text, route) => {
             const plaza = plazaRef.current;
             if (!plaza) return false;
             const topics = { writing: 'I need help writing my ideas in English.', instructions: 'I need help understanding game instructions.',
               'classmate-message': "I need help understanding a classmate's message.", other: 'I need help.' };
             const attemptId = plaza.recordAttempt(text || topics[topic], 'teacher', 'help', topic);
-            return sendRecorded(plaza, { t: 'help-request', topic, text, attemptId }, attemptId);
+            return sendRecorded(plaza, { t: 'help-request', topic, text, route, attemptId }, attemptId);
           }}
           onOpenChat={openTeacherChat} />
 

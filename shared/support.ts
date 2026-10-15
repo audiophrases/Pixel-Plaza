@@ -11,8 +11,9 @@ export type HelpAlert = {
     status: HelpStatus; note: string; timestamp: number; updated: number;
     evidence: { reason: string; text: string; timestamp: number }[];
 };
-export type TeacherSupport = { alerts: HelpAlert[]; students: { studentKey: string; name: string }[] };
+export type TeacherSupport = { alerts: HelpAlert[]; students: { studentKey: string; name: string }[]; ai?: { used: number; students: number } };
 export type StudentSupport = {
+    ai?: { session: string; available: boolean; used: boolean; pending: boolean; tip: string | null; resultId: string | null };
     request: { id: string; topic: HelpTopic; status: HelpStatus } | null;
     messages: { id: string; text: string; timestamp: number }[];
 };

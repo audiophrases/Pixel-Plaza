@@ -29,7 +29,8 @@ const statuses: Record<string, string> = {
   'language-blocked': 'Stopped by language check', 'language-checked': 'Language checked',
   'hint-offered': 'Language hint offered', 'rate-limited': 'Too many messages at once',
   invalid: 'Could not submit', waiting: 'Waiting to submit', correct: 'Correct answer',
-  'help-requested': 'Help requested', unavailable: 'Could not complete this action', removed: 'Removed from chat'
+  'help-requested': 'Help requested', unavailable: 'Could not complete this action', removed: 'Removed from chat',
+  'ai-help': 'AI language hint', 'ai-help-pending': 'AI hint requested'
 };
 
 function time(timestamp: number) {
@@ -182,6 +183,7 @@ export default function TeacherSupport({ gameId, token, support, students, who, 
       <a href="#teacher-help-history" onClick={() => setHistoryOpen(true)}>Message history</a>
     </div>
     <p>Students can ask for help. Three related language blocks, grammar hints or incorrect answers within five minutes suggest a check-in. You decide what support they need.</p>
+    {support.ai && <p className="teacher-ai-count">AI help requests used: <strong>{support.ai.used} / {support.ai.students}</strong> students in this session.</p>}
     {active.length === 0 && <p>No students waiting for help.</p>}
     {support.alerts.some(alert => alert.status === 'resolved') && <label className="teacher-help-toggle">
       <input type="checkbox" checked={showResolved} onChange={event => setShowResolved(event.target.checked)} /> Show completed check-ins

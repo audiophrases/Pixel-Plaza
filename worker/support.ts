@@ -22,6 +22,11 @@ export class StudentAssistance {
     constructor(sql: SqlStorage) { this.sql = sql; }
 
     initialize(): void {
+        this.sql.exec(`CREATE TABLE IF NOT EXISTS assistance_ai_students (
+            session_id TEXT NOT NULL, game_id TEXT NOT NULL, student_key TEXT NOT NULL,
+            used INTEGER NOT NULL DEFAULT 0, pending TEXT, pending_until INTEGER NOT NULL DEFAULT 0,
+            tip TEXT, last_attempt TEXT, last_at INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(session_id, student_key));`);
         this.sql.exec(`CREATE TABLE IF NOT EXISTS assistance_attempts (
             id TEXT PRIMARY KEY, game_id TEXT NOT NULL, student_key TEXT NOT NULL, sender TEXT NOT NULL,
             client_id TEXT, text TEXT NOT NULL, ts INTEGER NOT NULL, source TEXT NOT NULL,
@@ -151,10 +156,40 @@ export class StudentAssistance {
 
     studentState(game: string, studentKey: string): StudentSupport {
         const request = this.sql.exec<{ id: string; topic: HelpTopic; status: HelpStatus }>(`SELECT id, topic, status FROM assistance_help
-            WHERE game_id = ? AND student_key = ? AND kind = 'requested' ORDER BY updated DESC, id DESC LIMIT 1`, game, studentKey).toArray()[0] ?? null;
+            WHERE game_id = ? AND student_key = ? AND kind = 'requested'
+            ORDER BY CASE WHEN status = 'resolved' THEN 1 ELSE 0 END, updated DESC, id DESC LIMIT 1`, game, studentKey).toArray()[0] ?? null;
         const messages = this.sql.exec<{ id: string; text: string; timestamp: number }>(`SELECT id, text, ts AS timestamp FROM assistance_teacher_messages
             WHERE game_id = ? AND student_key = ? ORDER BY ts DESC, id DESC LIMIT 50`, game, studentKey).toArray().reverse();
         return { request, messages };
+    }
+
+    joinSession(session: string, game: string, student: string): void {
+        this.sql.exec('INSERT OR IGNORE INTO assistance_ai_students (session_id, game_id, student_key) VALUES (?, ?, ?)', session, game, student);
+    }
+
+    aiState(session: string, student: string, enabled: boolean, now = Date.now()): NonNullable<StudentSupport['ai']> {
+        const row = this.sql.exec<{ used: number; pending: string | null; pending_until: number; tip: string | null; last_attempt: string | null }>(
+            'SELECT * FROM assistance_ai_students WHERE session_id = ? AND student_key = ?', session, student).toArray()[0];
+        return { session, available: enabled && !row?.used, used: !!row?.used,
+            pending: !!row?.pending && row.pending_until > now, tip: row?.tip ?? null, resultId: row?.last_attempt ?? null };
+    }
+
+    reserveAi(session: string, student: string, attempt: string, now = Date.now()): boolean {
+        return this.sql.exec(`UPDATE assistance_ai_students SET pending = ?, pending_until = ?, last_attempt = ?, last_at = ?
+            WHERE session_id = ? AND student_key = ? AND used = 0 AND pending_until <= ?
+            AND (last_attempt IS NULL OR (last_attempt != ? AND last_at <= ?)) RETURNING student_key`,
+            attempt, now + 6000, attempt, now, session, student, now, attempt, now - 30_000).toArray().length === 1;
+    }
+
+    finishAi(session: string, student: string, attempt: string, tip: string | null): boolean {
+        return this.sql.exec(`UPDATE assistance_ai_students SET used = ?, tip = ?, pending = NULL, pending_until = 0
+            WHERE session_id = ? AND student_key = ? AND pending = ? RETURNING student_key`,
+            tip ? 1 : 0, tip, session, student, attempt).toArray().length === 1;
+    }
+
+    aiCount(session: string): { used: number; students: number } {
+        return this.sql.exec<{ used: number; students: number }>(
+            'SELECT COALESCE(SUM(used), 0) AS used, COUNT(*) AS students FROM assistance_ai_students WHERE session_id = ?', session).toArray()[0];
     }
 
     page(game: string, studentKey?: string, cursor?: string | null, limit = 50): AttemptPage {
@@ -192,7 +227,7 @@ export class StudentAssistance {
     }
 
     clear(game: string): void {
-        for (const table of ['assistance_attempts', 'assistance_signals', 'assistance_help', 'assistance_teacher_messages']) {
+        for (const table of ['assistance_attempts', 'assistance_signals', 'assistance_help', 'assistance_teacher_messages', 'assistance_ai_students']) {
             this.sql.exec(`DELETE FROM ${table} WHERE game_id = ?`, game);
         }
     }

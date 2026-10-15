@@ -46,6 +46,7 @@
 .student-help-actions .btn { padding: .5rem .7rem; font-size: .9rem; }
 .student-help-actions button:disabled { opacity: .6; cursor: default; }
 .student-help-error { color: #a8071a; }
+.student-ai-tip { padding: .65rem; border-left: 3px solid #327b54; border-radius: 6px; background: #ecf7ec; color: #21573b; }
 .student-help-chat { border: 0; background: none; padding: .7rem 0 0; color: #315873; font: inherit; text-decoration: underline; cursor: pointer; }
 
 @media (max-width: 640px) {

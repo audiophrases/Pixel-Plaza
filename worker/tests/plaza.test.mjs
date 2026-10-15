@@ -153,6 +153,94 @@ async function exchangeEvidence(teacher, investigator, witness, objective) {
     return { id: received.id, questionId: question.id, replyId: reply.id };
 }
 
+test('one AI help per student and classroom session, with durable usage, direct teacher help and safe failure', { timeout: 120000 }, async () => {
+    const calls = []; let fail = false; let hold = null;
+    const ai = http.createServer(async (req, res) => {
+        let body = ''; for await (const chunk of req) body += chunk;
+        calls.push(JSON.parse(body));
+        const pause = hold; hold = null; if (pause) await pause();
+        res.writeHead(fail ? 500 : 200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ tip: 'want' }) } }] }));
+    });
+    await new Promise(resolve => ai.listen(0, '127.0.0.1', resolve));
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-ai-help-'));
+    const pinPlayUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    const vars = { OPENAI_API_KEY: 'test-key', OPENAI_BASE_URL: `http://127.0.0.1:${ai.address().port}` };
+    let plaza = await startPlaza(pinPlayUrl, persistTo, vars); const sockets = [];
+    try {
+        let base = plaza.base;
+        const session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (op, body) => api(base, `/api/teacher/${op}`, { session, body });
+        PIN = (await teacher('class', { open: true })).body.pin;
+        let alex = await enter(base, 'signed-a', null); sockets.push(alex);
+        const sam = await enter(base, 'signed-b', null); sockets.push(sam);
+        const first = (await alex.next(m => m.t === 'support')).support;
+        assert.equal(first.ai.available, true);
+        alex.send({ t: 'help-request', route: 'auto', topic: 'writing', text: 'I want tell...', attemptId: 'first-help' });
+        const helped = (await alex.next(m => m.t === 'support' && m.support.ai?.used)).support;
+        assert.match(helped.ai.tip, /want to/); assert.equal(calls.length, 1);
+        assert.deepEqual(JSON.parse(calls[0].messages[1].content), { topic: 'writing', unfinishedMessageOrIntention: 'I want tell...' });
+        let status = (await teacher('status')).body;
+        assert.deepEqual(status.support.ai, { used: 1, students: 2 });
+        assert.equal(status.support.alerts.length, 0, 'successful AI hint creates no duplicate teacher alert');
+        alex.send({ t: 'help-request', route: 'auto', topic: 'writing', text: 'I still need help', attemptId: 'next-help', studentKey: 'stu_b', session: 'forged', used: false });
+        await alex.next(m => m.t === 'support' && m.support.request);
+        assert.equal(calls.length, 1, 'second request routes to teacher without an AI call');
+        assert.equal((await teacher('status')).body.support.alerts.length, 1);
+        sam.send({ t: 'help-request', route: 'teacher', topic: 'writing', text: 'Teacher please', attemptId: 'direct-help' });
+        const direct = (await sam.next(m => m.t === 'support' && m.support.request)).support;
+        assert.equal(direct.ai.used, false); assert.equal(calls.length, 1);
+
+        let entered; let release;
+        const started = new Promise(resolve => { entered = resolve; });
+        const waiting = new Promise(resolve => { release = resolve; });
+        hold = () => { entered(); return waiting; };
+        sam.send({ t: 'help-request', route: 'auto', topic: 'writing', text: 'I want say...', attemptId: 'sam-ai' });
+        await started;
+        sam.send({ t: 'help-request', route: 'auto', topic: 'writing', text: 'Another request', attemptId: 'sam-concurrent' });
+        await sam.next(m => m.t === 'support' && m.support.ai?.pending && m.support.request);
+        assert.equal(calls.length, 2, 'concurrent requests cannot reserve another AI call');
+        release(); await sam.next(m => m.t === 'support' && m.support.ai?.used);
+        assert.deepEqual((await teacher('status')).body.support.ai, { used: 2, students: 2 });
+        await teacher('class', { open: true });
+        alex = await enter(base, 'signed-a', null); sockets.push(alex);
+        assert.equal((await alex.next(m => m.t === 'support')).support.ai.used, true, 'rejoining and repeated teacher-open keep usage');
+
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); plaza = await startPlaza(pinPlayUrl, persistTo, vars); base = plaza.base;
+        alex = await enter(base, 'signed-a', null); sockets.push(alex);
+        assert.equal((await alex.next(m => m.t === 'support')).support.ai.used, true, 'usage survives a server restart');
+        const chris = await enter(base, 'signed-c', null); sockets.push(chris);
+        fail = true;
+        chris.send({ t: 'help-request', route: 'auto', topic: 'writing', text: 'I want...', attemptId: 'failure' });
+        const fallback = (await chris.next(m => m.t === 'support' && m.support.request && !m.support.ai?.pending)).support;
+        assert.equal(fallback.ai.used, false); assert.equal(fallback.ai.available, true);
+        assert.equal(calls.length, 3);
+        assert.ok((await teacher('status')).body.support.alerts.some(a => a.studentKey === 'stu_c'));
+        chris.send({ t: 'help-request', route: 'auto', topic: 'writing', text: 'Retry too soon', attemptId: 'quick-retry' });
+        await chris.next(m => m.t === 'support' && m.support.request && !m.support.ai?.pending);
+        assert.equal(calls.length, 3, 'failed-call cooldown bounds repeated spending');
+        fail = false;
+        await teacher('class', { open: false }); await teacher('class', { open: true });
+        assert.deepEqual((await teacher('status')).body.support.ai, { used: 0, students: 0 });
+        alex = await enter(base, 'signed-a', null); sockets.push(alex);
+        const fresh = (await alex.next(m => m.t === 'support')).support.ai;
+        assert.notEqual(fresh.session, first.ai.session); assert.equal(fresh.used, false); assert.equal(fresh.tip, null);
+        alex.send({ t: 'help-request', route: 'auto', topic: 'writing', text: 'I want ask...', attemptId: 'new-session-help' });
+        await alex.next(m => m.t === 'support' && m.support.ai?.used);
+        assert.equal(calls.length, 4);
+        assert.deepEqual((await teacher('status')).body.support.ai, { used: 1, students: 1 });
+        const audit = (await teacher('attempts')).body.attempts;
+        assert.ok(audit.some(a => a.status === 'ai-help' && a.text === 'I want ask...' && /want to/.test(a.reason)));
+        await teacher('game', { name: 'Next class', randomNames: false });
+        assert.deepEqual((await teacher('status')).body.support.ai, { used: 0, students: 0 });
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        await Promise.all([new Promise(resolve => pinPlay.close(resolve)), new Promise(resolve => ai.close(resolve))]); removeTemp(persistTo);
+    }
+});
+
 test('chat speech uses persisted sender voices and only synthesizes messages delivered to the listener', { timeout: 120000 }, async () => {
     const requests = [];
     let holdResponse = null;

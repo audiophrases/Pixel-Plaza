@@ -1,6 +1,16 @@
 # Student assistance and submitted-message history
 
-Students can use **I need help** while playing to ask about writing an idea, game instructions, a classmate's message or another problem. An optional note can use any language. The teacher sees the request with the student's real and game names, can acknowledge it, and can complete the check-in after helping in person.
+Students can use **I need help** while playing to ask about writing an idea, game instructions, a classmate's message or another problem. The help panel copies their unfinished chat draft without changing or sending it. They can instead describe their intention in any language.
+
+With the existing `OPENAI_API_KEY` configured, **Get my AI language hint** provides one successful AI-assisted language scaffold per student per classroom session. The AI selects a relevant vocabulary tip, grammar explanation or incomplete starter from a validated set. Arbitrary generated answers, names, codes and mission solutions cannot be displayed. Only the submitted help note and topic go to the model; mission content, hidden clues, answer keys, classmates' messages and chat history are not supplied. The student finishes and sends their own message.
+
+Further requests go directly to the existing teacher check-in system. **Ask my teacher directly** is also available before using AI, and during an AI request; direct teacher help does not use the AI allowance. The teacher sees requests with real and game names, can acknowledge them, and can complete the check-in after helping in person. Successful AI hints appear in the existing submission history rather than generating another teacher-alert system.
+
+The dashboard shows **AI help requests used / students in this session**. The denominator counts distinct students who joined this session, including those now disconnected. Usage and the private hint persist in SQLite across refreshes, reconnects and server restarts. Reservations are atomic and durable so simultaneous requests cannot launch a second AI call. A new classroom session starts when the teacher opens a closed class, switches to another game or creates a new game. Repeating Open while already open, reconnecting, changing chapters and resetting the campaign do not reset usage.
+
+The helper uses the existing OpenAI key/base URL with `gpt-4o-mini`, at most 80 completion tokens and a strict four-second timeout covering the entire request. It makes one call with no automatic retries. No key, timeout, refusal, invalid output or other failure falls back to the same teacher alerts without consuming the allowance. Failed attempts have a 30-second retry cooldown to bound costs; teacher help stays available throughout. Chat grammar hints and safety moderation remain independent.
+
+The API uses [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=chat) to select a scaffold ID; the server validates the ID and renders only its own approved text.
 
 The **Teacher (private help)** chat recipient lets a student explain an idea without the English-word or grammar checks stopping it. Private teacher replies arrive in that student's chatbox and are replayed after reconnecting. The teacher can send help to an offline student; it appears when they return to the same game. These messages are recorded for teacher review and stay private to that student and the authenticated teacher.
 
@@ -23,3 +33,5 @@ Retained chat from before this feature is imported once. Previously deleted chat
 ## Validation
 
 Storage tests cover the observation window, resolution reset, original/revised text, ownership, game and student pagination, equal timestamps, retained-chat migration and game deletion. Browser tests cover prefilter recording, offline queues and acknowledgement, private help, preserved drafts, full history pagination and game switching. Multiplayer tests cover help requests, filtered and rate-limited attempts, private replies, more than 600 records, reconnect/restart, repeated grammar checks, incorrect answers and a game switch during moderation.
+
+AI-specific unit and runtime tests cover concurrent reservation, successful usage, failed-call refund/cooldown, direct teacher bypass, session reset, reconnect/restart persistence, request privacy, invalid outputs and the four-second timeout. Student and teacher UI checks cover the saved composer, incomplete hint, absence of automatic chat messages, teacher escalation and dashboard counter. These checks use a fake OpenAI service rather than making billable model calls.

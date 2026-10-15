@@ -14,6 +14,10 @@ localStorage.setItem('pixelplaza.student.v1', JSON.stringify({ studentToken: 'te
 global.fetch = async () => ({ ok: true, json: async () => ({ ticket: 'join-ticket' }) });
 
 const sockets: Socket[] = [];
+let testAIHelp = false;
+let aiUsed = false;
+const aiSupport = () => ({ session: 'lesson-one', available: !aiUsed, used: aiUsed, pending: false,
+  tip: aiUsed ? 'Use “want to” before a base verb. Try: “I want to ___.”' : null, resultId: aiUsed ? 'ai-result' : null });
 class Socket {
   static OPEN = 1;
   readyState = 0;
@@ -33,8 +37,13 @@ class Socket {
     if (message.t === 'check') queueMicrotask(() => this.receive({ t: 'checked', id: message.id, ok: false,
       corrected: 'He walks home.', why: 'Use walks with he.' }));
     if (message.t === 'chat') queueMicrotask(() => this.receive({ t: 'result', cid: message.cid }));
-    if (message.t === 'help-request') queueMicrotask(() => this.receive({ t: 'support', support: {
-      request: { id: 'request-a', topic: message.topic, status: 'open' }, messages: [] } }));
+    if (message.t === 'help-request') queueMicrotask(() => {
+      if (testAIHelp && message.route !== 'teacher' && !aiUsed) {
+        aiUsed = true;
+        this.receive({ t: 'support', support: { request: null, messages: [], ai: aiSupport() } });
+      } else this.receive({ t: 'support', support: { request: { id: 'request-a', topic: message.topic, status: 'open' },
+        messages: [], ...(testAIHelp ? { ai: aiSupport() } : {}) } });
+    });
   }
 }
 global.WebSocket = Socket;
@@ -65,6 +74,27 @@ try {
   });
   const socket = sockets[0];
   await act(async () => { socket.open(); socket.receive({ t: 'welcome', id: 'socket-a', gameId: 'game-a', players: [{ id: 'socket-a', name: 'Alex', x: 100, y: 100 }] }); });
+
+  testAIHelp = true;
+  await act(async () => socket.receive({ t: 'support', support: { request: null, messages: [], ai: aiSupport() } }));
+  await type(input(), 'I want tell');
+  await click('I need help');
+  assert.equal((document.querySelector('.student-help-panel textarea') as HTMLTextAreaElement).value, 'I want tell', 'help starts with a copy of the unfinished chat draft');
+  await click('Ask my teacher directly');
+  assert.equal(socket.sent.at(-1).route, 'teacher');
+  assert.equal(input().value, 'I want tell'); assert.equal(aiUsed, false);
+  await click('I need help');
+  await click('Get my AI language hint');
+  assert.ok(document.querySelector('.student-ai-tip')?.textContent?.includes('want to'));
+  assert.equal(input().value, 'I want tell', 'AI help never rewrites or clears the composer');
+  assert.ok(!socket.sent.some(event => event.t === 'chat'), 'AI help never posts a message');
+  assert.ok(button('Notify my teacher'), 'after AI use, further help goes to the teacher');
+  await click('Notify my teacher');
+  assert.equal(socket.sent.at(-1).route, 'teacher');
+  assert.equal(input().value, 'I want tell');
+  testAIHelp = false;
+  await act(async () => socket.receive({ t: 'support', support: { request: null, messages: [] } }));
+  socket.sent = [];
 
   await type(input(), 'No entenc');
   assert.equal(socket.sent.length, 0, 'typing an unsent draft never creates a teacher log');
@@ -194,7 +224,7 @@ try {
   assert.equal(stored()[2].text, "I need help understanding a classmate's message.");
   assert.equal(stored()[3].status, 'not-sent');
   assert.ok(document.querySelector('.student-help-panel'), 'an offline help request keeps its form open for a manual retry');
-  console.log('Student support UI checks pass: prefilter audit, retries, private teacher chat, hints, help, warm-up, interviews, journal answers, and offline persistence.');
+  console.log('Student support UI checks pass: one AI hint, direct teacher help, preserved composer, no automatic messages, prefilter audit, private help and offline persistence.');
 } finally {
   await act(async () => root.unmount());
   dom.window.close();
