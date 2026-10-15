@@ -7,6 +7,11 @@ import path from 'node:path';
 
 const file = path.join(import.meta.dirname, '..', '.dev.vars');
 
+if (fs.existsSync(file)) {
+    console.log('.dev.vars already exists. Keeping its configuration and secrets unchanged.');
+    process.exit(0);
+}
+
 // Typed characters show as *, as in a password box.
 function askHidden(question) {
     return new Promise(resolve => {
@@ -52,9 +57,9 @@ for (;;) {
 // The same scheme as worker/rules.ts and PinPlay.
 const hash = crypto.createHash('sha256').update(password.normalize('NFC')).digest('hex');
 fs.writeFileSync(file, [
-    '# Made by classroom.bat. Delete this file to enter the password again.',
+    '# Made by classroom.bat. Preserve this file: it may contain other secrets.',
     `CREATE_PASSWORD_HASH=${hash}`,
     'PINPLAY_API_URL=https://api.pinplay.win',
     ''
-].join('\n'));
-console.log('\nSaved. If the password ever changes, delete .dev.vars and run classroom.bat again.\n');
+].join('\n'), { flag: 'wx' });
+console.log('\nSaved. Preserve .dev.vars when updating the password: it may contain other secrets.\n');
