@@ -1,4 +1,5 @@
 import type { AvatarConfig } from './utils/AvatarRenderer';
+import { messageId } from './utils/messageId.ts';
 import type { QuestView } from '../shared/campaign';
 import type { WarmupView } from '../shared/warmup';
 import type { AttemptSource, StudentSupport } from '../shared/support';
@@ -102,7 +103,7 @@ export class PlazaConnection {
   }
 
   recordAttempt(text: string, to?: string, source: ClientAttemptSource = 'chat', objective?: string): string {
-    const id = crypto.randomUUID();
+    const id = messageId();
     this.record({ t: 'attempt', id, text: text.slice(0, 1000), source, ...(to ? { to } : {}),
       ...(objective ? { objective: objective.slice(0, 200) } : {}), ...(this.currentGameId ? { gameId: this.currentGameId } : {}) });
     return id;
@@ -171,7 +172,7 @@ export class PlazaConnection {
   // anything is slow, offline or unsure, so it can never stop a message.
   check(text: string, attemptId?: string): Promise<GrammarHint> {
     return new Promise(resolve => {
-      const id = crypto.randomUUID();
+      const id = messageId();
       let timer = 0;
       const finish = (hint: GrammarHint) => {
         window.clearTimeout(timer);

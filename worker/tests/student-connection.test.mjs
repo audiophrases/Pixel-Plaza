@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { PlazaConnection } from '../../src/plaza.ts';
 
 test('explicit chat attempts survive disconnects and reloads until acknowledged without crossing students or games', async () => {
+    // Plain HTTP classroom browsers expose getRandomValues, but not randomUUID.
+    const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    const browserCrypto = { getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto) };
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: browserCrypto });
     const originals = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch, WebSocket: globalThis.WebSocket };
     const sockets = [];
     class Socket {
@@ -134,6 +138,7 @@ test('explicit chat attempts survive disconnects and reloads until acknowledged 
         assert.equal(support.request.status, 'acknowledged');
         unsubscribe();
     } finally {
+        Object.defineProperty(globalThis, 'crypto', cryptoDescriptor);
         for (const connection of connections) connection.close();
         for (const [key, original] of Object.entries(originals)) {
             if (original === undefined) delete globalThis[key];

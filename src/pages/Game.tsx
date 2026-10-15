@@ -11,6 +11,7 @@ import PhaserGame from '../components/PhaserGame';
 import type { QuestView } from '../../shared/campaign';
 import type { StudentSupport } from '../../shared/support';
 import { PlazaConnection } from '../plaza';
+import { messageId } from '../utils/messageId';
 import { loadChecker } from '../spellingData';
 import type { Checker, Misspelling } from '../spelling';
 import type { PlazaStatus } from '../plaza';
@@ -255,7 +256,7 @@ export default function Game() {
   const deliver = (text: string, extra: object = {}) => {
     const plaza = plazaRef.current;
     if (!plaza) return;
-    const cid = crypto.randomUUID();
+    const cid = messageId();
     const attemptId = submissionAttemptId.current;
     const message = { t: 'chat', text, cid, ...(attemptId ? { attemptId } : {}), ...(whisperTo ? { to: whisperTo } : {}), ...extra };
     if (attemptId ? sendRecorded(plaza, message, attemptId) : plaza.send(message)) {
