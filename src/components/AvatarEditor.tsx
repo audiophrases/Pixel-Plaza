@@ -12,9 +12,21 @@ interface AvatarEditorProps {
   onCancel?: () => void;
 }
 
+// Same combination rules as PinPlay's randomAvatar.
+function randomCombination(catalog: any): Omit<AvatarConfig, 'voice'> {
+  const pick = (items: unknown[]) => Math.floor(Math.random() * items.length);
+  return {
+    head: pick(catalog.parts.head), skin: pick(catalog.skins), hairColor: pick(catalog.hairColors),
+    hair: pick(catalog.parts.hair), eyes: pick(catalog.parts.eyes), mouth: pick(catalog.parts.mouth),
+    shirt: pick(catalog.parts.shirt), glasses: Math.random() < 0.5 ? 0 : pick(catalog.parts.glasses),
+    hat: Math.random() < 0.4 ? 0 : pick(catalog.parts.hat)
+  };
+}
+
 export default function AvatarEditor({ initialConfig, onSave, onCancel }: AvatarEditorProps) {
   const [config, setConfig] = useState<AvatarConfig>({
     skin: 0,
+    head: 0,
     hairColor: 0,
     hair: 0,
     eyes: 0,
@@ -64,26 +76,34 @@ export default function AvatarEditor({ initialConfig, onSave, onCancel }: Avatar
     // Check if CUP_AVATAR is loaded
     const checkCatalog = setInterval(() => {
       if (window.CUP_AVATAR) {
-        setCatalog(window.CUP_AVATAR);
+        const data = window.CUP_AVATAR;
+        setCatalog(data);
+        if (!initialConfig) setConfig(previous => ({ ...previous, ...randomCombination(data) }));
         clearInterval(checkCatalog);
       }
     }, 100);
     return () => clearInterval(checkCatalog);
-  }, []);
+  }, [initialConfig]);
 
   if (!catalog) return <div className="avatar-loading">Loading Wardrobe...</div>;
 
   const svgStr = renderAvatarSvg(config);
 
-  const handleChange = (part: Exclude<keyof AvatarConfig, 'voice'>, direction: number) => {
+  const handleChange = (part: Exclude<keyof AvatarConfig, 'voice'> | 'character', direction: number) => {
     setConfig(prev => {
+      if (part === 'character') {
+        const keys = ['head', 'skin', 'hairColor', 'hair', 'eyes', 'mouth', 'shirt', 'glasses', 'hat'] as const;
+        const at = catalog.presets.findIndex((preset: { avatar: AvatarConfig }) =>
+          keys.every(key => (preset.avatar[key] || 0) === (prev[key] || 0)));
+        return { ...prev, ...catalog.presets[(Math.max(0, at) + direction + catalog.presets.length) % catalog.presets.length].avatar, voice: prev.voice };
+      }
       let itemsLength = 1;
       
       if (part === 'skin') itemsLength = catalog.skins.length;
       else if (part === 'hairColor') itemsLength = catalog.hairColors.length;
       else if (catalog.parts[part]) itemsLength = catalog.parts[part].length;
 
-      let newValue = prev[part] + direction;
+      let newValue = (prev[part] || 0) + direction;
       if (newValue < 0) newValue = itemsLength - 1;
       if (newValue >= itemsLength) newValue = 0;
 
@@ -92,6 +112,8 @@ export default function AvatarEditor({ initialConfig, onSave, onCancel }: Avatar
   };
 
   const categories = [
+    { key: 'character', label: 'Character' },
+    { key: 'head', label: 'Head' },
     { key: 'skin', label: 'Skin Tone' },
     { key: 'hair', label: 'Hair Style' },
     { key: 'hairColor', label: 'Hair Color' },
@@ -107,19 +129,21 @@ export default function AvatarEditor({ initialConfig, onSave, onCancel }: Avatar
       <h2 className="heading-pixel">Your Character</h2>
       
       <div className="avatar-preview" dangerouslySetInnerHTML={{ __html: svgStr }} />
+      <button type="button" className="btn btn-secondary avatar-random" onClick={() =>
+        setConfig(previous => ({ ...previous, ...randomCombination(catalog) }))}>Surprise me</button>
 
       <div className="avatar-controls">
         {categories.map(({ key, label }) => {
           // Skip if part doesn't exist in catalog (like glasses/hats if they are empty)
-          if (key !== 'skin' && key !== 'hairColor' && !catalog.parts[key]) return null;
+          if (key !== 'character' && key !== 'skin' && key !== 'hairColor' && !catalog.parts[key]) return null;
           
           return (
             <div key={key} className="control-row">
               <span className="control-label">{label}</span>
               <div className="control-buttons">
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleChange(key, -1)}>◀</button>
-                <span className="control-value">{config[key] + 1}</span>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleChange(key, 1)}>▶</button>
+                <button type="button" className="btn btn-secondary btn-sm" aria-label={`Previous ${label}`} onClick={() => handleChange(key, -1)}>◀</button>
+                {key !== 'character' && <span className="control-value">{(config[key] || 0) + 1}</span>}
+                <button type="button" className="btn btn-secondary btn-sm" aria-label={`Next ${label}`} onClick={() => handleChange(key, 1)}>▶</button>
               </div>
             </div>
           );

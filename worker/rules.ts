@@ -9,7 +9,7 @@ export const EMOTES = ['🙋', '❓', '👍', '😂'];
 
 // One index per part. Counts come from public/cup/avatar-parts.js, the same
 // numbers as PinPlay's ARENA_AVATAR_PARTS; update both after a rebuild.
-export const AVATAR_PARTS = { skin: 20, hairColor: 25, hair: 29, eyes: 37, mouth: 41, glasses: 17, shirt: 28, hat: 29 };
+export const AVATAR_PARTS = { head: 17, skin: 20, hairColor: 25, hair: 29, eyes: 37, mouth: 41, glasses: 17, shirt: 28, hat: 29 };
 export type Avatar = Record<keyof typeof AVATAR_PARTS, number> & { voice?: string };
 
 export function sanitizeAvatar(value: unknown): Avatar | null {

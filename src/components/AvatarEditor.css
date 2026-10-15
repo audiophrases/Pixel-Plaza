@@ -37,6 +37,10 @@
   padding-right: 0.5rem;
 }
 
+.avatar-random {
+  margin-bottom: 1rem;
+}
+
 /* Custom scrollbar for controls */
 .avatar-controls::-webkit-scrollbar {
   width: 6px;

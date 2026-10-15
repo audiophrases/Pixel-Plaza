@@ -1,5 +1,6 @@
 // Represents the user's selected parts
 export interface AvatarConfig {
+  head?: number;
   skin: number;
   hairColor: number;
   hair: number;
@@ -29,7 +30,7 @@ export function renderAvatarSvg(avatar: Partial<AvatarConfig> = {}): string {
   const skinColor = data.skins[avatar.skin || 0] || data.skins[0];
   const hairColorHex = data.hairColors[avatar.hairColor || 0] || data.hairColors[0];
 
-  const base = data.base;
+  const base = part('head');
   const hair = part('hair');
   
   const bodyParts = [
@@ -88,7 +89,7 @@ export function renderFigureParts(avatar: Partial<AvatarConfig> = {}): Record<Fi
   const hairColor: string = data.hairColors[avatar.hairColor || 0] || data.hairColors[0];
   const paint = (svg: string) => svg.replace(/#00FFFF/gi, skin).replace(/#FF00FF/gi, hairColor);
 
-  const base = data.base;
+  const base = part('head');
   const hair = part('hair');
   const shirt = part('shirt');
   const shirtColor: string = (shirt.svg || '').match(/fill="(#[0-9a-fA-F]{3,8})"/)?.[1] || '#638ECD';

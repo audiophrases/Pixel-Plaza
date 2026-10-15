@@ -17,7 +17,9 @@ test('nameplates come from the roster name, cleaned', () => {
 });
 
 test('avatars must use existing parts', () => {
-    assert.deepEqual(sanitizeAvatar({ skin: 2, hair: 28 }), { skin: 2, hairColor: 0, hair: 28, eyes: 0, mouth: 0, glasses: 0, shirt: 0, hat: 0 });
+    assert.deepEqual(sanitizeAvatar({ skin: 2, hair: 28 }), { head: 0, skin: 2, hairColor: 0, hair: 28, eyes: 0, mouth: 0, glasses: 0, shirt: 0, hat: 0 });
+    assert.equal(sanitizeAvatar({ head: 16 }).head, 16);
+    assert.equal(sanitizeAvatar({ head: 17 }), null);
     assert.equal(sanitizeAvatar({ hair: 29 }), null);
     assert.equal(sanitizeAvatar({ skin: 1.5 }), null);
     assert.equal(sanitizeAvatar({ skin: '1' }), null);
