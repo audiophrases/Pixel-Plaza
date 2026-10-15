@@ -95,6 +95,14 @@ The laptop's address is plain HTTP, so student sessions cross the school network
 
 **Message history** retains every recorded submission, including browser-filtered drafts, server refusals, whispers, witness exchanges, answers and private assistance. It preserves originals, suggested corrections and revised text, with student filtering and pagination past 500 records. Pending audit records survive browser reopening until acknowledged. See the [student assistance guide](docs/student-assistance.md) for detection, retention and offline behavior.
 
+## Chat voices and goal sounds
+
+Sound starts **on**. New chat messages are read aloud in the sender's chosen character voice while their text stays visible. Students choose an English voice/accent in the character editor and can replay messages with **Listen**. Successful journal objectives and warm-up answers play PinPlay's rotating correct-answer clips for fun.
+
+**Sound on/off** mutes both voices and celebrations immediately and remembers the student's choice on that device. Unmuting does not play a backlog. Chat and gameplay continue normally if sound is muted or speech is unavailable. Headphones are recommended. A browser that blocks autoplay offers **Enable sound**.
+
+Speech reuses PinPlay's Render Edge TTS bridge. The service may take a while to wake up on the first request. Its address and optional secret can be overridden with `EDGE_TTS_URL` and `EDGE_TTS_SECRET`; secrets stay server-side. Only messages the player received can be requested as speech, under the existing moderation and privacy rules. See [sound and voice details](docs/audio-voice-plan.md).
+
 ## Editing the map (theme studio)
 
 Open `/mission-studio` from the teacher controls to edit campaigns, chapters, roles, clues and accepted answers. Start from Castanyada or create a new draft. **Save draft** keeps work in progress; **Publish for new games** validates it and makes it available in the teacher's campaign list. Games already running keep their published story revision, including after a restart.
@@ -174,6 +182,7 @@ Google sign-in works locally only from an origin listed in the OAuth client (for
 npm run lint
 npm test
 npm run check:missions
+node scripts/check-audio.mjs
 ```
 
 `npm test` builds the app, runs the unit tests, then starts `wrangler dev` with a fake PinPlay for a full lesson: PIN and identity checks, moving, chat approval, mutes, a second window, and a restart that must keep every student's avatar and position.

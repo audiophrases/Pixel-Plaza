@@ -8,6 +8,7 @@ export interface AvatarConfig {
   glasses: number;
   shirt: number;
   hat: number;
+  voice?: string;
 }
 
 declare global {

@@ -9,3 +9,6 @@ PINPLAY_API_URL=https://api.pinplay.win
 OPENAI_API_KEY=
 # Optional: the chat model that gives grammar hints (default gpt-4o-mini).
 # OPENAI_GRAMMAR_MODEL=
+# Optional: override PinPlay's existing Render Edge TTS bridge for chat voices.
+# EDGE_TTS_URL=https://pinplay-tts-bridge-27sk.onrender.com/tts
+# EDGE_TTS_SECRET=

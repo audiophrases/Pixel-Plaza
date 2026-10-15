@@ -84,6 +84,29 @@
   flex: 1;
 }
 
+.character-voice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 100%;
+  margin-top: 1.25rem;
+}
+
+.character-voice .input-field {
+  width: 100%;
+  min-width: 0;
+}
+
+.character-voice p {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.character-voice-error {
+  color: var(--danger, #fca5a5);
+}
+
 .avatar-loading {
   text-align: center;
   padding: 2rem;

@@ -13,7 +13,7 @@ export type PlazaEvent =
   | { t: 'leave'; id: string }
   | { t: 'move'; id: string; x: number; y: number }
   | { t: 'emote'; id: string; emote: string }
-  | { t: 'chat'; id?: string; sender: string; text: string; ts: number; whisper?: boolean; to?: string; marks?: [number, number][] }
+  | { t: 'chat'; id?: string; sender: string; text: string; ts: number; whisper?: boolean; to?: string; marks?: [number, number][]; voice?: string; history?: boolean }
   | { t: 'retract'; id: string } // the teacher took a posted message down
   | { t: 'notice'; level: 'info' | 'warning'; text: string; cid?: string } // cid: the chat message this answers
   | { t: 'result'; cid: string }
@@ -25,7 +25,7 @@ export type PlazaEvent =
   | { t: 'rename'; id: string; name: string }                              // a namesake arrived: this player's shown name changed
   | { t: 'quest'; quest: QuestView | null }                                  // this student's view of the campaign
   | { t: 'answered'; objective: string; correct: boolean; wait: boolean }
-  | { t: 'support'; support: StudentSupport };
+  | { t: 'support'; support: StudentSupport; history?: boolean };
 
 // As in PinPlay's live-socket.js: a connection can die without closing (a laptop
 // lid, Wi-Fi roaming), and only a missing pong shows it. The room answers

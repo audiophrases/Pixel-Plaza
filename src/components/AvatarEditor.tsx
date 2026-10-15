@@ -1,6 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { renderAvatarSvg } from '../utils/AvatarRenderer';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
+import { ENGLISH_VOICES, normalizeVoice } from '../../shared/voices';
+import { previewCharacterVoice, stopVoicePreview, unlockSound } from '../audio';
+import { readStudentSession } from '../studentAuth';
 import './AvatarEditor.css';
 
 interface AvatarEditorProps {
@@ -19,10 +22,43 @@ export default function AvatarEditor({ initialConfig, onSave, onCancel }: Avatar
     glasses: 0,
     shirt: 0,
     hat: 0,
-    ...initialConfig
+    ...initialConfig,
+    voice: normalizeVoice(initialConfig?.voice)
   });
 
   const [catalog, setCatalog] = useState<any>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [voiceError, setVoiceError] = useState('');
+  const previewRequest = useRef(0);
+
+  const stopPreview = () => {
+    previewRequest.current += 1;
+    stopVoicePreview();
+    setPreviewing(false);
+  };
+
+  useEffect(() => () => {
+    previewRequest.current += 1;
+    stopVoicePreview();
+  }, []);
+
+  const previewVoice = async () => {
+    if (previewing) { stopPreview(); return; }
+    const session = readStudentSession();
+    if (!session) { setVoiceError('Sign in to hear your character voice.'); return; }
+    const request = ++previewRequest.current;
+    setPreviewing(true);
+    setVoiceError('');
+    try {
+      await previewCharacterVoice(normalizeVoice(config.voice), session.studentToken, session.student.studentKey);
+    } catch (cause) {
+      if (previewRequest.current === request) {
+        setVoiceError(cause instanceof Error ? cause.message : 'Could not play this voice. Try again.');
+      }
+    } finally {
+      if (previewRequest.current === request) setPreviewing(false);
+    }
+  };
 
   useEffect(() => {
     // Check if CUP_AVATAR is loaded
@@ -39,7 +75,7 @@ export default function AvatarEditor({ initialConfig, onSave, onCancel }: Avatar
 
   const svgStr = renderAvatarSvg(config);
 
-  const handleChange = (part: keyof AvatarConfig, direction: number) => {
+  const handleChange = (part: Exclude<keyof AvatarConfig, 'voice'>, direction: number) => {
     setConfig(prev => {
       let itemsLength = 1;
       
@@ -68,7 +104,7 @@ export default function AvatarEditor({ initialConfig, onSave, onCancel }: Avatar
 
   return (
     <div className="avatar-editor glass-panel">
-      <h2 className="heading-pixel">Avatar Editor</h2>
+      <h2 className="heading-pixel">Your Character</h2>
       
       <div className="avatar-preview" dangerouslySetInnerHTML={{ __html: svgStr }} />
 
@@ -90,9 +126,29 @@ export default function AvatarEditor({ initialConfig, onSave, onCancel }: Avatar
         })}
       </div>
 
+      <div className="character-voice">
+        <label className="control-label" htmlFor="character-voice">Character voice</label>
+        <select id="character-voice" className="input-field" value={config.voice}
+          onChange={event => {
+            stopPreview();
+            setVoiceError('');
+            setConfig(previous => ({ ...previous, voice: event.target.value }));
+          }}>
+          {ENGLISH_VOICES.map(voice => <option key={voice.id} value={voice.id}>
+            {voice.label} · {voice.accent}
+          </option>)}
+        </select>
+        <p>Your messages will be read aloud in this voice.</p>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => void previewVoice()}>
+          {previewing ? 'Stop preview' : 'Hear this voice'}
+        </button>
+        {previewing && <p role="status">Voice preview…</p>}
+        {voiceError && <p role="alert" className="character-voice-error">{voiceError}</p>}
+      </div>
+
       <div className="editor-actions">
-        {onCancel && <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>}
-        <button type="button" className="btn btn-primary" onClick={() => onSave(config)}>Save Looks</button>
+        {onCancel && <button type="button" className="btn btn-secondary" onClick={() => { stopPreview(); onCancel(); }}>Cancel</button>}
+        <button type="button" className="btn btn-primary" onClick={() => { unlockSound(); stopPreview(); onSave(config); }}>Save Character</button>
       </div>
     </div>
   );

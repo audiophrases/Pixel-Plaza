@@ -16,6 +16,7 @@ import type { Checker, Misspelling } from '../spelling';
 import type { PlazaStatus } from '../plaza';
 import { readStudentSession } from '../studentAuth';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
+import { GameAudio, soundIsMuted, unlockSound, type SoundState } from '../audio';
 import './Game.css';
 
 interface GameState {
@@ -32,6 +33,7 @@ interface ChatMessage {
   to?: string;
   marks?: [number, number][]; // words the sender was offered a better version of and kept
   teacher?: boolean;
+  voice?: string;
 }
 
 // Text with some character ranges wrapped, so a changed or mistaken word can have its own shade.
@@ -53,6 +55,11 @@ export default function Game() {
   const navigate = useNavigate();
   const state = location.state as GameState | null;
   const [session] = useState(() => readStudentSession());
+  const audioRef = useRef<GameAudio | null>(null);
+  const [sound, setSound] = useState<SoundState>(() => ({
+    muted: session ? soundIsMuted(session.student.studentKey) : false,
+    messageId: null, needsInteraction: false, error: '',
+  }));
   // Shown as the first name, with a surname letter added when a classmate shares it; the plaza tells us which.
   const [myName, setMyName] = useState(() => firstName(readStudentSession()?.student.displayName ?? ''));
   
@@ -129,14 +136,29 @@ export default function Game() {
   };
 
   useEffect(() => {
+    // Joining normally unlocks sound. These gestures also cover refreshed game
+    // tabs where the browser requires a fresh interaction before autoplay.
+    const enable = () => { if (audioRef.current && !audioRef.current.snapshot.muted) unlockSound(); };
+    window.addEventListener('pointerdown', enable, true);
+    window.addEventListener('keydown', enable, true);
+    return () => {
+      window.removeEventListener('pointerdown', enable, true);
+      window.removeEventListener('keydown', enable, true);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!state?.roomCode || !session) {
       navigate('/');
       return;
     }
 
     const plaza = new PlazaConnection(state.roomCode, session.studentToken, state.avatarConfig, session.student.studentKey);
+    const audio = new GameAudio(session.studentToken, session.student.studentKey);
+    audioRef.current = audio;
+    const unhear = audio.subscribe(setSound);
     plazaRef.current = plaza;
-    const say = (message: ChatMessage) => setMessages(prev => [...prev, message]);
+    const say = (message: ChatMessage) => setMessages(prev => message.id && prev.some(item => item.id === message.id) ? prev : [...prev, message]);
     const unsubscribe = plaza.subscribe(event => {
       if (event.t === 'roster' || event.t === 'join' || event.t === 'leave' || event.t === 'rename') {
         const me = plaza.players.get(plaza.selfId ?? '');
@@ -168,21 +190,37 @@ export default function Game() {
         for (const message of unseen) {
           teacherMessageIds.current.add(message.id);
           say({ id: `teacher:${message.id}`, sender: 'Teacher', text: message.text, timestamp: message.timestamp, teacher: true });
+          audio.receive(`teacher:${message.id}`, !!event.history);
         }
         if (unseen.length) setChatSpot(spot => ({ ...spot, folded: false }));
         return;
       }
       if (event.t === 'warmup') { setWarmup(event.warmup); setWarmupFeedback(null); return; }
-      if (event.t === 'warmup-answered') { setWarmupFeedback({ correct: event.correct, wait: event.wait }); return; }
+      if (event.t === 'warmup-answered') {
+        setWarmupFeedback({ correct: event.correct, wait: event.wait });
+        if (event.correct && !event.wait) audio.goal();
+        return;
+      }
       if (event.t === 'alias') { setAlias({ name: event.name, kept: event.kept }); return; }
       if (event.t === 'quest') { setQuest(event.quest); setAnswered(null); return; }
-      if (event.t === 'answered') { setAnswered({ objective: event.objective, correct: event.correct, wait: event.wait }); return; }
-      if (event.t === 'chat') say({ id: event.id, sender: event.sender, text: event.text, timestamp: event.ts, whisper: event.whisper, to: event.to, marks: event.marks });
-      else if (event.t === 'retract') setMessages(prev => prev.filter(message => message.id !== event.id));
+      if (event.t === 'answered') {
+        setAnswered({ objective: event.objective, correct: event.correct, wait: event.wait });
+        if (event.correct && !event.wait) audio.goal();
+        return;
+      }
+      if (event.t === 'chat') {
+        say({ id: event.id, sender: event.sender, text: event.text, timestamp: event.ts, whisper: event.whisper, to: event.to, marks: event.marks, voice: event.voice });
+        if (event.id) audio.receive(event.id, !!event.history);
+      }
+      else if (event.t === 'retract') {
+        audio.retract(event.id);
+        setMessages(prev => prev.filter(message => message.id !== event.id));
+      }
       else if (event.t === 'notice') say({ sender: event.level === 'warning' ? 'System Warning' : 'System', text: event.text });
     });
     const unwatch = plaza.onStatus(next => {
       setStatus(next);
+      if (next.state !== 'online') audio.stop();
       if (next.state === 'online') setConnection(plaza); // the map appears once connected
       if (next.state === 'stopped' && next.message) say({ sender: 'System Warning', text: next.message });
     });
@@ -190,6 +228,9 @@ export default function Game() {
     return () => {
       unsubscribe();
       unwatch();
+      unhear();
+      audio.dispose();
+      if (audioRef.current === audio) audioRef.current = null;
       if (pending.current) window.clearTimeout(pending.current.timer);
       pending.current = null;
       if (plazaRef.current === plaza) plazaRef.current = null;
@@ -324,6 +365,13 @@ export default function Game() {
               {status.state === 'stopped' ? 'Disconnected' : status.state === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
             </span>}
           </div>
+          <button type="button" className="sound-toggle" aria-pressed={!sound.muted}
+            title={sound.muted ? 'Turn on chat voices and goal sounds' : 'Mute chat voices and goal sounds'}
+            onClick={() => audioRef.current?.setMuted(!sound.muted)}>
+            {sound.muted ? '🔇 Sound off' : '🔊 Sound on'}
+          </button>
+          {!sound.muted && sound.needsInteraction && <button type="button" className="sound-enable" onClick={unlockSound}>Enable sound</button>}
+          {!sound.muted && sound.error && <p className="sound-error" role="status">{sound.error}</p>}
         </header>
 
         <HelpRequest support={support} online={status.state === 'online'}
@@ -384,10 +432,15 @@ export default function Game() {
               const isSystem = msg.sender.startsWith('System');
               
               return (
-                <div key={msg.id ?? i} className={`chat-message ${isSystem ? 'system-msg' : ''} ${isWarning ? 'warning-msg' : ''} ${msg.whisper ? 'whisper-msg' : ''} ${msg.teacher ? 'teacher-msg' : ''}`}>
+                <div key={msg.id ?? i} className={`chat-message ${isSystem ? 'system-msg' : ''} ${isWarning ? 'warning-msg' : ''} ${msg.whisper ? 'whisper-msg' : ''} ${msg.teacher ? 'teacher-msg' : ''} ${msg.id && sound.messageId === msg.id ? 'chat-speaking' : ''}`}>
                   {/* Notices from the game are just the sentence, with no "System:" in front */}
                   {!isSystem && <span className="chat-sender">{msg.teacher ? 'Teacher (private)' : msg.whisper ? `${msg.sender} → ${msg.to} (whisper)` : msg.sender}:</span>}
                   <span className="chat-text"><Marked text={msg.text} marks={msg.marks} className="slip" /></span>
+                  {!isSystem && msg.id && <button type="button" className="chat-listen" disabled={sound.muted || status.state !== 'online'}
+                    aria-label={sound.messageId === msg.id ? `Stop reading ${msg.sender}'s message` : `Listen to ${msg.sender}'s message`}
+                    onClick={() => sound.messageId === msg.id ? audioRef.current?.stop() : audioRef.current?.replay(msg.id!)}>
+                    {sound.messageId === msg.id ? '■ Stop' : '▶ Listen'}
+                  </button>}
                   {msg.teacher && <button type="button" className="teacher-reply" disabled={checking || sending}
                     onClick={openTeacherChat}>Reply to teacher</button>}
                 </div>

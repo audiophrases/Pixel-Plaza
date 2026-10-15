@@ -11,6 +11,7 @@ import type { StudentConfig, StudentSession } from '../studentAuth';
 import { firstName } from '../../shared/names';
 import { plazaMap } from '../../shared/plazaMap';
 import { testerAvatar, testerPin } from '../tester';
+import { unlockSound } from '../audio';
 import './Login.css';
 
 export default function Login() {
@@ -84,6 +85,7 @@ export default function Login() {
 
   // A null avatar keeps the saved one.
   const enter = (avatarConfig: AvatarConfig | null) => {
+    unlockSound();
     if (session) navigate('/game', { state: { roomCode: pin, avatarConfig } });
   };
   const ready = !!session && /^\d{4,8}$/.test(pin);
@@ -106,6 +108,7 @@ export default function Login() {
           {step === 'details' ? (
             <form className="login-form" onSubmit={event => {
               event.preventDefault();
+              unlockSound();
               if (laptopUrl) { if (session) handOffTo(laptopUrl, session, joinPin()); return; }
               if (!ready) return;
               if (savedAvatar) enter(null);
@@ -134,10 +137,10 @@ export default function Login() {
               </div>
               {error && <p role="alert" className="login-error">{error}</p>}
               <button className="btn btn-primary login-btn" type="submit" disabled={!session || busy}>
-                {laptopUrl ? 'Go to class' : savedAvatar ? 'Enter the Plaza' : 'Choose your avatar'}
+                {laptopUrl ? 'Go to class' : savedAvatar ? 'Enter the Plaza' : 'Choose your character'}
               </button>
               {savedAvatar && !laptopUrl && <button className="link-btn" type="button" disabled={!ready || busy}
-                onClick={() => setStep('avatar')}>Change my looks</button>}
+                onClick={() => setStep('avatar')}>Change my character</button>}
             </form>
           ) : <AvatarEditor initialConfig={savedAvatar ?? undefined} onSave={enter} onCancel={() => setStep('details')} />}
           <p className="login-notice">Your teacher can review every message. Messages appear after teacher approval.</p>

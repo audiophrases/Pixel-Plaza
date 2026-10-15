@@ -153,6 +153,118 @@ async function exchangeEvidence(teacher, investigator, witness, objective) {
     return { id: received.id, questionId: question.id, replyId: reply.id };
 }
 
+test('chat speech uses persisted sender voices and only synthesizes messages delivered to the listener', { timeout: 120000 }, async () => {
+    const requests = [];
+    let holdResponse = null;
+    const bridge = http.createServer(async (req, res) => {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        requests.push({ body: JSON.parse(body), authorization: req.headers.authorization });
+        const hold = holdResponse; holdResponse = null;
+        if (hold) await hold();
+        res.writeHead(200, { 'Content-Type': 'audio/mpeg' }); res.end('ID3-test-audio');
+    });
+    await new Promise(resolve => bridge.listen(0, '127.0.0.1', resolve));
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-speech-'));
+    const pinPlayUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    const vars = { EDGE_TTS_URL: `http://127.0.0.1:${bridge.address().port}/tts`, EDGE_TTS_SECRET: 'server-only-test-secret' };
+    let plaza = await startPlaza(pinPlayUrl, persistTo, vars);
+    const sockets = [];
+    try {
+        let base = plaza.base;
+        const session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (op, body) => api(base, `/api/teacher/${op}`, { session, body });
+        PIN = (await teacher('class', { open: true })).body.pin;
+        const chosen = 'en-IE-EmilyNeural';
+        const alex = await enter(base, 'signed-a', { voice: chosen }); sockets.push(alex);
+        const sam = await enter(base, 'signed-b', null); sockets.push(sam);
+        const chris = await enter(base, 'signed-c', null); sockets.push(chris);
+        assert.equal(alex.me.voice, chosen);
+        assert.equal((await alex.next(m => m.t === 'support')).history, true, 'restored teacher history is marked quiet');
+        chris.send({ t: 'move', x: 100, y: 100 });
+        await new Promise(resolve => setTimeout(resolve, 250));
+        const speech = (id, token = 'signed-b', extra = {}) => fetch(`${base}/api/plaza/speech`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'x-student-token': token }, body: JSON.stringify({ id, ...extra }),
+        });
+        const preview = voice => api(base, '/api/plaza/voice-preview', { token: 'signed-b', body: { voice } });
+        const text = 'The basket is near the cellar.';
+        alex.send({ t: 'chat', text });
+        await alex.next(m => m.t === 'notice' && /approval/.test(m.text));
+        const id = (await teacher('status')).body.entries.find(e => e.text === text).id;
+        assert.equal((await speech(id)).status, 404, 'pending text cannot be voiced');
+        assert.equal((await speech(id, 'forged')).status, 401);
+        assert.equal((await preview('not-an-English-voice')).status, 400);
+        assert.equal(requests.length, 0, 'denied calls never reach the speech service');
+        await teacher('review', { id, approve: true });
+        const delivered = await sam.next(m => m.t === 'chat' && m.id === id);
+        assert.equal(delivered.voice, chosen);
+        sam.send({ t: 'move', x: 100, y: 100 });
+        chris.send({ t: 'move', x: alex.me.x, y: alex.me.y });
+        await new Promise(resolve => setTimeout(resolve, 250));
+        const audio = await speech(id, 'signed-b', { text: 'Forged replacement', voice: 'en-GB-RyanNeural' });
+        assert.equal(audio.status, 200);
+        assert.equal(audio.headers.get('Content-Type'), 'audio/mpeg');
+        assert.match(audio.headers.get('Cache-Control'), /private.*no-store/);
+        assert.equal(await audio.text(), 'ID3-test-audio');
+        assert.deepEqual(requests.at(-1).body, { text, voice: chosen, rate: '+0%' });
+        assert.equal(requests.at(-1).authorization, 'Bearer server-only-test-secret');
+        assert.equal((await speech(id, 'signed-c')).status, 404, 'moving closer later cannot grant an unheard message');
+
+        const changed = await enter(base, 'signed-a', { voice: 'en-AU-NatashaNeural' }); sockets.push(changed);
+        assert.equal((await api(base, '/api/student/me', { token: 'signed-a' })).body.avatar.voice, 'en-AU-NatashaNeural');
+        assert.equal((await speech(id)).status, 200);
+        assert.equal(requests.at(-1).body.voice, chosen, 'old chat keeps the voice chosen when sent');
+
+        // A private message to the teacher is echoed only to its own author.
+        sam.send({ t: 'chat', to: 'teacher', text: 'Can you help me write my idea?' });
+        const ownHelp = await sam.next(m => m.t === 'chat' && m.to === 'Teacher');
+        assert.equal((await speech(ownHelp.id)).status, 200);
+        assert.equal(requests.at(-1).body.text, ownHelp.text);
+        assert.equal((await speech(ownHelp.id, 'signed-a')).status, 404);
+        await teacher('help-message', { studentKey: 'stu_b', text: 'Tell me your idea.' });
+        const support = await sam.next(m => m.t === 'support' && m.support.messages.length);
+        assert.notEqual(support.history, true, 'live teacher replies can autoplay');
+        const reply = `teacher:${support.support.messages.at(-1).id}`;
+        assert.equal((await speech(reply)).status, 200);
+        assert.equal((await speech(reply, 'signed-a')).status, 404);
+
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        plaza = await startPlaza(pinPlayUrl, persistTo, vars); base = plaza.base;
+        assert.equal((await speech(id)).status, 200, 'delivery permissions survive a restart');
+        assert.equal(requests.at(-1).body.voice, chosen);
+        let entered; let release;
+        const bridgeEntered = new Promise(resolve => { entered = resolve; });
+        const bridgeRelease = new Promise(resolve => { release = resolve; });
+        holdResponse = () => { entered(); return bridgeRelease; };
+        const inFlight = speech(id);
+        await bridgeEntered;
+        assert.equal((await teacher('review', { id, approve: false })).status, 200);
+        release();
+        assert.equal((await inFlight).status, 404, 'withdrawal during synthesis prevents returning the generated clip');
+        const before = requests.length;
+        assert.equal((await speech(id)).status, 404, 'a withdrawn message can no longer be voiced');
+        assert.equal(requests.length, before);
+        const oversized = await fetch(`${base}/api/plaza/speech`, { method: 'POST', body: JSON.stringify({ id: 'x'.repeat(2000) }) });
+        assert.equal(oversized.status, 413);
+        const sample = await fetch(`${base}/api/plaza/voice-preview`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'x-student-token': 'signed-b' },
+            body: JSON.stringify({ voice: chosen, text: 'Never synthesize this arbitrary text.' }),
+        });
+        assert.equal(sample.status, 200); await sample.arrayBuffer();
+        assert.equal(requests.at(-1).body.text, 'Hello! This is my voice in Pixel Plaza.');
+        assert.equal(requests.at(-1).body.voice, chosen);
+        await teacher('game', { name: 'Another game', randomNames: false });
+        assert.equal((await speech(reply)).status, 404, 'private help from another game remains private');
+        assert.equal((await speech(ownHelp.id)).status, 404);
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        await Promise.all([new Promise(resolve => pinPlay.close(resolve)), new Promise(resolve => bridge.close(resolve))]);
+        removeTemp(persistTo);
+    }
+});
+
 test('student assistance: blocked submissions, help requests, private replies and complete history persist', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay();
     const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-assistance-'));

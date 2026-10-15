@@ -2,6 +2,7 @@
 // tests run this file directly under `node --test`.
 
 import { MAP_SIZE, SPAWN, isBlocked } from '../shared/plazaMap.ts';
+import { isEnglishVoice } from '../shared/voices.ts';
 
 export { MAP_SIZE, SPAWN, isBlocked };
 export const EMOTES = ['🙋', '❓', '👍', '😂'];
@@ -9,15 +10,20 @@ export const EMOTES = ['🙋', '❓', '👍', '😂'];
 // One index per part. Counts come from public/cup/avatar-parts.js, the same
 // numbers as PinPlay's ARENA_AVATAR_PARTS; update both after a rebuild.
 export const AVATAR_PARTS = { skin: 20, hairColor: 25, hair: 29, eyes: 37, mouth: 41, glasses: 17, shirt: 28, hat: 29 };
-export type Avatar = Record<keyof typeof AVATAR_PARTS, number>;
+export type Avatar = Record<keyof typeof AVATAR_PARTS, number> & { voice?: string };
 
 export function sanitizeAvatar(value: unknown): Avatar | null {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     const avatar = {} as Avatar;
-    for (const [part, count] of Object.entries(AVATAR_PARTS) as [keyof Avatar, number][]) {
+    for (const [part, count] of Object.entries(AVATAR_PARTS) as [keyof typeof AVATAR_PARTS, number][]) {
         const index = (value as Record<string, unknown>)[part] ?? 0;
         if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= count) return null;
         avatar[part] = index;
+    }
+    const voice = (value as Record<string, unknown>).voice;
+    if (voice !== undefined) {
+        if (!isEnglishVoice(voice)) return null;
+        avatar.voice = voice;
     }
     return avatar;
 }

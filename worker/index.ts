@@ -2,6 +2,8 @@ import { PlazaRoom, type TeacherAction } from './plaza.ts';
 import { PinPlayAuthError, resolveStudent, studentConfig, studentLogin, testerMode } from './pinplay.ts';
 import { laptopOrigin, sanitizeAvatar, secretsMatch, teacherPasswordMatches } from './rules.ts';
 import { MISSION_MAX_BYTES } from '../shared/missionSchema.ts';
+import { isEnglishVoice } from '../shared/voices.ts';
+import { synthesize, VOICE_SAMPLE } from './speech.ts';
 
 export { PlazaRoom };
 
@@ -25,6 +27,9 @@ export interface Env {
     CLOUD_URL?: string;
     // Set only by tester.bat on a local server: lets "tester:Name" tokens sign in without Google.
     TESTER_MODE?: string;
+    // Optional override for PinPlay's existing Render speech bridge.
+    EDGE_TTS_URL?: string;
+    EDGE_TTS_SECRET?: string;
 }
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -118,8 +123,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
     const get = request.method === 'GET';
     const post = request.method === 'POST';
     const studio = path.startsWith('/api/teacher/missions/');
+    const speech = path === '/api/plaza/speech' || path === '/api/plaza/voice-preview';
     let body: any = {};
-    if (post && studio) {
+    if (post && (studio || speech)) {
         // Bound authoring input before buffering or parsing JSON, even without Content-Length.
         const reader = request.body?.getReader();
         if (!reader) return json({ error: 'Expected JSON.' }, 400);
@@ -128,7 +134,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
             const { done, value } = await reader.read();
             if (done) break;
             size += value.byteLength;
-            if (size > MISSION_MAX_BYTES + 4096) { await reader.cancel(); return json({ error: 'Mission request exceeds 512 KB.' }, 413); }
+            if (size > (studio ? MISSION_MAX_BYTES + 4096 : 1024)) {
+                await reader.cancel();
+                return json({ error: studio ? 'Mission request exceeds 512 KB.' : 'Speech request is too large.' }, 413);
+            }
             chunks.push(value);
         }
         const bytes = new Uint8Array(size); let offset = 0;
@@ -153,6 +162,27 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (path === '/api/student/me' && get) {
         const student = await resolveStudent(env, request.headers.get('x-student-token'));
         return json({ student, avatar: await plaza(env).savedAvatar(student.studentKey) });
+    }
+
+    if (speech && post) {
+        const student = await resolveStudent(env, request.headers.get('x-student-token'));
+        const preview = path === '/api/plaza/voice-preview';
+        if (preview ? !isEnglishVoice(body?.voice) : typeof body?.id !== 'string' || !body.id || body.id.length > 100) {
+            return json({ error: 'Choose a valid voice or chat message.' }, 400);
+        }
+        const room = plaza(env);
+        const message = preview ? { text: VOICE_SAMPLE, voice: body.voice as string } : await room.speechMessage(student.studentKey, body.id);
+        if (!message) return json({ error: 'That message is not available.' }, 404);
+        if (!(await room.spendSpeech(student.studentKey, preview))) return json({ error: 'Wait a moment before playing more sounds.' }, 429);
+        const audio = await synthesize(env, message, request.signal);
+        if (!audio) return json({ error: 'Speech is temporarily unavailable. You can keep reading.' }, 503);
+        // A teacher may retract a message or switch games during synthesis.
+        const current = preview ? message : await room.speechMessage(student.studentKey, body.id);
+        if (!current || current.text !== message.text || current.voice !== message.voice) {
+            await audio.body?.cancel();
+            return json({ error: 'That message is no longer available.' }, 404);
+        }
+        return audio;
     }
 
     if (path === '/api/plaza/join' && post) {
