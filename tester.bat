@@ -8,6 +8,9 @@ title Pixel Plaza - tester
 
 where node >nul 2>nul || (echo Node.js is not installed. Get it from https://nodejs.org & pause & exit /b 1)
 
+rem Wake Render while dependency installation and the build run.
+start "" /min powershell -NoProfile -WindowStyle Hidden -Command "node scripts/warm-speech.mjs"
+
 echo Checking dependencies...
 call npm install --no-audit --no-fund --no-save || (echo. & echo Installing failed. Is this PC online? & pause & exit /b 1)
 
