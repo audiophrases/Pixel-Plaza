@@ -250,8 +250,13 @@ export class StudentAssistance {
         const evidence = this.sql.exec<SignalRow>(`SELECT reason, text, ts AS timestamp FROM assistance_signals
             WHERE game_id = ? AND student_key = ? AND ts >= ? AND id > ? ORDER BY ts DESC, id DESC LIMIT 3`,
             row.game_id, row.student_key, row.ts - SIGNAL_WINDOW, this.resolvedSignal(row.game_id, row.student_key)).toArray().reverse();
+        const latestHelp = this.sql.exec<{ status: string; reason: string | null }>(`SELECT status, reason FROM assistance_attempts
+            WHERE game_id = ? AND student_key = ? AND source = 'help' ORDER BY ts DESC, rowid DESC LIMIT 1`,
+            row.game_id, row.student_key).toArray()[0];
+        const ai = latestHelp?.status === 'ai-help-pending' ? { pending: true, tip: null }
+            : latestHelp?.status === 'ai-help' ? { pending: false, tip: latestHelp.reason } : undefined;
         return { id: row.id, studentKey: row.student_key, name: name ?? row.name, topic: row.topic, kind: row.kind,
-            status: row.status, note: row.note, timestamp: row.ts, updated: row.updated, evidence };
+            status: row.status, note: row.note, timestamp: row.ts, updated: row.updated, evidence, ...(ai ? { ai } : {}) };
     }
 
     private cursor(value: string, game: string, studentKey?: string): Cursor {

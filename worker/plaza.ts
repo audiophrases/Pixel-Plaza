@@ -16,7 +16,7 @@ import type { LiveMissionTarget } from '../shared/missionTypes.ts';
 import { boardWait, type Campaign } from '../shared/campaign.ts';
 import { wordDiff } from '../shared/diff.ts';
 import { cleanName, shownNames } from '../shared/names.ts';
-import { DEFAULT_VOICE, normalizeVoice } from '../shared/voices.ts';
+import { normalizeVoice } from '../shared/voices.ts';
 import { fillThiefClue, lookOf, thiefCount } from '../shared/thief.ts';
 import { assignLateJoiner, assignWarmup, factById, type WarmupView } from '../shared/warmup.ts';
 import { assignIdentities, assignLateIdentity, assignLatePair, assignPairs, identityById, isWarmupKind, type WarmupKind } from '../shared/warmupKinds.ts';
@@ -444,11 +444,7 @@ export class PlazaRoom extends DurableObject<Env> {
     speechMessage(studentKey: string, id: string): { text: string; voice: string } | null {
         const game = this.activeGame();
         if (!game || !this.isOpen()) return null;
-        if (id.startsWith('teacher:')) {
-            const row = this.sql.exec<{ text: string }>(`SELECT text FROM assistance_teacher_messages
-                WHERE id = ? AND game_id = ? AND student_key = ?`, id.slice(8), game, studentKey).toArray()[0];
-            return row ? { text: row.text, voice: DEFAULT_VOICE } : null;
-        }
+        if (id.startsWith('teacher:')) return null; // Teacher help may mix Catalan and English.
         const row = this.sql.exec<{ text: string; voice: string }>(`SELECT c.text, a.voice FROM chat c
             JOIN chat_audience a ON a.chat_id = c.id AND a.game_id = c.game_id
             WHERE c.id = ? AND c.game_id = ? AND c.status = 'approved' AND a.student_key = ?`, id, game, studentKey).toArray()[0];
@@ -505,6 +501,7 @@ export class PlazaRoom extends DurableObject<Env> {
             teacher(data.route === 'teacher' ? 'Student requested the teacher directly.' : 'Personal teacher assistance.'); return;
         }
         this.attemptStatus(audit, 'ai-help-pending', 'Preparing one language hint.');
+        this.assistance.request(seat.game, seat.studentKey, seat.name, topic, note, false);
         this.sendSupport(seat.game, seat.studentKey);
         const tip = await languageHelp(note, topic, this.env);
         if (!this.isOpen() || this.activeGame() !== seat.game || this.helpSession() !== session) {

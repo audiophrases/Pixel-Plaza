@@ -183,7 +183,8 @@ test('one AI help per student and classroom session, with durable usage, direct 
         assert.deepEqual(JSON.parse(calls[0].messages[1].content), { topic: 'writing', unfinishedMessageOrIntention: 'I want tell...' });
         let status = (await teacher('status')).body;
         assert.deepEqual(status.support.ai, { used: 1, students: 2 });
-        assert.equal(status.support.alerts.length, 0, 'successful AI hint creates no duplicate teacher alert');
+        assert.equal(status.support.alerts.length, 1, 'AI help alerts the teacher');
+        assert.match(status.support.alerts[0].ai.tip, /want to/);
         alex.send({ t: 'help-request', route: 'auto', topic: 'writing', text: 'I still need help', attemptId: 'next-help', studentKey: 'stu_b', session: 'forged', used: false });
         await alex.next(m => m.t === 'support' && m.support.request);
         assert.equal(calls.length, 1, 'second request routes to teacher without an AI call');
@@ -312,9 +313,9 @@ test('chat speech uses persisted sender voices and only synthesizes messages del
         assert.equal((await speech(ownHelp.id, 'signed-a')).status, 404);
         await teacher('help-message', { studentKey: 'stu_b', text: 'Tell me your idea.' });
         const support = await sam.next(m => m.t === 'support' && m.support.messages.length);
-        assert.notEqual(support.history, true, 'live teacher replies can autoplay');
+        assert.notEqual(support.history, true, 'live teacher replies arrive immediately');
         const reply = `teacher:${support.support.messages.at(-1).id}`;
-        assert.equal((await speech(reply)).status, 200);
+        assert.equal((await speech(reply)).status, 404, 'teacher help is excluded from speech');
         assert.equal((await speech(reply, 'signed-a')).status, 404);
 
         for (const socket of sockets) socket.ws.close();

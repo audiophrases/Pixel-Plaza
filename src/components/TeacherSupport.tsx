@@ -194,6 +194,10 @@ export default function TeacherSupport({ gameId, token, support, students, who, 
         <span>{alert.kind === 'requested' ? 'Asked for help' : 'Suggested check-in'} · {alert.status === 'acknowledged' ? 'Helping' : alert.status === 'resolved' ? 'Completed' : 'Waiting'}</span>
       </div>
       <p><strong>{topics[alert.topic]}</strong>{alert.note && <> · {alert.note}</>}</p>
+      {alert.ai && <div className="teacher-note"><strong>{alert.ai.pending ? 'AI hint in progress…' : 'AI feedback'}</strong>
+        {alert.ai.tip && <p>{alert.ai.tip}</p>}
+        <small>You can intervene or let the student continue.</small>
+      </div>}
       <small>{time(alert.timestamp)}</small>
       {alert.evidence.length > 0 && <details>
         <summary>What prompted this check-in ({alert.evidence.length})</summary>

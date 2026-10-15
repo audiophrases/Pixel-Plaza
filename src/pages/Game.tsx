@@ -191,7 +191,6 @@ export default function Game() {
         for (const message of unseen) {
           teacherMessageIds.current.add(message.id);
           say({ id: `teacher:${message.id}`, sender: 'Teacher', text: message.text, timestamp: message.timestamp, teacher: true });
-          audio.receive(`teacher:${message.id}`, !!event.history);
         }
         if (unseen.length) setChatSpot(spot => ({ ...spot, folded: false }));
         return;
@@ -437,7 +436,7 @@ export default function Game() {
                   {/* Notices from the game are just the sentence, with no "System:" in front */}
                   {!isSystem && <span className="chat-sender">{msg.teacher ? 'Teacher (private)' : msg.whisper ? `${msg.sender} → ${msg.to} (whisper)` : msg.sender}:</span>}
                   <span className="chat-text"><Marked text={msg.text} marks={msg.marks} className="slip" /></span>
-                  {!isSystem && msg.id && <button type="button" className="chat-listen" disabled={sound.muted || status.state !== 'online'}
+                  {!isSystem && !msg.teacher && msg.id && <button type="button" className="chat-listen" disabled={sound.muted || status.state !== 'online'}
                     aria-label={sound.messageId === msg.id ? `Stop reading ${msg.sender}'s message` : `Listen to ${msg.sender}'s message`}
                     onClick={() => sound.messageId === msg.id ? audioRef.current?.stop() : audioRef.current?.replay(msg.id!)}>
                     {sound.messageId === msg.id ? '■ Stop' : '▶ Listen'}

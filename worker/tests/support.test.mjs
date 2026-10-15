@@ -231,3 +231,21 @@ test('retained chat backfills idempotently without duplicating linked attempts o
     restarted.chatStatus('old', 'removed');
     assert.equal(restarted.get(old.id).status, 'removed');
 });
+
+
+test('teacher alert exposes pending AI help and feedback without losing the original note', t => {
+    const { support, db } = repository(); t.after(() => db.close());
+    const id = attempt(support, { source: 'help', text: 'Vull explicar una idea.' });
+    support.update(id, 'ai-help-pending');
+    support.request('game', 'alex', 'Alex', 'writing', 'Vull explicar una idea.', false);
+    assert.equal(support.alerts('game', {})[0].ai.pending, true);
+    support.update(id, 'ai-help', 'Try: I want to ___.');
+    const alert = support.alerts('game', {})[0];
+    assert.equal(alert.note, 'Vull explicar una idea.');
+    assert.deepEqual(alert.ai, { pending: false, tip: 'Try: I want to ___.' });
+    const second = attempt(support, { source: 'help', text: 'More help' });
+    support.update(second, 'help-requested');
+    support.request('game', 'alex', 'Alex', 'writing', 'More help', false);
+    assert.equal(support.alerts('game', {}).length, 1);
+    assert.equal(support.alerts('game', {})[0].ai, undefined);
+});

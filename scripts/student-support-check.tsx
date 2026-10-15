@@ -80,17 +80,14 @@ try {
   await type(input(), 'I want tell');
   await click('I need help');
   assert.equal((document.querySelector('.student-help-panel textarea') as HTMLTextAreaElement).value, 'I want tell', 'help starts with a copy of the unfinished chat draft');
-  await click('Ask my teacher directly');
-  assert.equal(socket.sent.at(-1).route, 'teacher');
-  assert.equal(input().value, 'I want tell'); assert.equal(aiUsed, false);
-  await click('I need help');
-  await click('Get my AI language hint');
+  assert.equal(button('Ask my teacher directly'), undefined);
+  await click('Get help');
   assert.ok(document.querySelector('.student-ai-tip')?.textContent?.includes('want to'));
   assert.equal(input().value, 'I want tell', 'AI help never rewrites or clears the composer');
   assert.ok(!socket.sent.some(event => event.t === 'chat'), 'AI help never posts a message');
-  assert.ok(button('Notify my teacher'), 'after AI use, further help goes to the teacher');
-  await click('Notify my teacher');
-  assert.equal(socket.sent.at(-1).route, 'teacher');
+  assert.ok(button('Get help'), 'after AI use, further help goes to the teacher');
+  await click('Get help');
+  assert.equal(socket.sent.at(-1).route, 'auto');
   assert.equal(input().value, 'I want tell');
   testAIHelp = false;
   await act(async () => socket.receive({ t: 'support', support: { request: null, messages: [] } }));
@@ -110,7 +107,7 @@ try {
   await click('I need help');
   await select(document.querySelector('.student-help-panel select') as HTMLSelectElement, 'instructions');
   await type(document.querySelector('.student-help-panel textarea') as HTMLTextAreaElement, 'No entenc què he de fer.');
-  await click('Notify my teacher');
+  await click('Get help');
   const help = socket.sent.at(-1);
   assert.equal(help.t, 'help-request');
   assert.equal(help.topic, 'instructions');
@@ -118,7 +115,7 @@ try {
   assert.equal(socket.sent.at(-2).source, 'help');
   assert.equal(socket.sent.at(-2).objective, 'instructions');
   assert.equal(help.attemptId, socket.sent.at(-2).id);
-  assert.ok(document.body.textContent?.includes('Teacher notified'));
+  assert.ok(document.body.textContent?.includes('Help requested'));
 
   const support = { request: { id: 'request-a', topic: 'instructions', status: 'acknowledged' }, messages: [{ id: 'reply-a', text: 'Tell me your idea and we can write it together.', timestamp: 100 }] };
   await act(async () => { socket.receive({ t: 'support', support }); socket.receive({ t: 'support', support }); });
@@ -218,7 +215,7 @@ try {
   await click('I need help');
   await select(document.querySelector('.student-help-panel select') as HTMLSelectElement, 'classmate-message');
   await type(document.querySelector('.student-help-panel textarea') as HTMLTextAreaElement, '');
-  await click('Notify my teacher');
+  await click('Get help');
   assert.equal(stored()[2].source, 'help');
   assert.equal(stored()[2].objective, 'classmate-message');
   assert.equal(stored()[2].text, "I need help understanding a classmate's message.");

@@ -9,6 +9,7 @@ export type MessageAttempt = {
 export type HelpAlert = {
     id: string; studentKey: string; name: string; topic: HelpTopic; kind: 'requested' | 'suggested';
     status: HelpStatus; note: string; timestamp: number; updated: number;
+    ai?: { pending: boolean; tip: string | null };
     evidence: { reason: string; text: string; timestamp: number }[];
 };
 export type TeacherSupport = { alerts: HelpAlert[]; students: { studentKey: string; name: string }[]; ai?: { used: number; students: number } };

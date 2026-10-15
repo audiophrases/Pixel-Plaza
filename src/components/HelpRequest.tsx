@@ -15,38 +15,37 @@ export default function HelpRequest({ support, online, chatDraft = '', onRequest
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const pendingRequest = useRef(false);
-  const pendingRoute = useRef<'auto' | 'teacher'>('auto');
+  const awaitingHint = useRef(false);
   const timer = useRef(0);
   const panelId = useId();
   const status = support.request?.status;
-  const canUseAI = !!support.ai?.available && !support.ai.used;
   const aiPending = !!support.ai?.pending;
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
   useEffect(() => {
-    if (!pendingRequest.current || (pendingRoute.current !== 'teacher' && support.ai?.pending)
+    if (!pendingRequest.current || support.ai?.pending
       || (!support.request && !support.ai?.tip)) return;
     pendingRequest.current = false;
     window.clearTimeout(timer.current);
     setSending(false);
     setError('');
-    if (pendingRoute.current === 'teacher' || !support.ai?.tip) setOpen(false);
+    if (!awaitingHint.current || !support.ai?.tip) setOpen(false);
   }, [support.request, support.ai]);
 
   useEffect(() => {
     if (!online) { pendingRequest.current = false; window.clearTimeout(timer.current); setSending(false); }
   }, [online]);
 
-  const request = (route: 'auto' | 'teacher') => {
-    if (onRequest(topic, text.trim(), route)) {
+  const request = () => {
+    awaitingHint.current = !!support.ai?.available && !support.ai.used;
+    if (onRequest(topic, text.trim(), 'auto')) {
       pendingRequest.current = true;
-      pendingRoute.current = route;
       setSending(true); setError('');
       window.clearTimeout(timer.current);
       timer.current = window.setTimeout(() => {
         pendingRequest.current = false; setSending(false);
-        setError('Help is taking longer than expected. Your note is still here. You can ask your teacher directly.');
+        setError('Help is taking longer than expected. Your note is saved here.');
       }, 8000);
     } else setError('Waiting for a connection. Your note is still here; try again when connected.');
   };
@@ -55,28 +54,26 @@ export default function HelpRequest({ support, online, chatDraft = '', onRequest
     <button className="student-help-toggle" type="button" aria-expanded={open} aria-controls={panelId}
       onClick={() => { if (!open && !text) setText(chatDraft.slice(0, 500)); setOpen(current => !current); }}>I need help</button>
     {status && <span className={`student-help-status student-help-${status}`} role="status">
-      {status === 'open' ? 'Teacher notified' : status === 'acknowledged' ? 'Teacher is helping' : 'Help completed'}
+      {status === 'open' ? 'Help requested' : status === 'acknowledged' ? 'Teacher is helping' : 'Help completed'}
     </span>}
     {open && <form className="student-help-panel glass-panel" id={panelId} onSubmit={event => {
       event.preventDefault();
       if (sending) return;
-      request(canUseAI ? 'auto' : 'teacher');
+      request();
     }}>
-      <h2>Get help communicating</h2>
-      <p>{canUseAI ? 'Get one AI language hint this session, then help from your teacher. You can ask your teacher directly anytime.'
-        : 'Your teacher can help you here in chat or in class.'}</p>
-      {support.ai?.tip && <div className="student-ai-tip" role="status"><strong>Your AI language hint</strong><p>{support.ai.tip}</p>
-        <small>You finish your own message. Ask your teacher whenever you need more help.</small></div>}
+      <h2>Get help</h2>
+      <p>Tell us where you’re stuck.</p>
+      {support.ai?.tip && <div className="student-ai-tip" role="status"><strong>A hint for you</strong><p>{support.ai.tip}</p></div>}
       {aiPending && <p role="status">Getting your language hint…</p>}
-      <label>What do you need help with?
+      <label>Help with
         <select value={topic} onChange={event => setTopic(event.target.value as HelpTopic)} disabled={sending}>
-          <option value="writing">Writing my ideas in English</option>
-          <option value="instructions">Understanding game instructions</option>
-          <option value="classmate-message">Understanding a classmate's message</option>
+          <option value="writing">Writing in English</option>
+          <option value="instructions">Game instructions</option>
+          <option value="classmate-message">A classmate’s message</option>
           <option value="other">Something else</option>
         </select>
       </label>
-      <label>Your unfinished sentence or what you want to communicate
+      <label>Your question or unfinished sentence
         <textarea value={text} onChange={event => setText(event.target.value)} maxLength={500} rows={3}
           placeholder="Write in any language if that helps." disabled={sending} />
       </label>
@@ -84,9 +81,8 @@ export default function HelpRequest({ support, online, chatDraft = '', onRequest
       {!online && <p className="student-help-error" role="status">Reconnecting to your teacher…</p>}
       <div className="student-help-actions">
         <button type="submit" className="btn btn-primary" disabled={sending}>
-          {sending ? 'Sending…' : canUseAI ? 'Get my AI language hint' : 'Notify my teacher'}
+          {sending ? 'Sending…' : 'Get help'}
         </button>
-        {(canUseAI || aiPending) && <button type="button" className="btn btn-secondary" onClick={() => request('teacher')}>Ask my teacher directly</button>}
         <button type="button" className="spelling-fix" onClick={() => setOpen(false)}>Close</button>
       </div>
       {support.messages.length > 0 && <button type="button" className="student-help-chat" onClick={() => {

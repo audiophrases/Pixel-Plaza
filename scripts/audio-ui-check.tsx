@@ -110,7 +110,8 @@ try {
   assert.ok(!document.querySelector('.chat-messages')?.textContent?.includes('retracted'));
   await act(async () => socket.receive({ t: 'support', support: { ...oldSupport,
     messages: [...oldSupport.messages, { id: 'live-help', text: 'A new private reply.', timestamp: 2 }] } }));
-  assert.equal(speech().at(-1)?.body.id, 'teacher:live-help');
+  assert.ok(!speech().some(request => request.body.id.startsWith('teacher:')), 'teacher help is never synthesized');
+  assert.equal(document.querySelector('.teacher-msg .chat-listen'), null);
   await finish();
   await click('🔊 Sound on');
   await act(async () => root.unmount());
