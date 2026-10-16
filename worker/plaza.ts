@@ -24,6 +24,7 @@ import { assignIdentities, assignLateIdentity, assignLatePair, assignPairs, iden
 import { randomName } from '../shared/randomNames.ts';
 import { legalMove, zoneAt } from '../shared/plazaMap.ts';
 import { XP, checkStyle, emotesFor, levelOf, readStyle, type Style } from '../shared/levels.ts';
+import { REPORT_LINES_PER_STUDENT, type ClassReportData, type ReportLine } from '../shared/classReport.ts';
 import { type Avatar, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 
 const TICKET_MS = 60_000;
@@ -479,6 +480,43 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!game) return { attempts: [], next: null };
         try { return this.assistance.page(game, studentKey, cursor); }
         catch { return { error: 'That history cursor is no longer valid. Refresh the history.', status: 400 }; }
+    }
+
+    // The log of this lesson (since the class was opened) or of the whole game, for the AI report prompt. Every
+    // student who took part is in it, those who wrote nothing too: that is part of the picture.
+    classReport(token: string, scope: 'lesson' | 'game'): ClassReportData | { error: string; status: number } {
+        if (!token || !this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray().length) return { error: 'Please sign in again.', status: 401 };
+        const game = this.activeGame();
+        const row = game && this.sql.exec<{ name: string; last_opened: number }>('SELECT name, last_opened FROM games WHERE id = ?', game).toArray()[0];
+        if (!game || !row) return { error: 'Open a game first.', status: 400 };
+        const from = scope === 'lesson' ? row.last_opened : 0;
+        const campaign = this.gameCampaign(game); const campaignRow = this.campaignRow(game);
+        const questions = new Map((campaign?.chapters ?? []).flatMap(chapter => chapter.objectives).map(objective => [objective.id, objective.text]));
+        const roles = new Map(this.campaignPlayers(game).map(player => [player.student_key, campaign?.roles.find(role => role.id === player.role_id)?.name ?? null]));
+        const starred = new Set(this.sql.exec<{ source: string }>("SELECT source FROM xp_awards WHERE game_id = ? AND source LIKE 'teacher:%'", game).toArray().map(award => award.source.slice('teacher:'.length)));
+        const gained = new Map(this.sql.exec<{ student_key: string; xp: number }>('SELECT student_key, SUM(amount) AS xp FROM xp_awards WHERE game_id = ? AND ts >= ? GROUP BY student_key', game, from).toArray().map(award => [award.student_key, award.xp]));
+        const warmup = new Map((this.warmupStatus(game)?.players ?? []).map(player => [player.studentKey, { found: player.found, of: player.of }]));
+        const online = new Set(this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey));
+        const lines = new Map<string, ReportLine[]>();
+        for (const attempt of this.sql.exec<{ student_key: string; ts: number; source: string; status: string; text: string; target: string | null; objective: string | null; correction: string | null; final_text: string | null; reason: string | null; chat_id: string | null }>(
+            'SELECT student_key, ts, source, status, text, target, objective, correction, final_text, reason, chat_id FROM assistance_attempts WHERE game_id = ? AND ts >= ? ORDER BY ts, id', game, from)) {
+            const list = lines.get(attempt.student_key) ?? []; lines.set(attempt.student_key, list);
+            list.push({ ts: attempt.ts, source: attempt.source as ReportLine['source'], status: attempt.status, text: attempt.text.slice(0, 400), target: attempt.target,
+                question: attempt.objective ? questions.get(attempt.objective) ?? null : null, correction: attempt.correction, finalText: attempt.final_text,
+                reason: attempt.reason, starred: !!attempt.chat_id && starred.has(attempt.chat_id) });
+        }
+        // Who was there: everyone who wrote, everyone here now, and everyone who left during the lesson.
+        const seen = new Set(this.sql.exec<{ student_key: string }>('SELECT student_key FROM students WHERE last_seen >= ?', from).toArray().map(student => student.student_key));
+        const real = new Map(this.sql.exec<{ student_key: string; full: string }>('SELECT student_key, COALESCE(full_name, name) AS full FROM students').toArray().map(student => [student.student_key, student.full]));
+        const students = [...this.rosterNames(game)].filter(([key]) => lines.has(key) || online.has(key) || seen.has(key)).map(([key, name]) => {
+            const all = lines.get(key) ?? [];
+            return { studentKey: key, name, realName: real.get(key) ?? name, online: online.has(key), role: roles.get(key) ?? null,
+                level: levelOf(this.xpOf(key)).level, xp: gained.get(key) ?? 0, warmup: warmup.get(key) ?? null,
+                lines: all.slice(-REPORT_LINES_PER_STUDENT), earlier: Math.max(0, all.length - REPORT_LINES_PER_STUDENT) };
+        });
+        return { game: row.name, scope, from, to: Date.now(), students,
+            campaign: campaign && campaignRow ? { title: campaign.title, chapter: campaignRow.chapter, chapters: campaign.chapters.length,
+                chapterTitle: campaign.chapters[Math.min(campaignRow.chapter, campaign.chapters.length - 1)].title } : null };
     }
 
     // Audio may only reproduce a message this student actually received in the

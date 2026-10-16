@@ -11,6 +11,7 @@ import type { TeacherSupport as Support } from '../../shared/support';
 import type { CampaignChoice } from '../../shared/missionTypes';
 import { XP } from '../../shared/levels';
 import TeacherSupport from '../components/TeacherSupport';
+import ClassReport from '../components/ClassReport';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred?: boolean };
 type CampaignInfo = {
@@ -220,7 +221,9 @@ export default function Teacher() {
     { id: 'games', title: 'Games', label: `${status.games.length}` },
     { id: 'mode', title: 'How chat is moderated', label: status.mode === 'review' ? 'review after' : 'approve first' },
     ...(status.laptop ? [{ id: 'laptop' as const, title: 'Playing on this laptop' }] : []),
+    ...(status.game ? [{ id: 'report' as const, title: 'Class report' }] : []),
   ];
+  const closeAll = () => setOpenCards(Object.fromEntries(cards.map(info => [info.id, false])));
   const card = (id: CardId, children: ReactNode) => {
     const info = cards.find(item => item.id === id);
     return info && <Card info={info} open={openCards[id] ?? DEFAULT_OPEN.includes(id)} onToggle={open => toggle(id, open)}>{children}</Card>;
@@ -248,12 +251,20 @@ export default function Teacher() {
         <button className="btn btn-secondary" onClick={() => { storeTeacherSession(''); setStatus(null); setToken(''); }}>Sign out</button>
       </section>
       <nav className="teacher-nav" aria-label="Sections">
-        {cards.map(info => <button key={info.id} type="button" className={`teacher-nav-chip${info.alert && info.badge ? ' teacher-nav-alert' : ''}`}
-          onClick={() => choose(info.id)}>
-          {info.title}<Badge info={info} />
-        </button>)}
+        {GROUPS.map(group => {
+          const items = group.cards.flatMap(id => cards.filter(info => info.id === id));
+          return items.length > 0 && <div key={group.title} className="teacher-nav-group">
+            <span>{group.title}</span>
+            {items.map(info => <button key={info.id} type="button" className={`teacher-nav-chip${info.alert && info.badge ? ' teacher-nav-alert' : ''}`}
+              onClick={() => choose(info.id)}>
+              {info.title}<Badge info={info} />
+            </button>)}
+          </div>;
+        })}
+        <button type="button" className="teacher-nav-close" onClick={closeAll}>Close all</button>
       </nav>
 
+      <h2 className="teacher-group">During class</h2>
       {status.game && card('help', <TeacherSupport key={status.game.id} gameId={status.game.id} token={token} embedded
         support={status.support ?? { alerts: [], students: [] }}
         students={[...supportStudents.values()].sort((a, b) => who(a.studentKey, a.name).localeCompare(who(b.studentKey, b.name)))}
@@ -306,6 +317,25 @@ export default function Teacher() {
             <strong>{index + 1}. {who(student.studentKey, student.name)}</strong> · {student.zone ?? 'plaza'}{student.level !== undefined && <> · Lv {student.level}</>}
           </button>
         </li>)}</ul> : <p>No students in the plaza right now.</p>}
+      </>)}
+
+      {status.game && <h2 className="teacher-group">Activities</h2>}
+      {status.game && card('warmup', <>
+        <p>{WARMUP_KINDS.find(kind => kind.id === warmupKind)?.blurb} Good for the first few minutes.</p>
+        <div className="teacher-newgame">
+          <select value={warmupKind} onChange={event => setWarmupKind(event.target.value as WarmupKind)} aria-label="Which warm-up">
+            {WARMUP_KINDS.map(kind => <option key={kind.id} value={kind.id}>{kind.label}</option>)}
+          </select>
+          <button className="btn btn-primary" disabled={!status.open} onClick={() => void action('warmup', { op: 'start', type: warmupKind })}>
+            {status.warmup?.active ? 'Start again' : 'Start the warm-up'}</button>
+          {status.warmup?.active && <button className="btn btn-secondary" onClick={() => void action('warmup', { op: 'end' })}>End the warm-up</button>}
+        </div>
+        {status.warmup && <>
+          <p>{status.warmup.active ? 'In progress' : 'Finished'}: {status.warmup.team.done} of {status.warmup.team.total} found.</p>
+          <ul>{status.warmup.players.map(player => <li key={player.studentKey}>
+            <span><strong>{who(player.studentKey, player.name)}</strong> · {player.fact} · found {player.found} of {player.of}</span>
+          </li>)}</ul>
+        </>}
       </>)}
 
       {status.game && card('campaign', !campaign ? <>
@@ -382,32 +412,7 @@ export default function Teacher() {
         }}>Erase campaign</button>
       </>)}
 
-      {status.game && card('warmup', <>
-        <p>{WARMUP_KINDS.find(kind => kind.id === warmupKind)?.blurb} Good for the first few minutes.</p>
-        <div className="teacher-newgame">
-          <select value={warmupKind} onChange={event => setWarmupKind(event.target.value as WarmupKind)} aria-label="Which warm-up">
-            {WARMUP_KINDS.map(kind => <option key={kind.id} value={kind.id}>{kind.label}</option>)}
-          </select>
-          <button className="btn btn-primary" disabled={!status.open} onClick={() => void action('warmup', { op: 'start', type: warmupKind })}>
-            {status.warmup?.active ? 'Start again' : 'Start the warm-up'}</button>
-          {status.warmup?.active && <button className="btn btn-secondary" onClick={() => void action('warmup', { op: 'end' })}>End the warm-up</button>}
-        </div>
-        {status.warmup && <>
-          <p>{status.warmup.active ? 'In progress' : 'Finished'}: {status.warmup.team.done} of {status.warmup.team.total} found.</p>
-          <ul>{status.warmup.players.map(player => <li key={player.studentKey}>
-            <span><strong>{who(player.studentKey, player.name)}</strong> · {player.fact} · found {player.found} of {player.of}</span>
-          </li>)}</ul>
-        </>}
-      </>)}
-
-      {status.game && card('vision', <>
-        <p>How far students see around themselves in <strong>{status.game.name}</strong>. Applies at once.</p>
-        <div className="teacher-newgame">
-          {VISION_CHOICES.map(([radius, label]) => <button key={radius} className={`btn ${status.game?.vision === radius ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => void action('vision', { radius })}>{label}</button>)}
-        </div>
-      </>)}
-
+      <h2 className="teacher-group">Setup</h2>
       {card('games', <>
         {status.pin && <label className="teacher-linkbox">The join link for {status.game?.name ?? 'the open game'}
           <input readOnly value={linkFor(status.pin)} onFocus={event => event.currentTarget.select()} onClick={event => event.currentTarget.select()} />
@@ -453,6 +458,14 @@ export default function Teacher() {
         </ul>}
       </>)}
 
+      {status.game && card('vision', <>
+        <p>How far students see around themselves in <strong>{status.game.name}</strong>. Applies at once.</p>
+        <div className="teacher-newgame">
+          {VISION_CHOICES.map(([radius, label]) => <button key={radius} className={`btn ${status.game?.vision === radius ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => void action('vision', { radius })}>{label}</button>)}
+        </div>
+      </>)}
+
       {card('mode', <>
         <label><input type="radio" name="mode" checked={status.mode === 'approve'} onChange={() => void action('mode', { mode: 'approve' })} />
           Approve every message first</label>
@@ -468,17 +481,29 @@ export default function Teacher() {
         <p>Students go to <strong>{status.laptop.signInUrl}</strong> and sign in with Google. They are then sent
           here, to <strong>{status.laptop.url}</strong>, while the class is open.</p>
       </>)}
+
+      {status.game && <h2 className="teacher-group">After class</h2>}
+      {status.game && card('report', <ClassReport token={token} copy={copyText} />)}
+
       {notice && <p role="alert" className="teacher-error">{notice}</p>}
     </>}
     {error && <p role="alert" className="teacher-error">{error}</p>}
   </main>;
 }
 
-type CardId = 'help' | 'chat' | 'live' | 'campaign' | 'warmup' | 'vision' | 'games' | 'mode' | 'laptop';
+type CardId = 'help' | 'chat' | 'live' | 'campaign' | 'warmup' | 'vision' | 'games' | 'mode' | 'laptop' | 'report';
 // badge: a number to show; alert: that number is something waiting on the teacher; label: a word of status instead.
 type CardInfo = { id: CardId; title: string; badge?: number; alert?: boolean; label?: string };
-const DEFAULT_OPEN: CardId[] = ['help', 'chat', 'live', 'campaign'];
-const CARDS_KEY = 'pixelplaza.teacher.cards.v1';
+// Every card starts closed; the counts in the bar say where to look. (A new key, so cards left open before close once.)
+const DEFAULT_OPEN: CardId[] = [];
+const CARDS_KEY = 'pixelplaza.teacher.cards.v2';
+// The page in four parts, in the order a lesson uses them.
+const GROUPS: { title: string; cards: CardId[] }[] = [
+  { title: 'During class', cards: ['help', 'chat', 'live'] },
+  { title: 'Activities', cards: ['warmup', 'campaign'] },
+  { title: 'Setup', cards: ['games', 'vision', 'mode', 'laptop'] },
+  { title: 'After class', cards: ['report'] },
+];
 
 function readOpenCards(): Partial<Record<CardId, boolean>> {
   try { return JSON.parse(localStorage.getItem(CARDS_KEY) ?? '{}') ?? {}; } catch { return {}; }
@@ -497,7 +522,7 @@ function Badge({ info }: { info: CardInfo }) {
 
 function Card({ info, open, onToggle, children }: { info: CardInfo; open: boolean; onToggle: (open: boolean) => void; children: ReactNode }) {
   return <details id={`card-${info.id}`} className="teacher-card" open={open} onToggle={event => onToggle(event.currentTarget.open)}>
-    <summary><h2>{info.title}</h2><Badge info={info} /></summary>
+    <summary><h3>{info.title}</h3><Badge info={info} /></summary>
     <div className="teacher-card-body">{children}</div>
   </details>;
 }

@@ -56,10 +56,10 @@ kbd { border: 1px solid #aaa; border-radius: 4px; padding: 0 .35rem; background:
 .teacher-card > summary::-webkit-details-marker { display: none; }
 .teacher-card > summary::before { content: '›'; display: inline-block; width: .8em; font-size: 1.4rem; line-height: 1; font-weight: 700; color: #8a93a3; transition: transform .15s; }
 .teacher-card[open] > summary::before { transform: rotate(90deg); }
-.teacher-card > summary h2 { margin: 0; font-size: 1.1rem; }
+.teacher-card > summary h3 { margin: 0; font-size: 1.05rem; }
 .teacher-card-body { padding: 0 1.25rem 1.25rem; }
 .teacher-card-body > p, .teacher-card-body > ul { margin: .5rem 0; }
-.teacher-card-body h3 { margin: 1rem 0 .4rem; font-size: 1rem; }
+.teacher-card-body h3 { margin: 1rem 0 .4rem; font-size: .95rem; }
 .teacher-card-body ul { list-style: none; padding: 0; display: grid; gap: .4rem; }
 .teacher-card-body li { display: flex; justify-content: space-between; align-items: center; gap: .75rem; flex-wrap: wrap; }
 .teacher-card-body .teacher-actions { display: inline-flex; }
@@ -84,3 +84,20 @@ kbd { border: 1px solid #aaa; border-radius: 4px; padding: 0 .35rem; background:
 .teacher-step-now .teacher-step-number { background: var(--primary); color: #fff; }
 .teacher-step-now small { color: var(--primary-dark); font-weight: 700; text-transform: uppercase; font-size: .7rem; }
 .teacher-starred { font-size: .85rem; color: #8a6d00; font-weight: 600; }
+
+/* The page in four parts, and the bar that lists them. */
+.teacher-group { margin: 1.25rem 0 .5rem; font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #5f6b7a; }
+.teacher-nav { align-items: center; row-gap: .5rem; }
+.teacher-nav-group { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; padding-right: .6rem; margin-right: .2rem; border-right: 1px solid var(--line); }
+.teacher-nav-group > span { font-size: .7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #8a93a3; }
+.teacher-nav-close { margin-left: auto; padding: .25rem .5rem; border: 0; background: none; color: #5f6b7a; font: inherit; font-size: .8rem; text-decoration: underline; cursor: pointer; }
+
+/* The class report. */
+.teacher-inline { display: inline-flex; align-items: center; gap: .4rem; font-size: .9rem; }
+.teacher-inline input { flex: none; padding: 0; }
+.teacher-inline select { padding: .3rem .4rem; border: 1px solid var(--line); border-radius: .4rem; font: inherit; }
+.teacher-report-text { width: 100%; margin: .5rem 0; padding: .6rem; border: 1px solid var(--line); border-radius: .5rem; font: .8rem/1.4 ui-monospace, Consolas, monospace; resize: vertical; }
+.teacher-report-key { margin-top: .75rem; }
+.teacher-report-key summary { cursor: pointer; font-weight: 600; }
+.teacher-report-key table { margin-top: .5rem; border-collapse: collapse; font-size: .9rem; }
+.teacher-report-key th, .teacher-report-key td { padding: .25rem .75rem .25rem 0; text-align: left; border-bottom: 1px solid var(--line); }

@@ -1322,6 +1322,15 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
         assert.equal((await alex.next(m => m.t === 'xp', 'experience on joining')).xp, 10);
         assert.equal((await api(base, '/api/teacher/status', { session })).body.online.find(s => s.studentKey === 'stu_a').level, 1);
 
+        // The class report: this lesson's log for each student, with the teacher's stars.
+        const report = await fetch(`${base}/api/teacher/report?scope=lesson`, { headers: { 'x-teacher-session': session } }).then(r => r.json());
+        const alexReport = report.students.find(student => student.studentKey === 'stu_a');
+        assert.equal(alexReport.realName, 'Alex');
+        assert.equal(alexReport.xp, 10);
+        const nice = alexReport.lines.find(entry => entry.text === 'Nice to meet you');
+        assert.deepEqual([nice.source, nice.status, nice.starred], ['chat', 'approved', true]);
+        assert.equal((await fetch(`${base}/api/teacher/report`)).status, 401, 'teachers only');
+
         // Review mode: what OpenAI cleared posts at once, with no teacher click.
         const status = (await api(base, '/api/teacher/status', { session })).body;
         assert.deepEqual([status.mode, status.moderation], ['approve', true]);
