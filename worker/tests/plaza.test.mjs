@@ -2027,7 +2027,10 @@ test('the warm-up: a secret fact, someone to find by name, progress for everyone
         assert.equal(status.warmup.team.done, 1);
         assert.equal(status.realNames.stu_a, 'Alex');
 
-        // Someone who arrives late is given a fact that is already in play.
+        // Someone who arrives late is given a fact that is already in play, held by a classmate still here:
+        // Chris has left, so nobody is sent looking for Chris's fact alone.
+        players.stu_c.ws.close();
+        await pause(500);
         const late = await enter(base, 'roger-1', null);
         sockets.push(late);
         await late.next(message => message.t === 'alias', 'alias');
@@ -2035,10 +2038,16 @@ test('the warm-up: a secret fact, someone to find by name, progress for everyone
         const lateView = (await late.next(message => message.t === 'warmup' && message.warmup, 'late warm-up')).warmup;
         assert.match(lateView.fact, /^You /);
         assert.ok(lateView.of >= 1);
+        const factOf = studentKey => FACTS.find(fact => fact.mine === started.players.find(player => player.studentKey === studentKey).fact);
+        const wanted = FACTS.find(fact => `Find someone who ${fact.find}.` === lateView.task);
+        assert.ok([factOf('stu_a'), factOf('stu_b')].includes(wanted), 'the late part looks for a classmate who is here');
+        // ...and everyone's team total grows to include the newcomer's part.
+        const grown = await players.stu_a.next(message => message.t === 'warmup' && message.warmup?.team.total === 6 + lateView.of, 'total includes the late part');
+        assert.equal(grown.warmup.team.done, 1);
 
         // Ending it takes the panel away.
         assert.equal((await warmup({ op: 'end' })).body.warmup.active, false);
-        assert.equal((await players.stu_c.next(message => message.t === 'warmup' && message.warmup === null, 'ended')).warmup, null);
+        assert.equal((await players.stu_b.next(message => message.t === 'warmup' && message.warmup === null, 'ended')).warmup, null);
     } finally {
         for (const socket of sockets) socket.ws.close();
         await plaza.stop();

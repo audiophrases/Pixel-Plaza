@@ -598,7 +598,9 @@ export class PlazaRoom extends DurableObject<Env> {
         this.sendQuest(server, seat.game, seat.studentKey, true);
         this.sendAlias(server, seat.game, seat.studentKey);
         this.sendVision(server, seat.game);
-        this.sendWarmup(server, seat.game, seat.studentKey);
+        // A late arrival's part changes everyone's team total, so all get the warm-up again.
+        if (this.lateWarmupPart(seat.game, seat.studentKey)) this.sendWarmupToAll(seat.game);
+        else this.sendWarmup(server, seat.game, seat.studentKey);
         this.sendSupport(seat.game, seat.studentKey, true);
         this.refreshBoard(seat.game);
         return new Response(null, { status: 101, webSocket: client });
@@ -1233,21 +1235,30 @@ export class PlazaRoom extends DurableObject<Env> {
         return null;
     }
 
+    // Arrived after the start: a part that fits with those already in play, so there is someone to find. Only
+    // classmates in the plaza now count, so the part never sends them looking for someone who has left.
+    // True when a part was given.
+    private lateWarmupPart(game: string, studentKey: string): boolean {
+        if (!this.warmupActive(game)) return false;
+        const players = this.warmupPlayers(game);
+        if (players.some(player => player.student_key === studentKey)) return false;
+        const online = new Set(this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey));
+        const here = players.filter(player => online.has(player.student_key));
+        const kind = this.warmupKind(game);
+        const late = kind === 'identity' ? assignLateIdentity(players.map(player => player.fact), here.map(player => player.student_key))
+            : kind === 'pairs' ? assignLatePair(here.map(player => player.fact)) : assignLateJoiner(here.map(player => player.fact));
+        if (!late) return false;
+        this.sql.exec('INSERT INTO warmup_players (game_id, student_key, fact, targets) VALUES (?, ?, ?, ?)', game, studentKey, late.fact, JSON.stringify(late.targets));
+        return true;
+    }
+
     private warmupView(game: string, studentKey: string): WarmupView | null {
         if (!this.warmupActive(game)) return null;
         const kind = this.warmupKind(game);
-        let players = this.warmupPlayers(game);
-        let me = players.find(player => player.student_key === studentKey);
-        if (!me) {
-            // Arrived after the start: a part that fits with those already in play, so there is someone to find.
-            const inPlay = players.map(player => player.fact);
-            const late = kind === 'identity' ? assignLateIdentity(inPlay, players.map(player => player.student_key))
-                : kind === 'pairs' ? assignLatePair(inPlay) : assignLateJoiner(inPlay);
-            if (!late) return null;
-            this.sql.exec('INSERT INTO warmup_players (game_id, student_key, fact, targets) VALUES (?, ?, ?, ?)', game, studentKey, late.fact, JSON.stringify(late.targets));
-            players = this.warmupPlayers(game);
-            me = players.find(player => player.student_key === studentKey)!;
-        }
+        this.lateWarmupPart(game, studentKey);
+        const players = this.warmupPlayers(game);
+        const me = players.find(player => player.student_key === studentKey);
+        if (!me) return null;
         const open = me.step < me.targets.length;
         const classmate = this.rosterNames(game).get(me.targets[0]) ?? 'a classmate';
         const card = kind === 'identity' ? { fact: `You are ${identityById(me.fact)?.name ?? '?'}. Do not say your name! Answer yes or no.`,
