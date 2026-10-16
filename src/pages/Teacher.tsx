@@ -199,7 +199,7 @@ export default function Teacher() {
   return <main className="teacher-page">
     <header className="teacher-header">
       <div><h1>Teacher controls</h1><p>{status?.mode === 'review' ? 'Nearby chat posts after an OpenAI check. Review it here and remove anything unsuitable.' : 'All student chat waits for your approval.'}</p></div>
-      <span><Link to="/mission-studio">Mission Studio</Link> · <Link to="/studio">Theme studio</Link> · <Link to="/">Student entrance</Link></span>
+      <span><Link to="/quest-library">Side quest library</Link> · <Link to="/mission-studio">Mission Studio</Link> · <Link to="/studio">Theme studio</Link> · <Link to="/">Student entrance</Link></span>
     </header>
     {!token || !status ? <form className="teacher-signin" onSubmit={event => { event.preventDefault(); void signIn(); }}>
       <label htmlFor="teacher-password">Teacher password (the same as PinPlay)</label>
@@ -335,6 +335,7 @@ export default function Teacher() {
               if (window.confirm('Erase the campaign for this game, including every role and clue?')) void action('campaign', { op: 'reset', confirm: true });
             }}>Erase campaign</button>
           </div>
+          <p>Students finished early, or a short session between chapters? <Link to="/quest-library">Add side quests from the library</Link>: story quests for this chapter or generic ones for any game.</p>
           {!!status.campaign.board?.length && <><h3>Quest board</h3><p>Release prepared quests when the class needs another mystery.</p><ul>{status.campaign.board.map(quest => <li key={quest.id}><span>{quest.text} · {quest.accepted} accepted · {quest.completed} completed</span>
             {quest.teacherReleased && !quest.released && status.campaign?.status !== 'campaign_complete' && <button className="btn btn-secondary" onClick={() => void action('quest-release', { objective: quest.id })}>Release quest</button>}
             {quest.teacherReleased && quest.released && <small>Released</small>}</li>)}</ul></>}

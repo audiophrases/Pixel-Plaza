@@ -1,0 +1,213 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { missionJson } from '../../shared/missionSchema';
+import type { LiveMissionPreview, LiveMissionTarget } from '../../shared/missionTypes';
+import {
+    ANSWERS, FORMATS, LEVELS, STORY_CHAPTERS, THEMES, questCategories, questFacets, questObjective, searchQuests, sideQuests,
+    type QuestAnswer, type QuestFilters, type QuestFormat, type QuestLevel, type QuestTheme, type SideQuest,
+} from '../../shared/sideQuests';
+import { readTeacherSession, storeTeacherSession } from '../teacherSession';
+import './MissionStudio.css';
+import './QuestLibrary.css';
+
+async function request<T>(token: string, op: string, body?: object): Promise<T> {
+    const response = await fetch(`/api/teacher/missions/${op}`, { method: body ? 'POST' : 'GET', headers: { 'x-teacher-session': token, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const result = await response.json();
+    if (!response.ok) throw Object.assign(new Error([result.error, ...(result.errors ?? []).map((e: { path: string; message: string }) => `${e.path}: ${e.message}`)].join('\n')), { status: response.status });
+    return result;
+}
+function download(text: string, filename: string) {
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' })); const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const MAX_RELEASE = 10; // the game reviews at most ten quests at a time
+const PAGE = 40;
+const chapterName = (id: string | null) => { const c = STORY_CHAPTERS.find(item => item.id === id); return c ? `${c.campaign} ch. ${c.number}` : ''; };
+const levelName = (id: QuestLevel) => `${id} ${LEVELS.find(l => l.id === id)?.name ?? ''}`;
+const toggle = <T,>(list: T[] | undefined, value: T): T[] => list?.includes(value) ? list.filter(item => item !== value) : [...(list ?? []), value];
+
+// A Mission Studio file with one chapter holding the chosen quests: import it with "Extend the selected chapter".
+function missionPack(quests: SideQuest[]): string {
+    return missionJson({ id: 'side-quest-pack', title: 'Side quest pack', finale: '', roles: [], chapters: [{
+        id: 'side-quest-pack', title: 'Side quests', intro: '', recap: '', ending: '', share: 1,
+        objectives: quests.map(questObjective), discoveries: [], reveals: [],
+    }] });
+}
+
+function Chips<T extends string>({ label, values, chosen, counts, name, onChange }: { label: string; values: readonly T[]; chosen: T[] | undefined; counts: Record<string, number>; name: (value: T) => string; onChange: (next: T[]) => void }) {
+    return <div className="ql-filter" role="group" aria-label={label}><span>{label}</span><div>
+        {values.map(value => <button key={value} type="button" className={`ql-chip${chosen?.includes(value) ? ' on' : ''}`} aria-pressed={!!chosen?.includes(value)}
+            onClick={() => onChange(toggle(chosen, value))}>{name(value)} <small>{counts[value] ?? 0}</small></button>)}
+    </div></div>;
+}
+
+export default function QuestLibrary() {
+    const [token, setToken] = useState(readTeacherSession); const [password, setPassword] = useState('');
+    const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
+    const [query, setQuery] = useState(''); const [filters, setFilters] = useState<QuestFilters>({});
+    const [fitsOnly, setFitsOnly] = useState(false); const [shown, setShown] = useState(PAGE);
+    const [selected, setSelected] = useState<string[]>([]);
+    const [target, setTarget] = useState<LiveMissionTarget | null>(null);
+    const [preview, setPreview] = useState<LiveMissionPreview | null>(null);
+
+    const run = async (work: () => Promise<void>) => {
+        setBusy(true); setError(''); setNotice('');
+        try { await work(); } catch (cause) {
+            setPreview(null); setError(cause instanceof Error ? cause.message : 'Connection failed.');
+            if ((cause as { status?: number }).status === 401) { storeTeacherSession(''); setToken(''); }
+        } finally { setBusy(false); }
+    };
+    const refresh = () => run(async () => { setTarget((await request<{ target: LiveMissionTarget | null }>(token, 'live')).target); setPreview(null); });
+    useEffect(() => {
+        if (!token) return;
+        let active = true;
+        request<{ target: LiveMissionTarget | null }>(token, 'live').then(result => { if (active) setTarget(result.target); })
+            .catch(cause => { if (active) { setError(cause.message); if (cause.status === 401) { storeTeacherSession(''); setToken(''); } } });
+        return () => { active = false; };
+    }, [token]);
+    // A reviewed selection is only valid for what was reviewed; cancel it when the page moves on.
+    useEffect(() => {
+        const id = preview?.id;
+        return () => { if (id && token) void request(token, 'live-cancel', { previewId: id }).catch(() => {}); };
+    }, [token, preview?.id]);
+
+    // Why a quest cannot go into the running game right now; the server checks again.
+    const blocked = (quest: SideQuest): string | null => {
+        if (!target) return null;
+        if (target.objectiveIds.includes(quest.id) || target.additions.some(a => a.id === quest.id)) return 'Already in this game.';
+        if (quest.chapter && quest.chapter !== target.chapter.id) return `Story quest for ${chapterName(quest.chapter)}; the game is on another chapter.`;
+        if (quest.after && !target.objectiveIds.includes(quest.after)) return 'Needs a question this game does not have.';
+        return null;
+    };
+    const results = useMemo(() => {
+        const found = searchQuests(query, filters);
+        return fitsOnly && target ? found.filter(quest => !blocked(quest)) : found;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [query, filters, fitsOnly, target]);
+    const facets = useMemo(() => questFacets(query, filters), [query, filters]);
+    const categories = useMemo(() => questCategories(), []);
+    const chosen = selected.map(id => sideQuests.find(quest => quest.id === id)).filter((quest): quest is SideQuest => !!quest);
+    const setFilter = (next: QuestFilters) => { setFilters(next); setShown(PAGE); };
+    const pick = (quest: SideQuest) => { setPreview(null); setSelected(current => current.includes(quest.id) ? current.filter(id => id !== quest.id) : [...current, quest.id]); };
+    const surprise = (n: number) => {
+        const pool = results.filter(quest => !selected.includes(quest.id) && !blocked(quest));
+        const picks: string[] = [];
+        while (picks.length < n && pool.length) picks.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0].id);
+        setPreview(null); setSelected(current => [...current, ...picks]);
+    };
+    const presets: { label: string; apply: () => void }[] = [
+        { label: 'Warm-ups (5 min)', apply: () => { setQuery(''); setFilter({ maxMinutes: 5 }); } },
+        { label: 'Auto-checked answers', apply: () => { setQuery(''); setFilter({ answers: ['text'] }); } },
+        { label: 'Pair work', apply: () => { setQuery(''); setFilter({ formats: ['pair'] }); } },
+        { label: 'Whole-class mingles', apply: () => { setQuery(''); setFilter({ formats: ['class'] }); } },
+        ...(target && STORY_CHAPTERS.some(c => c.id === target.chapter.id) ? [{ label: `Story quests for ${chapterName(target.chapter.id)}`, apply: () => { setQuery(''); setFilter({ chapters: [target.chapter.id] }); } }] : []),
+        { label: 'Halloween & autumn', apply: () => { setQuery(''); setFilter({ categories: categories.filter(c => /autumn/i.test(c.category)).map(c => c.category) }); } },
+        { label: 'Christmas & winter', apply: () => { setQuery(''); setFilter({ categories: categories.filter(c => /winter/i.test(c.category)).map(c => c.category) }); } },
+    ];
+    const anyFilter = !!query || Object.values(filters).some(value => Array.isArray(value) ? value.length : !!value);
+
+    return <main className="mission-page ql-page">
+        <header className="mission-header"><div><p className="mission-eyebrow">PIXEL PLAZA · TEACHER WORKSPACE</p><h1>Side Quest Library</h1>
+            <p>{sideQuests.length} ready-made quests for fast finishers, warm-ups and sessions between chapters. Search, pick, and add them to the running game.</p></div>
+            <nav className="ql-links"><Link to="/teacher">Teacher controls</Link><Link to="/mission-studio">Mission Studio</Link></nav></header>
+        {error && <p className="mission-error" role="alert">{error}</p>}{notice && <p className="mission-notice" role="status">{notice}</p>}
+        {!token ? <form className="mission-card mission-login" onSubmit={e => { e.preventDefault(); void run(async () => {
+            const response = await fetch('/api/teacher/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password }) });
+            const result = await response.json(); if (!response.ok) throw new Error(result.error);
+            storeTeacherSession(result.token); setToken(result.token); setPassword('');
+        }); }}><h2>Teacher sign-in</h2><label className="mission-field"><span>Teacher password</span><input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label><button className="mission-button primary" disabled={busy}>Open the library</button></form>
+        : <div className="ql-layout">
+            <section className="ql-main">
+                <div className="mission-card ql-search">
+                    <label className="ql-searchbox"><span className="ql-sr">Search quests</span>
+                        <input type="search" value={query} autoFocus placeholder='Search: food, debate, past simple, riddle, Christmas, hotel…' onChange={e => { setQuery(e.target.value); setShown(PAGE); }} /></label>
+                    <div className="ql-presets">{presets.map(preset => <button key={preset.label} type="button" className="ql-preset" onClick={preset.apply}>{preset.label}</button>)}</div>
+                    <div className="ql-filter" role="group" aria-label="Kind"><span>Kind</span><div>
+                        {([['', 'All'], ['story', 'Story quests'], ['generic', 'Generic quests']] as const).map(([value, label]) =>
+                            <button key={label} type="button" className={`ql-chip${(filters.kind ?? '') === value ? ' on' : ''}`} aria-pressed={(filters.kind ?? '') === value}
+                                onClick={() => setFilter({ ...filters, kind: value || undefined })}>{label}</button>)}
+                    </div></div>
+                    <Chips label="Theme" values={THEMES.map(t => t.id)} chosen={filters.themes} counts={facets.themes} name={(id: QuestTheme) => THEMES.find(t => t.id === id)!.name} onChange={themes => setFilter({ ...filters, themes })} />
+                    {(filters.kind === 'story' || filters.themes?.includes('castanyada') || filters.chapters?.length) ? <Chips label="Chapter" values={STORY_CHAPTERS.map(c => c.id)} chosen={filters.chapters} counts={facets.chapters} name={id => `${STORY_CHAPTERS.findIndex(c => c.id === id) + 1}. ${STORY_CHAPTERS.find(c => c.id === id)!.title}`} onChange={chapters => setFilter({ ...filters, chapters })} /> : null}
+                    <Chips label="Level" values={LEVELS.map(l => l.id)} chosen={filters.levels} counts={facets.levels} name={levelName} onChange={levels => setFilter({ ...filters, levels })} />
+                    <Chips label="Who" values={FORMATS.map(f => f.id)} chosen={filters.formats} counts={facets.formats} name={(id: QuestFormat) => FORMATS.find(f => f.id === id)!.name} onChange={formats => setFilter({ ...filters, formats })} />
+                    <Chips label="Answer" values={ANSWERS.map(a => a.id)} chosen={filters.answers} counts={facets.answers} name={(id: QuestAnswer) => ANSWERS.find(a => a.id === id)!.name} onChange={answers => setFilter({ ...filters, answers })} />
+                    <div className="ql-row">
+                        <label className="ql-select"><span>Category</span><select value={filters.categories?.length === 1 ? filters.categories[0] : ''} onChange={e => setFilter({ ...filters, categories: e.target.value ? [e.target.value] : undefined })}>
+                            <option value="">All categories</option>
+                            {THEMES.map(theme => <optgroup key={theme.id} label={theme.name}>{categories.filter(c => c.theme === theme.id).map(c => <option key={c.category} value={c.category}>{c.category} ({c.count})</option>)}</optgroup>)}
+                        </select></label>
+                        <label className="ql-select"><span>Time</span><select value={filters.maxMinutes ?? 0} onChange={e => setFilter({ ...filters, maxMinutes: Number(e.target.value) || undefined })}>
+                            <option value={0}>Any length</option><option value={5}>5 minutes or less</option><option value={10}>10 minutes or less</option>
+                        </select></label>
+                        {target && <label className="ql-check"><input type="checkbox" checked={fitsOnly} onChange={e => setFitsOnly(e.target.checked)} />Only quests that fit {target.game.name} now</label>}
+                        {anyFilter && <button type="button" className="mission-button" onClick={() => { setQuery(''); setFilter({}); setFitsOnly(false); }}>Clear search</button>}
+                    </div>
+                </div>
+                <div className="mission-toolbar ql-count"><h2>{results.length === sideQuests.length ? `All ${results.length} quests` : `${results.length} of ${sideQuests.length} quests`}</h2>
+                    <button type="button" className="mission-button" disabled={!results.length || selected.length >= MAX_RELEASE} onClick={() => surprise(Math.min(5, MAX_RELEASE - selected.length))}>Pick 5 at random from these</button></div>
+                {!results.length && <p className="mission-card ql-empty">No quests match. Try fewer words or clear a filter.</p>}
+                <div className="ql-results">{results.slice(0, shown).map(quest => {
+                    const reason = blocked(quest); const theme = THEMES.find(t => t.id === quest.theme)!;
+                    const on = selected.includes(quest.id);
+                    return <article key={quest.id} className={`ql-card ql-${quest.theme}${on ? ' selected' : ''}`}>
+                        <header>
+                            <span className={`ql-kind ql-kind-${theme.kind}`}>{theme.kind === 'story' ? `Story · ${chapterName(quest.chapter)}` : `Generic · ${theme.name}`}</span>
+                            <span className={`ql-level ql-level-${quest.level}`}>{levelName(quest.level)}</span>
+                        </header>
+                        <h3>{quest.title}</h3>
+                        <p className="ql-meta">{quest.category} · {FORMATS.find(f => f.id === quest.format)!.name} · {quest.minutes} min · {quest.answer === 'text' ? 'Typed answer, checked by the game' : 'Written report for you to read'}{quest.roles?.length ? ` · only for: ${quest.roles.join(', ')}` : ''}</p>
+                        <p className="ql-text">{quest.text}</p>
+                        {!!quest.focus.length && <p className="ql-focus">Focus: {quest.focus.join(' · ')}</p>}
+                        <details><summary>Teacher note{quest.answer === 'text' ? ' and answers' : ''}</summary>
+                            <p>{quest.teacherNote}</p>
+                            {quest.answer === 'text' && <p><strong>Accepted:</strong> {quest.accept.join(' · ')}</p>}
+                            {quest.after && <p>Unlocks after the main question <code>{quest.after}</code>.</p>}
+                            {quest.afterMain && <p>Unlocks when a student has finished the chapter's main mystery.</p>}
+                            <p className="ql-tags">{quest.tags.map(tag => <button key={tag} type="button" onClick={() => { setQuery(tag); setShown(PAGE); }}>#{tag}</button>)}</p>
+                            <p className="mission-muted">ID {quest.id}</p>
+                        </details>
+                        <footer>{reason ? <span className="ql-reason">{reason}</span> : <span />}
+                            <button type="button" className={`mission-button${on ? ' primary' : ''}`} disabled={!on && (!!reason || selected.length >= MAX_RELEASE)} onClick={() => pick(quest)}>{on ? 'Selected ✓' : 'Select'}</button></footer>
+                    </article>;
+                })}</div>
+                {results.length > shown && <button type="button" className="mission-button ql-more" onClick={() => setShown(shown + PAGE)}>Show {Math.min(PAGE, results.length - shown)} more</button>}
+            </section>
+
+            <aside className="mission-card ql-tray" aria-label="Your selection">
+                <div className="mission-toolbar"><h2>Your selection</h2><button type="button" className="mission-button" disabled={busy} onClick={() => void refresh()}>Refresh game</button></div>
+                {target ? <p className="ql-target"><strong>{target.game.name}</strong> · {target.campaign.title}<br />Chapter {target.chapter.index + 1}: {target.chapter.title}
+                    {!target.open && <><br /><em>Open this game in Teacher controls to add quests.</em></>}{target.ended && <><br /><em>This campaign has ended.</em></>}</p>
+                    : <p className="ql-target">No game is running. In Teacher controls, open a game and start a campaign (for example <strong>Plaza Free Play</strong>) to add quests. You can still browse and download.</p>}
+                <p className="mission-muted">{selected.length} of {MAX_RELEASE} chosen. The game adds up to {MAX_RELEASE} at a time.</p>
+                {chosen.length ? <ol className="ql-chosen">{chosen.map(quest => <li key={quest.id}><span>{quest.title} <small>{quest.level} · {quest.theme === 'castanyada' ? chapterName(quest.chapter) : THEMES.find(t => t.id === quest.theme)!.name}</small></span>
+                    <button type="button" aria-label={`Remove ${quest.title}`} onClick={() => pick(quest)}>×</button></li>)}</ol> : <p>Select quests from the results.</p>}
+                <fieldset className="ql-actions" disabled={busy}>
+                    <button type="button" className="mission-button primary" disabled={!target?.open || target.ended || !chosen.length || chosen.some(quest => !!blocked(quest))} onClick={() => void run(async () => {
+                        const result = await request<{ target: LiveMissionTarget; preview: LiveMissionPreview }>(token, 'library-preview', { gameId: target!.game.id, targetVersion: target!.version, targetEpoch: target!.epoch, chapterId: target!.chapter.id, questIds: selected });
+                        setTarget(result.target); setPreview(result.preview);
+                    })}>Review and add to the game</button>
+                    <button type="button" className="mission-button" disabled={!chosen.length} onClick={() => download(missionPack(chosen), 'side-quest-pack.json')}>Download for Mission Studio</button>
+                    {!!selected.length && <button type="button" className="mission-button" onClick={() => { setSelected([]); setPreview(null); }}>Clear selection</button>}
+                </fieldset>
+                {preview && <div className="mission-import-preview"><h3>Ready to release to {preview.game.name}</h3>
+                    <p className="mission-muted">This review expires at {new Date(preview.expires).toLocaleTimeString()}. Students who can accept now:</p>
+                    <ul>{preview.quests.map(quest => <li key={quest.id}><strong>{sideQuests.find(q => q.id === quest.id)?.title ?? quest.id}</strong> · {quest.audience} · {quest.eligibleNow} now</li>)}</ul>
+                    <div className="mission-toolbar"><button type="button" className="mission-button primary" disabled={busy} onClick={() => void run(async () => {
+                        const result = await request<{ target: LiveMissionTarget; released: string[] }>(token, 'live-release', { previewId: preview.id });
+                        setTarget(result.target); setPreview(null); setSelected([]); setNotice(`${result.released.length} quests are on the quest board in ${preview.game.name}.`);
+                    })}>Release to students</button>
+                    <button type="button" className="mission-button" disabled={busy} onClick={() => void run(async () => { await request(token, 'live-cancel', { previewId: preview.id }); setPreview(null); })}>Cancel</button></div>
+                </div>}
+                {!!target?.additions.length && <details className="ql-added"><summary>Added to this chapter ({target.additions.length})</summary>
+                    <ul>{target.additions.map(item => <li key={item.id}>{sideQuests.find(q => q.id === item.id)?.title ?? item.text}{item.withdrawn ? ' · withdrawn' : item.started ? ' · started' : ''}</li>)}</ul>
+                    <p className="mission-muted">Withdraw unstarted quests in Mission Studio.</p></details>}
+                <details className="ql-help"><summary>How it works</summary>
+                    <p><strong>Story quests</strong> use one Castanyada chapter and can be added while that chapter runs. <strong>Generic quests</strong> work in any game, also in Plaza Free Play between chapters.</p>
+                    <p>Levels: {LEVELS.map(l => `${l.id} ${l.name}: ${l.description}`).join(' ')}</p>
+                    <p>Students accept a quest on their quest board, do it and type their answer. Typed answers are checked by the game; written reports count once a student writes a real attempt, and you read them in Teacher controls.</p>
+                </details>
+            </aside>
+        </div>}
+    </main>;
+}

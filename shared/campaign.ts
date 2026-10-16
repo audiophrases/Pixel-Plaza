@@ -256,7 +256,31 @@ for (const chapter of castanyadaInvestigations.chapters) {
         if (!objective.optional) objective.conversation = { witnesses: objective.answerThief ? 2 : 1 };
     }
 }
-export const campaigns: Campaign[] = [castanyadaInvestigations, castanyada, castanyadaSideQuests, castanyadaComplete];
+// No mystery: a home for side quests from the library, for short sessions between chapters, warm-ups and any day of
+// the year. Each session starts with a short check-in; the teacher adds quests from the Side Quest Library while it
+// runs, and "Start the next chapter" opens a fresh session with an empty quest board.
+const FREE_PLAY_SESSIONS = 8;
+export const plazaFreePlay: Campaign = {
+    id: 'plaza-free-play',
+    title: 'Plaza Free Play: Side Quests',
+    finale: 'Thanks for playing! See you in the plaza.',
+    roles: [
+        { id: 'explorer', name: 'Explorer', card: 'You love finding new places and new people in the plaza.', clue: 'Explorer tip: the park has a pond and a little bridge. Have you crossed it?' },
+        { id: 'reporter', name: 'Reporter', card: 'You collect news and stories from your classmates.', clue: 'Reporter tip: a good follow-up question is "Why?" or "What happened next?"' },
+        { id: 'host', name: 'Host', card: 'You welcome people and help them meet each other.', clue: 'Host tip: say hello to someone you have not talked to today.' },
+        { id: 'artist', name: 'Artist', card: 'You notice colours, styles and good ideas.', clue: 'Artist tip: look at the hats, glasses and colours around you.' },
+    ],
+    chapters: Array.from({ length: FREE_PLAY_SESSIONS }, (_, i): Chapter => ({
+        id: `free-play-${i + 1}`, title: `Free play: session ${i + 1}`, share: 0.6,
+        intro: 'No mystery today. Check in, then choose quests on the quest board, chat with your classmates in English and have fun. Your teacher can add new quests at any time.',
+        recap: 'Last time: you played side quests in the plaza.',
+        ending: 'Great start! Keep choosing quests on the quest board. Your teacher can add more.',
+        objectives: [{ id: `check-in-${i + 1}`, text: 'Check in: write one or two sentences. How are you today, and what do you want to do in the plaza?', accept: [], kind: 'report' }],
+        discoveries: [], reveals: [],
+    })),
+};
+
+export const campaigns: Campaign[] = [castanyadaInvestigations, castanyada, castanyadaSideQuests, castanyadaComplete, plazaFreePlay];
 export const campaignById = (id: string): Campaign | undefined => campaigns.find(campaign => campaign.id === id);
 
 // The role the fewest students have so far, so a class is spread across the roles; ties are

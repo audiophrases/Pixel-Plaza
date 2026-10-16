@@ -14,6 +14,7 @@ import type { ConversationView, Objective, InterviewView } from '../shared/campa
 import { LiveMissions, type LiveMissionResult } from './liveMissions.ts';
 import type { LiveMissionTarget } from '../shared/missionTypes.ts';
 import { boardWait, type Campaign } from '../shared/campaign.ts';
+import { SIDE_QUEST_LIBRARY_VERSION, SIDE_QUEST_SOURCE, questFit, questObjective, sideQuestById } from '../shared/sideQuests.ts';
 import { wordDiff } from '../shared/diff.ts';
 import { cleanName, shownNames } from '../shared/names.ts';
 import { normalizeVoice } from '../shared/voices.ts';
@@ -260,7 +261,7 @@ export class PlazaRoom extends DurableObject<Env> {
     missionStudio(token: string, op: string, body: unknown): MissionResult | LiveMissionResult {
         const session = this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray();
         if (!token || session.length === 0) return { error: 'Please sign in again.', status: 401 };
-        const result = this.ctx.storage.transactionSync(() => op.startsWith('live') ? this.liveMissionAction(token, op, body) : this.missions.execute(op, body));
+        const result = this.ctx.storage.transactionSync(() => op.startsWith('live') || op === 'library-preview' ? this.liveMissionAction(token, op, body) : this.missions.execute(op, body));
         if (!('error' in result) && ('released' in result || 'withdrawn' in result)) {
             const game = this.activeGame(); if (game) this.sendQuestToAll(game);
         }
@@ -281,6 +282,17 @@ export class PlazaRoom extends DurableObject<Env> {
             objectiveIds: campaign.chapters.flatMap(c => c.objectives.map(o => o.id)), additions: this.liveMissions.additions(game.id, chapter.id)
         } : null;
     }
+    // How many students could accept each previewed quest right now: a snapshot for the teacher.
+    private countEligible(target: LiveMissionTarget, campaign: Campaign, quests: Objective[], preview: { quests: { eligibleNow: number }[] }): void {
+        const chapter = { ...campaign.chapters[target.chapter.index], objectives: [...campaign.chapters[target.chapter.index].objectives, ...quests] };
+        const players = this.campaignPlayers(target.game.id);
+        for (const [i, objective] of quests.entries()) preview.quests[i].eligibleNow = players.filter(p => {
+            const ctx = this.boardContext(target.game.id, p.student_key)!;
+            return ctx.online.has(p.student_key) && !boardWait(objective, chapter, p.role_id, p.done, true, ctx.online.size)
+                && (!objective.activity || this.questBoard.partners({ ...ctx, chapter }, objective).length > 0);
+        }).length;
+    }
+
     private liveMissionAction(token: string, op: string, body: unknown): LiveMissionResult {
         const b = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
         const target = this.liveTarget();
@@ -299,20 +311,33 @@ export class PlazaRoom extends DurableObject<Env> {
             if (!Array.isArray(b.objectiveIds) || b.objectiveIds.some(id => typeof id !== 'string')) return { error: 'Choose valid quest IDs.', status: 400 };
             const result = this.liveMissions.preview(token, target, campaign, source.campaign, source.version, b.objectiveIds as string[]);
             if ('error' in result) return result;
-            const chapter = { ...campaign.chapters[target.chapter.index], objectives: [...campaign.chapters[target.chapter.index].objectives, ...result.quests] };
-            const players = this.campaignPlayers(target.game.id);
-            for (const [i, objective] of result.quests.entries()) result.preview.quests[i].eligibleNow = players.filter(p => {
-                const ctx = this.boardContext(target.game.id, p.student_key)!;
-                return ctx.online.has(p.student_key) && !boardWait(objective, chapter, p.role_id, p.done, true, ctx.online.size)
-                    && (!objective.activity || this.questBoard.partners({ ...ctx, chapter }, objective).length > 0);
-            }).length;
+            this.countEligible(target, campaign, result.quests, result.preview);
+            return { target, preview: result.preview };
+        }
+        if (op === 'library-preview') {
+            // Quests from the side quest library: the server builds them from its own copy of the library, so a page
+            // can only choose which ones, never change what they say or accept.
+            if (b.gameId !== target.game.id || b.targetVersion !== target.version || b.targetEpoch !== target.epoch || b.chapterId !== target.chapter.id) return { error: 'The running game changed. Refresh the live target before reviewing quests.', status: 409 };
+            if (!Array.isArray(b.questIds) || b.questIds.some(id => typeof id !== 'string')) return { error: 'Choose quests from the library.', status: 400 };
+            const ids = b.questIds as string[];
+            const quests = ids.map(id => sideQuestById(id));
+            if (quests.some(quest => !quest)) return { error: 'Choose quests from the library.', status: 400 };
+            for (const quest of quests) {
+                const reason = questFit(quest!, campaign, target.chapter.id);
+                if (reason) return { error: `${quest!.title}: ${reason}`, status: 400 };
+            }
+            const source = structuredClone(campaign); source.id = SIDE_QUEST_SOURCE;
+            source.chapters[target.chapter.index].objectives.push(...quests.map(quest => questObjective(quest!)).filter(quest => !campaign.chapters[target.chapter.index].objectives.some(o => o.id === quest.id)));
+            const result = this.liveMissions.preview(token, target, campaign, source, SIDE_QUEST_LIBRARY_VERSION, ids);
+            if ('error' in result) return result;
+            this.countEligible(target, campaign, result.quests, result.preview);
             return { target, preview: result.preview };
         }
         if (op === 'live-release') {
             const preview = typeof b.previewId === 'string' ? this.liveMissions.pending(token, b.previewId) : undefined;
             if (!preview) return { error: 'This preview is no longer available. Review the quests again.', status: 409 };
             if (preview.expires <= Date.now() || preview.game_id !== target.game.id || preview.revision_id !== target.campaign.revision || preview.chapter_id !== target.chapter.id || preview.base_version !== target.version
-                || this.missions.draft(preview.source_id)?.version !== preview.source_version) return { error: 'The preview expired or the game/draft changed. Review the quests again.', status: 409 };
+                || (preview.source_id === SIDE_QUEST_SOURCE ? SIDE_QUEST_LIBRARY_VERSION : this.missions.draft(preview.source_id)?.version) !== preview.source_version) return { error: 'The preview expired or the game/draft changed. Review the quests again.', status: 409 };
             const released = this.liveMissions.release(preview);
             for (const id of released) this.questBoard.release(target.game.id, id);
             return { target: this.liveTarget(), released };

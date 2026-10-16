@@ -15,6 +15,7 @@ import { FACTS } from '../../shared/warmup.ts';
 import { identityById } from '../../shared/warmupKinds.ts';
 import { missionEnvelope } from '../../shared/missionSchema.ts';
 import { legalMove } from '../../shared/plazaMap.ts';
+import { SIDE_QUEST_SOURCE, sideQuests } from '../../shared/sideQuests.ts';
 
 const root = path.join(import.meta.dirname, '..', '..');
 const wrangler = path.join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
@@ -667,6 +668,74 @@ test('Live missions: reviewed additions preserve progress, enforce conflicts and
         assert.equal((await review(['next-live-quest'])).status, 409, 'chapter changes invalidate the old target');
         await teacher('campaign', { op: 'next' }); await teacher('campaign', { op: 'next' });
         assert.equal((await live('live-release', { previewId: 'old' })).status, 400, 'ended campaign cannot receive additions');
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
+test('Side quest library: teachers add generic and story quests to Castanyada and to Plaza Free Play', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-library-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); const sockets = [];
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+        const live = (op, body) => teacher(`missions/${op}`, body);
+        assert.equal((await api(base, '/api/teacher/missions/library-preview', { body: {} })).status, 401);
+        // A generic quest with a typed answer, a generic written one, and a story quest for chapter 1 with no prerequisite.
+        const riddle = sideQuests.find(q => !q.chapter && q.answer === 'text' && q.format === 'solo');
+        const report = sideQuests.find(q => !q.chapter && q.answer === 'report' && q.format === 'solo');
+        const story = sideQuests.find(q => q.chapter === 'missing-chestnuts' && !q.after && !q.afterMain && !q.roles?.length);
+        const elsewhere = sideQuests.find(q => q.chapter && q.chapter !== 'missing-chestnuts');
+        assert.ok(riddle && report && story && elsewhere, 'the library has every kind of quest this test needs');
+
+        PIN = (await teacher('game', { name: 'Library class', randomNames: false })).body.pin;
+        const alex = await enter(base, 'signed-a', null); const sam = await enter(base, 'signed-b', null); sockets.push(alex, sam);
+        await teacher('campaign', { op: 'start', campaign: 'castanyada-complete' });
+        let target = (await live('live')).body.target;
+        const review = (questIds, t = target) => live('library-preview', { gameId: t.game.id, targetVersion: t.version, targetEpoch: t.epoch, chapterId: t.chapter.id, questIds });
+        assert.equal((await review(['not-a-library-quest'])).status, 400, 'only library quests');
+        const wrongChapter = await review([elsewhere.id]); assert.equal(wrongChapter.status, 400, 'a story quest needs its own chapter');
+        assert.match(wrongChapter.body.error, /chapter/);
+        assert.equal((await live('library-preview', { gameId: target.game.id, targetVersion: target.version + 1, targetEpoch: target.epoch, chapterId: target.chapter.id, questIds: [riddle.id] })).status, 409);
+        const reviewed = await review([riddle.id, report.id, story.id]); assert.equal(reviewed.status, 200, JSON.stringify(reviewed.body));
+        assert.deepEqual(reviewed.body.preview.quests.map(q => q.id), [riddle.id, report.id, story.id]);
+        assert.equal(reviewed.body.preview.quests[0].eligibleNow, 2);
+        const released = await live('live-release', { previewId: reviewed.body.preview.id }); assert.equal(released.status, 200, JSON.stringify(released.body));
+        target = released.body.target;
+        assert.deepEqual(target.additions.map(a => a.id), [riddle.id, report.id, story.id]);
+        assert.equal((await live(`live-inspect?id=${riddle.id}`)).body.inspection.sourceId, SIDE_QUEST_SOURCE);
+        assert.equal((await review([riddle.id])).status, 400, 'a library quest joins a game once');
+
+        const view = (await alex.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === riddle.id), 'library quests on the board')).quest;
+        assert.equal(view.board.find(q => q.id === riddle.id).text, `${riddle.title}: ${riddle.text}`);
+        assert.equal(JSON.stringify(view).includes('"accept"'), false, 'answers stay on the server');
+        alex.send({ t: 'quest-accept', objective: riddle.id });
+        await alex.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === riddle.id && q.state === 'active'), 'accepted');
+        alex.send({ t: 'answer', objective: riddle.id, text: `It is ${riddle.accept[0]}` });
+        assert.equal((await alex.next(m => m.t === 'answered' && m.objective === riddle.id)).correct, true);
+        alex.send({ t: 'quest-accept', objective: report.id });
+        await alex.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === report.id && q.state === 'active'), 'accepted report');
+        await new Promise(resolve => setTimeout(resolve, 3100)); // a wrong answer earlier would make the next one wait
+        alex.send({ t: 'answer', objective: report.id, text: 'I asked two classmates and they told me their ideas.' });
+        assert.equal((await alex.next(m => m.t === 'answered' && m.objective === report.id)).correct, true);
+
+        // Between chapters, or any day: Plaza Free Play has no mystery, only a check-in and the library.
+        await teacher('game', { name: 'Free play', randomNames: false });
+        PIN = (await teacher('status')).body.pin;
+        const chris = await enter(base, 'signed-c', null); sockets.push(chris);
+        assert.ok((await teacher('status')).body.campaigns.some(c => c.id === 'plaza-free-play'));
+        await teacher('campaign', { op: 'start', campaign: 'plaza-free-play' });
+        const free = (await chris.next(m => m.t === 'quest' && m.quest, 'free play journal')).quest;
+        assert.equal(free.chapter.title, 'Free play: session 1'); assert.equal(free.objectives[0].kind, 'report');
+        let freeTarget = (await live('live')).body.target;
+        assert.equal((await review([story.id], freeTarget)).status, 400, 'story quests stay with their story');
+        const freeReview = await review([riddle.id], freeTarget); assert.equal(freeReview.status, 200, JSON.stringify(freeReview.body));
+        assert.equal((await live('live-release', { previewId: freeReview.body.preview.id })).status, 200);
+        await chris.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === riddle.id && q.state === 'available'), 'free play board');
+        await teacher('campaign', { op: 'next' });
+        freeTarget = (await live('live')).body.target;
+        assert.equal(freeTarget.chapter.id, 'free-play-2'); assert.deepEqual(freeTarget.additions, [], 'each session starts with a fresh board');
     } finally {
         for (const socket of sockets) socket.ws.close(); await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
     }
@@ -1398,7 +1467,7 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         const opened = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body;
         PIN = opened.pin;
         assert.equal(opened.campaign, null);
-        assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada', 'castanyada-complete', 'castanyada-investigations', 'castanyada-side-quests']);
+        assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada', 'castanyada-complete', 'castanyada-investigations', 'castanyada-side-quests', 'plaza-free-play']);
 
         // No story yet: nothing is sent.
         const early = await enter(base, 'signed-a', null);

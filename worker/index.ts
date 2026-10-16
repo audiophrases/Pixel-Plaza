@@ -210,7 +210,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
     }
     if (studio) {
         const op = path.slice('/api/teacher/missions/'.length);
-        if (!(get && ['list', 'get', 'live', 'live-inspect'].includes(op)) && !(post && ['create', 'save', 'publish', 'live-preview', 'live-release', 'live-withdraw', 'live-cancel'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
+        if (!(get && ['list', 'get', 'live', 'live-inspect'].includes(op)) && !(post && ['create', 'save', 'publish', 'live-preview', 'library-preview', 'live-release', 'live-withdraw', 'live-cancel'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
         const args = get ? { id: new URL(request.url).searchParams.get('id') } : body;
         const result = await plaza(env).missionStudio(request.headers.get('x-teacher-session') || '', op, args);
         return 'error' in result ? json(result, result.status) : json(result);

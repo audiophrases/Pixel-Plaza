@@ -4,6 +4,7 @@ import type { LiveMissionInspection, LiveMissionPreview, LiveMissionTarget } fro
 import type { MissionIssue } from '../shared/missionSchema.ts';
 
 export type LiveMissionResult = { target: LiveMissionTarget | null; preview?: LiveMissionPreview; inspection?: LiveMissionInspection; released?: string[]; withdrawn?: string } | { error: string; status: number; errors?: MissionIssue[] };
+export const LIVE_PER_CHAPTER = 40;
 type LiveRow = { objective_id: string; chapter_id: string; content: string; withdrawn: number };
 export type StoredPreview = { preview_id: string; game_id: string; revision_id: string; chapter_id: string; source_id: string; source_version: number; base_version: number; content: string; expires: number };
 
@@ -40,7 +41,9 @@ export class LiveMissions {
             started: this.sql.exec('SELECT 1 FROM quest_assignments WHERE game_id = ? AND objective = ? LIMIT 1', game, row.objective_id).toArray().length > 0 }));
     }
     preview(token: string, target: LiveMissionTarget, base: Campaign, source: Campaign, sourceVersion: number, ids: string[]): { preview: LiveMissionPreview; quests: Objective[] } | { error: string; status: number; errors?: MissionIssue[] } {
-        if (this.rows(target.game.id).length + ids.length > 40) return { error: 'A game can receive at most 40 live quest additions, including withdrawn ones.', status: 400 };
+        // Bounded per chapter (a chapter holds at most 100 objectives), so a long campaign or a run of free-play
+        // sessions can keep receiving library quests.
+        if (this.rows(target.game.id).filter(row => row.chapter_id === target.chapter.id).length + ids.length > LIVE_PER_CHAPTER) return { error: `A chapter can receive at most ${LIVE_PER_CHAPTER} live quest additions, including withdrawn ones. Start the next chapter or session for more.`, status: 400 };
         const checked = liveMissionCandidate(base, source, target.chapter.id, ids, this.rows(target.game.id).map(r => r.objective_id));
         if (!checked.campaign) return { error: 'These quests cannot be added to this game.', errors: checked.errors, status: 400 };
         const id = crypto.randomUUID(); const expires = Date.now() + 10 * 60_000;

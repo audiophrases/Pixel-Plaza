@@ -1,10 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { Suspense, lazy, useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import Login from './pages/Login';
 import Game from './pages/Game';
 import Studio from './pages/Studio';
 import Teacher from './pages/Teacher';
 import MissionStudio from './pages/MissionStudio';
+// The side quest library is large, so it loads only when a teacher opens it.
+const QuestLibrary = lazy(() => import('./pages/QuestLibrary'));
 
 function StudentFullscreen() {
   const { pathname } = useLocation();
@@ -39,6 +41,7 @@ function App() {
           <Route path="/teacher" element={<Teacher />} />
           <Route path="/studio" element={<Studio />} />
           <Route path="/mission-studio" element={<MissionStudio />} />
+          <Route path="/quest-library" element={<Suspense fallback={<p style={{ padding: '2rem' }}>Loading the quest library…</p>}><QuestLibrary /></Suspense>} />
         </Routes>
       </div>
     </BrowserRouter>
