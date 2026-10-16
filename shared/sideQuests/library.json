@@ -4554,7 +4554,7 @@
     "warm-up",
     "clothes"
    ],
-   "text": "Find a classmate. Say one nice thing about their avatar. Use: \"I like your ... because ...\". Write 2 sentences: what you said and how your classmate answered.",
+   "text": "Find a classmate. Say one nice thing about their avatar. Use: \"I like your ... because ...\". Write 2 sentences: what you say and what your classmate says.",
    "accept": [],
    "teacherNote": "Look for a real reason after 'because' (colour, style, hat). Model a polite reply such as 'Thank you!' for students who stay silent."
   },
@@ -4631,7 +4631,7 @@
    ],
    "text": "Find four classmates with different shirts. Say \"I like your shirt!\" Ask \"What is your favourite colour?\" Write 2 sentences about two answers: \"... likes ...\".",
    "accept": [],
-   "teacherNote": "Check 'likes' with the third person -s. Students can use any classmate name shown above an avatar."
+   "teacherNote": "Check 'likes' with the third person -s. Students can use any name shown above an avatar."
   },
   {
    "id": "sq-kindness-05",
@@ -4679,7 +4679,7 @@
     "teamwork",
     "speaking"
    ],
-   "text": "Stand together in a group of four. Person 1 compliments Person 2's avatar. Person 2 says thanks and compliments Person 3. Continue until everyone gets a compliment. Useful phrases: \"Your ... looks great.\" \"That is a cool ...\". Write 3 sentences: what you heard and what you said.",
+   "text": "Meet three classmates. Person 1 compliments Person 2's avatar. Person 2 says thanks and compliments Person 3. Continue until everyone gets a compliment. Useful phrases: \"Your ... looks great.\" \"That is a cool ...\". Write 3 sentences: what you heard and what you said.",
    "accept": [],
    "teacherNote": "Compliments should be about avatars only. Encourage students to avoid repeating the same adjective."
   },
@@ -4731,7 +4731,7 @@
    ],
    "text": "Ask four classmates: \"What kind thing did someone do for you last week?\" Choose a small, happy thing at school. Reply \"That is lovely!\" Write 3 sentences about their answers, for example: \"One classmate said a friend helped with homework.\"",
    "accept": [],
-   "teacherNote": "Remind students to keep answers light and school-related. Check past simple forms such as helped, shared, gave."
+   "teacherNote": "Remind students to keep answers light and school-related; they may invent an example. Check past simple forms such as helped, shared, gave."
   },
   {
    "id": "sq-kindness-09",
@@ -4760,7 +4760,7 @@
   },
   {
    "id": "sq-kindness-10",
-   "title": "Calm Down Advice",
+   "title": "Helping Hands",
    "theme": "social",
    "category": "Kindness, Compliments & Teamwork",
    "chapter": null,
@@ -4769,19 +4769,19 @@
    "answer": "report",
    "minutes": 7,
    "focus": [
-    "Giving advice",
-    "Should / Why don't you"
+    "Asking for help politely",
+    "Can / Could"
    ],
    "tags": [
-    "advice",
+    "help",
+    "politeness",
     "role-play",
-    "problems",
     "pair",
-    "feelings"
+    "requests"
    ],
-   "text": "Pretend you have a small problem, like \"I am nervous about a test.\" Tell a classmate. They give two pieces of advice. Swap roles with the problem \"I lost my pencil case.\" Useful phrases: \"You should ...\" \"Why don't you ...?\" Write 3 sentences: the problems and the advice.",
+   "text": "Ask a classmate for help with a small pretend job, like carrying boxes to the shop or finding a hat in the park. Useful phrases: \"Can you help me?\" \"Of course! I can ...\" \"Thank you so much!\" Swap roles with a new job. Write 3 sentences: the jobs and who helped.",
    "accept": [],
-   "teacherNote": "Problems are made up and light, so nobody has to share anything personal. Listen for should and Why don't you."
+   "teacherNote": "Listen for polite requests (Can/Could you ...?) and friendly offers. Jobs are invented, so nobody shares anything personal."
   },
   {
    "id": "sq-kindness-11",
@@ -4810,7 +4810,7 @@
   },
   {
    "id": "sq-kindness-12",
-   "title": "Kindness Project",
+   "title": "Kind Action Plan",
    "theme": "social",
    "category": "Kindness, Compliments & Teamwork",
    "chapter": null,
@@ -4820,7 +4820,7 @@
    "minutes": 10,
    "focus": [
     "Making suggestions",
-    "Agreeing and deciding"
+    "Giving reasons"
    ],
    "tags": [
     "kindness",
@@ -4829,9 +4829,9 @@
     "teamwork",
     "suggestions"
    ],
-   "text": "With three classmates, plan a kind surprise for the whole class, for example a thank-you message wall. Each person suggests one idea and gives a reason. Then agree on one. Useful phrases: \"I suggest ... because ...\" \"That would be fun, but ...\" \"Let's go with ...\" Write 4 sentences: the ideas, the reasons and your choice.",
+   "text": "With three classmates, talk about three small situations: a new player stands alone at the fountain, a player loses a mini-game, a player cannot find the cafe. For each one, suggest a kind action and give a reason. Useful phrases: \"We could ... because ...\" \"Why don't we ...?\" \"I agree, so ...\" Write 4 sentences: your best idea for each situation and one thing your group agreed on.",
    "accept": [],
-   "teacherNote": "Check that every student contributed an idea with a reason. You could ask groups to share the winner with the class afterwards."
+   "teacherNote": "Check that everyone suggests something with a reason. Groups can add their own situation if they finish early."
   },
   {
    "id": "sq-kindness-13",
@@ -4979,9 +4979,9 @@
     "conditionals",
     "problem solving"
    ],
-   "text": "Imagine your group project is due tomorrow and one teammate has done nothing. With two or three classmates, discuss what you would do and what might happen with each option: talk to them privately, ask the teacher, do their part, or change the plan. Reach an agreement that is fair and kind. Write a short paragraph: the options, the consequences you discussed, and your final plan.",
+   "text": "Imagine your group project is due tomorrow and one imaginary teammate has done nothing. With two or three classmates, discuss what you would do and what might happen with each option: talk to them privately, ask the teacher, do their part, or change the plan. Reach an agreement that is fair and kind. Write a short paragraph: the options, the consequences you discussed, and your final plan.",
    "accept": [],
-   "teacherNote": "Listen for second and third conditionals. This is an invented situation, so remind students not to name real classmates."
+   "teacherNote": "Listen for second and third conditionals. The situation is invented, so remind students not to name real classmates."
   },
   {
    "id": "sq-kindness-19",
@@ -5010,7 +5010,7 @@
   },
   {
    "id": "sq-kindness-20",
-   "title": "Thank-You Speech",
+   "title": "Speech Workshop",
    "theme": "social",
    "category": "Kindness, Compliments & Teamwork",
    "chapter": null,
@@ -5029,7 +5029,7 @@
     "pair",
     "writing"
    ],
-   "text": "Plan a short thank-you speech of about five sentences for a made-up person who helped you in a tough moment, for example a coach who believed in you. Send it to a classmate in the chat. They give one compliment and one suggestion to make it warmer. Swap roles. Write a short paragraph: summarise your speech, the feedback you got, and how you would improve it.",
+   "text": "Plan a short thank-you speech of about five sentences for an invented person who helped you in a tough moment, for example a coach who believed in you. Send it to a classmate in the chat. They give one compliment and one suggestion to make it warmer. Swap roles. Write a short paragraph: summarise your speech, the feedback you got, and how you would improve it.",
    "accept": [],
    "teacherNote": "The helper must be invented to avoid personal stories. Look for varied gratitude vocabulary and specific, kind feedback."
   },
@@ -5561,7 +5561,7 @@
    "category": "Music, Films, Series & Games",
    "chapter": null,
    "level": "A1",
-   "format": "class",
+   "format": "group",
    "answer": "report",
    "minutes": 5,
    "focus": [
@@ -5571,13 +5571,12 @@
    "tags": [
     "games",
     "survey",
-    "class",
-    "mingle",
+    "group",
     "warm-up"
    ],
    "text": "Ask 3 classmates: 'Do you play video games?' Then write 2 sentences: '... classmates play games. My favourite game is ...'.",
    "accept": [],
-   "teacherNote": "Students practise 'Do you...?' and short answers. Students who do not play games can write about board games or sports."
+   "teacherNote": "Students practise 'Do you...?' and short answers. Students who do not play video games can write about board games or sports."
   },
   {
    "id": "sq-media-03",
@@ -5590,18 +5589,19 @@
    "answer": "report",
    "minutes": 4,
    "focus": [
-    "Asking questions",
-    "Possessives"
+    "Do you like...?",
+    "Likes and dislikes"
    ],
    "tags": [
     "films",
+    "genres",
     "favourites",
     "pair",
     "warm-up"
    ],
-   "text": "Ask a classmate: 'What is your favourite film?' Tell your favourite film too. Write 2 sentences: 'My film is ... His/Her film is ...'.",
+   "text": "Ask a classmate: 'Do you like comedy films? Do you like cartoons?' Then write 2 sentences: 'We both like ...' or 'I like ... but my classmate likes ...'.",
    "accept": [],
-   "teacherNote": "Check his/her and 'is'. Cartoons and animated films are fine."
+   "teacherNote": "Check 'like' versus 'likes' and short answers (Yes, I do / No, I don't). Students can swap in other genres such as action or horror-lite."
   },
   {
    "id": "sq-media-04",
@@ -5630,28 +5630,28 @@
   },
   {
    "id": "sq-media-05",
-   "title": "My Series",
+   "title": "Series Match",
    "theme": "social",
    "category": "Music, Films, Series & Games",
    "chapter": null,
    "level": "A1",
-   "format": "solo",
+   "format": "class",
    "answer": "report",
-   "minutes": 4,
+   "minutes": 5,
    "focus": [
-    "Present simple",
-    "Giving reasons with because"
+    "Yes/no questions",
+    "Present simple"
    ],
    "tags": [
     "series",
     "tv",
-    "favourites",
-    "solo",
+    "survey",
+    "class",
     "warm-up"
    ],
-   "text": "Think of a TV series you like. Write 2 sentences: 'My series is ... I like it because ...'. Then tell a classmate in the chat.",
+   "text": "Name a TV series you like. Ask 4 classmates: 'Do you like ...?' Write 2 sentences: 'My series is ... ' and '... classmates like it.'",
    "accept": [],
-   "teacherNote": "A solo warm-up with an optional social step. Check that students give one reason."
+   "teacherNote": "Students find who shares their taste. If nobody likes it, '0 classmates like it' is a fine result; encourage a second question about another series."
   },
   {
    "id": "sq-media-06",
@@ -5660,7 +5660,7 @@
    "category": "Music, Films, Series & Games",
    "chapter": null,
    "level": "A2",
-   "format": "solo",
+   "format": "pair",
    "answer": "text",
    "minutes": 4,
    "focus": [
@@ -5672,7 +5672,7 @@
     "riddle",
     "puzzle",
     "warm-up",
-    "solo"
+    "pair"
    ],
    "text": "Solve the riddle. I am yellow. I live in a video game. I eat dots and I run away from four ghosts. Who am I? Ask a classmate to guess too. Then type my name.",
    "accept": [
@@ -5859,28 +5859,28 @@
   },
   {
    "id": "sq-media-14",
-   "title": "Best Game Ever",
+   "title": "Rules Explained",
    "theme": "social",
    "category": "Music, Films, Series & Games",
    "chapter": null,
    "level": "B1",
-   "format": "class",
+   "format": "pair",
    "answer": "report",
-   "minutes": 11,
+   "minutes": 10,
    "focus": [
-    "Follow-up questions",
-    "Comparing answers"
+    "Giving instructions",
+    "Asking clarifying questions"
    ],
    "tags": [
     "games",
-    "survey",
-    "class",
-    "compare",
-    "interview"
+    "rules",
+    "explaining",
+    "sequencing",
+    "pair"
    ],
-   "text": "Find the best video game in your class. Ask 4 classmates: 'What is the best game you have played, and why?' Ask one follow-up question to each person. Useful phrases: 'What do you like most about it?', 'Is it better than ...?'. Write 3-5 sentences comparing their answers.",
+   "text": "Explain the rules of a game you know (video game, board game or sport) to a classmate in the chat. Your classmate asks 3 questions to check. Then swap roles. Useful phrases: 'First, you ...', 'If you ..., you ...', 'Do you mean ...?'. Write 3-5 sentences about the game your partner explained.",
    "accept": [],
-   "teacherNote": "Look for real follow-up questions, not just repeated ones. Players of board games, sports or mobile games are welcome."
+   "teacherNote": "Look for sequencers (first, then, after that), simple conditionals and real clarifying questions. Any game is fine, including sports or card games."
   },
   {
    "id": "sq-media-15",
@@ -6003,7 +6003,7 @@
     "music",
     "group"
    ],
-   "text": "Imagine that your school week is a TV series. Ask 2 or 3 classmates what genre it would be, which song would be its theme tune, and what the title of this week's episode would be. Explain your own answers with reasons, and ask each person why they chose theirs. Write a short paragraph describing the series that suits your group best.",
+   "text": "Imagine that your school week were a TV series. Ask 2 or 3 classmates what genre it would be, which song would be its theme tune, and what the title of this week's episode would be. Explain your own answers with reasons, and ask each person why they chose theirs. Write a short paragraph describing the series that suits your group best.",
    "accept": [],
    "teacherNote": "Keep the humour kind and about situations, not people. Look for 'would' and justified creative choices."
   },
@@ -10157,7 +10157,7 @@
     "spelling",
     "warm-up"
    ],
-   "text": "Unscramble the letters N-T-A-I-N-F-O-U to find a place in Pixel Plaza. Walk there and write in nearby chat: \"I am at the ...!\" Then type the place in your journal.",
+   "text": "Unscramble N-T-A-I-N-F-O-U to find a place in Pixel Plaza. Walk there and write in nearby chat: \"I am at the ...!\" Then type the place in your journal.",
    "accept": [
     "fountain",
     "fountains"
@@ -10212,7 +10212,7 @@
     "adjectives",
     "warm-up"
    ],
-   "text": "Find the opposites of up, young and bad. Their first letters, in order, spell an animal. Ask a classmate: \"What is the opposite of ...?\" Type the animal in your journal.",
+   "text": "Find the opposites of up, young and bad. Their first letters spell an animal. Ask a classmate: \"What is the opposite of ...?\" Type the animal in your journal.",
    "accept": [
     "dog",
     "dogs"
@@ -10226,7 +10226,7 @@
    "category": "Word Games & Vocabulary Puzzles",
    "chapter": null,
    "level": "A1",
-   "format": "solo",
+   "format": "pair",
    "answer": "text",
    "minutes": 4,
    "focus": [
@@ -10239,7 +10239,7 @@
     "puzzle",
     "warm-up"
    ],
-   "text": "Find one word that goes after foot, basket and snow to make three new words. Write in nearby chat: \"My words are ...\" Type the magic word in your journal.",
+   "text": "Find one word that goes after foot, basket and snow to make three new words. Ask a classmate: \"What is your word?\" Type the magic word in your journal.",
    "accept": [
     "ball",
     "balls",
@@ -10271,7 +10271,7 @@
     "word list",
     "warm-up"
    ],
-   "text": "Ask four classmates: \"Can you name a fruit?\" Every fruit must be different! Then write 1-2 sentences in your journal: \"My class fruit salad has ..., ... and ...\"",
+   "text": "Ask four classmates: \"Can you name a fruit?\" Every fruit must be different! Then write 1-2 sentences in your journal: \"My class fruit salad has ..., ..., ... and ...\"",
    "accept": [],
    "teacherNote": "Check the spelling of the fruit names and that each one is different. Reuse the quest by changing the category to vegetables, animals or clothes."
   },
@@ -10302,62 +10302,53 @@
   },
   {
    "id": "sq-word-games-07",
-   "title": "Word Glue",
+   "title": "Rhyme Time",
    "theme": "puzzle",
    "category": "Word Games & Vocabulary Puzzles",
    "chapter": null,
    "level": "A2",
    "format": "pair",
-   "answer": "text",
-   "minutes": 5,
+   "answer": "report",
+   "minutes": 6,
    "focus": [
-    "Compound words",
-    "Vocabulary: weather"
+    "Rhyming words",
+    "Pronunciation"
    ],
    "tags": [
-    "compound words",
-    "weather",
-    "puzzle",
+    "rhyme",
+    "pronunciation",
     "pair",
-    "warm-up"
+    "creative",
+    "vocabulary"
    ],
-   "text": "With a classmate, find one word that goes before bow, coat and drop to make three new words. Useful phrases: \"What about ...?\", \"I don't think so.\", \"Yes, that works!\" Then make a puzzle like this one for your partner. Type the secret word in your journal.",
-   "accept": [
-    "rain",
-    "rains",
-    "rainbow",
-    "raincoat",
-    "raindrop"
-   ],
-   "teacherNote": "Solution: rain (rainbow, raincoat, raindrop); the full compound words are also accepted. A good partner puzzle has only one answer, e.g. sun (sunglasses, sunflower, sunshine)."
+   "text": "Find three pairs of rhyming words with a classmate. Start with: cat, light, bear. Example: cat - hat. Useful phrases: \"Does it rhyme with ...?\", \"I know one!\" Write 3 funny sentences, one for each pair.",
+   "accept": [],
+   "teacherNote": "Possible pairs: cat/hat, light/night, bear/chair. Accept rhymes by sound, not spelling, and praise funny sentences; ask students to read their rhymes aloud in class."
   },
   {
    "id": "sq-word-games-08",
-   "title": "The Odd Verb Out",
+   "title": "Past Tense Tennis",
    "theme": "puzzle",
    "category": "Word Games & Vocabulary Puzzles",
    "chapter": null,
    "level": "A2",
-   "format": "solo",
-   "answer": "text",
-   "minutes": 4,
+   "format": "pair",
+   "answer": "report",
+   "minutes": 6,
    "focus": [
     "Past simple",
     "Irregular verbs"
    ],
    "tags": [
-    "odd one out",
-    "verbs",
     "past simple",
+    "verbs",
     "grammar",
-    "warm-up"
+    "game",
+    "pair"
    ],
-   "text": "Look at these past simple verbs: went, saw, played, ate, took. One is different. Which one? Clue: think about how we make the past. Then post the puzzle in nearby chat and see if a classmate can solve it. Useful phrase: \"Can you find the odd one?\" Type the odd verb in your journal.",
-   "accept": [
-    "played",
-    "play"
-   ],
-   "teacherNote": "Solution: played, the only regular (-ed) verb; went, saw, ate and took are irregular. Fast finishers can write the opposite puzzle: one irregular verb among regular ones."
+   "text": "Play past tense tennis with a classmate in nearby chat. You write a verb, like \"go\". Your partner writes the past form, \"went\", and a new verb for you. Keep going! Useful phrases: \"Is that right?\", \"Good one!\" Write 2-3 sentences about yesterday with past verbs from your game.",
+   "accept": [],
+   "teacherNote": "Check the past forms in the chat, especially irregular verbs (went, saw, ate, took). Make it harder by banning regular verbs or setting a 10-second limit."
   },
   {
    "id": "sq-word-games-09",
@@ -10380,7 +10371,7 @@
     "spelling",
     "mingle"
    ],
-   "text": "One animal is hiding in all these words: VA _ _ _ ION, EDU _ _ _ ION, LO _ _ _ ION. Find it! Then ask four classmates in nearby chat: \"Which animal is hiding in vacation, education and location?\" Who answers first? Type the animal in your journal.",
+   "text": "Write the same three letters in each gap: VA___ION, EDU___ION, LO___ION. The three letters spell an animal! Ask four classmates in nearby chat: \"Do you know the animal?\" Type it in your journal.",
    "accept": [
     "cat",
     "cats"
@@ -10408,12 +10399,12 @@
     "whisper",
     "warm-up"
    ],
-   "text": "Change one letter at a time to go from SHIP to STOP: SHIP, ?, STOP. The middle word is a place in Pixel Plaza. Then write your own ladder (like HOT, ?, CAT) and whisper it to a classmate. Useful phrases: \"Change one letter.\", \"Is that a word?\" Type the middle word in your journal.",
+   "text": "Change one letter at a time to go from SHIP to STOP: SHIP, ?, STOP. The middle word is a place in Pixel Plaza. Then make your own ladder (like HOT, ?, CAT) and whisper it to a classmate. Useful phrase: \"Is that a word?\" Type the middle word in your journal.",
    "accept": [
     "shop",
     "shops"
    ],
-   "teacherNote": "Solution: SHOP (SHIP, SHOP, STOP); the other route, STIP, is not a word, so the answer is unique. Check that students' own ladders change only one letter at each step."
+   "teacherNote": "Solution: SHOP (SHIP, SHOP, STOP); the only other route, STIP, is not a word, so the answer is unique. Check that students' own ladders change only one letter at each step."
   },
   {
    "id": "sq-word-games-11",
@@ -10433,7 +10424,7 @@
     "opposites",
     "prefixes",
     "adjectives",
-    "odd one out",
+    "vocabulary",
     "pair"
    ],
    "text": "Make the opposite of each adjective by adding a prefix: happy, kind, polite, friendly, fair. One word needs a different prefix from the others. Which one? Compare your answer with a classmate and explain your reasons. Useful phrases: \"I think the odd one is ... because ...\", \"Do you agree?\", \"What about ...?\" Type the odd adjective in your journal.",
@@ -10455,7 +10446,7 @@
    "minutes": 6,
    "focus": [
     "Comparatives and superlatives",
-    "Spelling"
+    "Giving reasons"
    ],
    "tags": [
     "anagram",
@@ -10547,7 +10538,7 @@
     "objects",
     "group"
    ],
-   "text": "Play \"Mystery Word\" with two or three classmates. One player secretly chooses an object you can find in Pixel Plaza, like something in the cafe or the park. The others ask yes/no questions in nearby chat to guess it, with a maximum of 15 questions. Take turns. Useful phrases: \"Is it bigger than ...?\", \"Can you eat it?\", \"Is it used for ...?\" Write 3-5 sentences: which words you guessed, how many questions it took, and which question was the most helpful.",
+   "text": "Play \"Mystery Word\" with two or three classmates. One player secretly chooses an object from Pixel Plaza, like something in the cafe or the park. The others ask yes/no questions in nearby chat to guess it, with a maximum of 15 questions. Take turns. Useful phrases: \"Is it bigger than ...?\", \"Can you eat it?\", \"Is it used for ...?\" Write 3-5 sentences: which words you guessed, how many questions it took, and which question helped most.",
    "accept": [],
    "teacherNote": "Look for correctly formed yes/no questions and comparatives in the chat. Make it harder with a 10-question limit or a ban on colour questions."
   },
@@ -10599,7 +10590,7 @@
     "whisper",
     "pair"
    ],
-   "text": "Find the one small word that completes all three sentences: \"We've run ___ of milk, so I'll buy some at the shop.\" \"Can you help me work ___ the answer to this puzzle?\" \"I was shocked when I found ___ the truth.\" Whisper a classmate to compare answers. Then each of you writes one more sentence with a phrasal verb using the same word; decide together which sentence sounds more natural and why. Useful phrases: \"I'd say it's ... because ...\", \"Wouldn't ... sound more natural?\" Type the missing word in your journal.",
+   "text": "Find the one small word that completes all three sentences: \"We've run ___ of milk, so I'll buy some at the shop.\" \"Can you help me work ___ the answer to this puzzle?\" \"I was shocked when I found ___ the truth.\" Whisper to a classmate to compare answers. Then each of you writes one more sentence with a phrasal verb using the same word; decide together which sentence sounds more natural and why. Useful phrases: \"I'd say it's ... because ...\", \"Wouldn't ... sound more natural?\" Type the missing word in your journal.",
    "accept": [
     "out"
    ],
@@ -10612,7 +10603,7 @@
    "category": "Word Games & Vocabulary Puzzles",
    "chapter": null,
    "level": "B2",
-   "format": "solo",
+   "format": "pair",
    "answer": "text",
    "minutes": 10,
    "focus": [
@@ -10626,7 +10617,7 @@
     "seasons",
     "creative"
    ],
-   "text": "Find one English word with all three of these meanings: a season of the year; a place where water comes up naturally out of the ground; and a metal coil that jumps back when you press it. When you have it, invent a similar three-meaning clue for another word with several meanings (for example \"light\", \"match\" or \"bat\") and post it in nearby chat. If a classmate guesses it, ask them which meaning they found easiest and why. Useful phrases: \"Here's a tricky one for you...\", \"Which meaning gave it away?\" Type the word with three meanings in your journal.",
+   "text": "Find one English word with all three of these meanings: a season of the year; a place where water comes up naturally out of the ground; and a metal coil that jumps back when you press it. When you have it, invent a similar three-meaning clue for another word with several meanings (for example \"light\", \"match\" or \"bat\") and whisper it to a classmate. If they guess it, ask which meaning they found easiest and why. Useful phrases: \"Here's a tricky one for you...\", \"Which meaning gave it away?\" Type the word with three meanings in your journal.",
    "accept": [
     "spring",
     "springs"
@@ -10679,7 +10670,7 @@
     "mingle",
     "word building"
    ],
-   "text": "Invent a new compound word for something in Pixel Plaza that has no name yet, for example \"lift-wait\" (the feeling of waiting ages for the hotel lift) or \"fountain-walker\" (someone who walks round the fountain all day). Write it with a hyphen. Explain your word to at least four classmates in nearby chat, listen to theirs and vote for the best one. Useful phrases: \"It would be perfect for ...\", \"Mine is catchier because ...\", \"Yours is clever, but ...\" Write a short paragraph: your word and its meaning, the best word you heard, and why it got your vote.",
+   "text": "Invent a new compound word for something in Pixel Plaza that has no name yet, for example \"lift-wait\" (the feeling of waiting ages for the hotel lift) or \"fountain-walker\" (someone who walks round the fountain all day). Write it with a hyphen and keep it kind: never name a classmate. Explain your word to at least four classmates in nearby chat, listen to theirs and vote for the best one. Useful phrases: \"It would be perfect for ...\", \"Mine is catchier because ...\", \"Yours is clever, but ...\" Write a short paragraph: your word and its meaning, the best word you heard, and why it got your vote.",
    "accept": [],
    "teacherNote": "Check that invented words are kind and not aimed at real classmates. If the chat filter blocks a new word, students can type the two parts separately (lift wait)."
   },
