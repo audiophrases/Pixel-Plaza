@@ -34,6 +34,7 @@ const DEFAULT_VISION = 450; // map pixels a student sees around themselves in a 
 const MAX_VISION = 2000;
 const REROLL_GAP_MS = 300; // between asks for another name
 const WRONG_ANSWER_WAIT_MS = 3000; // before a student can try a chapter question again
+const MOVE_BATCH_MS = 150; // positions go out together this often: one message a student, not one a step
 const CHECK_GAP_MS = 800; // grammar hints cost money: no more than one a student can read
 // Nearby chat reaches students within this many map pixels of where the sender stood.
 export const HEARING_RANGE = 350;
@@ -109,6 +110,8 @@ export class PlazaRoom extends DurableObject<Env> {
     private assistance: StudentAssistance;
     private interviewSends = new Set<string>();
     private liveMissions: LiveMissions;
+    private moves = new Map<string, [number, number]>(); // player id to latest position, not yet passed on
+    private movesTimer: ReturnType<typeof setTimeout> | null = null;
 
     constructor(ctx: DurableObjectState, env: Env) {
         super(ctx, env);
@@ -643,7 +646,7 @@ export class PlazaRoom extends DurableObject<Env> {
             seat.y = position.y;
             this.discover(seat);
             ws.serializeAttachment(seat);
-            this.broadcast({ t: 'move', id: seat.id, ...position }, ws);
+            this.queueMove(seat.id, position.x, position.y);
         } else if (data?.t === 'warmup-answer' && typeof data.text === 'string') {
             this.warmupAnswer(ws, seat, data.text, typeof data.attemptId === 'string' ? data.attemptId : undefined);
         } else if (data?.t === 'answer' && typeof data.objective === 'string' && typeof data.text === 'string') {
@@ -1384,6 +1387,19 @@ export class PlazaRoom extends DurableObject<Env> {
         }
     }
 
+    // Walking is most of the traffic, and a phone hotspot handles many small messages badly. So
+    // instead of each step going to everyone at once, everyone gets one message every
+    // MOVE_BATCH_MS with the latest position of whoever moved. The mover's own entry is ignored.
+    private queueMove(id: string, x: number, y: number): void {
+        this.moves.set(id, [x, y]);
+        this.movesTimer ??= setTimeout(() => {
+            this.movesTimer = null;
+            const moves = [...this.moves].map(([id, [x, y]]) => [id, x, y]);
+            this.moves.clear();
+            if (moves.length) this.broadcast({ t: 'moves', moves });
+        }, MOVE_BATCH_MS);
+    }
+
     private notify(studentKey: string, level: 'info' | 'warning', text: string): void {
         for (const ws of this.ctx.getWebSockets(studentKey)) {
             try { ws.send(JSON.stringify({ t: 'notice', level, text })); } catch { /* closing */ }
@@ -1403,6 +1419,7 @@ export class PlazaRoom extends DurableObject<Env> {
         this.sql.exec('UPDATE students SET last_seen = ? WHERE student_key = ?', Date.now(), seat.studentKey);
         this.sql.exec(`INSERT INTO positions (game_id, student_key, x, y) VALUES (?, ?, ?, ?)
             ON CONFLICT (game_id, student_key) DO UPDATE SET x = excluded.x, y = excluded.y`, seat.game, seat.studentKey, seat.x, seat.y);
+        this.moves.delete(seat.id);
         this.broadcast({ t: 'leave', id: seat.id }, ws);
         if (announce) this.systemChat(`${seat.name} left the Plaza.`, ws);
         this.refreshBoard(seat.game);

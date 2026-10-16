@@ -3,8 +3,11 @@ import { AvatarFigure, FIGURE_BODY, FIGURE_TOP } from '../AvatarFigure';
 import { ART, MAP_SIZE, SCALE, plazaMap, worldRects, worldZones } from '../../../shared/plazaMap';
 import type { PlazaConnection, PlazaEvent, PlazaPlayer } from '../../plaza';
 
-// Position updates go out at most this often; remote avatars glide between them.
-const SEND_EVERY_MS = 100;
+// Position updates go out at most this often (the server passes them on in batches as
+// often). Remote avatars glide a little longer than that, so an update that arrives late
+// on a busy network keeps them walking instead of stopping and starting.
+const SEND_EVERY_MS = 150;
+const GLIDE_MS = 225;
 
 export default class LobbyScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -154,7 +157,7 @@ export default class LobbyScene extends Phaser.Scene {
       const container = this.playerEntities[event.id];
       if (!container) return;
       this.tweens.killTweensOf(container);
-      this.tweens.add({ targets: container, x: event.x, y: event.y, duration: SEND_EVERY_MS });
+      this.tweens.add({ targets: container, x: event.x, y: event.y, duration: GLIDE_MS });
     } else if (event.t === 'emote') {
       const container = this.playerEntities[event.id];
       if (container) this.showEmote(container, event.emote);

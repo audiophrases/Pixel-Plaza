@@ -111,7 +111,10 @@ function openSocket(base, ticket) {
             waiter.resolve(inbox.splice(index, 1)[0]);
         }
     };
-    ws.onmessage = event => { if (event.data !== 'pong') { const message = JSON.parse(event.data); if (message.t === 'quest') state.quest = message.quest; inbox.push(message); deliver(); } };
+    ws.onmessage = event => { if (event.data !== 'pong') { const message = JSON.parse(event.data); if (message.t === 'quest') state.quest = message.quest;
+        // Batched positions are checked as the single moves a student sees.
+        if (message.t === 'moves') inbox.push(...message.moves.map(([id, x, y]) => ({ t: 'move', id, x, y }))); else inbox.push(message);
+        deliver(); } };
     const closed = new Promise(resolve => { ws.onclose = event => resolve(event.code); });
     return {
         ws, closed, inbox, state,
@@ -1743,11 +1746,10 @@ test('movement: no walking through walls, no teleporting, but real walking is be
         const { x, y } = alex.me;
         const snapBack = () => alex.next(message => message.t === 'snap', 'put back');
 
-        // A normal few steps are passed on to everyone.
+        // A normal step. Moves reach others in batches, so the refused moves below go
+        // straight after it, before the batch, to be judged against how little time has passed.
         await pause(300);
         alex.send({ t: 'move', x: x + 20, y });
-        const seen = await sam.next(message => message.t === 'move' && message.id === alex.welcome.id, 'a step');
-        assert.deepEqual([seen.x, seen.y], [x + 20, y]);
 
         // Stepping into the fountain is refused, and Alex is told where they really are.
         alex.send({ t: 'move', x: 590, y: 1280 }); // the fountain basin: far, and a wall
@@ -1760,6 +1762,10 @@ test('movement: no walking through walls, no teleporting, but real walking is be
         // And a short hop into the top of the fountain.
         alex.send({ t: 'move', x: x + 20, y: y + 100 });
         await snapBack();
+        // The step is passed on to everyone; the refused moves are not.
+        const seen = await sam.next(message => message.t === 'move' && message.id === alex.welcome.id, 'a step');
+        assert.deepEqual([seen.x, seen.y], [x + 20, y]);
+        await pause(300);
         assert.equal(sam.inbox.filter(message => message.t === 'move' && message.id === alex.welcome.id && message.y !== y).length, 0, 'refused moves never reach anyone');
 
         // The same distance walked over time is fine: a long walk, given the seconds it takes.

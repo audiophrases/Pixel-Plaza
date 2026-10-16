@@ -291,6 +291,11 @@ export class PlazaConnection {
       this.hints.get(message.id)?.(message.ok ? { ok: true } : { ok: false, corrected: String(message.corrected), why: String(message.why) });
       return;
     }
+    if (message.t === 'moves') {
+      // Everyone who walked since the last batch, passed on as single moves.
+      for (const [id, x, y] of message.moves as [string, number, number][]) this.receive({ t: 'move', id, x, y });
+      return;
+    }
     if (message.t === 'join') this.players.set(message.player.id, message.player);
     if (message.t === 'vision') this.vision = message.radius;
     if (message.t === 'rename') { const player = this.players.get(message.id); if (player) player.name = message.name; }

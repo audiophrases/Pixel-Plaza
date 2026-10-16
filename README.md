@@ -165,7 +165,7 @@ Each hint is one small API call (one message, a few hundred tokens), and a stude
 
 ## Costs
 
-The Workers free plan is enough for a class. The heaviest case, 30 students all walking non-stop for an hour, is about 54,000 of the 100,000 Durable Object requests the free plan allows each day. Position updates are capped at 10 a second per student (`SEND_EVERY_MS` in `src/game/scenes/LobbyScene.ts`), and outgoing messages are free.
+The Workers free plan is enough for a class. The heaviest case, 30 students all walking non-stop for an hour, is about 36,000 of the 100,000 Durable Object requests the free plan allows each day. Position updates are capped at about 7 a second per student (`SEND_EVERY_MS` in `src/game/scenes/LobbyScene.ts`), and the server passes them on to everyone as one batched message every 150 ms (`MOVE_BATCH_MS` in `worker/plaza.ts`), which keeps a phone hotspot from drowning in small messages, and outgoing messages are free.
 
 ## Develop locally
 
