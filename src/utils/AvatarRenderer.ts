@@ -18,13 +18,29 @@ declare global {
   }
 }
 
+// Some of PinPlay's artwork closes one group more than it opens (most animal heads end in
+// an extra </g>). A page forgives that, but the map loads each body piece as an image, which
+// must be exact XML: one stray tag and the piece never loads, leaving only a shadow.
+export function balanced(svg: string): string {
+  let open = 0;
+  const kept = svg.replace(/<g[\s>]|<\/g>/g, tag => {
+    if (tag !== '</g>') { open += 1; return tag; }
+    if (open === 0) return '';
+    open -= 1;
+    return tag;
+  });
+  return kept + '</g>'.repeat(open);
+}
+
+const cleanPart = (item: any) => Object.fromEntries(Object.entries(item).map(([key, value]) => [key, typeof value === 'string' ? balanced(value) : value])) as any;
+
 export function renderAvatarSvg(avatar: Partial<AvatarConfig> = {}): string {
   const data = window.CUP_AVATAR;
   if (!data) return ''; // Loading fallback
 
   const part = (key: string) => {
     if (!data.parts[key]) return { svg: '', back: '', front: '' };
-    return data.parts[key][(avatar as any)[key] || 0] || data.parts[key][0];
+    return cleanPart(data.parts[key][(avatar as any)[key] || 0] || data.parts[key][0]);
   };
   
   const skinColor = data.skins[avatar.skin || 0] || data.skins[0];
@@ -83,7 +99,7 @@ export function renderFigureParts(avatar: Partial<AvatarConfig> = {}): Record<Fi
 
   const part = (key: string) => {
     if (!data.parts[key]) return { svg: '', back: '', front: '' };
-    return data.parts[key][(avatar as any)[key] || 0] || data.parts[key][0];
+    return cleanPart(data.parts[key][(avatar as any)[key] || 0] || data.parts[key][0]);
   };
   const skin: string = data.skins[avatar.skin || 0] || data.skins[0];
   const hairColor: string = data.hairColors[avatar.hairColor || 0] || data.hairColors[0];

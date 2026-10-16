@@ -84,12 +84,20 @@ export class AvatarFigure {
         this.loaded += 1;
         if (this.loaded === this.expected) this.ready(parts);
       };
+      // A piece that cannot be drawn is left out, rather than holding back the whole figure.
+      img.onerror = () => {
+        if (this.destroyed) return;
+        console.warn(`Avatar piece ${name} could not be drawn`);
+        this.loaded += 1;
+        if (this.loaded === this.expected) this.ready(parts);
+      };
     }
   }
 
   private ready(parts: NonNullable<ReturnType<typeof renderFigureParts>>) {
     const origin = (sprite: Phaser.GameObjects.Sprite, name: FigurePartName) => {
-      sprite.setTexture(this.textures.get(name)!).setOrigin(parts[name].ox, parts[name].oy).setVisible(true);
+      sprite.setOrigin(parts[name].ox, parts[name].oy);
+      this.show(sprite, name);
     };
     origin(this.head, 'headDown');
     origin(this.torso, 'torsoFront');
@@ -165,9 +173,9 @@ export class AvatarFigure {
   // Facing changes which pictures show and where the limbs hang.
   private dress(facing: Facing, side: boolean) {
     this.shownFacing = facing;
-    const tex = (name: FigurePartName) => this.textures.get(name)!;
-    this.head.setTexture(tex(facing === 'up' ? 'headUp' : facing === 'left' ? 'headLeft' : facing === 'right' ? 'headRight' : 'headDown'));
-    this.torso.setTexture(tex(facing === 'up' ? 'torsoBack' : 'torsoFront')).setScale(side ? 0.8 : 1, 1);
+    this.show(this.head, facing === 'up' ? 'headUp' : facing === 'left' ? 'headLeft' : facing === 'right' ? 'headRight' : 'headDown');
+    this.show(this.torso, facing === 'up' ? 'torsoBack' : 'torsoFront');
+    this.torso.setScale(side ? 0.8 : 1, 1);
 
     const armX = side ? 0 : 25 * S;
     const legX = side ? 1.5 : 9 * S;
@@ -180,6 +188,13 @@ export class AvatarFigure {
       ? [this.shadow, this.arms[0], this.legs[0], this.legs[1], this.torso, this.arms[1], this.head]
       : [this.shadow, this.legs[0], this.legs[1], this.torso, this.arms[0], this.arms[1], this.head];
     order.forEach((part, index) => this.container.moveTo(part, index));
+  }
+
+  // A piece whose picture did not load stays hidden.
+  private show(sprite: Phaser.GameObjects.Sprite, name: FigurePartName) {
+    const key = this.textures.get(name);
+    if (key) sprite.setTexture(key).setVisible(true);
+    else sprite.setVisible(false);
   }
 
   destroy() {
