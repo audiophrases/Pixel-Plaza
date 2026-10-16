@@ -1306,13 +1306,18 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
         await sam.next(m => m.t === 'chat' && m.text === 'Good morning everyone', 'heard at once');
         assert.equal((await entries()).find(e => e.text === 'Good morning everyone').status, 'approved');
 
-        // ...but not what OpenAI could not check, nor a whisper.
-        assert.match((await send('outage again')).text, /approval/);
+        // A cleared whisper posts at once too, to its one reader...
         await pause(1600);
         alex.send({ t: 'chat', text: 'Psst, a whisper', to: sam.welcome.id });
-        assert.match((await alex.next(m => m.t === 'notice', 'whisper waits')).text, /approval/);
+        const whispered = await sam.next(m => m.t === 'chat' && m.text === 'Psst, a whisper', 'whisper at once');
+        assert.deepEqual([whispered.whisper, whispered.to], [true, 'Sam']);
+        assert.equal((await entries()).find(e => e.text === 'Psst, a whisper').status, 'approved');
+
+        // ...but not what OpenAI could not check.
+        await pause(1600);
+        assert.match((await send('outage again')).text, /approval/);
         const waiting = (await entries()).filter(e => e.status === 'pending').map(e => e.text).sort();
-        assert.deepEqual(waiting, ['Psst, a whisper', 'outage again']);
+        assert.deepEqual(waiting, ['outage again']);
 
         // The teacher can take a posted message down; it leaves every screen.
         await api(base, '/api/teacher/review', { session, body: { id: live.id, approve: false } });

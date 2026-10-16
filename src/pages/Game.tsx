@@ -85,7 +85,13 @@ export default function Game() {
   const keptRun = useRef(0); // hints in a row the student turned down
   const chatField = useRef<HTMLInputElement>(null);
   const [spelling, setSpelling] = useState<Misspelling[]>([]); // words that stopped the last message
-  const [whisperTo, setWhisperTo] = useState(''); // a classmate's id; empty means nearby chat
+  // Who a message is for: 'auto' whispers to the nearest classmate (the default), a classmate's id whispers to them,
+  // 'teacher' is private help, and '' is everyone nearby, sent only when the student chooses it.
+  const [target, setTarget] = useState('auto');
+  const [nearest, setNearest] = useState<{ id: string; name: string } | null>(null);
+  const whisperTo = target === 'auto' ? nearest?.id ?? '' : target;
+  const draft = useRef(''); // the nearest classmate is not changed while a message is being written
+  useEffect(() => { draft.current = chatInput; }, [chatInput]);
   const [classmates, setClassmates] = useState<{ id: string; name: string }[]>([]);
   const [connection, setConnection] = useState<PlazaConnection | null>(null);
   const [status, setStatus] = useState<PlazaStatus>({ state: 'connecting' });
@@ -159,6 +165,18 @@ export default function Game() {
     audioRef.current = audio;
     const unhear = audio.subscribe(setSound);
     plazaRef.current = plaza;
+    const findNearest = () => {
+      const me = plaza.players.get(plaza.selfId);
+      if (draft.current && me) return;
+      let best: { id: string; name: string } | null = null;
+      let bestDistance = Infinity;
+      for (const player of me ? plaza.players.values() : []) {
+        const distance = Math.hypot(player.x - me!.x, player.y - me!.y);
+        if (player.id !== me!.id && distance < bestDistance) { best = { id: player.id, name: player.name }; bestDistance = distance; }
+      }
+      setNearest(current => current?.id === best?.id && current?.name === best?.name ? current : best);
+    };
+    const nearestTimer = window.setInterval(findNearest, 1000);
     const say = (message: ChatMessage) => setMessages(prev => message.id && prev.some(item => item.id === message.id) ? prev : [...prev, message]);
     const unsubscribe = plaza.subscribe(event => {
       if (event.t === 'roster' || event.t === 'join' || event.t === 'leave' || event.t === 'rename') {
@@ -166,7 +184,8 @@ export default function Game() {
         if (me) setMyName(me.name);
         const others = [...plaza.players.values()].filter(player => player.id !== plaza.selfId);
         setClassmates(others.map(({ id, name }) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)));
-        if (event.t === 'leave') setWhisperTo(current => (current === event.id ? '' : current));
+        if (event.t === 'leave') setTarget(current => (current === event.id ? 'auto' : current));
+        findNearest();
       }
       // What became of the message being sent. A refusal gives the draft back, with the reason beside it.
       const settled = (event.t === 'notice' || event.t === 'result') && !!event.cid && event.cid === pending.current?.cid;
@@ -226,6 +245,7 @@ export default function Game() {
     });
 
     return () => {
+      window.clearInterval(nearestTimer);
       unsubscribe();
       unwatch();
       unhear();
@@ -278,6 +298,7 @@ export default function Game() {
     e.preventDefault();
     const plaza = plazaRef.current;
     if (!chatInput.trim() || !plaza || checking || sending || nudge) return;
+    if (target === 'auto' && !nearest) { setSendError('Nobody else is in the Plaza yet. Choose "Nearby" or your teacher.'); return; }
     const text = chatInput;
     const attemptId = plaza.recordAttempt(text, whisperTo || undefined);
     submissionAttemptId.current = attemptId;
@@ -340,7 +361,7 @@ export default function Game() {
   const openTeacherChat = () => {
     setChatSpot(spot => ({ ...spot, folded: false }));
     if (!checking && !sending) {
-      setWhisperTo('teacher');
+      setTarget('teacher');
       setNudge(null);
       setSpelling([]);
       submissionAttemptId.current = null;
@@ -483,20 +504,21 @@ export default function Game() {
           <form className="chat-input-wrapper" onSubmit={event => void handleSendMessage(event)}>
             <select
               className="chat-target"
-              value={whisperTo}
-              onChange={(e) => { setWhisperTo(e.target.value); setNudge(null); setSpelling([]); submissionAttemptId.current = null; }}
+              value={target}
+              onChange={(e) => { setTarget(e.target.value); setNudge(null); setSpelling([]); setSendError(''); submissionAttemptId.current = null; }}
               disabled={checking || sending}
               title="Who can read this message"
             >
-              <option value="">Nearby</option>
-              <option value="teacher">Teacher (private help)</option>
+              <option value="auto">{nearest ? `Nearest: ${nearest.name}` : 'Nearest classmate'}</option>
               {classmates.map(player => <option key={player.id} value={player.id}>Whisper: {player.name}</option>)}
+              <option value="">Nearby: everyone close</option>
+              <option value="teacher">Teacher (private help)</option>
             </select>
             <input 
               type="text" 
               ref={chatField}
               className="chat-input"
-              placeholder={whisperTo === 'teacher' ? 'Ask your teacher in any language…' : whisperTo ? 'Whisper (your teacher can read it)...' : 'Message people nearby (teacher approves)...'}
+              placeholder={whisperTo === 'teacher' ? 'Ask your teacher in any language…' : whisperTo ? `Whisper to ${target === 'auto' ? nearest?.name : classmates.find(player => player.id === target)?.name ?? 'a classmate'} (your teacher can read it)...` : 'Message people nearby (teacher approves)...'}
               maxLength={200}
               value={chatInput}
               readOnly={checking || sending}

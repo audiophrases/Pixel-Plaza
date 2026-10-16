@@ -1515,8 +1515,9 @@ export class PlazaRoom extends DurableObject<Env> {
             // The class may have closed or the student been muted while OpenAI answered.
             if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
         }
-        // Review mode posts only what OpenAI cleared, and never a whisper.
-        const posts = !problem && cleared && !target && this.mode() === 'review';
+        // Review mode posts what OpenAI cleared, nearby or whisper. A witness exchange (the only caller
+        // that passes `valid`) always waits: the teacher's approval is part of that activity.
+        const posts = !problem && cleared && !valid && this.mode() === 'review';
         const entry = { id: crypto.randomUUID(), game_id: seat.game, student_key: seat.studentKey, sender: seat.name, text: value.trim().slice(0, 200),
             target_key: target?.studentKey ?? null, x: seat.x, y: seat.y, marks: null as string | null, voice: normalizeVoice(seat.avatar.voice) };
         // Sent as written although a better version was offered: mark the words that differ, for everyone who reads it.

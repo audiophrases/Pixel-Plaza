@@ -227,7 +227,7 @@ export default function Teacher() {
 
   return <main className="teacher-page">
     <header className="teacher-header">
-      <div><h1>Teacher controls</h1><p>{status?.mode === 'review' ? 'Nearby chat posts after an OpenAI check. Review it here and remove anything unsuitable.' : 'All student chat waits for your approval.'}</p></div>
+      <div><h1>Teacher controls</h1><p>{status?.mode === 'review' ? 'Chat posts after an OpenAI check, nearby or whisper. Review it here and remove anything unsuitable.' : 'All student chat waits for your approval.'}</p></div>
       <span><Link to="/quest-library">Side quest library</Link> · <Link to="/mission-studio">Mission Studio</Link> · <Link to="/studio">Theme studio</Link> · <Link to="/">Student entrance</Link></span>
     </header>
     {!token || !status ? <form className="teacher-signin" onSubmit={event => { event.preventDefault(); void signIn(); }}>
@@ -455,9 +455,9 @@ export default function Teacher() {
           Approve every message first</label>
         <label><input type="radio" name="mode" checked={status.mode === 'review'} disabled={!status.moderation}
           onChange={() => void action('mode', { mode: 'review' })} />
-          Post nearby chat after OpenAI checks it, and review afterwards</label>
+          Post chat after OpenAI checks it, and review afterwards</label>
         <p>{status.moderation
-          ? 'In the second mode only messages OpenAI cleared post at once. Whispers, flagged messages and anything it could not check still wait for you.'
+          ? 'In the second mode only messages OpenAI cleared post at once, nearby or whisper. Witness exchanges, flagged messages and anything it could not check still wait for you.'
           : 'The second mode needs an OPENAI_API_KEY (see the README), so it is off.'}</p>
       </>)}
 
