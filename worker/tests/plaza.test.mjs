@@ -1108,7 +1108,7 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         plaza = await startPlaza(pinPlayUrl, persistTo);
         base = plaza.base;
         assert.deepEqual((await api(base, '/api/student/me', { token: 'signed-a' })).body.avatar,
-            { skin: 2, hairColor: 0, hair: 3, eyes: 0, mouth: 0, glasses: 0, shirt: 0, hat: 0 });
+            { head: 0, skin: 2, hairColor: 0, hair: 3, eyes: 0, mouth: 0, glasses: 0, shirt: 0, hat: 0 });
         assert.equal((await api(base, '/api/student/me', { token: 'signed-b' })).body.avatar, null);
         status = (await api(base, '/api/teacher/status', { session })).body;
         assert.equal(status.open, true);

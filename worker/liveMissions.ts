@@ -24,7 +24,7 @@ export class LiveMissions {
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaigns')").toArray().some(c => c.name === 'live_epoch')) this.sql.exec('ALTER TABLE campaigns ADD COLUMN live_epoch TEXT');
         for (const row of this.sql.exec<{ game_id: string }>('SELECT game_id FROM campaigns WHERE live_epoch IS NULL').toArray()) this.sql.exec('UPDATE campaigns SET live_epoch = ? WHERE game_id = ?', crypto.randomUUID(), row.game_id);
     }
-    rows(game: string): LiveRow[] { return this.sql.exec<LiveRow>('SELECT objective_id, chapter_id, content, withdrawn FROM mission_live_quests WHERE game_id = ? ORDER BY created, objective_id', game).toArray(); }
+    rows(game: string): LiveRow[] { return this.sql.exec<LiveRow>('SELECT objective_id, chapter_id, content, withdrawn FROM mission_live_quests WHERE game_id = ? ORDER BY created, rowid', game).toArray(); } // released together: in the order the teacher chose
     inspect(game: string, id: string): LiveMissionInspection | null {
         const row = this.sql.exec<{ content: string; source_id: string; source_version: number; created: number; withdrawn: number }>('SELECT content, source_id, source_version, created, withdrawn FROM mission_live_quests WHERE game_id = ? AND objective_id = ?', game, id).toArray()[0];
         return row ? { id, definition: JSON.parse(row.content), sourceId: row.source_id, sourceVersion: row.source_version, created: row.created, withdrawn: !!row.withdrawn } : null;
