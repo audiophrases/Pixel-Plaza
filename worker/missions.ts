@@ -1,8 +1,11 @@
 import { campaigns, type Campaign } from '../shared/campaign.ts';
 import { missionEnvelope, missionId, validateMission, type MissionIssue } from '../shared/missionSchema.ts';
-import type { MissionDraft, MissionSummary } from '../shared/missionTypes.ts';
+import type { CampaignChoice, MissionDraft, MissionSummary } from '../shared/missionTypes.ts';
 
 export type MissionResult = { library?: MissionSummary[]; draft?: MissionDraft; revision?: string; errors?: MissionIssue[]; warnings?: MissionIssue[] } | { error: string; status: number; errors?: MissionIssue[] };
+// Built-in campaigns are offered shortest story first, then the longer and stricter versions of it, then free play.
+// The teacher's own campaigns follow by title. A fixed order, so editing one in Mission Studio does not move it.
+const BUILT_IN_ORDER = ['castanyada', 'castanyada-side-quests', 'castanyada-complete', 'castanyada-investigations', 'plaza-free-play'];
 type DraftRow = { campaign_id: string; content: string; version: number; published_revision: string | null; updated: number };
 
 export class MissionRepository {
@@ -48,9 +51,18 @@ export class MissionRepository {
         this.revisions.set(id, campaign);
         return campaign;
     }
-    published(): { id: string; title: string }[] {
-        return this.sql.exec<{ id: string; title: string }>(`SELECT d.campaign_id AS id, json_extract(r.content, '$.title') AS title
-            FROM mission_drafts d JOIN mission_revisions r ON d.published_revision = r.revision_id ORDER BY d.updated DESC, d.campaign_id`).toArray();
+    published(): CampaignChoice[] {
+        const rank = (id: string) => { const index = BUILT_IN_ORDER.indexOf(id); return index < 0 ? BUILT_IN_ORDER.length : index; };
+        return this.sql.exec<{ revision: string }>('SELECT published_revision AS revision FROM mission_drafts WHERE published_revision IS NOT NULL').toArray()
+            .flatMap(({ revision }) => {
+                const campaign = this.revision(revision);
+                if (!campaign) return [];
+                const objectives = campaign.chapters.flatMap(chapter => chapter.objectives);
+                return [{ id: campaign.id, title: campaign.title, chapters: campaign.chapters.map(chapter => chapter.title),
+                    mystery: objectives.some(objective => objective.answerThief), partnerQuests: objectives.some(objective => objective.board),
+                    witnesses: objectives.some(objective => objective.conversation) }];
+            })
+            .sort((a, b) => rank(a.id) - rank(b.id) || a.title.localeCompare(b.title));
     }
     latest(id: string): { campaign: Campaign; revision: string } | null {
         const revision = this.sql.exec<{ published_revision: string | null }>('SELECT published_revision FROM mission_drafts WHERE campaign_id = ?', id).toArray()[0]?.published_revision;

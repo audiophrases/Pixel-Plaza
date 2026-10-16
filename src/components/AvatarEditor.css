@@ -2,19 +2,34 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 1rem;
   width: 100%;
-  max-width: 400px;
-  padding: 2rem;
   margin: 0 auto;
+  color: #fff;
+}
+
+/* As in PinPlay: the character on one side, the parts list on the other, side by side when there is room. */
+.avatar-builder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  width: 100%;
+}
+
+.avatar-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .6rem;
 }
 
 .avatar-preview {
-  width: 160px;
-  height: 160px;
-  margin-bottom: 1.5rem;
-  background-color: var(--primary);
+  width: 150px;
+  height: 150px;
+  background-color: #ecebff;
   border-radius: 50%;
-  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.2);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -28,59 +43,53 @@
 }
 
 .avatar-controls {
-  width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  max-height: 35vh;
-  overflow-y: auto;
-  padding-right: 0.5rem;
-}
-
-.avatar-random {
-  margin-bottom: 1rem;
-}
-
-/* Custom scrollbar for controls */
-.avatar-controls::-webkit-scrollbar {
-  width: 6px;
-}
-.avatar-controls::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.4);
-  border-radius: 10px;
+  gap: 6px;
+  min-width: 220px;
+  flex: 1 1 220px;
+  max-width: 300px;
 }
 
 .control-row {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 34px 1fr 34px;
   align-items: center;
-  background: rgba(0, 0, 0, 0.1);
-  padding: 0.5rem 1rem;
-  border-radius: 8px;
+  gap: 8px;
 }
 
 .control-label {
   font-weight: 600;
-  color: var(--text-color);
-}
-
-.control-buttons {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.control-value {
-  min-width: 30px;
+  font-size: .9rem;
   text-align: center;
-  font-family: 'Press Start 2P', cursive;
-  font-size: 0.75rem;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .6);
 }
+
+.control-label small {
+  font-weight: 400;
+  opacity: .75;
+}
+
+.avatar-step {
+  width: 34px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--background);
+  color: var(--text-dark);
+  font: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.avatar-step:hover { border-color: var(--primary); }
+.avatar-step:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
 .editor-actions {
   display: flex;
-  gap: 1rem;
-  margin-top: 1.5rem;
+  gap: .75rem;
   width: 100%;
 }
 
@@ -91,14 +100,20 @@
 .character-voice {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  align-items: flex-start;
+  gap: 0.5rem;
   width: 100%;
-  margin-top: 1.25rem;
 }
 
 .character-voice .input-field {
   width: 100%;
   min-width: 0;
+  padding: .5rem .75rem;
+  border-radius: 8px;
+}
+
+.character-voice p, .character-voice .control-label {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .6);
 }
 
 .character-voice p {

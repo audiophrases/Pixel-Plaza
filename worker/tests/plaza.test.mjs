@@ -1470,7 +1470,10 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         const opened = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body;
         PIN = opened.pin;
         assert.equal(opened.campaign, null);
-        assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada', 'castanyada-complete', 'castanyada-investigations', 'castanyada-side-quests', 'plaza-free-play']);
+        assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada', 'castanyada-side-quests', 'castanyada-complete', 'castanyada-investigations', 'plaza-free-play']);
+        assert.deepEqual(opened.campaigns.find(item => item.id === 'castanyada-investigations'),
+            { id: 'castanyada-investigations', title: 'Castanyada: Witness Investigations', chapters: ['The Missing Chestnuts', 'Conflicting Stories', 'The Hotel Cellar', 'The Missing Festival Plan', 'The Haunted Celebration'],
+                mystery: true, partnerQuests: true, witnesses: true });
 
         // No story yet: nothing is sent.
         const early = await enter(base, 'signed-a', null);

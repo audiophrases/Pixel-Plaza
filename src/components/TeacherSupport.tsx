@@ -11,6 +11,7 @@ type Props = {
   who: (studentKey: string, name: string) => string;
   action: (path: string, body: object) => Promise<boolean>;
   failed: (cause: unknown) => void;
+  embedded?: boolean; // inside a card that already has the heading and count
 };
 
 const topics: Record<HelpTopic, string> = {
@@ -43,7 +44,7 @@ function mergeAttempts(current: MessageAttempt[], incoming: MessageAttempt[]) {
   return [...merged.values()].sort((a, b) => b.timestamp - a.timestamp || b.id.localeCompare(a.id));
 }
 
-export default function TeacherSupport({ gameId, token, support, students, who, action, failed }: Props) {
+export default function TeacherSupport({ gameId, token, support, students, who, action, failed, embedded = false }: Props) {
   const [recipient, setRecipient] = useState('');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -177,9 +178,9 @@ export default function TeacherSupport({ gameId, token, support, students, who, 
     students.find(student => student.studentKey === attempt.studentKey)?.name
     ?? support.alerts.find(alert => alert.studentKey === attempt.studentKey)?.name ?? 'Student');
 
-  return <section className="teacher-support" aria-labelledby="teacher-support-heading">
+  return <section className={`teacher-support${embedded ? ' teacher-support-embedded' : ''}`} aria-labelledby={embedded ? undefined : 'teacher-support-heading'}>
     <div className="teacher-support-heading">
-      <h2 id="teacher-support-heading">Student help {active.length > 0 && <span className="teacher-help-count">{active.length} to follow up</span>}</h2>
+      {!embedded && <h2 id="teacher-support-heading">Student help {active.length > 0 && <span className="teacher-help-count">{active.length} to follow up</span>}</h2>}
       <a href="#teacher-help-history" onClick={() => setHistoryOpen(true)}>Message history</a>
     </div>
     <p>Students can ask for help. Three related language blocks, grammar hints or incorrect answers within five minutes suggest a check-in. You decide what support they need.</p>

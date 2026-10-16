@@ -125,29 +125,32 @@ export default function AvatarEditor({ initialConfig, onSave, onCancel }: Avatar
   ] as const;
 
   return (
-    <div className="avatar-editor glass-panel">
+    <div className="avatar-editor">
       <h2 className="heading-pixel">Your Character</h2>
-      
-      <div className="avatar-preview" dangerouslySetInnerHTML={{ __html: svgStr }} />
-      <button type="button" className="btn btn-secondary avatar-random" onClick={() =>
-        setConfig(previous => ({ ...previous, ...randomCombination(catalog) }))}>Surprise me</button>
 
-      <div className="avatar-controls">
-        {categories.map(({ key, label }) => {
-          // Skip if part doesn't exist in catalog (like glasses/hats if they are empty)
-          if (key !== 'character' && key !== 'skin' && key !== 'hairColor' && !catalog.parts[key]) return null;
-          
-          return (
-            <div key={key} className="control-row">
-              <span className="control-label">{label}</span>
-              <div className="control-buttons">
-                <button type="button" className="btn btn-secondary btn-sm" aria-label={`Previous ${label}`} onClick={() => handleChange(key, -1)}>◀</button>
-                {key !== 'character' && <span className="control-value">{(config[key] || 0) + 1}</span>}
-                <button type="button" className="btn btn-secondary btn-sm" aria-label={`Next ${label}`} onClick={() => handleChange(key, 1)}>▶</button>
+      {/* As in PinPlay: the character beside a short list of parts, each stepped with ‹ and ›. */}
+      <div className="avatar-builder">
+        <div className="avatar-side">
+          <div className="avatar-preview" dangerouslySetInnerHTML={{ __html: svgStr }} />
+          <button type="button" className="btn btn-sm" onClick={() =>
+            setConfig(previous => ({ ...previous, ...randomCombination(catalog) }))}>Surprise me</button>
+        </div>
+
+        <div className="avatar-controls">
+          {categories.map(({ key, label }) => {
+            // Skip if part doesn't exist in catalog (like glasses/hats if they are empty)
+            if (key !== 'character' && key !== 'skin' && key !== 'hairColor' && !catalog.parts[key]) return null;
+            const count = key === 'skin' ? catalog.skins.length : key === 'hairColor' ? catalog.hairColors.length : key === 'character' ? 0 : catalog.parts[key].length;
+
+            return (
+              <div key={key} className="control-row">
+                <button type="button" className="avatar-step" aria-label={`Previous ${label}`} onClick={() => handleChange(key, -1)}>‹</button>
+                <span className="control-label">{label}{key !== 'character' && count > 0 && <small> {(config[key] || 0) + 1}/{count}</small>}</span>
+                <button type="button" className="avatar-step" aria-label={`Next ${label}`} onClick={() => handleChange(key, 1)}>›</button>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
       <div className="character-voice">

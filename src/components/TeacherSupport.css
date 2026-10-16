@@ -1,4 +1,5 @@
 .teacher-support { background: white; border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; }
+.teacher-support.teacher-support-embedded { padding: 0; margin: 0; border-radius: 0; }
 .teacher-support-heading, .teacher-help-alert-heading, .teacher-help-history-controls, .teacher-help-send { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
 .teacher-support-heading { justify-content: space-between; }
 .teacher-support h2 { margin: 0; }

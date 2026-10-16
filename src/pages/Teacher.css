@@ -10,7 +10,6 @@
 .teacher-entry p { margin: .7rem 0; overflow-wrap: anywhere; }
 .teacher-entry small { color: #555; }
 .teacher-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
-.teacher-actions button { padding: .5rem .8rem; cursor: pointer; }
 .teacher-error { color: #9d171b; margin-top: 1rem; }
 .teacher-pin { font-size: 1.2rem; }
 .teacher-pin strong { font-size: 2.2rem; letter-spacing: .15em; margin-left: .5rem; }
@@ -29,7 +28,8 @@ kbd { border: 1px solid #aaa; border-radius: 4px; padding: 0 .35rem; background:
 .teacher-toggle input { margin-top: 0.2rem; }
 .teacher-linkbox { display: grid; gap: 0.25rem; margin: 0.5rem 0; font-size: 0.85rem; color: #445; }
 .teacher-linkbox input { width: 100%; box-sizing: border-box; padding: 0.4rem 0.6rem; border: 1px solid #ccc; border-radius: 8px; font: inherit; background: #f8f9fa; }
-.teacher-danger { color: #a8071a; border-color: #ffa39e; }
+.teacher-danger.btn { color: #a8071a; border-color: #ffa39e; }
+.teacher-danger.btn:hover:not(:disabled) { background: #fff1f0; border-color: #ff7875; }
 .teacher-map { position: relative; width: 100%; aspect-ratio: 1; margin-top: 1rem; }
 .teacher-map > img { display: block; width: 100%; height: 100%; border-radius: 12px; }
 .teacher-map-marker { position: absolute; transform: translate(-50%, -50%); width: 28px; height: 28px; padding: 0; border: 2px solid white; border-radius: 50%; background: #173d85; color: white; font-weight: bold; cursor: pointer; box-shadow: 0 1px 5px #0009; transition: left 1s linear, top 1s linear; }
@@ -43,3 +43,43 @@ kbd { border: 1px solid #aaa; border-radius: 4px; padding: 0 .35rem; background:
 .teacher-newgame input { flex: 1 1 14rem; padding: 0.5rem 0.75rem; border: 1px solid #ccc; border-radius: 8px; font: inherit; }
 .teacher-games ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
 .teacher-games li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+
+/* Folding cards, and the bar of chips that jumps to each one with its count. */
+.teacher-nav { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: .4rem; padding: .6rem 0; margin: -1rem 0 1rem; background: var(--background); border-bottom: 1px solid var(--line); }
+.teacher-nav-chip { display: inline-flex; align-items: center; gap: .4rem; padding: .3rem .65rem; border: 1px solid var(--line); border-radius: .6rem; background: #fff; color: var(--text-dark); font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; }
+.teacher-nav-chip:hover { border-color: #c9ced8; background: #f4f6fa; }
+.teacher-nav-alert { border-color: #e8a3a5; background: #fff4f4; }
+.teacher-badge { display: inline-block; min-width: 1.4em; padding: .05rem .45rem; border-radius: .5rem; background: #eef0f4; color: #4c5360; font-size: .75rem; font-weight: 600; text-align: center; }
+.teacher-badge-alert { background: #c62828; color: #fff; }
+.teacher-card { background: white; border: 1px solid var(--line); border-radius: 12px; margin-bottom: .75rem; scroll-margin-top: 4.5rem; }
+.teacher-card > summary { display: flex; align-items: center; gap: .6rem; padding: .85rem 1.25rem; cursor: pointer; list-style: none; }
+.teacher-card > summary::-webkit-details-marker { display: none; }
+.teacher-card > summary::before { content: '›'; display: inline-block; width: .8em; font-size: 1.4rem; line-height: 1; font-weight: 700; color: #8a93a3; transition: transform .15s; }
+.teacher-card[open] > summary::before { transform: rotate(90deg); }
+.teacher-card > summary h2 { margin: 0; font-size: 1.1rem; }
+.teacher-card-body { padding: 0 1.25rem 1.25rem; }
+.teacher-card-body > p, .teacher-card-body > ul { margin: .5rem 0; }
+.teacher-card-body h3 { margin: 1rem 0 .4rem; font-size: 1rem; }
+.teacher-card-body ul { list-style: none; padding: 0; display: grid; gap: .4rem; }
+.teacher-card-body li { display: flex; justify-content: space-between; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.teacher-card-body .teacher-actions { display: inline-flex; }
+.teacher-muted { color: #5f6b7a; font-size: .9rem; }
+
+/* Choosing a campaign: one row each, with its chapters in order. */
+.teacher-card-body .teacher-campaign-choices { gap: .5rem; margin: .75rem 0; }
+.teacher-campaign-choices > li { padding: .7rem .9rem; border: 1px solid var(--line); border-radius: 10px; flex-wrap: nowrap; }
+.teacher-campaign-choices > li > div { display: grid; gap: .2rem; min-width: 0; }
+.teacher-campaign-choices small { color: #5f6b7a; }
+.teacher-chapter-line { display: flex; flex-wrap: wrap; gap: .15rem .35rem; margin: .15rem 0 0; padding: 0; list-style: none; font-size: .85rem; color: #3d4654; }
+.teacher-chapter-line li { display: inline; }
+.teacher-chapter-line li span { margin-right: .25em; color: #8a93a3; }
+.teacher-chapter-line li:not(:last-child)::after { content: ' →'; color: #b0b7c3; }
+
+/* A running campaign: its chapters as numbered steps, done, now and next. */
+.teacher-card-body .teacher-chapter-steps { display: flex; flex-wrap: wrap; gap: .4rem; margin: .75rem 0; padding: 0; list-style: none; }
+.teacher-chapter-steps li { display: inline-flex; align-items: center; gap: .4rem; padding: .3rem .6rem .3rem .3rem; border: 1px solid var(--line); border-radius: .6rem; font-size: .9rem; color: #5f6b7a; }
+.teacher-step-number { display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: .4rem; background: #eef0f4; font-weight: 700; font-size: .8rem; }
+.teacher-step-done .teacher-step-number { background: #dff3e4; color: #0f6f2c; }
+.teacher-step-now { border-color: var(--primary); color: var(--text-dark); font-weight: 600; }
+.teacher-step-now .teacher-step-number { background: var(--primary); color: #fff; }
+.teacher-step-now small { color: var(--primary-dark); font-weight: 700; text-transform: uppercase; font-size: .7rem; }

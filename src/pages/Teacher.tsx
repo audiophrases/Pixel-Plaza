@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { joinLink } from '../studentAuth';
 import { WARMUP_KINDS } from '../../shared/warmupKinds';
@@ -8,11 +8,12 @@ import './Teacher.css';
 import { MAP_SIZE, plazaMap } from '../../shared/plazaMap';
 import type { InterviewView } from '../../shared/campaign';
 import type { TeacherSupport as Support } from '../../shared/support';
+import type { CampaignChoice } from '../../shared/missionTypes';
 import TeacherSupport from '../components/TeacherSupport';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string };
 type CampaignInfo = {
-  id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string;
+  id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string; chapterTitles?: string[];
   reveals: { shown: number; total: number; next: string | null };
   reports: { studentKey: string; objective: string; text: string; partner?: string }[];
   interviews?: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
@@ -23,7 +24,7 @@ type Game = { id: string; name: string; pin: string; lastOpened: number; open: b
 type LiveStudent = { studentKey: string; name: string; x: number; y: number; zone: string | null };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
-  campaign: CampaignInfo | null; campaigns: { id: string; title: string }[];
+  campaign: CampaignInfo | null; campaigns: CampaignChoice[];
   warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
   open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: LiveStudent[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
@@ -55,6 +56,8 @@ export default function Teacher() {
   const [copied, setCopied] = useState(''); // the PIN whose link was just copied
   const [vision, setVision] = useState(450); // how far students see in a new game, in map pixels
   const [randomNames, setRandomNames] = useState(true); // students get made-up names, and the teacher sees who they are
+  const [openCards, setOpenCards] = useState(readOpenCards); // which cards the teacher left open or closed
+  useEffect(() => { try { localStorage.setItem(CARDS_KEY, JSON.stringify(openCards)); } catch { /* remembered for this visit only */ } }, [openCards]);
 
   const request = useCallback((path: string, body?: object) => call<Status>(path, {
     method: body ? 'POST' : 'GET',
@@ -196,6 +199,32 @@ export default function Teacher() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  // Every section is a card that folds away. The bar at the top lists them with a count each: red for something
+  // waiting on the teacher, grey for information. A card's open or closed state is remembered on this computer.
+  const choose = (id: CardId) => {
+    setOpenCards(previous => ({ ...previous, [id]: true }));
+    window.requestAnimationFrame(() => document.getElementById(`card-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
+  const toggle = (id: CardId, open: boolean) => setOpenCards(previous => previous[id] === open ? previous : { ...previous, [id]: open });
+  const campaign = status?.campaign ?? null;
+  const cards: CardInfo[] = !status ? [] : [
+    ...(status.game ? [{ id: 'help' as const, title: 'Student help', badge: openHelp.length, alert: true }] : []),
+    { id: 'chat', title: 'Chat review', badge: waiting.length, alert: true },
+    ...(status.game ? [
+      { id: 'live' as const, title: 'Live plaza', badge: status.online.length, label: `${status.online.length} online` },
+      { id: 'campaign' as const, title: 'Campaign', label: campaign ? `chapter ${campaign.chapter + 1} of ${campaign.chapters}` : 'not started' },
+      { id: 'warmup' as const, title: 'Warm-up', label: status.warmup?.active ? 'running' : undefined },
+      { id: 'vision' as const, title: 'Vision', label: VISION_CHOICES.find(([radius]) => radius === status.game?.vision)?.[1] },
+    ] : []),
+    { id: 'games', title: 'Games', label: `${status.games.length}` },
+    { id: 'mode', title: 'How chat is moderated', label: status.mode === 'review' ? 'review after' : 'approve first' },
+    ...(status.laptop ? [{ id: 'laptop' as const, title: 'Playing on this laptop' }] : []),
+  ];
+  const card = (id: CardId, children: ReactNode) => {
+    const info = cards.find(item => item.id === id);
+    return info && <Card info={info} open={openCards[id] ?? DEFAULT_OPEN.includes(id)} onToggle={open => toggle(id, open)}>{children}</Card>;
+  };
+
   return <main className="teacher-page">
     <header className="teacher-header">
       <div><h1>Teacher controls</h1><p>{status?.mode === 'review' ? 'Nearby chat posts after an OpenAI check. Review it here and remove anything unsuitable.' : 'All student chat waits for your approval.'}</p></div>
@@ -217,12 +246,44 @@ export default function Teacher() {
         </button>}
         <button className="btn btn-secondary" onClick={() => { storeTeacherSession(''); setStatus(null); setToken(''); }}>Sign out</button>
       </section>
-      {status.game && <TeacherSupport key={status.game.id} gameId={status.game.id} token={token}
+      <nav className="teacher-nav" aria-label="Sections">
+        {cards.map(info => <button key={info.id} type="button" className={`teacher-nav-chip${info.alert && info.badge ? ' teacher-nav-alert' : ''}`}
+          onClick={() => choose(info.id)}>
+          {info.title}<Badge info={info} />
+        </button>)}
+      </nav>
+
+      {status.game && card('help', <TeacherSupport key={status.game.id} gameId={status.game.id} token={token} embedded
         support={status.support ?? { alerts: [], students: [] }}
         students={[...supportStudents.values()].sort((a, b) => who(a.studentKey, a.name).localeCompare(who(b.studentKey, b.name)))}
-        who={who} action={action} failed={failed} />}
-      {status.game && <section className="teacher-online teacher-live">
-        <h2>Live plaza ({status.online.length} students)</h2>
+        who={who} action={action} failed={failed} />)}
+
+      {card('chat', <>
+        {waiting.length > 0 && <div className="teacher-queue">
+          <strong>{waiting.length} waiting</strong>
+          <button className="btn btn-primary" onClick={() => void action('approve-all', {})}>Approve all ({waiting.length})</button>
+          <small>or press <kbd>A</kbd> to approve and <kbd>R</kbd> to reject the oldest</small>
+        </div>}
+        {status.entries.length === 0 && <p>No messages yet.</p>}
+        {status.entries.map(entry => <article key={entry.id} className={`teacher-entry${entry === oldest ? ' teacher-oldest' : ''}`}>
+          <div><strong>{who(entry.studentKey, entry.sender)}</strong>{entry.target && <> → <strong>{entry.target}</strong> <em>(whisper)</em></>} <small>{new Date(entry.timestamp).toLocaleTimeString()} · {entry.status}</small></div>
+          <p>{entry.text}</p>
+          {entry.note && <p className="teacher-note">{entry.note.startsWith('Investigation:') ? entry.note : `Grammar hint: ${entry.note}`}</p>}
+          {entry.flag && <p className="teacher-flag">{entry.status === 'blocked' ? 'Blocked by moderation' : 'Not checked by moderation'}: {entry.flag}</p>}
+          <div className="teacher-actions">
+            {entry.status === 'pending' && <>
+              <button className="btn btn-sm btn-primary" onClick={() => void action('review', { id: entry.id, approve: true })}>Approve</button>
+              <button className="btn btn-sm" onClick={() => void action('review', { id: entry.id, approve: false })}>Reject</button>
+            </>}
+            {entry.status === 'approved' && <button className="btn btn-sm" onClick={() => void action('review', { id: entry.id, approve: false })}>Remove</button>}
+            <button className="btn btn-sm" onClick={() => void action('mute', { studentKey: entry.studentKey, muted: !status.muted.includes(entry.studentKey) })}>
+              {status.muted.includes(entry.studentKey) ? 'Unmute' : 'Mute'} student
+            </button>
+          </div>
+        </article>)}
+      </>)}
+
+      {status.game && card('live', <>
         <p>{status.open ? 'Updates every 2 seconds. Select a student to find them on the map.' : 'The class is closed.'}</p>
         <div className="teacher-map" aria-label="Live student locations in the plaza">
           <img src={plazaMap.image} alt="Plaza map" />
@@ -243,9 +304,108 @@ export default function Teacher() {
             <strong>{index + 1}. {who(student.studentKey, student.name)}</strong> · {student.zone ?? 'plaza'}
           </button>
         </li>)}</ul> : <p>No students in the plaza right now.</p>}
-      </section>}
-      <section className="teacher-games">
-        <h2>Games</h2>
+      </>)}
+
+      {status.game && card('campaign', !campaign ? <>
+        <p>Start a story for <strong>{status.game.name}</strong>. Each student gets a role at random and keeps it for the whole campaign. Closing the game saves it, and reopening picks the story up again.</p>
+        <ul className="teacher-campaign-choices">{status.campaigns.map(choice => <li key={choice.id}>
+          <div>
+            <strong>{choice.title}</strong>
+            <small>{choice.chapters.length} {choice.chapters.length === 1 ? 'chapter' : 'chapters'} · {features(choice)}</small>
+            <ol className="teacher-chapter-line">{chapterPreview(choice.chapters).map(([number, title]) => <li key={title}>{number > 0 && <span>{number}.</span>}{title}</li>)}</ol>
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={() => void action('campaign', { op: 'start', campaign: choice.id })}>Start</button>
+        </li>)}</ul>
+        <p className="teacher-muted">Change these chapters or write your own campaign in <Link to="/mission-studio">Mission Studio</Link>.</p>
+      </> : <>
+        <p><strong>{campaign.title}</strong> · {{ active: 'in progress', chapter_complete: 'ready for the next chapter: students can keep working', campaign_complete: 'finished' }[campaign.status]}</p>
+        <ol className="teacher-chapter-steps">{(campaign.chapterTitles ?? []).map((title, index) => {
+          const state = campaign.status === 'campaign_complete' || index < campaign.chapter ? 'done' : index === campaign.chapter ? 'now' : 'next';
+          return <li key={index} className={`teacher-step-${state}`} aria-current={state === 'now' ? 'step' : undefined}>
+            <span className="teacher-step-number">{state === 'done' ? '✓' : index + 1}</span>
+            <span>{title}</span>
+            {state === 'now' && <small>now</small>}
+          </li>;
+        })}</ol>
+        {campaign.status !== 'campaign_complete' && <div className="teacher-newgame">
+          {campaign.reveals.next && <button className="btn btn-secondary" title={campaign.reveals.next}
+            onClick={() => void action('campaign', { op: 'reveal' })}>Reveal the next news ({campaign.reveals.shown} of {campaign.reveals.total} shown)</button>}
+          <button className="btn btn-primary" onClick={() => void action('campaign', { op: 'next' })}>
+            {campaign.chapter + 1 < campaign.chapters ? `Start chapter ${campaign.chapter + 2}: ${campaign.chapterTitles?.[campaign.chapter + 1] ?? ''}` : 'End the campaign'}
+          </button>
+        </div>}
+        {campaign.status !== 'campaign_complete' && campaign.reveals.next && <p>Next news: <em>{campaign.reveals.next}</em></p>}
+        {campaign.players.length > 0 && <><h3>Students</h3><ul>
+          {campaign.players.map(player => <li key={player.studentKey}>
+            <span><strong>{who(player.studentKey, player.name)}</strong> · {player.role}{player.thief ? ' · THIEF' : ''} · {player.clues} place clue{player.clues === 1 ? '' : 's'} · {player.done.length ? `answered ${player.done.length}` : 'not answered yet'}</span>
+          </li>)}
+        </ul></>}
+        {!!campaign.board?.length && <><h3>Quest board</h3><p>Release prepared quests when the class needs another mystery.</p><ul>{campaign.board.map(quest => <li key={quest.id}><span>{quest.text} · {quest.accepted} accepted · {quest.completed} completed</span>
+          {quest.teacherReleased && !quest.released && campaign.status !== 'campaign_complete' && <button className="btn btn-secondary btn-sm" onClick={() => void action('quest-release', { objective: quest.id })}>Release quest</button>}
+          {quest.teacherReleased && quest.released && <small>Released</small>}</li>)}</ul></>}
+        {campaign.reports.length > 0 && <>
+          <h3>What students wrote</h3>
+          <ul>{campaign.reports.map(report => <li key={report.studentKey + report.objective}>
+            <span><strong>{who(report.studentKey, campaign.players.find(player => player.studentKey === report.studentKey)?.name ?? 'Student')}</strong>{report.partner ? ` · partner: ${report.partner}` : ''}: {report.text}</span>
+          </li>)}</ul>
+        </>}
+        {!!campaign.interviews?.length && <details className="teacher-interviews"><summary>Witness exchanges ({campaign.interviews.length})</summary>
+          <p>Review questions and replies in the chat queue. These records verify participation; you assess the language and reasoning.</p>
+          {campaign.interviews.map(interview => <article key={interview.id} className="teacher-entry">
+            <strong>{who(interview.studentKey, campaign.players.find(p => p.studentKey === interview.studentKey)?.name ?? 'Student')} → {who(interview.witnessKey, interview.name)}</strong>
+            <p>{interview.task}</p>
+            <p>Question ({interview.questionStatus}): {interview.question}</p>
+            {interview.shared && <p>Investigator evidence: {interview.shared}</p>}
+            {interview.answer && <p>Reply ({interview.answerStatus}): {interview.answer}</p>}
+            {interview.evidence && <p>Witness evidence: {interview.evidence}</p>}
+            <div className="teacher-actions">
+              {interview.questionStatus === 'pending' && <>
+                <button className="btn btn-sm btn-primary" onClick={() => void action('review', { id: interview.questionId, approve: true })}>Approve question</button>
+                <button className="btn btn-sm" onClick={() => void action('review', { id: interview.questionId, approve: false })}>Reject question</button>
+              </>}
+              {interview.answerStatus === 'pending' && <>
+                <button className="btn btn-sm btn-primary" onClick={() => void action('review', { id: interview.answerId, approve: true })}>Approve reply</button>
+                <button className="btn btn-sm" onClick={() => void action('review', { id: interview.answerId, approve: false })}>Reject reply</button>
+              </>}
+              {interview.questionStatus === 'approved' && <button className="btn btn-sm" onClick={() => void action('review', { id: interview.questionId, approve: false })}>Remove question</button>}
+              {interview.answerStatus === 'approved' && <button className="btn btn-sm" onClick={() => void action('review', { id: interview.answerId, approve: false })}>Remove reply</button>}
+            </div>
+          </article>)}
+        </details>}
+        <p className="teacher-muted">Students finished early, or a short session between chapters? <Link to="/quest-library">Add side quests from the library</Link>: story quests for this chapter or generic ones for any game.
+          Change chapters in <Link to="/mission-studio">Mission Studio</Link>.</p>
+        <button className="btn btn-secondary btn-sm teacher-danger" onClick={() => {
+          if (window.confirm('Erase the campaign for this game, including every role and clue?')) void action('campaign', { op: 'reset', confirm: true });
+        }}>Erase campaign</button>
+      </>)}
+
+      {status.game && card('warmup', <>
+        <p>{WARMUP_KINDS.find(kind => kind.id === warmupKind)?.blurb} Good for the first few minutes.</p>
+        <div className="teacher-newgame">
+          <select value={warmupKind} onChange={event => setWarmupKind(event.target.value as WarmupKind)} aria-label="Which warm-up">
+            {WARMUP_KINDS.map(kind => <option key={kind.id} value={kind.id}>{kind.label}</option>)}
+          </select>
+          <button className="btn btn-primary" disabled={!status.open} onClick={() => void action('warmup', { op: 'start', type: warmupKind })}>
+            {status.warmup?.active ? 'Start again' : 'Start the warm-up'}</button>
+          {status.warmup?.active && <button className="btn btn-secondary" onClick={() => void action('warmup', { op: 'end' })}>End the warm-up</button>}
+        </div>
+        {status.warmup && <>
+          <p>{status.warmup.active ? 'In progress' : 'Finished'}: {status.warmup.team.done} of {status.warmup.team.total} found.</p>
+          <ul>{status.warmup.players.map(player => <li key={player.studentKey}>
+            <span><strong>{who(player.studentKey, player.name)}</strong> · {player.fact} · found {player.found} of {player.of}</span>
+          </li>)}</ul>
+        </>}
+      </>)}
+
+      {status.game && card('vision', <>
+        <p>How far students see around themselves in <strong>{status.game.name}</strong>. Applies at once.</p>
+        <div className="teacher-newgame">
+          {VISION_CHOICES.map(([radius, label]) => <button key={radius} className={`btn ${status.game?.vision === radius ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => void action('vision', { radius })}>{label}</button>)}
+        </div>
+      </>)}
+
+      {card('games', <>
         {status.pin && <label className="teacher-linkbox">The join link for {status.game?.name ?? 'the open game'}
           <input readOnly value={linkFor(status.pin)} onFocus={event => event.currentTarget.select()} onClick={event => event.currentTarget.select()} />
         </label>}
@@ -275,115 +435,22 @@ export default function Teacher() {
         {status.games.length > 0 && <ul>
           {status.games.map(game => <li key={game.id}>
             <span><strong>{game.name}</strong> · PIN {game.pin} · {game.randomNames ? 'random names' : 'real first names'} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
-            <button className="btn btn-secondary" onClick={() => void copyLink(game.pin)} title={linkFor(game.pin)}>{copied === game.pin ? 'Link copied' : 'Copy join link'}</button>
-            <button className="btn btn-secondary teacher-danger" onClick={() => {
-              if (window.confirm(`Delete "${game.name}"?\n\nThis erases its chat, full submission history, help requests, where everyone stood, their made-up names and its story. The join link stops working. This cannot be undone.`)) {
-                void action('game/delete', { game: game.id, confirm: true });
-              }
-            }}>Delete</button>
-            {!game.open && <button className="btn btn-secondary" onClick={() => void action('class', { open: true, game: game.id })}>
-              {status.open ? 'Switch to this game' : 'Open'}
-            </button>}
+            <span className="teacher-actions">
+              <button className="btn btn-secondary btn-sm" onClick={() => void copyLink(game.pin)} title={linkFor(game.pin)}>{copied === game.pin ? 'Link copied' : 'Copy join link'}</button>
+              {!game.open && <button className="btn btn-secondary btn-sm" onClick={() => void action('class', { open: true, game: game.id })}>
+                {status.open ? 'Switch to this game' : 'Open'}
+              </button>}
+              <button className="btn btn-secondary btn-sm teacher-danger" onClick={() => {
+                if (window.confirm(`Delete "${game.name}"?\n\nThis erases its chat, full submission history, help requests, where everyone stood, their made-up names and its story. The join link stops working. This cannot be undone.`)) {
+                  void action('game/delete', { game: game.id, confirm: true });
+                }
+              }}>Delete</button>
+            </span>
           </li>)}
         </ul>}
-      </section>
-      {status.game && <section className="teacher-games">
-        <h2>Warm-up</h2>
-        <p>{WARMUP_KINDS.find(kind => kind.id === warmupKind)?.blurb} Good for the first few minutes.</p>
-        <div className="teacher-newgame">
-          <select value={warmupKind} onChange={event => setWarmupKind(event.target.value as WarmupKind)} aria-label="Which warm-up">
-            {WARMUP_KINDS.map(kind => <option key={kind.id} value={kind.id}>{kind.label}</option>)}
-          </select>
-          <button className="btn btn-primary" disabled={!status.open} onClick={() => void action('warmup', { op: 'start', type: warmupKind })}>
-            {status.warmup?.active ? 'Start again' : 'Start the warm-up'}</button>
-          {status.warmup?.active && <button className="btn btn-secondary" onClick={() => void action('warmup', { op: 'end' })}>End the warm-up</button>}
-        </div>
-        {status.warmup && <>
-          <p>{status.warmup.active ? 'In progress' : 'Finished'}: {status.warmup.team.done} of {status.warmup.team.total} found.</p>
-          <ul>{status.warmup.players.map(player => <li key={player.studentKey}>
-            <span><strong>{who(player.studentKey, player.name)}</strong> · {player.fact} · found {player.found} of {player.of}</span>
-          </li>)}</ul>
-        </>}
-      </section>}
-      {status.game && <section className="teacher-games">
-        <h2>Vision</h2>
-        <p>How far students see around themselves in <strong>{status.game.name}</strong>. Applies at once.</p>
-        <div className="teacher-newgame">
-          {VISION_CHOICES.map(([radius, label]) => <button key={radius} className={`btn ${status.game?.vision === radius ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => void action('vision', { radius })}>{label}</button>)}
-        </div>
-      </section>}
-      {status.game && <section className="teacher-games">
-        <h2>Campaign</h2>
-        {!status.campaign ? <>
-          <p>Start a story for <strong>{status.game.name}</strong>. Each student gets a role at random and keeps it for the whole campaign. Closing the game saves it, and reopening picks the story up again.</p>
-          <div className="teacher-newgame">
-            {status.campaigns.map(campaign => <button key={campaign.id} className="btn btn-primary"
-              onClick={() => void action('campaign', { op: 'start', campaign: campaign.id })}>Start {campaign.title}</button>)}
-          </div>
-          <p>Choose <strong>Castanyada: Witness Investigations</strong> to require approved clue exchanges before students can submit conclusions. Identifying the thief requires two witnesses.</p>
-        </> : <>
-          <p><strong>{status.campaign.title}</strong> · chapter {status.campaign.chapter + 1} of {status.campaign.chapters}: {status.campaign.chapterTitle} ·{' '}
-            {{ active: 'in progress', chapter_complete: 'ready to advance: students can keep working', campaign_complete: 'finished' }[status.campaign.status]}</p>
-          <div className="teacher-newgame">
-            {status.campaign.status !== 'campaign_complete' && status.campaign.reveals.next && <button className="btn btn-secondary" title={status.campaign.reveals.next}
-              onClick={() => void action('campaign', { op: 'reveal' })}>Reveal the next news ({status.campaign.reveals.shown} of {status.campaign.reveals.total} shown)</button>}
-            {status.campaign.status !== 'campaign_complete' && <button className="btn btn-primary" onClick={() => void action('campaign', { op: 'next' })}>
-              {status.campaign.chapter + 1 < status.campaign.chapters ? 'Start the next chapter' : 'End the campaign'}
-            </button>}
-            <button className="btn btn-secondary" onClick={() => {
-              if (window.confirm('Erase the campaign for this game, including every role and clue?')) void action('campaign', { op: 'reset', confirm: true });
-            }}>Erase campaign</button>
-          </div>
-          <p>Students finished early, or a short session between chapters? <Link to="/quest-library">Add side quests from the library</Link>: story quests for this chapter or generic ones for any game.</p>
-          {!!status.campaign.board?.length && <><h3>Quest board</h3><p>Release prepared quests when the class needs another mystery.</p><ul>{status.campaign.board.map(quest => <li key={quest.id}><span>{quest.text} · {quest.accepted} accepted · {quest.completed} completed</span>
-            {quest.teacherReleased && !quest.released && status.campaign?.status !== 'campaign_complete' && <button className="btn btn-secondary" onClick={() => void action('quest-release', { objective: quest.id })}>Release quest</button>}
-            {quest.teacherReleased && quest.released && <small>Released</small>}</li>)}</ul></>}
-          {status.campaign.reports.length > 0 && <>
-            <h3>What students wrote</h3>
-            <ul>{status.campaign.reports.map(report => <li key={report.studentKey + report.objective}>
-              <span><strong>{who(report.studentKey, status.campaign?.players.find(player => player.studentKey === report.studentKey)?.name ?? 'Student')}</strong>{report.partner ? ` · partner: ${report.partner}` : ''}: {report.text}</span>
-            </li>)}</ul>
-          </>}
-          {!!status.campaign.interviews?.length && <details className="teacher-interviews"><summary>Witness exchanges ({status.campaign.interviews.length})</summary>
-            <p>Review questions and replies in the chat queue. These records verify participation; you assess the language and reasoning.</p>
-            {status.campaign.interviews.map(interview => <article key={interview.id} className="teacher-entry">
-              <strong>{who(interview.studentKey, status.campaign?.players.find(p => p.studentKey === interview.studentKey)?.name ?? 'Student')} → {who(interview.witnessKey, interview.name)}</strong>
-              <p>{interview.task}</p>
-              <p>Question ({interview.questionStatus}): {interview.question}</p>
-              {interview.shared && <p>Investigator evidence: {interview.shared}</p>}
-              {interview.answer && <p>Reply ({interview.answerStatus}): {interview.answer}</p>}
-              {interview.evidence && <p>Witness evidence: {interview.evidence}</p>}
-              <div className="teacher-actions">
-                {interview.questionStatus === 'pending' && <>
-                  <button onClick={() => void action('review', { id: interview.questionId, approve: true })}>Approve question</button>
-                  <button onClick={() => void action('review', { id: interview.questionId, approve: false })}>Reject question</button>
-                </>}
-                {interview.answerStatus === 'pending' && <>
-                  <button onClick={() => void action('review', { id: interview.answerId, approve: true })}>Approve reply</button>
-                  <button onClick={() => void action('review', { id: interview.answerId, approve: false })}>Reject reply</button>
-                </>}
-                {interview.questionStatus === 'approved' && <button onClick={() => void action('review', { id: interview.questionId, approve: false })}>Remove question</button>}
-                {interview.answerStatus === 'approved' && <button onClick={() => void action('review', { id: interview.answerId, approve: false })}>Remove reply</button>}
-              </div>
-            </article>)}
-          </details>}
-          {status.campaign.status !== 'campaign_complete' && status.campaign.reveals.next && <p>Next news: <em>{status.campaign.reveals.next}</em></p>}
-          {status.campaign.players.length > 0 && <ul>
-            {status.campaign.players.map(player => <li key={player.studentKey}>
-              <span><strong>{who(player.studentKey, player.name)}</strong> · {player.role}{player.thief ? ' · THIEF' : ''} · {player.clues} place clue{player.clues === 1 ? '' : 's'} · {player.done.length ? `answered ${player.done.length}` : 'not answered yet'}</span>
-            </li>)}
-          </ul>}
-        </>}
-      </section>}
-      {status.laptop && <section className="teacher-laptop">
-        <h2>Playing on this laptop</h2>
-        <p>Students go to <strong>{status.laptop.signInUrl}</strong> and sign in with Google. They are then sent
-          here, to <strong>{status.laptop.url}</strong>, while the class is open.</p>
-        {notice && <p role="alert" className="teacher-error">{notice}</p>}
-      </section>}
-      <section className="teacher-mode">
-        <h2>How chat is moderated</h2>
+      </>)}
+
+      {card('mode', <>
         <label><input type="radio" name="mode" checked={status.mode === 'approve'} onChange={() => void action('mode', { mode: 'approve' })} />
           Approve every message first</label>
         <label><input type="radio" name="mode" checked={status.mode === 'review'} disabled={!status.moderation}
@@ -392,37 +459,51 @@ export default function Teacher() {
         <p>{status.moderation
           ? 'In the second mode only messages OpenAI cleared post at once. Whispers, flagged messages and anything it could not check still wait for you.'
           : 'The second mode needs an OPENAI_API_KEY (see the README), so it is off.'}</p>
-      </section>
-      <section className="teacher-online">
-        <h2>In the Plaza now ({status.online.length})</h2>
-        <p>{status.online.length ? status.online.map(student => who(student.studentKey, student.name)).join(', ') : 'Nobody yet.'}</p>
-      </section>
-      <section className="teacher-entries">
-        <h2>Chat review</h2>
-        {waiting.length > 0 && <div className="teacher-queue">
-          <strong>{waiting.length} waiting</strong>
-          <button className="btn btn-primary" onClick={() => void action('approve-all', {})}>Approve all ({waiting.length})</button>
-          <small>or press <kbd>A</kbd> to approve and <kbd>R</kbd> to reject the oldest</small>
-        </div>}
-        {status.entries.length === 0 && <p>No messages yet.</p>}
-        {status.entries.map(entry => <article key={entry.id} className={`teacher-entry${entry === oldest ? ' teacher-oldest' : ''}`}>
-          <div><strong>{who(entry.studentKey, entry.sender)}</strong>{entry.target && <> → <strong>{entry.target}</strong> <em>(whisper)</em></>} <small>{new Date(entry.timestamp).toLocaleTimeString()} · {entry.status}</small></div>
-          <p>{entry.text}</p>
-          {entry.note && <p className="teacher-note">{entry.note.startsWith('Investigation:') ? entry.note : `Grammar hint: ${entry.note}`}</p>}
-          {entry.flag && <p className="teacher-flag">{entry.status === 'blocked' ? 'Blocked by moderation' : 'Not checked by moderation'}: {entry.flag}</p>}
-          <div className="teacher-actions">
-            {entry.status === 'pending' && <>
-              <button onClick={() => void action('review', { id: entry.id, approve: true })}>Approve</button>
-              <button onClick={() => void action('review', { id: entry.id, approve: false })}>Reject</button>
-            </>}
-            {entry.status === 'approved' && <button onClick={() => void action('review', { id: entry.id, approve: false })}>Remove</button>}
-            <button onClick={() => void action('mute', { studentKey: entry.studentKey, muted: !status.muted.includes(entry.studentKey) })}>
-              {status.muted.includes(entry.studentKey) ? 'Unmute' : 'Mute'} student
-            </button>
-          </div>
-        </article>)}
-      </section>
+      </>)}
+
+      {status.laptop && card('laptop', <>
+        <p>Students go to <strong>{status.laptop.signInUrl}</strong> and sign in with Google. They are then sent
+          here, to <strong>{status.laptop.url}</strong>, while the class is open.</p>
+      </>)}
+      {notice && <p role="alert" className="teacher-error">{notice}</p>}
     </>}
     {error && <p role="alert" className="teacher-error">{error}</p>}
   </main>;
+}
+
+type CardId = 'help' | 'chat' | 'live' | 'campaign' | 'warmup' | 'vision' | 'games' | 'mode' | 'laptop';
+// badge: a number to show; alert: that number is something waiting on the teacher; label: a word of status instead.
+type CardInfo = { id: CardId; title: string; badge?: number; alert?: boolean; label?: string };
+const DEFAULT_OPEN: CardId[] = ['help', 'chat', 'live', 'campaign'];
+const CARDS_KEY = 'pixelplaza.teacher.cards.v1';
+
+function readOpenCards(): Partial<Record<CardId, boolean>> {
+  try { return JSON.parse(localStorage.getItem(CARDS_KEY) ?? '{}') ?? {}; } catch { return {}; }
+}
+
+function Badge({ info }: { info: CardInfo }) {
+  if (info.alert) return info.badge ? <span className="teacher-badge teacher-badge-alert">{info.badge}</span> : null;
+  return info.label ? <span className="teacher-badge">{info.label}</span> : null;
+}
+
+function Card({ info, open, onToggle, children }: { info: CardInfo; open: boolean; onToggle: (open: boolean) => void; children: ReactNode }) {
+  return <details id={`card-${info.id}`} className="teacher-card" open={open} onToggle={event => onToggle(event.currentTarget.open)}>
+    <summary><h2>{info.title}</h2><Badge info={info} /></summary>
+    <div className="teacher-card-body">{children}</div>
+  </details>;
+}
+
+// What is special about a campaign, from what it contains.
+function features(choice: CampaignChoice): string {
+  return [
+    choice.mystery ? 'a mystery: find the thief' : 'no mystery',
+    choice.witnesses && 'witness exchanges before each conclusion',
+    choice.partnerQuests && 'partner quests on a quest board',
+  ].filter(Boolean).join(' · ');
+}
+
+// The chapters in order, numbered; a long run of sessions is shortened, and the gap has no number.
+function chapterPreview(chapters: string[]): [number, string][] {
+  const numbered = chapters.map((title, index): [number, string] => [index + 1, title]);
+  return chapters.length > 6 ? [...numbered.slice(0, 2), [0, `… ${chapters.length - 3} more …`], numbered[numbered.length - 1]] : numbered;
 }

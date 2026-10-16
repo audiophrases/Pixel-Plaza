@@ -238,26 +238,21 @@
 }
 
 .emote-btn {
-  background: transparent;
-  border: 1px solid #ddd;
-  border-radius: 20px;
-  padding: 4px 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: .6rem;
+  padding: 3px 9px;
   font-size: 1.1rem;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color .15s, border-color .15s;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .emote-btn:hover {
-  background: var(--secondary);
-  color: white;
-  border-color: var(--secondary);
-  transform: translateY(-2px);
-}
-.emote-btn:active {
-  transform: translateY(0);
+  background: #f4f6fa;
+  border-color: #c9ced8;
 }
 
 /* Whispers */

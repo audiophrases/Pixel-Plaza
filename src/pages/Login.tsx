@@ -99,7 +99,7 @@ export default function Login() {
   return (
     <div className="login-wrapper" style={{ backgroundImage: `url(${plazaMap.image})` }}>
       <div className="login-overlay" />
-      <main className="login-content">
+      <main className={`login-content${step === 'avatar' ? ' login-content-wide' : ''}`}>
         <div className="login-brand animate-float">
           <h1 className="heading-pixel login-title">Pixel Plaza</h1>
           <p className="login-subtitle">A social space for English class</p>

@@ -10,13 +10,13 @@
 }
 
 .student-help-toggle {
-  padding: .65rem 1rem;
-  border: 2px solid #735017;
-  border-radius: 10px;
+  padding: .5rem .85rem;
+  border: 1px solid #c9a35a;
+  border-radius: .6rem;
   background: #fff4d1;
   color: #573b12;
   font: inherit;
-  font-weight: 800;
+  font-weight: 700;
   cursor: pointer;
 }
 

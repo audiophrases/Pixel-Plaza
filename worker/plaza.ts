@@ -12,7 +12,7 @@ import { StudentAssistance } from './support.ts';
 import type { AttemptPage, AttemptSource, HelpStatus, HelpTopic, TeacherSupport } from '../shared/support.ts';
 import type { ConversationView, Objective, InterviewView } from '../shared/campaign.ts';
 import { LiveMissions, type LiveMissionResult } from './liveMissions.ts';
-import type { LiveMissionTarget } from '../shared/missionTypes.ts';
+import type { CampaignChoice, LiveMissionTarget } from '../shared/missionTypes.ts';
 import { boardWait, type Campaign } from '../shared/campaign.ts';
 import { SIDE_QUEST_LIBRARY_VERSION, SIDE_QUEST_SOURCE, questFit, questObjective, sideQuestById } from '../shared/sideQuests.ts';
 import { wordDiff } from '../shared/diff.ts';
@@ -72,7 +72,7 @@ export type GameSummary = { id: string; name: string; pin: string; lastOpened: n
 
 // Where this game's campaign stands, and what every student has done in it.
 export type CampaignStatus = {
-    id: string; title: string; status: QuestView['status']; chapter: number; chapters: number; chapterTitle: string;
+    id: string; title: string; status: QuestView['status']; chapter: number; chapters: number; chapterTitle: string; chapterTitles: string[];
     reveals: { shown: number; total: number; next: string | null }; // prepared news the teacher can release
     players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
     reports: { studentKey: string; objective: string; text: string; partner?: string }[]; // what students wrote for the written questions
@@ -84,7 +84,7 @@ export type TeacherStatus = {
     support: TeacherSupport;
     warmup: { active: boolean; kind: WarmupKind; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
     campaign: CampaignStatus | null; // the open game's campaign, once started
-    campaigns: { id: string; title: string }[]; // those that can be started
+    campaigns: CampaignChoice[]; // those that can be started, in the order to offer them
     open: boolean;
     game: { id: string; name: string; randomNames: boolean; vision: number } | null; // the open game, or the one last played
     realNames: Record<string, string>; // every student's real name, since the plaza may show made-up ones
@@ -1067,6 +1067,7 @@ export class PlazaRoom extends DurableObject<Env> {
         return {
             id: campaign.id, title: campaign.title, status: row.status, chapter: row.chapter, chapters: campaign.chapters.length,
             chapterTitle: campaign.chapters[Math.min(row.chapter, campaign.chapters.length - 1)].title,
+            chapterTitles: campaign.chapters.map(chapter => chapter.title),
             reveals: (() => {
                 const reveals = campaign.chapters[Math.min(row.chapter, campaign.chapters.length - 1)].reveals;
                 return { shown: Math.min(row.revealed, reveals.length), total: reveals.length, next: reveals[row.revealed]?.text ?? null };
