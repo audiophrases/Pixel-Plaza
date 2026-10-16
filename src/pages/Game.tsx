@@ -5,6 +5,8 @@ import Warmup from '../components/Warmup';
 import type { WarmupView } from '../../shared/warmup';
 import NamePicker from '../components/NamePicker';
 import HelpRequest from '../components/HelpRequest';
+import { LevelBar, Rewards } from '../components/LevelBar';
+import { DEFAULT_STYLE, emotesFor, levelOf, type Style } from '../../shared/levels';
 import { wordDiff } from '../../shared/diff';
 import { firstName } from '../../shared/names';
 import PhaserGame from '../components/PhaserGame';
@@ -93,6 +95,11 @@ export default function Game() {
   const draft = useRef(''); // the nearest classmate is not changed while a message is being written
   useEffect(() => { draft.current = chatInput; }, [chatInput]);
   const [classmates, setClassmates] = useState<{ id: string; name: string }[]>([]);
+  // Experience and levels: the bar at the bottom, and the look the levels unlock.
+  const [xp, setXp] = useState(0);
+  const [xpReason, setXpReason] = useState<string | undefined>();
+  const [myStyle, setMyStyle] = useState<Style>(DEFAULT_STYLE);
+  const [showRewards, setShowRewards] = useState(false);
   const [connection, setConnection] = useState<PlazaConnection | null>(null);
   const [status, setStatus] = useState<PlazaStatus>({ state: 'connecting' });
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -179,6 +186,8 @@ export default function Game() {
     const nearestTimer = window.setInterval(findNearest, 1000);
     const say = (message: ChatMessage) => setMessages(prev => message.id && prev.some(item => item.id === message.id) ? prev : [...prev, message]);
     const unsubscribe = plaza.subscribe(event => {
+      if (event.t === 'xp') { setXpReason(event.reason); setXp(event.xp); return; }
+      if (event.t === 'roster' || (event.t === 'style' && event.id === plaza.selfId)) setMyStyle(plaza.players.get(plaza.selfId)?.style ?? DEFAULT_STYLE);
       if (event.t === 'roster' || event.t === 'join' || event.t === 'leave' || event.t === 'rename') {
         const me = plaza.players.get(plaza.selfId ?? '');
         if (me) setMyName(me.name);
@@ -395,6 +404,10 @@ export default function Game() {
           {!sound.muted && sound.error && <p className="sound-error" role="status">{sound.error}</p>}
         </header>
 
+        <LevelBar xp={xp} reason={xpReason} onOpen={() => setShowRewards(open => !open)} />
+        {showRewards && <Rewards xp={xp} style={myStyle} onClose={() => setShowRewards(false)}
+          onChoose={style => { setMyStyle(style); connection?.send({ t: 'style', ...style }); }} />}
+
         <HelpRequest support={support} online={status.state === 'online'} chatDraft={chatInput}
           onRequest={(topic, text, route) => {
             const plaza = plazaRef.current;
@@ -470,7 +483,7 @@ export default function Game() {
             <div ref={messagesEndRef} />
           </div>
           <div className="emote-bar">
-            {['🙋', '❓', '👍', '😂'].map(emote => (
+            {emotesFor(levelOf(xp).level).map(emote => (
               <button 
                 key={emote} 
                 className="emote-btn" 
@@ -518,7 +531,7 @@ export default function Game() {
               type="text" 
               ref={chatField}
               className="chat-input"
-              placeholder={whisperTo === 'teacher' ? 'Ask your teacher in any language…' : whisperTo ? `Whisper to ${target === 'auto' ? nearest?.name : classmates.find(player => player.id === target)?.name ?? 'a classmate'} (your teacher can read it)...` : 'Message people nearby (teacher approves)...'}
+              placeholder={target === 'auto' && !nearest ? 'Nobody else is in the Plaza yet' : whisperTo === 'teacher' ? 'Ask your teacher in any language…' : whisperTo ? `Whisper to ${target === 'auto' ? nearest?.name : classmates.find(player => player.id === target)?.name ?? 'a classmate'} (your teacher can read it)...` : 'Message people nearby (teacher approves)...'}
               maxLength={200}
               value={chatInput}
               readOnly={checking || sending}

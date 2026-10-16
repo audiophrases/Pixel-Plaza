@@ -5,7 +5,8 @@ import { MAP_SIZE, SPAWN, isBlocked } from '../shared/plazaMap.ts';
 import { isEnglishVoice } from '../shared/voices.ts';
 
 export { MAP_SIZE, SPAWN, isBlocked };
-export const EMOTES = ['🙋', '❓', '👍', '😂'];
+// The emotes everyone has; levels add more (shared/levels.ts).
+export { BASE_EMOTES as EMOTES } from '../shared/levels.ts';
 
 // One index per part. Counts come from public/cup/avatar-parts.js, the same
 // numbers as PinPlay's ARENA_AVATAR_PARTS; update both after a rebuild.

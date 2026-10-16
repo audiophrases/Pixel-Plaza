@@ -2,6 +2,11 @@ import Phaser from 'phaser';
 import { AvatarFigure, FIGURE_BODY, FIGURE_TOP } from '../AvatarFigure';
 import { ART, MAP_SIZE, SCALE, plazaMap, worldRects, worldZones } from '../../../shared/plazaMap';
 import type { PlazaConnection, PlazaEvent, PlazaPlayer } from '../../plaza';
+import { NAME_COLOURS } from '../../../shared/levels';
+
+// A nameplate: the flair a student chose, then their name, in the colour they chose.
+const plateText = (player: PlazaPlayer) => (player.style?.flair ? `${player.style.flair} ` : '') + player.name;
+const plateColour = (player: PlazaPlayer) => NAME_COLOURS[player.style?.colour ?? 0] ?? NAME_COLOURS[0];
 
 // Position updates go out at most this often (the server passes them on in batches as
 // often). Remote avatars glide a little longer than that, so an update that arrives late
@@ -147,7 +152,10 @@ export default class LobbyScene extends Phaser.Scene {
     if (event.t === 'roster') this.syncRoster();
     else if (event.t === 'join') this.addPlayer(event.player);
     else if (event.t === 'leave') this.removePlayer(event.id);
-    else if (event.t === 'rename') this.nameplates[event.id]?.setText(event.name);
+    else if (event.t === 'rename' || event.t === 'style') {
+      const player = this.connection.players.get(event.id);
+      if (player) this.nameplates[event.id]?.setText(plateText(player)).setColor(plateColour(player));
+    }
     else if (event.t === 'vision') this.setVision(event.radius);
     else if (event.t === 'snap' && this.localPlayerContainer?.body) {
       (this.localPlayerContainer.body as Phaser.Physics.Arcade.Body).reset(event.x, event.y);
@@ -190,10 +198,10 @@ export default class LobbyScene extends Phaser.Scene {
     }
 
     // Nameplate, above the tallest hat and drawn over the figure
-    const nameText = this.add.text(0, FIGURE_TOP - 12, player.name, {
+    const nameText = this.add.text(0, FIGURE_TOP - 12, plateText(player), {
       fontSize: '12px',
       fontFamily: '"Press Start 2P", cursive',
-      color: '#ffffff',
+      color: plateColour(player),
       backgroundColor: 'rgba(0,0,0,0.5)',
       padding: { x: 4, y: 2 }
     }).setOrigin(0.5);

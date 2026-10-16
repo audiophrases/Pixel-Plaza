@@ -1295,6 +1295,33 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
         await alex.next(m => m.t === 'notice' && /approved/.test(m.text), 'approval notice');
         assert.equal((await entries()).filter(e => e.status === 'pending').length, 0);
 
+        // Levels: the teacher stars a good message, once; the student sees the experience arrive, with why.
+        const star = body => api(base, '/api/teacher/xp', { session, body });
+        assert.equal((await star({ chatId: posted[0].id })).status, 200);
+        const gained = await alex.next(m => m.t === 'xp' && m.gained, 'experience');
+        assert.deepEqual([gained.xp, gained.gained], [5, 5]);
+        assert.match(gained.reason, /Nice to meet you/);
+        assert.equal((await star({ chatId: posted[0].id })).status, 400, 'a message earns one star');
+        assert.equal((await star({ chatId: 'not-a-message' })).status, 400);
+        assert.equal((await entries()).find(e => e.id === posted[0].id).starred, true);
+        // A name colour waits for level 1, a flair for level 2, and the extra emotes for level 3.
+        alex.send({ t: 'style', colour: 2, flair: null });
+        alex.send({ t: 'emote', emote: '🎉' });
+        alex.send({ t: 'emote', emote: '👍' });
+        assert.equal((await alex.next(m => m.t === 'emote', 'emote')).emote, '👍', 'a locked emote is not sent');
+        await star({ chatId: posted[1].id });
+        assert.equal((await alex.next(m => m.t === 'xp' && m.gained, 'level 1')).xp, 10);
+        alex.send({ t: 'style', colour: 2, flair: '⚽' });
+        alex.send({ t: 'style', colour: 2, flair: null });
+        assert.deepEqual((await alex.next(m => m.t === 'style', 'style')).style, { colour: 2, flair: null }, 'the flair is refused, the colour shown');
+        // It stays for good: back in the plaza, everyone sees it, and the experience is there.
+        alex.ws.close();
+        await pause(300);
+        alex = await enter(base, 'signed-a', null);
+        assert.deepEqual(alex.me.style, { colour: 2, flair: null });
+        assert.equal((await alex.next(m => m.t === 'xp', 'experience on joining')).xp, 10);
+        assert.equal((await api(base, '/api/teacher/status', { session })).body.online.find(s => s.studentKey === 'stu_a').level, 1);
+
         // Review mode: what OpenAI cleared posts at once, with no teacher click.
         const status = (await api(base, '/api/teacher/status', { session })).body;
         assert.deepEqual([status.mode, status.moderation], ['approve', true]);
@@ -1555,6 +1582,9 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         await pause(3200);
         answer(alexBack, 'It is in the park');
         assert.equal((await result(alexBack)).correct, true);
+        // A right answer earns experience, once; wrong ones earn nothing.
+        const earned = await alexBack.socket.next(message => message.t === 'xp' && message.gained, 'experience for the answer');
+        assert.deepEqual([earned.gained, earned.reason], [2, 'Right answer in your journal']);
         const next = (await alexBack.socket.next(message => message.t === 'quest' && message.quest.objectives.some(item => item.id === 'when'), 'next question')).quest;
         assert.ok(next.clues.some(clue => clue.from === 'reward' && clue.text === chapter.objectives[0].rewards[next.role.id]), 'a clue for their role');
         assert.deepEqual(next.objectives.filter(item => item.optional).map(item => item.id).sort(), ['lock', 'note']);

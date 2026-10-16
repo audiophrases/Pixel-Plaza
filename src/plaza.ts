@@ -3,8 +3,9 @@ import { messageId } from './utils/messageId.ts';
 import type { QuestView } from '../shared/campaign';
 import type { WarmupView } from '../shared/warmup';
 import type { AttemptSource, StudentSupport } from '../shared/support';
+import type { Style } from '../shared/levels';
 
-export type PlazaPlayer = AvatarConfig & { id: string; name: string; x: number; y: number };
+export type PlazaPlayer = AvatarConfig & { id: string; name: string; x: number; y: number; style?: Style };
 // A hint on one chat message, from the server. Never a refusal.
 export type GrammarHint = { ok: true } | { ok: false; corrected: string; why: string };
 export type PlazaStatus = { state: 'connecting' | 'online' | 'reconnecting' | 'stopped'; message?: string };
@@ -26,7 +27,9 @@ export type PlazaEvent =
   | { t: 'rename'; id: string; name: string }                              // a namesake arrived: this player's shown name changed
   | { t: 'quest'; quest: QuestView | null }                                  // this student's view of the campaign
   | { t: 'answered'; objective: string; correct: boolean; wait: boolean }
-  | { t: 'support'; support: StudentSupport; history?: boolean };
+  | { t: 'support'; support: StudentSupport; history?: boolean }
+  | { t: 'xp'; xp: number; gained?: number; reason?: string }            // this student's experience; gained and why when it grows
+  | { t: 'style'; id: string; style: Style };                             // a player chose a name colour or a flair
 
 // As in PinPlay's live-socket.js: a connection can die without closing (a laptop
 // lid, Wi-Fi roaming), and only a missing pong shows it. The room answers
@@ -50,6 +53,7 @@ export class PlazaConnection {
   players = new Map<string, PlazaPlayer>();
   selfId = '';
   vision = 0; // how far this student sees, from the server; 0 shows everyone
+  xp = 0; // this student's experience, kept for good
   status: PlazaStatus = { state: 'connecting' };
   private pin: string;
   private token: string;
@@ -298,6 +302,8 @@ export class PlazaConnection {
     }
     if (message.t === 'join') this.players.set(message.player.id, message.player);
     if (message.t === 'vision') this.vision = message.radius;
+    if (message.t === 'xp') this.xp = message.xp;
+    if (message.t === 'style') { const player = this.players.get(message.id); if (player) player.style = message.style; }
     if (message.t === 'rename') { const player = this.players.get(message.id); if (player) player.name = message.name; }
     if (message.t === 'leave') this.players.delete(message.id);
     if (message.t === 'move') {

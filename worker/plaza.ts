@@ -23,7 +23,8 @@ import { assignLateJoiner, assignWarmup, factById, type WarmupView } from '../sh
 import { assignIdentities, assignLateIdentity, assignLatePair, assignPairs, identityById, isWarmupKind, type WarmupKind } from '../shared/warmupKinds.ts';
 import { randomName } from '../shared/randomNames.ts';
 import { legalMove, zoneAt } from '../shared/plazaMap.ts';
-import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
+import { XP, checkStyle, emotesFor, levelOf, readStyle, type Style } from '../shared/levels.ts';
+import { type Avatar, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 
 const TICKET_MS = 60_000;
 const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
@@ -46,7 +47,7 @@ const CLOSE_CLASS_CLOSED = 4002; // the teacher closed the game
 
 // Per-socket state. It lives in the socket's attachment, so it survives the
 // room hibernating between messages.
-type Seat = { id: string; game: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; x: number; y: number; lastChat: number; lastCheck?: number; lastReroll?: number; movedAt?: number; left?: boolean };
+type Seat = { id: string; game: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; style?: Style; x: number; y: number; lastChat: number; lastCheck?: number; lastReroll?: number; movedAt?: number; left?: boolean };
 
 // 'approve': every message waits for the teacher. 'review': nearby chat that OpenAI
 // cleared posts at once and the teacher reviews afterwards; whispers still wait.
@@ -65,6 +66,7 @@ export type TeacherAction =
     | { kind: 'approveAll' }
     | { kind: 'mode'; mode: ChatMode }
     | { kind: 'mute'; studentKey: string; muted: boolean }
+    | { kind: 'xp'; chatId?: string; report?: { studentKey: string; objective: string } } // the teacher stars a message or a report
     | { kind: 'helpStatus'; id: string; status: HelpStatus; gameId?: string }
     | { kind: 'helpMessage'; studentKey: string; text: string; gameId?: string };
 
@@ -75,7 +77,7 @@ export type CampaignStatus = {
     id: string; title: string; status: QuestView['status']; chapter: number; chapters: number; chapterTitle: string; chapterTitles: string[];
     reveals: { shown: number; total: number; next: string | null }; // prepared news the teacher can release
     players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
-    reports: { studentKey: string; objective: string; text: string; partner?: string }[]; // what students wrote for the written questions
+    reports: { studentKey: string; objective: string; text: string; partner?: string; starred: boolean }[]; // what students wrote for the written questions
     interviews: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
     board?: ReturnType<QuestBoard['summary']>;
 };
@@ -90,14 +92,14 @@ export type TeacherStatus = {
     realNames: Record<string, string>; // every student's real name, since the plaza may show made-up ones
     games: GameSummary[];                      // every saved game, most recently played first
     pin: string | null; // the open game's PIN, which students type to join
-    entries: { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string }[];
+    entries: { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred: boolean }[];
     mode: ChatMode;
     moderation: boolean; // an OpenAI key is set, so 'review' mode can post anything
     muted: string[];
-    online: { studentKey: string; name: string; x: number; y: number; zone: string | null }[];
+    online: { studentKey: string; name: string; x: number; y: number; zone: string | null; level: number }[];
 };
 
-const publicSeat = (seat: Seat) => ({ id: seat.id, name: seat.name, x: seat.x, y: seat.y, ...seat.avatar });
+const publicSeat = (seat: Seat) => ({ id: seat.id, name: seat.name, x: seat.x, y: seat.y, ...seat.avatar, ...(seat.style ? { style: seat.style } : {}) });
 
 // The plaza. Everything that must outlast a lesson is a SQLite row: each student's
 // looks, the games (a PIN each, kept for good) with where every student stood in
@@ -166,6 +168,14 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('students')").toArray().some(row => row.name === 'full_name')) {
             this.sql.exec('ALTER TABLE students ADD COLUMN full_name TEXT');
         }
+        // Levels: a student's experience, kept for good, and the look they chose with it. Each award is
+        // recorded by what earned it, so the same message or answer never counts twice.
+        if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('students')").toArray().some(row => row.name === 'xp')) {
+            this.sql.exec('ALTER TABLE students ADD COLUMN xp INTEGER NOT NULL DEFAULT 0');
+            this.sql.exec('ALTER TABLE students ADD COLUMN style TEXT');
+        }
+        this.sql.exec(`CREATE TABLE IF NOT EXISTS xp_awards (student_key TEXT NOT NULL, source TEXT NOT NULL, amount INTEGER NOT NULL,
+            reason TEXT NOT NULL, game_id TEXT, ts INTEGER NOT NULL, PRIMARY KEY (student_key, source))`);
         // Games from before made-up names keep showing real first names.
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('games')").toArray().some(row => row.name === 'random_names')) {
             this.sql.exec('ALTER TABLE games ADD COLUMN random_names INTEGER NOT NULL DEFAULT 0');
@@ -418,6 +428,10 @@ export class PlazaRoom extends DurableObject<Env> {
             const pending = this.sql.exec<{ id: string }>("SELECT id FROM chat WHERE status = 'pending' AND game_id IS ? ORDER BY ts", this.activeGame()).toArray();
             for (const { id } of pending) this.review(id, true);
         }
+        if (action.kind === 'xp') {
+            const failed = this.teacherStar(action);
+            if (failed) return { error: failed, status: 400 };
+        }
         if (action.kind === 'mode') this.saveSetting('mode', action.mode);
         if (action.kind === 'mute') {
             if (action.muted) this.sql.exec('INSERT OR IGNORE INTO mutes (student_key) VALUES (?)', action.studentKey);
@@ -441,16 +455,17 @@ export class PlazaRoom extends DurableObject<Env> {
                 'SELECT id, name, pin, last_opened AS lastOpened, random_names AS randomNames FROM games ORDER BY last_opened DESC').toArray()
                 .map(game => ({ ...game, randomNames: game.randomNames === 1, open: this.isOpen() && game.id === current?.id })),
             pin: this.classPin(),
-            entries: this.sql.exec<TeacherStatus['entries'][number]>(`SELECT id, student_key AS studentKey, sender, target_name AS target, flag, note, text,
+            entries: this.sql.exec<Omit<TeacherStatus['entries'][number], 'starred'>>(`SELECT id, student_key AS studentKey, sender, target_name AS target, flag, note, text,
                 ts AS timestamp, status FROM (
                     SELECT * FROM chat WHERE status = 'pending' AND game_id IS ?
                     UNION SELECT * FROM (SELECT * FROM chat WHERE game_id IS ? ORDER BY ts DESC LIMIT ?))
-                ORDER BY ts DESC`, current?.id ?? null, current?.id ?? null, STATUS_HISTORY).toArray(),
+                ORDER BY ts DESC`, current?.id ?? null, current?.id ?? null, STATUS_HISTORY).toArray()
+                .map(entry => ({ ...entry, starred: this.starred(entry.studentKey, `teacher:${entry.id}`) })),
             mode: this.mode(),
             moderation: !!this.env.OPENAI_API_KEY,
             muted: this.sql.exec<{ student_key: string }>('SELECT student_key FROM mutes').toArray().map(row => row.student_key),
             online: this.seats().filter(seat => seat.game === current?.id).map(seat => ({
-                studentKey: seat.studentKey, name: seat.name, x: seat.x, y: seat.y, zone: zoneAt(seat.x, seat.y)
+                studentKey: seat.studentKey, name: seat.name, x: seat.x, y: seat.y, zone: zoneAt(seat.x, seat.y), level: levelOf(this.xpOf(seat.studentKey)).level
             }))
         };
     }
@@ -575,8 +590,8 @@ export class PlazaRoom extends DurableObject<Env> {
         this.sql.exec('INSERT OR IGNORE INTO game_students (game_id, student_key) VALUES (?, ?)', game, row.student_key);
         this.assistance.joinSession(this.helpSession(), game, row.student_key);
         this.refreshNames(game);
-        const saved = this.sql.exec<{ name: string; avatar: string | null; x: number | null; y: number | null }>(
-            `SELECT s.name AS name, s.avatar AS avatar, p.x AS x, p.y AS y FROM students s
+        const saved = this.sql.exec<{ name: string; avatar: string | null; x: number | null; y: number | null; xp: number; style: string | null }>(
+            `SELECT s.name AS name, s.avatar AS avatar, s.xp AS xp, s.style AS style, p.x AS x, p.y AS y FROM students s
              LEFT JOIN positions p ON p.student_key = s.student_key AND p.game_id = ? WHERE s.student_key = ?`,
             game, row.student_key).one();
         // Where they stood last time in this game, unless the map has changed under them since
@@ -586,6 +601,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const seat: Seat = {
             id: crypto.randomUUID().slice(0, 8), game, studentKey: row.student_key, name: this.rosterNames(game).get(row.student_key) ?? saved.name,
             avatar: (saved.avatar && sanitizeAvatar(JSON.parse(saved.avatar))) || defaultAvatar(),
+            style: readStyle(saved.style, levelOf(saved.xp).level),
             x: spot.x, y: spot.y,
             lastChat: 0, movedAt: Date.now()
         };
@@ -596,6 +612,7 @@ export class PlazaRoom extends DurableObject<Env> {
         this.broadcast({ t: 'join', player: publicSeat(seat) }, server);
         if (replaced.length === 0) this.systemChat(`${seat.name} has joined the Plaza.`, server);
         this.sendQuest(server, seat.game, seat.studentKey, true);
+        try { server.send(JSON.stringify({ t: 'xp', xp: saved.xp })); } catch { /* closing */ }
         this.sendAlias(server, seat.game, seat.studentKey);
         this.sendVision(server, seat.game);
         // A late arrival's part changes everyone's team total, so all get the warm-up again.
@@ -659,8 +676,16 @@ export class PlazaRoom extends DurableObject<Env> {
             await this.interviewTurn(ws, seat, data);
         } else if (data?.t === 'reroll' || data?.t === 'keep') {
             this.chooseAlias(ws, seat, data.t === 'keep');
-        } else if (data?.t === 'emote' && EMOTES.includes(data.emote)) {
+        } else if (data?.t === 'emote' && typeof data.emote === 'string' && emotesFor(levelOf(this.xpOf(seat.studentKey)).level).includes(data.emote)) {
             this.broadcast({ t: 'emote', id: seat.id, emote: data.emote });
+        } else if (data?.t === 'style') {
+            // A name colour and a flair, as far as the student's level allows.
+            const style = checkStyle(data, levelOf(this.xpOf(seat.studentKey)).level);
+            if (!style) return;
+            this.sql.exec('UPDATE students SET style = ? WHERE student_key = ?', JSON.stringify(style), seat.studentKey);
+            seat.style = style;
+            ws.serializeAttachment(seat);
+            this.broadcast({ t: 'style', id: seat.id, style });
         } else if (data?.t === 'check') {
             await this.grammar(ws, seat, data.id, data.text, typeof data.attemptId === 'string' ? data.attemptId : undefined);
         } else if (data?.t === 'chat') {
@@ -1004,6 +1029,8 @@ export class PlazaRoom extends DurableObject<Env> {
         this.sql.exec('UPDATE campaign_players SET done = ? WHERE game_id = ? AND student_key = ?',
             JSON.stringify([...player.done, objective.id]), seat.game, seat.studentKey);
         reply(true);
+        this.award(seat.studentKey, `answer:${seat.game}:${objective.id}`, objective.board ? XP.quest : XP.answer,
+            objective.board ? 'Partner quest completed' : 'Right answer in your journal', seat.game);
         const chapter = campaign.chapters[row.chapter];
         if (row.status === 'active' && chapterDone(chapter, this.campaignPlayers(seat.game))) {
             this.sql.exec("UPDATE campaigns SET status = 'chapter_complete' WHERE game_id = ?", seat.game);
@@ -1090,6 +1117,7 @@ export class PlazaRoom extends DurableObject<Env> {
                 LEFT JOIN quest_assignments a ON r.game_id = a.game_id AND r.student_key = a.student_key AND r.objective = a.objective
                 WHERE r.game_id = ? ORDER BY r.ts DESC LIMIT 100`, game).toArray()
                 .map(report => ({ studentKey: report.student_key, objective: report.objective, text: report.text,
+                    starred: this.starred(report.student_key, `report:${game}:${report.objective}`),
                     ...(report.partner_key ? { partner: names.get(report.partner_key) ?? 'Classmate' } : {}) }))
         };
     }
@@ -1320,6 +1348,10 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         this.sql.exec('UPDATE warmup_players SET step = step + 1 WHERE game_id = ? AND student_key = ?', seat.game, seat.studentKey);
         reply(true);
+        if (me.step + 1 >= me.targets.length) {
+            const started = this.sql.exec<{ started: number }>('SELECT started FROM warmups WHERE game_id = ?', seat.game).toArray()[0]?.started ?? 0;
+            this.award(seat.studentKey, `warmup:${seat.game}:${started}`, XP.warmup, 'Warm-up finished', seat.game);
+        }
         // Everyone's progress bar moves
         this.sendWarmupToAll(seat.game);
     }
@@ -1410,6 +1442,44 @@ export class PlazaRoom extends DurableObject<Env> {
             this.moves.clear();
             if (moves.length) this.broadcast({ t: 'moves', moves });
         }, MOVE_BATCH_MS);
+    }
+
+    // ---------- Levels ----------
+
+    private xpOf(studentKey: string): number {
+        return this.sql.exec<{ xp: number }>('SELECT xp FROM students WHERE student_key = ?', studentKey).toArray()[0]?.xp ?? 0;
+    }
+
+    private starred(studentKey: string, source: string): boolean {
+        return this.sql.exec('SELECT 1 FROM xp_awards WHERE student_key = ? AND source = ?', studentKey, source).toArray().length > 0;
+    }
+
+    // Experience for one thing, once: `source` names what earned it. The student sees it arrive, with why.
+    private award(studentKey: string, source: string, amount: number, reason: string, game: string | null): boolean {
+        const added = this.sql.exec('INSERT OR IGNORE INTO xp_awards (student_key, source, amount, reason, game_id, ts) VALUES (?, ?, ?, ?, ?, ?) RETURNING 1',
+            studentKey, source, amount, reason, game, Date.now()).toArray().length > 0;
+        if (!added) return false;
+        this.sql.exec('UPDATE students SET xp = xp + ? WHERE student_key = ?', amount, studentKey);
+        const message = JSON.stringify({ t: 'xp', xp: this.xpOf(studentKey), gained: amount, reason });
+        for (const ws of this.ctx.getWebSockets(studentKey)) { try { ws.send(message); } catch { /* reconnect sends the total */ } }
+        return true;
+    }
+
+    // The teacher's star on an approved message or a written report from the open game. Returns what went wrong, or null.
+    private teacherStar(action: Extract<TeacherAction, { kind: 'xp' }>): string | null {
+        const game = this.activeGame();
+        if (!game) return 'Open a game first.';
+        if (action.chatId) {
+            const entry = this.sql.exec<{ student_key: string; text: string }>("SELECT student_key, text FROM chat WHERE id = ? AND game_id = ? AND status = 'approved'", action.chatId, game).toArray()[0];
+            if (!entry) return 'Only an approved message from this game can earn a star.';
+            return this.award(entry.student_key, `teacher:${action.chatId}`, XP.teacher, `Your teacher liked: "${entry.text.slice(0, 80)}"`, game) ? null : 'That message already has a star.';
+        }
+        if (action.report) {
+            const { studentKey, objective } = action.report;
+            if (!this.sql.exec('SELECT 1 FROM campaign_reports WHERE game_id = ? AND student_key = ? AND objective = ?', game, studentKey, objective).toArray().length) return 'That report was not found.';
+            return this.award(studentKey, `report:${game}:${objective}`, XP.teacher, 'Your teacher liked your report', game) ? null : 'That report already has a star.';
+        }
+        return 'Choose a message or a report.';
     }
 
     private notify(studentKey: string, level: 'info' | 'warning', text: string): void {

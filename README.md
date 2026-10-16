@@ -95,6 +95,15 @@ The laptop's address is plain HTTP, so student sessions cross the school network
 
 **Message history** retains every recorded submission, including browser-filtered drafts, server refusals, whispers, witness exchanges, answers and private assistance. It preserves originals, suggested corrections and revised text, with student filtering and pagination past 500 records. Pending audit records survive browser reopening until acknowledged. See the [student assistance guide](docs/student-assistance.md) for detection, retention and offline behavior.
 
+## Levels
+
+Students earn experience (XP) and levels, shown as a green bar at the bottom of the screen, as in Minecraft. Experience is kept for good, across games and lessons, and only unlocks looks, never an advantage in play:
+
+- **Your star:** **⭐ +5 XP** on an approved message in Chat review, or on a report in the Campaign card. Once per message or report; the student sees which sentence earned it.
+- **Automatic, once each:** a right journal answer (+2), a partner quest (+5), and finding everyone in a warm-up (+3). Writing more messages earns nothing by itself.
+
+Level 1 needs 10 XP and each level a little more (15, 20, 25...). Level 1 unlocks a name colour, level 2 a flair (a badge before the name) and level 3 four more emotes. Students choose them by clicking the bar. Teacher controls show each student's level in Live plaza. The rules are in `shared/levels.ts`.
+
 ## Chat voices and goal sounds
 
 Sound starts **on**. New chat messages are read aloud in the sender's chosen character voice while their text stays visible. Students choose an English voice/accent in the character editor and can replay messages with **Listen**. Successful journal objectives and warm-up answers play PinPlay's rotating correct-answer clips for fun.

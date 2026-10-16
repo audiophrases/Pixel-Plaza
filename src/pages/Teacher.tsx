@@ -9,19 +9,20 @@ import { MAP_SIZE, plazaMap } from '../../shared/plazaMap';
 import type { InterviewView } from '../../shared/campaign';
 import type { TeacherSupport as Support } from '../../shared/support';
 import type { CampaignChoice } from '../../shared/missionTypes';
+import { XP } from '../../shared/levels';
 import TeacherSupport from '../components/TeacherSupport';
 
-type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string };
+type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred?: boolean };
 type CampaignInfo = {
   id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string; chapterTitles?: string[];
   reveals: { shown: number; total: number; next: string | null };
-  reports: { studentKey: string; objective: string; text: string; partner?: string }[];
+  reports: { studentKey: string; objective: string; text: string; partner?: string; starred?: boolean }[];
   interviews?: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
   board?: { id: string; text: string; teacherReleased: boolean; released: boolean; accepted: number; completed: number }[];
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
 };
 type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean };
-type LiveStudent = { studentKey: string; name: string; x: number; y: number; zone: string | null };
+type LiveStudent = { studentKey: string; name: string; x: number; y: number; zone: string | null; level?: number };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
   campaign: CampaignInfo | null; campaigns: CampaignChoice[];
@@ -276,6 +277,7 @@ export default function Teacher() {
               <button className="btn btn-sm" onClick={() => void action('review', { id: entry.id, approve: false })}>Reject</button>
             </>}
             {entry.status === 'approved' && <button className="btn btn-sm" onClick={() => void action('review', { id: entry.id, approve: false })}>Remove</button>}
+            {entry.status === 'approved' && <StarButton starred={entry.starred} onStar={() => void action('xp', { chatId: entry.id })} />}
             <button className="btn btn-sm" onClick={() => void action('mute', { studentKey: entry.studentKey, muted: !status.muted.includes(entry.studentKey) })}>
               {status.muted.includes(entry.studentKey) ? 'Unmute' : 'Mute'} student
             </button>
@@ -301,7 +303,7 @@ export default function Teacher() {
         {status.online.length ? <ul className="teacher-map-roster">{status.online.map((student, index) => <li key={student.studentKey}>
           <button type="button" aria-pressed={selectedStudent === student.studentKey}
             onClick={() => setSelectedStudent(student.studentKey)}>
-            <strong>{index + 1}. {who(student.studentKey, student.name)}</strong> · {student.zone ?? 'plaza'}
+            <strong>{index + 1}. {who(student.studentKey, student.name)}</strong> · {student.zone ?? 'plaza'}{student.level !== undefined && <> · Lv {student.level}</>}
           </button>
         </li>)}</ul> : <p>No students in the plaza right now.</p>}
       </>)}
@@ -347,6 +349,7 @@ export default function Teacher() {
           <h3>What students wrote</h3>
           <ul>{campaign.reports.map(report => <li key={report.studentKey + report.objective}>
             <span><strong>{who(report.studentKey, campaign.players.find(player => player.studentKey === report.studentKey)?.name ?? 'Student')}</strong>{report.partner ? ` · partner: ${report.partner}` : ''}: {report.text}</span>
+            <StarButton starred={report.starred} onStar={() => void action('xp', { report: { studentKey: report.studentKey, objective: report.objective } })} />
           </li>)}</ul>
         </>}
         {!!campaign.interviews?.length && <details className="teacher-interviews"><summary>Witness exchanges ({campaign.interviews.length})</summary>
@@ -479,6 +482,12 @@ const CARDS_KEY = 'pixelplaza.teacher.cards.v1';
 
 function readOpenCards(): Partial<Record<CardId, boolean>> {
   try { return JSON.parse(localStorage.getItem(CARDS_KEY) ?? '{}') ?? {}; } catch { return {}; }
+}
+
+// The teacher's star: experience for a good message or report, once each.
+function StarButton({ starred, onStar }: { starred?: boolean; onStar: () => void }) {
+  return starred ? <span className="teacher-starred">⭐ Starred</span>
+    : <button className="btn btn-sm" title={`Give ${XP.teacher} XP for good English`} onClick={onStar}>⭐ +{XP.teacher} XP</button>;
 }
 
 function Badge({ info }: { info: CardInfo }) {

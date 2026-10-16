@@ -83,3 +83,4 @@ kbd { border: 1px solid #aaa; border-radius: 4px; padding: 0 .35rem; background:
 .teacher-step-now { border-color: var(--primary); color: var(--text-dark); font-weight: 600; }
 .teacher-step-now .teacher-step-number { background: var(--primary); color: #fff; }
 .teacher-step-now small { color: var(--primary-dark); font-weight: 700; text-transform: uppercase; font-size: .7rem; }
+.teacher-starred { font-size: .85rem; color: #8a6d00; font-weight: 600; }
