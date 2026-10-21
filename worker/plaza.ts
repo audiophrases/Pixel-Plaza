@@ -4,6 +4,7 @@ import type { PinPlayStudent } from './pinplay.ts';
 import { checkGrammar } from './grammar.ts';
 import { languageHelp } from './aiHelp.ts';
 import { moderate } from './moderation.ts';
+import { PARTICIPATION, Participation, participationDecision } from './participation.ts';
 import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
 import { MissionRepository, type MissionResult } from './missions.ts';
 import { QuestBoard, type BoardContext } from './questBoard.ts';
@@ -111,6 +112,7 @@ export class PlazaRoom extends DurableObject<Env> {
     private questBoard: QuestBoard;
     private interviews: Interviews;
     private assistance: StudentAssistance;
+    private participation: Participation;
     private interviewSends = new Set<string>();
     private liveMissions: LiveMissions;
     private moves = new Map<string, [number, number]>(); // player id to latest position, not yet passed on
@@ -200,6 +202,8 @@ export class PlazaRoom extends DurableObject<Env> {
         this.interviews.initialize();
         this.assistance = new StudentAssistance(this.sql);
         this.assistance.initialize();
+        this.participation = new Participation(this.sql);
+        this.participation.initialize();
         this.liveMissions = new LiveMissions(this.sql);
         this.liveMissions.initialize();
         // Keepalive pings are answered without waking the room.
@@ -1238,6 +1242,7 @@ export class PlazaRoom extends DurableObject<Env> {
             this.closeRoom();
         }
         this.assistance.clear(game);
+        this.participation.clear(game);
         for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'warmups', 'warmup_players']) {
             this.sql.exec(`DELETE FROM ${table} WHERE game_id = ?`, game);
         }
@@ -1721,7 +1726,36 @@ export class PlazaRoom extends DurableObject<Env> {
                 } catch { /* closing */ }
             }
         }
+        if (game && this.sql.exec('SELECT 1 FROM chat_audience WHERE chat_id = ? AND student_key != ? LIMIT 1', entry.id, entry.student_key).toArray().length) {
+            this.ctx.waitUntil(this.rewardParticipation(entry.id, game, entry.student_key).catch(() => {
+                console.log('Participation reward unavailable');
+            }));
+        }
         return entry.target_key === null || recipients.size > 1;
+    }
+
+    private async rewardParticipation(id: string, game: string, student: string): Promise<void> {
+        if (!this.env.OPENAI_API_KEY || this.env.OPENAI_PARTICIPATION === '0' || !this.isOpen() || this.activeGame() !== game) return;
+        const session = this.helpSession();
+        const entry = this.sql.exec<{ text: string; ts: number }>("SELECT text, ts FROM chat WHERE id = ? AND game_id = ? AND student_key = ? AND status = 'approved'", id, game, student).toArray()[0];
+        if (!entry) return;
+        // Across nearby and direct messages: changing recipient never resets the history.
+        const previous = this.sql.exec<{ text: string }>(`SELECT text FROM chat WHERE game_id = ? AND student_key = ?
+            AND id != ? AND status IN ('approved', 'removed') AND ts <= ? ORDER BY ts DESC, rowid DESC LIMIT 40`, game, student, id, entry.ts).toArray().reverse().map(row => row.text);
+        if (!this.participation.reserve(session, game, student, id, entry.text, previous)) return;
+        const conversation = this.sql.exec<{ student_key: string; text: string }>(`SELECT c.student_key, c.text FROM chat c
+            JOIN chat_audience a ON a.chat_id = c.id AND a.student_key = ?
+            WHERE c.game_id = ? AND c.id != ? AND c.status = 'approved' AND c.ts <= ?
+            ORDER BY c.ts DESC, c.rowid DESC LIMIT ?`, student, game, id, entry.ts, PARTICIPATION.peers).toArray().reverse()
+            .map(row => ({ self: row.student_key === student, text: row.text }));
+        const useful = await participationDecision({ message: entry.text, previous, conversation }, this.env);
+        // A teacher may have removed it, muted the student, switched games or ended the lesson during the call.
+        if (!useful || !this.isOpen() || this.activeGame() !== game || this.helpSession() !== session
+            || this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', student).toArray().length
+            || !this.sql.exec("SELECT 1 FROM chat WHERE id = ? AND game_id = ? AND status = 'approved'", id, game).toArray().length) return;
+        this.ctx.storage.transactionSync(() => {
+            if (this.participation.reward(id)) this.award(student, `participation:${id}`, XP.participation, 'A useful contribution to the conversation', game);
+        });
     }
 
     // Opens a saved game (the one last played when none is named, or a first game when there

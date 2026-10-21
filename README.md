@@ -104,6 +104,7 @@ Students earn experience (XP) and levels, shown as a green bar at the bottom of 
 
 - **Your star:** **⭐ +5 XP** on an approved message in Chat review, or on a report in the Campaign card. Once per message or report; the student sees which sentence earned it.
 - **Automatic, once each:** a right journal answer (+2), a partner quest (+5), and finding everyone in a warm-up (+3). Writing more messages earns nothing by itself.
+- **Participation:** useful, varied questions and replies to classmates can earn +1, up to 8 per lesson when AI checks are enabled. See [Participation XP](#participation-xp-optional).
 
 Level 1 needs 10 XP and each level a little more (15, 20, 25...). Level 1 unlocks a name colour, level 2 a flair (a badge before the name) and level 3 four more emotes. Students choose them by clicking the bar. Teacher controls show each student's level in Live plaza. The rules are in `shared/levels.ts`.
 
@@ -174,6 +175,14 @@ With the same `OPENAI_API_KEY`, a message that passes the dictionary check is al
 It never blocks. A message that looks fine, a short one (under 4 words), a slow answer (2 seconds), or any error means the message is simply sent. A student who turns hints down three times in a row is left alone for the next message. The queue shows the teacher a *Grammar hint* line for each message, saying whether the student used the suggestion or kept their own words.
 
 Each hint is one small API call (one message, a few hundred tokens), and a student gets at most one a second. The model is `gpt-4o-mini`; set `OPENAI_GRAMMAR_MODEL` in `.dev.vars` (or as a variable online) to use another. Set a monthly spending limit on the OpenAI account. Messages are sent to OpenAI to be checked, so mention it in your school's data notice.
+
+## Participation XP (optional)
+
+With `OPENAI_API_KEY`, students can earn **+1 XP** for a useful question, relevant answer, shared idea or helpful contribution to classmates. Understandable learner English is enough, including a short follow-up question. A message must be approved and reach another student before it is considered. Messages to the teacher, rejected messages and messages sent to an empty plaza do not qualify. The rewards menu explains this alongside the existing teacher stars and quest rewards.
+
+The server filters greeting loops, exact repetitions and near copies before calling AI. One short [Decisions API](https://developers.openai.com/api/docs/guides/decisions) predicate evaluates the new contribution against up to eight earlier messages by that student across nearby/direct recipients and four recent conversation messages they actually received. It does not resend the full history or ask a model to generate an explanation. The server uses a conservative 0.8 probability threshold; this is a heuristic, not a guarantee that farming will always be detected.
+
+Per student and classroom session: **at most 8 participation XP, at most 12 API checks, and at least 45 seconds between checks**. Failed and negative checks consume that allowance too; there are no automatic retries or generated-text fallbacks. Quotas, checked texts and awarded message IDs survive reconnects and Worker restarts. A new session starts when the teacher reopens a class. Checks run in the background and failures leave chat working normally. Messages removed while a check runs earn nothing; XP already awarded stays with the student, like existing XP. Set `OPENAI_PARTICIPATION=0` to disable this feature without disabling moderation or grammar hints. Teacher stars remain worth +5 XP.
 
 ## Costs
 

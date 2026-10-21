@@ -19,6 +19,7 @@ export interface Env {
     OPENAI_API_KEY?: string;
     OPENAI_BASE_URL?: string; // tests only
     OPENAI_GRAMMAR_MODEL?: string; // which chat model gives grammar hints; a small, cheap one by default
+    OPENAI_PARTICIPATION?: string; // '0' disables small automatic conversation XP rewards
     MOVEMENT_CHECK?: string; // '0' turns off the check that moves do not go through walls or too fast (tests only)
     OPENAI_GRAMMAR_GATE?: string; // '0' skips the quick Decisions check that decides whether a hint is worth asking for
     // Set only on the teacher's laptop (npm run classroom): its address on the

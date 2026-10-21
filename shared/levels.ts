@@ -1,10 +1,11 @@
 // Levels, as in Minecraft: experience fills a bar, and each full bar is a level. A student keeps their
 // experience for good, across games and lessons. Levels unlock looks only, never an advantage in play,
 // so the mysteries stay fair. Experience comes from the teacher and from a few moments in the game, each
-// counted once, and never from the number of messages, so writing more does not earn more.
+// counted once. Chat rewards depend on useful, varied communication, with a small lesson limit.
 
 // How much each thing is worth.
 export const XP = {
+    participation: 1, // a useful, varied contribution to a classmate conversation
     teacher: 5, // the teacher stars a message or a report
     answer: 2,  // a chapter question answered right, the first time
     quest: 5,   // a partner quest completed

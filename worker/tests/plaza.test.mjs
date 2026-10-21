@@ -1370,6 +1370,97 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
     }
 });
 
+test('small participation XP follows approved delivery, keeps durable limits and ignores removed messages', { timeout: 120000 }, async () => {
+    const decisions = []; let releaseDecision, startedDecision;
+    const ai = http.createServer(async (req, res) => {
+        let body = ''; for await (const chunk of req) body += chunk;
+        const request = JSON.parse(body);
+        res.setHeader('content-type', 'application/json');
+        if (req.url === '/v1/moderations') return res.end(JSON.stringify({ results: [{ flagged: false, categories: {} }] }));
+        assert.equal(req.url, '/v1/decisions');
+        assert.equal(request.questions[0].name, 'useful_participation');
+        const input = JSON.parse(request.input); decisions.push(input);
+        if (input.message.startsWith('Could')) {
+            startedDecision?.();
+            await new Promise(resolve => { releaseDecision = resolve; });
+        }
+        res.end(JSON.stringify({ answers: [{ name: 'useful_participation', type: 'predicate', probability: 0.95 }] }));
+    });
+    await new Promise(resolve => ai.listen(0, '127.0.0.1', resolve));
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const vars = { OPENAI_API_KEY: 'test-key', OPENAI_BASE_URL: `http://127.0.0.1:${ai.address().port}` };
+    let plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, vars);
+    let alex, sam;
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        let base = plaza.base;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        PIN = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body.pin;
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, ...(body ? { body } : {}) });
+        alex = await enter(base, 'signed-a', null);
+        await alex.next(m => m.t === 'xp');
+        alex.send({ t: 'chat', text: 'Where is the hotel?' });
+        await alex.next(m => m.t === 'chat' && m.text === 'Where is the hotel?');
+        assert.equal(decisions.length, 0, 'talking to an empty plaza earns nothing and costs no check');
+        sam = await enter(base, 'signed-b', null);
+        await sam.next(m => m.t === 'xp');
+        sam.send({ t: 'chat', text: 'hi hello hi hello', to: alex.me.id });
+        await alex.next(m => m.t === 'chat' && m.sender === 'Sam');
+        assert.equal(decisions.length, 0, 'greeting loops are filtered locally');
+
+        await teacher('mode', { mode: 'approve' });
+        await pause(1550);
+        alex.send({ t: 'chat', text: 'What did you find near the fountain?', to: sam.me.id });
+        await alex.next(m => m.t === 'notice' && /approval/.test(m.text));
+        let entry = (await teacher('status')).body.entries.find(e => e.text === 'What did you find near the fountain?');
+        assert.equal(decisions.length, 0, 'pending messages cost no participation check');
+        await teacher('review', { id: entry.id, approve: true });
+        await sam.next(m => m.t === 'chat' && m.id === entry.id);
+        const gained = await alex.next(m => m.t === 'xp' && m.gained);
+        assert.deepEqual([gained.xp, gained.gained], [1, 1], 'a genuine question needs no answer yet');
+        assert.equal(decisions.length, 1);
+        assert.ok(decisions[0].previous.includes('Where is the hotel?'), 'history crosses recipient choices');
+        assert.ok(decisions[0].conversation.some(line => !line.self), 'only delivered chat supplies peer context');
+        await teacher('review', { id: entry.id, approve: true });
+        assert.equal(decisions.length, 1, 'reviewing twice cannot reward twice');
+
+        // Restart the real Worker and reconnect: XP and the API cooldown both persist.
+        alex.ws.close(); sam.ws.close(); await pause(100);
+        await plaza.stop();
+        plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, vars); base = plaza.base;
+        alex = await enter(base, 'signed-a', null); sam = await enter(base, 'signed-b', null);
+        assert.equal((await alex.next(m => m.t === 'xp')).xp, 1);
+        await sam.next(m => m.t === 'xp');
+        await teacher('mode', { mode: 'review' });
+        alex.send({ t: 'chat', text: 'Do you enjoy playing football?', to: sam.me.id });
+        await sam.next(m => m.t === 'chat' && m.text === 'Do you enjoy playing football?');
+        assert.equal(decisions.length, 1, 'reconnecting cannot reset the cooldown');
+
+        const started = new Promise(resolve => { startedDecision = resolve; });
+        sam.send({ t: 'chat', text: 'Could you explain the clue about the box?', to: alex.me.id });
+        const posted = await alex.next(m => m.t === 'chat' && m.text.startsWith('Could'));
+        await started;
+        await teacher('review', { id: posted.id, approve: false });
+        releaseDecision(); releaseDecision = null;
+        await sam.next(m => m.t === 'retract' && m.id === posted.id);
+        await pause(200);
+        assert.equal(sam.inbox.filter(m => m.t === 'xp' && m.gained).length, 0, 'removed while checking earns no XP');
+
+        // A private request to the teacher never enters the participation pipeline.
+        await pause(1550);
+        sam.send({ t: 'chat', text: 'Please help me understand this.', to: 'teacher', cid: 'private-help' });
+        await sam.next(m => m.t === 'result' && m.cid === 'private-help');
+        assert.equal(decisions.length, 2);
+        const report = await fetch(`${base}/api/teacher/report`, { headers: { 'x-teacher-session': session } }).then(r => r.json());
+        assert.equal(report.students.find(s => s.studentKey === 'stu_a').xp, 1);
+        assert.equal(report.students.find(s => s.studentKey === 'stu_b').xp, 0);
+    } finally {
+        releaseDecision?.(); alex?.ws.close(); sam?.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); await new Promise(resolve => ai.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('grammar hints advise, never block, and the teacher sees what the student chose', { timeout: 120000 }, async () => {
     const calls = [];
     const openai = http.createServer((req, res) => {
