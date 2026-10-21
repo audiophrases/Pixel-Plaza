@@ -103,6 +103,7 @@ The laptop's address is plain HTTP, so student sessions cross the school network
 Students earn experience (XP) and levels, shown as a green bar at the bottom of the screen, as in Minecraft. Experience is kept for good, across games and lessons, and only unlocks looks, never an advantage in play:
 
 - **Your star:** **⭐ +5 XP** on an approved message in Chat review, or on a report in the Campaign card. Once per message or report; the student sees which sentence earned it.
+- **First message:** +1 for their first approved message that reaches a classmate, even a greeting. Once per student across all games, with no AI check required.
 - **Automatic, once each:** a right journal answer (+2), a partner quest (+5), and finding everyone in a warm-up (+3). Writing more messages earns nothing by itself.
 - **Participation:** useful, varied questions and replies to classmates can earn +1, up to 8 per lesson when AI checks are enabled. See [Participation XP](#participation-xp-optional).
 
@@ -177,6 +178,8 @@ It never blocks. A message that looks fine, a short one (under 4 words), a slow 
 Each hint is one small API call (one message, a few hundred tokens), and a student gets at most one a second. The model is `gpt-4o-mini`; set `OPENAI_GRAMMAR_MODEL` in `.dev.vars` (or as a variable online) to use another. Set a monthly spending limit on the OpenAI account. Messages are sent to OpenAI to be checked, so mention it in your school's data notice.
 
 ## Participation XP (optional)
+
+A student's first approved message delivered to a classmate earns **+1 XP** immediately, including a simple greeting. This welcome bonus works without an OpenAI key, is awarded once per student across all games and lessons, and survives reconnects, server restarts and game deletion. The same message skips the AI participation check, so it earns one point and costs no participation API call. Later messages use the rules below; repeating greetings cannot earn the welcome bonus again.
 
 With `OPENAI_API_KEY`, students can earn **+1 XP** for a useful question, relevant answer, shared idea or helpful contribution to classmates. Understandable learner English is enough, including a short follow-up question. A message must be approved and reach another student before it is considered. Messages to the teacher, rejected messages and messages sent to an empty plaza do not qualify. The rewards menu explains this alongside the existing teacher stars and quest rewards.
 

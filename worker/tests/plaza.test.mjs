@@ -1370,6 +1370,68 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
     }
 });
 
+test('first-message XP rewards a greeting once, after approval, across restarts and games without AI', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-first-message-'));
+    let plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    let alex, sam;
+    try {
+        let base = plaza.base;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, ...(body ? { body } : {}) });
+        const opened = (await teacher('class', { open: true })).body;
+        PIN = opened.pin;
+        const firstGame = opened.game.id;
+        alex = await enter(base, 'signed-a', null); sam = await enter(base, 'signed-b', null);
+        await alex.next(m => m.t === 'xp');
+        alex.send({ t: 'chat', text: 'Please help me.', to: 'teacher', cid: 'help' });
+        await alex.next(m => m.t === 'result' && m.cid === 'help');
+        assert.equal(alex.inbox.some(m => m.t === 'xp' && m.gained), false, 'teacher help does not use the welcome bonus');
+
+        const submit = async text => {
+            alex.send({ t: 'chat', text, to: sam.me.id });
+            await alex.next(m => m.t === 'notice' && /approval/.test(m.text));
+            return (await teacher('status')).body.entries.find(e => e.text === text && e.status === 'pending');
+        };
+        const rejected = await submit('Hi');
+        assert.equal(alex.inbox.some(m => m.t === 'xp' && m.gained), false, 'pending messages earn nothing');
+        await teacher('review', { id: rejected.id, approve: false });
+        await alex.next(m => m.t === 'notice' && /not posted/.test(m.text));
+        assert.equal(alex.inbox.some(m => m.t === 'xp' && m.gained), false, 'a rejected message does not use the bonus');
+        await new Promise(resolve => setTimeout(resolve, 1550));
+        const first = await submit('Hello');
+        await teacher('review', { id: first.id, approve: true });
+        await sam.next(m => m.t === 'chat' && m.id === first.id);
+        const gained = await alex.next(m => m.t === 'xp' && m.gained);
+        assert.deepEqual([gained.xp, gained.gained], [1, 1]);
+        assert.match(gained.reason, /first message/i);
+
+        alex.ws.close(); sam.ws.close(); await Promise.all([alex.closed, sam.closed]); await plaza.stop();
+        plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); base = plaza.base;
+        alex = await enter(base, 'signed-a', null); sam = await enter(base, 'signed-b', null);
+        assert.equal((await alex.next(m => m.t === 'xp')).xp, 1, 'the bonus persists after a server restart');
+        const repeated = await submit('Hi again');
+        await teacher('review', { id: repeated.id, approve: true });
+        await sam.next(m => m.t === 'chat' && m.id === repeated.id);
+
+        const next = (await teacher('game', { name: 'Another lesson', randomNames: false })).body;
+        PIN = next.pin;
+        await Promise.all([alex.closed, sam.closed]);
+        await teacher('game/delete', { game: firstGame, confirm: true });
+        alex = await enter(base, 'signed-a', null); sam = await enter(base, 'signed-b', null);
+        assert.equal((await alex.next(m => m.t === 'xp')).xp, 1, 'changing games and deleting old history cannot reset the bonus');
+        const later = await submit('Hello again');
+        await teacher('review', { id: later.id, approve: true });
+        await sam.next(m => m.t === 'chat' && m.id === later.id);
+        alex.ws.close(); await alex.closed;
+        alex = await enter(base, 'signed-a', null);
+        assert.equal((await alex.next(m => m.t === 'xp')).xp, 1, 'the next game cannot grant another welcome bonus');
+    } finally {
+        alex?.ws.close(); sam?.ws.close(); await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('small participation XP follows approved delivery, keeps durable limits and ignores removed messages', { timeout: 120000 }, async () => {
     const decisions = []; let releaseDecision, startedDecision;
     const ai = http.createServer(async (req, res) => {
@@ -1407,6 +1469,13 @@ test('small participation XP follows approved delivery, keeps durable limits and
         await sam.next(m => m.t === 'xp');
         sam.send({ t: 'chat', text: 'hi hello hi hello', to: alex.me.id });
         await alex.next(m => m.t === 'chat' && m.sender === 'Sam');
+        const samFirst = await sam.next(m => m.t === 'xp' && m.gained);
+        assert.deepEqual([samFirst.xp, samFirst.gained], [1, 1], 'the first greeting earns encouragement without AI');
+        await pause(1550);
+        alex.send({ t: 'chat', text: 'Hello Sam!', to: sam.me.id });
+        await sam.next(m => m.t === 'chat' && m.text === 'Hello Sam!');
+        const alexFirst = await alex.next(m => m.t === 'xp' && m.gained);
+        assert.deepEqual([alexFirst.xp, alexFirst.gained], [1, 1]);
         assert.equal(decisions.length, 0, 'greeting loops are filtered locally');
 
         await teacher('mode', { mode: 'approve' });
@@ -1418,7 +1487,7 @@ test('small participation XP follows approved delivery, keeps durable limits and
         await teacher('review', { id: entry.id, approve: true });
         await sam.next(m => m.t === 'chat' && m.id === entry.id);
         const gained = await alex.next(m => m.t === 'xp' && m.gained);
-        assert.deepEqual([gained.xp, gained.gained], [1, 1], 'a genuine question needs no answer yet');
+        assert.deepEqual([gained.xp, gained.gained], [2, 1], 'a genuine question needs no answer yet');
         assert.equal(decisions.length, 1);
         assert.ok(decisions[0].previous.includes('Where is the hotel?'), 'history crosses recipient choices');
         assert.ok(decisions[0].conversation.some(line => !line.self), 'only delivered chat supplies peer context');
@@ -1430,7 +1499,7 @@ test('small participation XP follows approved delivery, keeps durable limits and
         await plaza.stop();
         plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, vars); base = plaza.base;
         alex = await enter(base, 'signed-a', null); sam = await enter(base, 'signed-b', null);
-        assert.equal((await alex.next(m => m.t === 'xp')).xp, 1);
+        assert.equal((await alex.next(m => m.t === 'xp')).xp, 2);
         await sam.next(m => m.t === 'xp');
         await teacher('mode', { mode: 'review' });
         alex.send({ t: 'chat', text: 'Do you enjoy playing football?', to: sam.me.id });
@@ -1453,8 +1522,8 @@ test('small participation XP follows approved delivery, keeps durable limits and
         await sam.next(m => m.t === 'result' && m.cid === 'private-help');
         assert.equal(decisions.length, 2);
         const report = await fetch(`${base}/api/teacher/report`, { headers: { 'x-teacher-session': session } }).then(r => r.json());
-        assert.equal(report.students.find(s => s.studentKey === 'stu_a').xp, 1);
-        assert.equal(report.students.find(s => s.studentKey === 'stu_b').xp, 0);
+        assert.equal(report.students.find(s => s.studentKey === 'stu_a').xp, 2);
+        assert.equal(report.students.find(s => s.studentKey === 'stu_b').xp, 1);
     } finally {
         releaseDecision?.(); alex?.ws.close(); sam?.ws.close();
         await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); await new Promise(resolve => ai.close(resolve)); removeTemp(persistTo);

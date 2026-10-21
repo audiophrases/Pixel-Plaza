@@ -5,6 +5,7 @@
 
 // How much each thing is worth.
 export const XP = {
+    firstMessage: 1, // the student's first approved message delivered to a classmate, once across games
     participation: 1, // a useful, varied contribution to a classmate conversation
     teacher: 5, // the teacher stars a message or a report
     answer: 2,  // a chapter question answered right, the first time

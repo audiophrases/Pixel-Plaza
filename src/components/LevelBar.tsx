@@ -51,6 +51,7 @@ export function Rewards({ xp, style, onChoose, onClose }: { xp: number; style: S
     <details className="rewards-earn">
       <summary>How to earn XP</summary>
       <ul>
+        <li>Your first message to a classmate: +{XP.firstMessage} (once)</li>
         <li>Varied questions and useful replies to classmates: +{XP.participation} (small lesson limit)</li>
         <li>Your teacher stars a good message or report: +{XP.teacher}</li>
         <li>A right answer in your journal: +{XP.answer}</li>

@@ -1727,7 +1727,10 @@ export class PlazaRoom extends DurableObject<Env> {
             }
         }
         if (game && this.sql.exec('SELECT 1 FROM chat_audience WHERE chat_id = ? AND student_key != ? LIMIT 1', entry.id, entry.student_key).toArray().length) {
-            this.ctx.waitUntil(this.rewardParticipation(entry.id, game, entry.student_key).catch(() => {
+            // A first greeting deserves encouragement too. A fixed source keeps this
+            // once per student across lessons, games, reconnects and history pruning.
+            const firstMessage = this.award(entry.student_key, 'onboarding:first-message', XP.firstMessage, 'Your first message to a classmate!', game);
+            if (!firstMessage) this.ctx.waitUntil(this.rewardParticipation(entry.id, game, entry.student_key).catch(() => {
                 console.log('Participation reward unavailable');
             }));
         }
