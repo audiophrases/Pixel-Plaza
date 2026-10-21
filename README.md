@@ -160,7 +160,7 @@ Online: `npx wrangler secret put OPENAI_API_KEY`. On the teacher's laptop, add `
 
 ## English only
 
-Before a message is sent, every word is checked against an English dictionary (Hunspell `en_US`, in the student's browser). A word that is not English, whether another language or a spelling mistake, stops the message and shows the word with up to three suggestions to tap, such as *recieve* → *receive*, or *u* → *you*. Names of the students in the Plaza, laughter (*haha*), and chat words (*lol*, *ok*) are allowed, and accents do not matter (*cafe* and *café*).
+Before a message is sent, every word is checked against an English dictionary (Hunspell `en_US`, in the student's browser). A word that is not English, whether another language or a spelling mistake, stops the message and shows the word with up to three suggestions to tap, such as *recieve* → *receive*, or *u* → *you*. Names of the students in the Plaza, laughter (*haha*), and chat words (*lol*, *ok*) are allowed, and accents do not matter (*cafe* and *café*). Stretched letters are fine (*helloooo*, *nooo*, *yesss*), and so is a lower-case *i'm*, *i'll* or *i've*; stretching does not make another language English (*siiii*, *holaaaa* are still stopped).
 
 - It is a dictionary check, not a grammar check, and a few loanwords such as *amigo* are English words too.
 - On the teacher's laptop (`npm run classroom`) the server checks again with the same dictionary, so tampering with the page does not skip it. The online site checks in the browser only. The teacher review and OpenAI check apply to whatever is sent.

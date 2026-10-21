@@ -24,6 +24,19 @@ export type Checker = (text: string, names?: string[]) => Misspelling[];
 
 export type Dictionary = { aff: string; dic: string };
 
+// Letters stretched for feeling, as in "helloooo", "nooo" or "yesss": the word with each run of a repeated
+// letter as one letter or two. "siiii" becomes "si" and "sii", which are still not English.
+function unstretched(word: string): string[] {
+  const runs = word.match(/(.)\1*/gu) ?? [];
+  if (!runs.some(run => run.length > 1)) return [];
+  let words = [''];
+  for (const run of runs) {
+    words = words.flatMap(start => run.length > 1 ? [start + run[0], start + run[0] + run[0]] : [start + run]);
+    if (words.length > 64) return [];
+  }
+  return words.filter(short => short !== word);
+}
+
 // aff and dic are a Hunspell dictionary, as in the dictionary-en package: American
 // English, the one dialect the class uses, so every suggestion is American. `alsoAccept`
 // is another dictionary (British) whose words are fine when typed but never suggested.
@@ -43,6 +56,9 @@ export function createChecker(aff: string, dic: string, alsoAccept?: Dictionary)
       if (lower.length > 1 && correct(word)) continue;
       // Hunspell is case-sensitive: a word that is only fine in lower case, in capitals.
       if (lower.length > 1 && correct(lower)) continue;
+      // "i'm", "i'll", "i've", "i'd": the dictionary only has them with a capital I.
+      if (/^i'\p{L}/u.test(lower) && correct('I' + lower.slice(1))) continue;
+      if (unstretched(lower).some(short => CHAT_WORDS.has(short) || LAUGH.test(short) || known.has(short) || (short.length > 1 && correct(short)))) continue;
       // Learners type "cafe" and "café" alike: accents do not make a word foreign.
       const plain = lower.normalize('NFD').replace(/\p{M}/gu, '');
       if (plain !== lower && correct(plain)) continue;

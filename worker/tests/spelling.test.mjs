@@ -56,3 +56,13 @@ test('British spellings pass; suggestions are American', () => {
     assert.ok(typo.suggestions.includes('color'));
     assert.ok(!typo.suggestions.includes('colour'));
 });
+
+test('stretched letters and a lower-case I are still English', () => {
+    assert.deepEqual(words('HELLOOOO helloo nooo yesss broooo soooo coool pleaseee'), []);
+    assert.deepEqual(words("i'm fine, i'll go, i've got it, i'd like that, i’m ok"), []);
+    assert.deepEqual(words('hiii Youssef', ['Legendary Youssef']), []);
+    // Stretching does not make another language English, nor fix a missing space or a misspelling.
+    assert.deepEqual(words('siiiiii holaaaaaaa graciaaas'), ['siiiiii', 'holaaaaaaa', 'graciaaas']);
+    assert.deepEqual(words('hello how areyou'), ['areyou']);
+    assert.deepEqual(words('awnser ppopo'), ['awnser', 'ppopo']);
+});
