@@ -186,6 +186,7 @@ export default function Game() {
     const nearestTimer = window.setInterval(findNearest, 1000);
     const say = (message: ChatMessage) => setMessages(prev => message.id && prev.some(item => item.id === message.id) ? prev : [...prev, message]);
     const unsubscribe = plaza.subscribe(event => {
+      if (event.t === 'magic' && event.power === 'lightning') audio.thunder();
       if (event.t === 'xp') { setXpReason(event.reason); setXp(event.xp); return; }
       if (event.t === 'roster' || (event.t === 'style' && event.id === plaza.selfId)) setMyStyle(plaza.players.get(plaza.selfId)?.style ?? DEFAULT_STYLE);
       if (event.t === 'roster' || event.t === 'join' || event.t === 'leave' || event.t === 'rename') {
@@ -396,7 +397,7 @@ export default function Game() {
             </span>}
           </div>
           <button type="button" className="sound-toggle" aria-pressed={!sound.muted}
-            title={sound.muted ? 'Turn on chat voices and goal sounds' : 'Mute chat voices and goal sounds'}
+            title={sound.muted ? 'Turn on chat voices and game sounds' : 'Mute chat voices and game sounds'}
             onClick={() => audioRef.current?.setMuted(!sound.muted)}>
             {sound.muted ? '🔇 Sound off' : '🔊 Sound on'}
           </button>

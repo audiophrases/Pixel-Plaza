@@ -109,6 +109,7 @@ export class GameAudio {
   private queue: SoundJob[] = [];
   private seen = new Set<string>();
   private controller: AbortController | null = null;
+  private thunderController: AbortController | null = null;
   private busy = false;
   private disposed = false;
   private generation = 0;
@@ -171,6 +172,27 @@ export class GameAudio {
     this.enqueue({ kind: 'goal', path: `/sounds/pinplay/correct-${this.clip}.mp3` });
   }
 
+  // Thunder starts alongside the bolt, even while a chat message is speaking.
+  thunder(): void {
+    if (this.disposed || this.state.muted) return;
+    this.thunderController?.abort();
+    const controller = new AbortController();
+    this.thunderController = controller;
+    void (async () => {
+      try {
+        const bytes = await this.dependencies.effect('/sounds/thunder.mp3', controller.signal);
+        if (!controller.signal.aborted) await this.dependencies.play(bytes, controller.signal, 0.5);
+      } catch (cause) {
+        if (!controller.signal.aborted) {
+          if (cause instanceof NeedsInteraction) this.update({ needsInteraction: true });
+          else this.update({ error: 'Thunder sound is temporarily unavailable.' });
+        }
+      } finally {
+        if (this.thunderController === controller) this.thunderController = null;
+      }
+    })();
+  }
+
   retract(id: string): void {
     this.queue = this.queue.filter(job => job.kind !== 'speech' || job.id !== id);
     if (this.state.messageId === id) {
@@ -181,6 +203,8 @@ export class GameAudio {
   }
 
   stop(): void {
+    this.thunderController?.abort();
+    this.thunderController = null;
     this.generation += 1;
     this.queue = [];
     this.controller?.abort();

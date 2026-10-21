@@ -136,3 +136,33 @@ test('browser autoplay blocking keeps sound ON and resumes pending chat after an
         assert.equal(sound.snapshot.messageId, null);
     } finally { sound.dispose(); Object.assign(globalThis, previous); }
 });
+
+
+test('thunder plays alongside speech and respects mute, replacement and disposal', async () => {
+    const effects = []; const playing = [];
+    const sound = new GameAudio('', 'thunder-test', {
+        speech: async () => bytes,
+        effect: async (path, signal) => { effects.push({ path, signal }); return bytes; },
+        play: async (_bytes, signal, volume) => {
+            playing.push({ signal, volume });
+            await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+        },
+    });
+    try {
+        sound.receive('speaking'); await tick();
+        sound.thunder(); await tick();
+        assert.equal(sound.snapshot.messageId, 'speaking');
+        assert.equal(effects[0].path, '/sounds/thunder.mp3');
+        assert.equal(playing.length, 2, 'thunder does not wait for speech');
+        assert.equal(playing[1].volume, 0.5);
+        sound.thunder(); await tick();
+        assert.equal(effects[0].signal.aborted, true, 'repeated strikes replace the rumble');
+        sound.setMuted(true);
+        assert.equal(effects[1].signal.aborted, true);
+        sound.thunder(); await tick();
+        assert.equal(effects.length, 2, 'muted strikes stay silent');
+        sound.setMuted(false); sound.thunder(); await tick();
+        sound.dispose();
+        assert.equal(effects[2].signal.aborted, true);
+    } finally { sound.dispose(); }
+});
