@@ -1692,7 +1692,7 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         const delivered = this.deliver(entry);
         this.notify(entry.student_key, delivered ? 'info' : 'warning',
-            delivered ? 'Your message was approved.' : 'Your whisper was approved, but that student has left the Plaza.');
+            delivered ? 'Your message was approved.' : 'Your message was approved, but that student has left the Plaza.');
         return true;
     }
 

@@ -52,7 +52,7 @@ export default function HelpRequest({ support, online, chatDraft = '', onRequest
 
   return <div className="student-help">
     <button className="student-help-toggle" type="button" aria-expanded={open} aria-controls={panelId}
-      onClick={() => { if (!open && !text) setText(chatDraft.slice(0, 500)); setOpen(current => !current); }}>I need help</button>
+      onClick={() => { if (!open && !text) setText(chatDraft.slice(0, 500)); setOpen(current => !current); }}>Help</button>
     {status && <span className={`student-help-status student-help-${status}`} role="status">
       {status === 'open' ? 'Help requested' : status === 'acknowledged' ? 'Teacher is helping' : 'Help completed'}
     </span>}

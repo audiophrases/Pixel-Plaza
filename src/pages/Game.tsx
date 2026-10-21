@@ -468,7 +468,7 @@ export default function Game() {
               return (
                 <div key={msg.id ?? i} className={`chat-message ${isSystem ? 'system-msg' : ''} ${isWarning ? 'warning-msg' : ''} ${msg.whisper ? 'whisper-msg' : ''} ${msg.teacher ? 'teacher-msg' : ''} ${msg.id && sound.messageId === msg.id ? 'chat-speaking' : ''}`}>
                   {/* Notices from the game are just the sentence, with no "System:" in front */}
-                  {!isSystem && <span className="chat-sender">{msg.teacher ? 'Teacher (private)' : msg.whisper ? `${msg.sender} → ${msg.to} (whisper)` : msg.sender}:</span>}
+                  {!isSystem && <span className="chat-sender">{msg.teacher ? 'Teacher (private)' : msg.whisper ? `${msg.sender} → ${msg.to} (direct message)` : msg.sender}:</span>}
                   <span className="chat-text"><Marked text={msg.text} marks={msg.marks} className="slip" /></span>
                   {!isSystem && !msg.teacher && msg.id && <button type="button" className="chat-listen" disabled={sound.muted || status.state !== 'online'}
                     aria-label={sound.messageId === msg.id ? `Stop reading ${msg.sender}'s message` : `Listen to ${msg.sender}'s message`}
@@ -523,7 +523,7 @@ export default function Game() {
               title="Who can read this message"
             >
               <option value="auto">{nearest ? `Nearest: ${nearest.name}` : 'Nearest classmate'}</option>
-              {classmates.map(player => <option key={player.id} value={player.id}>Whisper: {player.name}</option>)}
+              {classmates.map(player => <option key={player.id} value={player.id}>Message: {player.name}</option>)}
               <option value="">Nearby: everyone close</option>
               <option value="teacher">Teacher (private help)</option>
             </select>
@@ -531,7 +531,7 @@ export default function Game() {
               type="text" 
               ref={chatField}
               className="chat-input"
-              placeholder={target === 'auto' && !nearest ? 'Nobody else is in the Plaza yet' : whisperTo === 'teacher' ? 'Ask your teacher in any language…' : whisperTo ? `Whisper to ${target === 'auto' ? nearest?.name : classmates.find(player => player.id === target)?.name ?? 'a classmate'} (your teacher can read it)...` : 'Message people nearby (teacher approves)...'}
+              placeholder={target === 'auto' && !nearest ? 'Nobody else is in the Plaza yet' : whisperTo === 'teacher' ? 'Ask your teacher in any language…' : whisperTo ? `Message ${target === 'auto' ? nearest?.name : classmates.find(player => player.id === target)?.name ?? 'a classmate'} (your teacher can read it)...` : 'Message people nearby (teacher approves)...'}
               maxLength={200}
               value={chatInput}
               readOnly={checking || sending}
