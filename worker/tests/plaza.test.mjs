@@ -2540,3 +2540,44 @@ test('deleting a game: it needs confirming, erases the game and what is saved in
         removeTemp(persistTo);
     }
 });
+
+
+test('teacher magic authorizes spells, blocks frozen movement and revives lightning after four seconds', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-magic-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = body => api(base, '/api/teacher/magic', { session, body });
+        PIN = (await api(base, '/api/teacher/game', { session, body: { name: 'Magic', randomNames: false } })).body.pin;
+        const alex = await enter(base, 'signed-a', null); const sam = await enter(base, 'signed-b', null); sockets.push(alex, sam);
+        assert.equal((await api(base, '/api/teacher/magic', { token: 'signed-a', body: { power: 'rain' } })).status, 401);
+        assert.equal((await teacher({ power: 'freeze', studentKey: 'offline' })).status, 400);
+        assert.equal((await teacher({ power: 'freeze', studentKey: 'stu_a' })).status, 200);
+        const ice = await sam.next(m => m.t === 'magic' && m.power === 'freeze');
+        assert.ok(ice.frozenUntil > Date.now());
+        alex.send({ t: 'move', x: alex.me.x + 10, y: alex.me.y });
+        assert.equal((await alex.next(m => m.t === 'snap')).x, alex.me.x);
+        await teacher({ power: 'thaw', studentKey: 'stu_a' });
+        assert.equal((await sam.next(m => m.t === 'magic' && m.power === 'thaw')).frozenUntil, 0);
+        await teacher({ power: 'teleport', studentKey: 'stu_a', x: alex.me.x + 10, y: alex.me.y });
+        assert.equal((await alex.next(m => m.t === 'snap')).x, alex.me.x + 10);
+        assert.equal((await teacher({ power: 'teleport', studentKey: 'stu_a', x: 'bad', y: 1 })).status, 400);
+        const before = Date.now();
+        await teacher({ power: 'lightning', studentKey: 'stu_a' });
+        const zap = await sam.next(m => m.t === 'magic' && m.power === 'lightning');
+        assert.ok(zap.downUntil >= before + 4000 && zap.downUntil <= Date.now() + 4000);
+        alex.send({ t: 'move', x: alex.me.x + 20, y: alex.me.y });
+        await alex.next(m => m.t === 'snap');
+        await new Promise(resolve => setTimeout(resolve, Math.max(0, zap.downUntil - Date.now()) + 100));
+        alex.send({ t: 'move', x: alex.me.x + 20, y: alex.me.y });
+        assert.equal((await sam.next(m => m.t === 'move' && m.x === alex.me.x + 20)).x, alex.me.x + 20);
+        await teacher({ power: 'rain' });
+        assert.ok((await sam.next(m => m.t === 'rain')).until > Date.now());
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});

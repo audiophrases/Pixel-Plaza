@@ -44,6 +44,7 @@ async function call<T>(path: string, init: RequestInit): Promise<T> {
 const VISION_CHOICES: [number, string][] = [[0, 'Everyone'], [650, 'Wide'], [450, 'Medium'], [300, 'Small']];
 
 export default function Teacher() {
+  const [movingStudent, setMovingStudent] = useState(false);
   const [password, setPassword] = useState('');
   const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
   // The password is checked once; the session token carries the rest.
@@ -298,12 +299,23 @@ export default function Teacher() {
 
       {status.game && card('live', <>
         <p>{status.open ? 'Updates every 2 seconds. Select a student to find them on the map.' : 'The class is closed.'}</p>
-        <div className="teacher-map" aria-label="Live student locations in the plaza">
+        <div className="teacher-actions" style={{ marginBottom: '1rem' }}>
+          <button className="btn btn-sm" onClick={() => void action('magic', { power: 'rain' })}>Make it rain (15s)</button>
+          <button className="btn btn-sm" disabled={!status.online.some(s => s.studentKey === selectedStudent)} onClick={() => setMovingStudent(!movingStudent)} aria-pressed={movingStudent}>{movingStudent ? 'Cancel move' : 'Move selected student'}</button>
+          {(['freeze', 'thaw', 'lightning'] as const).map(power => <button key={power} className="btn btn-sm" disabled={!status.online.some(s => s.studentKey === selectedStudent)} onClick={() => void action('magic', { power, studentKey: selectedStudent })}>{power === 'freeze' ? 'Freeze (15s)' : power === 'thaw' ? 'Thaw' : 'Lightning (revive in 4s)'}</button>)}
+        </div>
+        <p role="status">{movingStudent ? 'Click an open path on the map to teleport the selected student.' : 'Select a student to cast a spell. Lightning is a playful tumble: they get up after 4 seconds.'}</p>
+        <div className="teacher-map" style={{ cursor: movingStudent ? 'crosshair' : undefined }} aria-label="Live student locations in the plaza" onClick={event => {
+          if (!movingStudent || !selectedStudent) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          void action('magic', { power: 'teleport', studentKey: selectedStudent, x: (event.clientX - bounds.left) / bounds.width * MAP_SIZE, y: (event.clientY - bounds.top) / bounds.height * MAP_SIZE });
+          setMovingStudent(false);
+        }}>
           <img src={plazaMap.image} alt="Plaza map" />
           {status.online.map((student, index) => <button key={student.studentKey} type="button"
             className={`teacher-map-marker${selectedStudent === student.studentKey ? ' selected' : ''}`}
             style={{ left: `${student.x / MAP_SIZE * 100}%`, top: `${student.y / MAP_SIZE * 100}%` }}
-            onClick={() => setSelectedStudent(student.studentKey)}
+            onClick={event => { event.stopPropagation(); setSelectedStudent(student.studentKey); }}
             aria-pressed={selectedStudent === student.studentKey}
             aria-label={`${who(student.studentKey, student.name)}: ${student.zone ?? 'plaza'}`}
             title={`${who(student.studentKey, student.name)} · ${student.zone ?? 'plaza'}`}>
@@ -313,7 +325,7 @@ export default function Teacher() {
         </div>
         {status.online.length ? <ul className="teacher-map-roster">{status.online.map((student, index) => <li key={student.studentKey}>
           <button type="button" aria-pressed={selectedStudent === student.studentKey}
-            onClick={() => setSelectedStudent(student.studentKey)}>
+            onClick={event => { event.stopPropagation(); setSelectedStudent(student.studentKey); }}>
             <strong>{index + 1}. {who(student.studentKey, student.name)}</strong> · {student.zone ?? 'plaza'}{student.level !== undefined && <> · Lv {student.level}</>}
           </button>
         </li>)}</ul> : <p>No students in the plaza right now.</p>}

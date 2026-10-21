@@ -49,13 +49,14 @@ const CLOSE_CLASS_CLOSED = 4002; // the teacher closed the game
 
 // Per-socket state. It lives in the socket's attachment, so it survives the
 // room hibernating between messages.
-type Seat = { id: string; game: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; style?: Style; x: number; y: number; lastChat: number; lastCheck?: number; lastReroll?: number; movedAt?: number; left?: boolean };
+type Seat = { id: string; game: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; style?: Style; x: number; y: number; lastChat: number; lastCheck?: number; lastReroll?: number; movedAt?: number; left?: boolean; frozenUntil?: number; downUntil?: number };
 
 // 'approve': every message waits for the teacher. 'review': nearby chat that OpenAI
 // cleared posts at once and the teacher reviews afterwards; whispers still wait.
 export type ChatMode = 'approve' | 'review';
 
 export type TeacherAction =
+    | { kind: 'magic'; power: 'freeze' | 'thaw' | 'lightning' | 'teleport' | 'rain'; studentKey?: string; x?: number; y?: number }
     | { kind: 'status' }
     | { kind: 'open'; open: boolean; game?: string } // a saved game (the last played by default), or close the open one
     | { kind: 'newGame'; name: string; randomNames?: boolean; vision?: number } // a new game with its own PIN, opened at once
@@ -101,7 +102,7 @@ export type TeacherStatus = {
     online: { studentKey: string; name: string; x: number; y: number; zone: string | null; level: number }[];
 };
 
-const publicSeat = (seat: Seat) => ({ id: seat.id, name: seat.name, x: seat.x, y: seat.y, ...seat.avatar, ...(seat.style ? { style: seat.style } : {}) });
+const publicSeat = (seat: Seat) => ({ id: seat.id, name: seat.name, x: seat.x, y: seat.y, frozenUntil: seat.frozenUntil ?? 0, downUntil: seat.downUntil ?? 0, ...seat.avatar, ...(seat.style ? { style: seat.style } : {}) });
 
 // The plaza. Everything that must outlast a lesson is a SQLite row: each student's
 // looks, the games (a PIN each, kept for good) with where every student stood in
@@ -438,6 +439,33 @@ export class PlazaRoom extends DurableObject<Env> {
             if (failed) return { error: failed, status: 400 };
         }
         if (action.kind === 'mode') this.saveSetting('mode', action.mode);
+        if (action.kind === 'magic') {
+            if (!this.isOpen()) return { error: 'Open the class first.', status: 400 };
+            if (action.power === 'rain') this.broadcast({ t: 'rain', until: Date.now() + 15000 });
+            else {
+                const socket = this.ctx.getWebSockets().find(ws => {
+                    const seat = ws.deserializeAttachment() as Seat | null;
+                    return seat && !seat.left && seat.game === this.activeGame() && seat.studentKey === action.studentKey;
+                });
+                const seat = socket?.deserializeAttachment() as Seat | undefined;
+                if (!socket || !seat) return { error: 'Select a student who is online.', status: 400 };
+                if (action.power === 'teleport') {
+                    const position = clampPosition(action.x, action.y);
+                    if (!position || isBlocked(position.x, position.y)) return { error: 'Choose an open path on the map.', status: 400 };
+                    seat.x = position.x; seat.y = position.y; seat.movedAt = Date.now();
+                    this.discover(seat);
+                    this.moves.delete(seat.id);
+                    socket.send(JSON.stringify({ t: 'snap', x: seat.x, y: seat.y }));
+                    this.broadcast({ t: 'move', id: seat.id, x: seat.x, y: seat.y });
+                } else {
+                    if (action.power === 'freeze') seat.frozenUntil = Date.now() + 15000;
+                    if (action.power === 'thaw') seat.frozenUntil = 0;
+                    if (action.power === 'lightning') seat.downUntil = Date.now() + 4000;
+                    this.broadcast({ t: 'magic', id: seat.id, power: action.power, frozenUntil: seat.frozenUntil ?? 0, downUntil: seat.downUntil ?? 0 });
+                }
+                socket.serializeAttachment(seat);
+            }
+        }
         if (action.kind === 'mute') {
             if (action.muted) this.sql.exec('INSERT OR IGNORE INTO mutes (student_key) VALUES (?)', action.studentKey);
             else this.sql.exec('DELETE FROM mutes WHERE student_key = ?', action.studentKey);
@@ -698,7 +726,7 @@ export class PlazaRoom extends DurableObject<Env> {
             if (!position) return;
             // A move through a wall, or further than anyone can walk, puts the student back where they were.
             const now = Date.now();
-            if (this.env.MOVEMENT_CHECK !== '0' && !legalMove(seat.x, seat.y, position.x, position.y, now - (seat.movedAt ?? now))) {
+            if (Math.max(seat.frozenUntil ?? 0, seat.downUntil ?? 0) > now || this.env.MOVEMENT_CHECK !== '0' && !legalMove(seat.x, seat.y, position.x, position.y, now - (seat.movedAt ?? now))) {
                 try { ws.send(JSON.stringify({ t: 'snap', x: seat.x, y: seat.y })); } catch { /* closing */ }
                 return;
             }

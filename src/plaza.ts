@@ -5,11 +5,13 @@ import type { WarmupView } from '../shared/warmup';
 import type { AttemptSource, StudentSupport } from '../shared/support';
 import type { Style } from '../shared/levels';
 
-export type PlazaPlayer = AvatarConfig & { id: string; name: string; x: number; y: number; style?: Style };
+export type PlazaPlayer = AvatarConfig & { id: string; name: string; x: number; y: number; style?: Style; frozenUntil?: number; downUntil?: number };
 // A hint on one chat message, from the server. Never a refusal.
 export type GrammarHint = { ok: true } | { ok: false; corrected: string; why: string };
 export type PlazaStatus = { state: 'connecting' | 'online' | 'reconnecting' | 'stopped'; message?: string };
 export type PlazaEvent =
+  | { t: 'magic'; id: string; power: string; frozenUntil: number; downUntil: number }
+  | { t: 'rain'; until: number }
   | { t: 'roster' } // everyone was replaced: first join, or back after a dropped connection
   | { t: 'join'; player: PlazaPlayer }
   | { t: 'leave'; id: string }
@@ -300,6 +302,8 @@ export class PlazaConnection {
       for (const [id, x, y] of message.moves as [string, number, number][]) this.receive({ t: 'move', id, x, y });
       return;
     }
+    if (message.t === 'magic') { const player = this.players.get(message.id); if (player) { player.frozenUntil = message.frozenUntil; player.downUntil = message.downUntil; } }
+    if (message.t === 'snap') { const player = this.players.get(this.selfId); if (player) { player.x = message.x; player.y = message.y; } }
     if (message.t === 'join') this.players.set(message.player.id, message.player);
     if (message.t === 'vision') this.vision = message.radius;
     if (message.t === 'xp') this.xp = message.xp;

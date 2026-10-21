@@ -28,6 +28,10 @@ export default class LobbyScene extends Phaser.Scene {
   private localPlayerContainer?: Phaser.GameObjects.Container;
   private sent = { x: 0, y: 0 };
   private lastSent = 0;
+  private rainUntil = 0;
+  private rainGraphic?: Phaser.GameObjects.Graphics;
+  private artwork: Record<string, Phaser.GameObjects.Container> = {};
+  private magicLabels: Record<string, Phaser.GameObjects.Text> = {};
 
   constructor() {
     super('LobbyScene');
@@ -149,7 +153,17 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   private onPlazaEvent(event: PlazaEvent) {
-    if (event.t === 'roster') this.syncRoster();
+    if (event.t === 'rain') this.rainUntil = event.until;
+    else if (event.t === 'magic' && event.power === 'lightning') {
+      const target = this.playerEntities[event.id];
+      if (target) {
+        const bolt = this.add.graphics().setDepth(999999).lineStyle(6, 0xffee55, 1);
+        bolt.beginPath(); bolt.moveTo(target.x + 35, target.y - 330); bolt.lineTo(target.x - 18, target.y - 150); bolt.lineTo(target.x + 24, target.y - 165); bolt.lineTo(target.x, target.y); bolt.strokePath();
+        this.tweens.add({ targets: bolt, alpha: 0, duration: 600, onComplete: () => bolt.destroy() });
+        this.showEmote(target, '⚡');
+      }
+    }
+    else if (event.t === 'roster') this.syncRoster();
     else if (event.t === 'join') this.addPlayer(event.player);
     else if (event.t === 'leave') this.removePlayer(event.id);
     else if (event.t === 'rename' || event.t === 'style') {
@@ -197,6 +211,13 @@ export default class LobbyScene extends Phaser.Scene {
       container.add(this.add.rectangle(0, -16, 32, 64, isLocal ? 0xFF5A5F : 0x4285F4));
     }
 
+    const pieces = [...container.list];
+    const artwork = this.add.container(0, 0);
+    container.removeAll();
+    artwork.add(pieces);
+    container.add(artwork);
+    this.artwork[player.id] = artwork;
+
     // Nameplate, above the tallest hat and drawn over the figure
     const nameText = this.add.text(0, FIGURE_TOP - 12, plateText(player), {
       fontSize: '12px',
@@ -232,6 +253,9 @@ export default class LobbyScene extends Phaser.Scene {
       container.destroy();
       delete this.playerEntities[id];
     }
+    this.magicLabels[id]?.destroy();
+    delete this.magicLabels[id];
+    delete this.artwork[id];
     delete this.nameplates[id];
     this.figures[id]?.destroy(); // after the container, which still shows its pictures
     delete this.figures[id];
@@ -264,13 +288,31 @@ export default class LobbyScene extends Phaser.Scene {
     // Walk cycles, and whoever stands lower on the map is drawn in front.
     const me = this.localPlayerContainer;
     for (const [id, container] of Object.entries(this.playerEntities)) {
-      this.figures[id]?.update(time);
+      const player = this.connection.players.get(id);
+      const down = (player?.downUntil ?? 0) > Date.now();
+      const frozen = (player?.frozenUntil ?? 0) > Date.now();
+      // Transform the artwork only, keeping the physics feet and nameplate upright.
+      this.artwork[id]?.setAngle(down ? 85 : 0);
+      if (!this.magicLabels[id]) this.magicLabels[id] = this.add.text(0, FIGURE_TOP - 42, '', { fontSize: '18px', color: '#e5f9ff', backgroundColor: '#173451' }).setOrigin(0.5);
+      this.magicLabels[id].setPosition(container.x, container.y + FIGURE_TOP - 42).setDepth(999998).setText(down ? `⚡ Up in ${Math.ceil(((player?.downUntil ?? 0) - Date.now()) / 1000)}s` : frozen ? '❄ Frozen' : '').setVisible(container.visible);
+      if (!down && !frozen) this.figures[id]?.update(time);
       container.setDepth(container.y);
       // Classmates fade out toward the edge of what the student sees
       if (this.vision > 0 && me && container !== me) {
         const alpha = Phaser.Math.Clamp((this.vision - Phaser.Math.Distance.Between(me.x, me.y, container.x, container.y)) / (this.vision * 0.3), 0, 1);
         container.setAlpha(alpha).setVisible(alpha > 0);
       } else if (container.alpha !== 1 || !container.visible) container.setAlpha(1).setVisible(true);
+    }
+    this.rainGraphic ??= this.add.graphics().setScrollFactor(0).setDepth(1000001);
+    this.rainGraphic.clear();
+    if (this.rainUntil > Date.now()) {
+      const { width, height } = this.scale;
+      this.rainGraphic.fillStyle(0x355780, 0.12).fillRect(0, 0, width, height).lineStyle(2, 0x9cddff, 0.65);
+      for (let i = 0; i < 100; i++) {
+        const x = (i * 137 + time * 0.12) % (width + 60) - 30;
+        const y = (i * 83 + time * 0.55) % (height + 40) - 20;
+        this.rainGraphic.lineBetween(x, y, x - 7, y + 20);
+      }
     }
     if (this.fog && me) this.fog.setPosition(me.x, me.y);
 
@@ -282,7 +324,9 @@ export default class LobbyScene extends Phaser.Scene {
     body.setVelocity(0);
 
     // Keys walk only when the chat box is not being typed in.
-    const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName ?? '');
+    const self = this.connection.players.get(this.connection.selfId);
+    const immobilized = Math.max(self?.frozenUntil ?? 0, self?.downUntil ?? 0) > Date.now();
+    const typing = immobilized || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName ?? '');
     const left = !typing && (this.cursors.left.isDown || this.wasd.A.isDown);
     const right = !typing && (this.cursors.right.isDown || this.wasd.D.isDown);
     const up = !typing && (this.cursors.up.isDown || this.wasd.W.isDown);
