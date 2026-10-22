@@ -187,7 +187,10 @@ export class AvatarFigure {
     const order = side
       ? [this.shadow, this.arms[0], this.legs[0], this.legs[1], this.torso, this.arms[1], this.head]
       : [this.shadow, this.legs[0], this.legs[1], this.torso, this.arms[0], this.arms[1], this.head];
-    order.forEach((part, index) => this.container.moveTo(part, index));
+    // The scene may move the pieces into a container of their own (to tip the figure over), so they are
+    // reordered where they are now, not where they started.
+    const layer = this.head.parentContainer ?? this.container;
+    order.forEach((part, index) => layer.moveTo(part, index));
   }
 
   // A piece whose picture did not load stays hidden.
