@@ -66,3 +66,12 @@ test('stretched letters and a lower-case I are still English', () => {
     assert.deepEqual(words('hello how areyou'), ['areyou']);
     assert.deepEqual(words('awnser ppopo'), ['awnser', 'ppopo']);
 });
+
+test("words from the class's own languages are stopped with the English word to use", () => {
+    const suggestion = text => check(text).map(item => `${item.word}→${item.suggestions[0]}`);
+    assert.deepEqual(suggestion('si'), ['si→yes']);
+    assert.deepEqual(suggestion('siiii'), ['siiii→yes'], 'stretched too');
+    assert.deepEqual(suggestion('Hola, gràcies'), ['Hola→hello', 'gràcies→thank you']);
+    // "vale" is English too (a valley), so a dictionary cannot stop it.
+    assert.deepEqual(suggestion('vale'), []);
+});

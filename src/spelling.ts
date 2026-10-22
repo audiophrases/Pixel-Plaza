@@ -18,6 +18,18 @@ const TEXT_SPEAK: Record<string, string> = {
   idk: "I don't know", bc: 'because', cuz: 'because', gonna: 'going to', wanna: 'want to', gotta: 'have to'
 };
 
+// The class's own languages (Spanish and Catalan): the English word is the suggestion, rather than a look-alike
+// such as "six" for "si". The word is still stopped.
+const HOME_WORDS: Record<string, string> = {
+  si: 'yes', 'sí': 'yes', hola: 'hello', adios: 'bye', 'adiós': 'bye', adeu: 'bye', 'adéu': 'bye', gracias: 'thank you',
+  'gràcies': 'thank you', gracies: 'thank you', merci: 'thank you', vale: 'OK', valeee: 'OK', bueno: 'well', bé: 'well', bien: 'good',
+  pero: 'but', 'però': 'but', que: 'what', 'qué': 'what', 'què': 'what', como: 'how', 'cómo': 'how', com: 'how', donde: 'where',
+  'dónde': 'where', quien: 'who', 'quién': 'who', qui: 'who', porque: 'because', 'perquè': 'because', perque: 'because',
+  mira: 'look', tio: 'dude', 'tío': 'dude', tia: 'girl', 'tía': 'girl', jaja: 'haha', jajaja: 'haha', perdon: 'sorry', 'perdón': 'sorry',
+  'perdó': 'sorry', amiga: 'friend', amic: 'friend', nada: 'nothing', res: 'nothing', mucho: 'a lot', molt: 'very', tambien: 'too',
+  'también': 'too', 'també': 'too', aqui: 'here', 'aquí': 'here', alli: 'there', 'allí': 'there', alla: 'there',
+};
+
 const WORD = /\p{L}+(?:['’]\p{L}+)*/gu;
 
 export type Checker = (text: string, names?: string[]) => Misspelling[];
@@ -62,7 +74,8 @@ export function createChecker(aff: string, dic: string, alsoAccept?: Dictionary)
       // Learners type "cafe" and "café" alike: accents do not make a word foreign.
       const plain = lower.normalize('NFD').replace(/\p{M}/gu, '');
       if (plain !== lower && correct(plain)) continue;
-      found.set(lower, { word: raw, suggestions: lower.length > 1 ? speller.suggest(lower).slice(0, 3) : [] });
+      const home = HOME_WORDS[lower] ?? HOME_WORDS[plain] ?? unstretched(lower).map(short => HOME_WORDS[short]).find(Boolean);
+      found.set(lower, { word: raw, suggestions: home ? [home] : lower.length > 1 ? speller.suggest(lower).slice(0, 3) : [] });
     }
     return [...found.values()];
   };
