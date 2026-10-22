@@ -1,6 +1,13 @@
-.teacher-page { min-height: 100vh; padding: 2rem; max-width: 950px; margin: auto; }
-.teacher-header, .teacher-controls { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }
-.teacher-header h1 { margin-bottom: .4rem; }
+.teacher-page { min-height: 100vh; padding: 1.25rem 1.5rem 2rem; max-width: 1280px; margin: auto; }
+.teacher-header, .teacher-controls { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.teacher-header h1 { margin: 0; font-size: 1.5rem; }
+.teacher-controls { justify-content: flex-start; gap: .6rem; padding: .6rem 1rem; background: #fff; border: 1px solid var(--line); border-radius: 14px; }
+.teacher-class { display: inline-flex; align-items: center; gap: .45rem; margin-right: auto; font-size: 1.05rem; }
+.teacher-dot { width: .7rem; height: .7rem; border-radius: 50%; background: #b0b7c3; }
+.teacher-dot-open { background: #2e9d52; box-shadow: 0 0 0 3px rgba(46, 157, 82, .2); }
+/* What is running, with its next step */
+.teacher-now { display: flex; flex-wrap: wrap; gap: .5rem; margin: -.4rem 0 1rem; }
+.teacher-now-item { display: inline-flex; align-items: center; flex-wrap: wrap; gap: .45rem; padding: .35rem .5rem .35rem .8rem; border: 1px solid var(--line); border-radius: 999px; background: #fff; font-size: .9rem; font-weight: 600; }
 .teacher-signin, .teacher-games, .teacher-laptop, .teacher-online, .teacher-entries { background: white; border-radius: 16px; padding: 1.5rem; }
 .teacher-signin { display: flex; flex-direction: column; gap: 1rem; max-width: 420px; }
 .teacher-signin input { padding: .8rem; font: inherit; }
@@ -11,8 +18,8 @@
 .teacher-entry small { color: #555; }
 .teacher-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 .teacher-error { color: #9d171b; margin-top: 1rem; }
-.teacher-pin { font-size: 1.2rem; }
-.teacher-pin strong { font-size: 2.2rem; letter-spacing: .15em; margin-left: .5rem; }
+.teacher-pin { font-size: 1rem; color: #4c5360; }
+.teacher-pin strong { font-size: 1.7rem; letter-spacing: .12em; margin-left: .4rem; color: var(--text-dark); }
 .teacher-entry .teacher-flag { color: #b3261e; font-size: .9rem; margin: .3rem 0; }
 
 .teacher-mode { background: white; border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; }

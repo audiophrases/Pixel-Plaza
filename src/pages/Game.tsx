@@ -19,7 +19,9 @@ import { loadChecker } from '../spellingData';
 import type { Checker, Misspelling } from '../spelling';
 import type { PlazaPlayer, PlazaStatus } from '../plaza';
 import { readStudentSession } from '../studentAuth';
-import { renderFaceSvg, type AvatarConfig } from '../utils/AvatarRenderer';
+import type { AvatarConfig } from '../utils/AvatarRenderer';
+import Face from '../components/Face';
+import { shade } from '../utils/shade';
 import { GameAudio, soundIsMuted, unlockSound, type SoundState } from '../audio';
 import './Game.css';
 
@@ -61,30 +63,6 @@ function Marked({ text, marks, className }: { text: string; marks?: readonly (re
   }
   parts.push(text.slice(at));
   return <>{parts}</>;
-}
-
-// A classmate is shown by their avatar's face, so a student finds a conversation by who it is with.
-const faces = new Map<string, string>();
-function faceUrl(look: Partial<AvatarConfig>): string {
-  const key = JSON.stringify([look.head, look.skin, look.hairColor, look.hair, look.eyes, look.mouth, look.glasses, look.shirt, look.hat]);
-  const known = faces.get(key);
-  if (known) return known;
-  const svg = renderFaceSvg(look);
-  if (!svg) return ''; // the artwork has not loaded yet
-  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-  faces.set(key, url);
-  return url;
-}
-
-// Each name keeps one colour, readable on white, for its sender line and its initial.
-const SHADES = ['#c2185b', '#7b1fa2', '#3949ab', '#0277bd', '#00796b', '#558b2f', '#e65100', '#6d4c41'];
-const shade = (name: string) => SHADES[[...name].reduce((sum, character) => (sum * 31 + character.charCodeAt(0)) >>> 0, 7) % SHADES.length];
-
-function Face({ player, name, icon }: { player?: PlazaPlayer | null; name?: string; icon?: string }) {
-  const url = player ? faceUrl(player) : '';
-  return <span className="chat-face" style={!icon && !url && name ? { background: shade(name) } : undefined} aria-hidden="true">
-    {icon ?? (url ? <img src={url} alt="" /> : (name || '?').slice(0, 1).toUpperCase())}
-  </span>;
 }
 
 // What became of the student's own message, in the marks messaging apps use: a clock while it waits

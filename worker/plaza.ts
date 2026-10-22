@@ -101,7 +101,7 @@ export type TeacherStatus = {
     mode: ChatMode;
     moderation: boolean; // an OpenAI key is set, so 'review' mode can post anything
     muted: string[];
-    online: { studentKey: string; name: string; x: number; y: number; zone: string | null; level: number }[];
+    online: { studentKey: string; name: string; x: number; y: number; zone: string | null; level: number; look: Avatar }[]; // look: the avatar, for the teacher to recognise them by
 };
 
 const publicSeat = (seat: Seat) => ({ id: seat.id, name: seat.name, x: seat.x, y: seat.y, frozenUntil: seat.frozenUntil ?? 0, downUntil: seat.downUntil ?? 0, ...seat.avatar, ...(seat.style ? { style: seat.style } : {}) });
@@ -500,7 +500,7 @@ export class PlazaRoom extends DurableObject<Env> {
             moderation: !!this.env.OPENAI_API_KEY,
             muted: this.sql.exec<{ student_key: string }>('SELECT student_key FROM mutes').toArray().map(row => row.student_key),
             online: this.seats().filter(seat => seat.game === current?.id).map(seat => ({
-                studentKey: seat.studentKey, name: seat.name, x: seat.x, y: seat.y, zone: zoneAt(seat.x, seat.y), level: levelOf(this.xpOf(seat.studentKey)).level
+                studentKey: seat.studentKey, name: seat.name, x: seat.x, y: seat.y, zone: zoneAt(seat.x, seat.y), level: levelOf(this.xpOf(seat.studentKey)).level, look: seat.avatar
             }))
         };
     }

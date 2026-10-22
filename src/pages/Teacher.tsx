@@ -12,6 +12,8 @@ import type { CampaignChoice } from '../../shared/missionTypes';
 import { XP } from '../../shared/levels';
 import TeacherSupport from '../components/TeacherSupport';
 import ClassReport from '../components/ClassReport';
+import LiveClass from '../components/LiveClass';
+import type { AvatarConfig } from '../utils/AvatarRenderer';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; everyone?: boolean; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred?: boolean };
 type CampaignInfo = {
@@ -23,7 +25,7 @@ type CampaignInfo = {
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
 };
 type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean };
-type LiveStudent = { studentKey: string; name: string; x: number; y: number; zone: string | null; level?: number };
+type LiveStudent = { studentKey: string; name: string; x: number; y: number; zone: string | null; level?: number; look?: Partial<AvatarConfig> };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
   campaign: CampaignInfo | null; campaigns: CampaignChoice[];
@@ -211,10 +213,9 @@ export default function Teacher() {
   const toggle = (id: CardId, open: boolean) => setOpenCards(previous => previous[id] === open ? previous : { ...previous, [id]: open });
   const campaign = status?.campaign ?? null;
   const cards: CardInfo[] = !status ? [] : [
-    ...(status.game ? [{ id: 'help' as const, title: 'Student help', badge: openHelp.length, alert: true }] : []),
-    { id: 'chat', title: 'Chat review', badge: waiting.length, alert: true },
     ...(status.game ? [
-      { id: 'live' as const, title: 'Live plaza', badge: status.online.length, label: `${status.online.length} online` },
+      { id: 'live' as const, title: 'Map and spells', label: `${status.online.length} online` },
+      { id: 'help' as const, title: 'Message history' }, // what waits shows in To do
       { id: 'campaign' as const, title: 'Campaign', label: campaign ? `chapter ${campaign.chapter + 1} of ${campaign.chapters}` : 'not started' },
       { id: 'warmup' as const, title: 'Warm-up', label: status.warmup?.active ? 'running' : undefined },
       { id: 'vision' as const, title: 'Vision', label: VISION_CHOICES.find(([radius]) => radius === status.game?.vision)?.[1] },
@@ -232,7 +233,7 @@ export default function Teacher() {
 
   return <main className="teacher-page">
     <header className="teacher-header">
-      <div><h1>Teacher controls</h1><p>{status?.mode === 'review' ? 'Chat posts after an OpenAI check: nearby, to everyone or a whisper. Review it here and remove anything unsuitable.' : 'All student chat waits for your approval.'}</p></div>
+      <h1>Teacher controls</h1>
       <span><Link to="/quest-library">Side quest library</Link> · <Link to="/mission-studio">Mission Studio</Link> · <Link to="/studio">Theme studio</Link> · <Link to="/">Student entrance</Link></span>
     </header>
     {!token || !status ? <form className="teacher-signin" onSubmit={event => { event.preventDefault(); void signIn(); }}>
@@ -242,15 +243,30 @@ export default function Teacher() {
       <button className="btn btn-primary">Open controls</button>
     </form> : <>
       <section className="teacher-controls">
-        <strong>{status.game ? `${status.game.name} is ${status.open ? 'open' : 'closed'}` : 'No game yet'}</strong>
-        {status.pin && <span className="teacher-pin">Class PIN <strong>{status.pin}</strong></span>}
-        {status.pin && <button className="btn btn-secondary" onClick={() => void copyLink(status.pin!)} title={linkFor(status.pin)}>
-          {copied === status.pin ? 'Link copied' : 'Copy the join link'}</button>}
-        {status.game && <button className="btn btn-primary" onClick={() => void action('class', { open: !status.open })}>
+        <strong className="teacher-class"><span className={`teacher-dot${status.open ? ' teacher-dot-open' : ''}`} aria-hidden="true" />
+          {status.game ? `${status.game.name} · ${status.open ? 'open' : 'closed'}` : 'No game yet'}</strong>
+        {status.pin && <span className="teacher-pin">PIN <strong>{status.pin}</strong></span>}
+        {status.pin && <button className="btn btn-secondary btn-sm" onClick={() => void copyLink(status.pin!)} title={linkFor(status.pin)}>
+          {copied === status.pin ? 'Link copied ✓' : 'Copy join link'}</button>}
+        {status.game && <button className="btn btn-primary btn-sm" onClick={() => void action('class', { open: !status.open })}>
           {status.open ? 'Close class' : 'Open class'}
         </button>}
-        <button className="btn btn-secondary" onClick={() => { storeTeacherSession(''); setStatus(null); setToken(''); }}>Sign out</button>
+        <button className="btn btn-secondary btn-sm" onClick={() => { storeTeacherSession(''); setStatus(null); setToken(''); }}>Sign out</button>
       </section>
+      {/* What is running, with its next step, so nobody has to scroll for it. */}
+      {status.game && (status.warmup?.active || (campaign && campaign.status !== 'campaign_complete')) && <section className="teacher-now">
+        {status.warmup?.active && <span className="teacher-now-item">🧩 Warm-up · {status.warmup.team.done} of {status.warmup.team.total} found
+          <button className="btn btn-secondary btn-sm" onClick={() => void action('warmup', { op: 'end' })}>End</button></span>}
+        {campaign && campaign.status !== 'campaign_complete' && <span className="teacher-now-item">📖 {campaign.title} · chapter {campaign.chapter + 1} of {campaign.chapters}
+          {campaign.reveals.next && <button className="btn btn-secondary btn-sm" title={campaign.reveals.next} onClick={() => void action('campaign', { op: 'reveal' })}>📰 Next news</button>}
+          <button className="btn btn-secondary btn-sm" onClick={() => {
+            const next = campaign.chapter + 1 < campaign.chapters ? `Start chapter ${campaign.chapter + 2}: ${campaign.chapterTitles?.[campaign.chapter + 1] ?? ''}?` : 'End the campaign?';
+            if (window.confirm(next)) void action('campaign', { op: 'next' });
+          }}>{campaign.chapter + 1 < campaign.chapters ? '▶ Next chapter' : '🏁 End campaign'}</button></span>}
+      </section>}
+      {status.game && <LiveClass gameId={status.game.id} entries={status.entries} alerts={status.support?.alerts ?? []} online={status.online}
+        known={[...supportStudents.values()]} muted={status.muted} mode={status.mode} moderation={status.moderation} open={status.open}
+        who={who} action={action} selected={selectedStudent} onSelect={setSelectedStudent} />}
       <nav className="teacher-nav" aria-label="Sections">
         {GROUPS.map(group => {
           const items = group.cards.flatMap(id => cards.filter(info => info.id === id));
@@ -265,38 +281,7 @@ export default function Teacher() {
         <button type="button" className="teacher-nav-close" onClick={closeAll}>Close all</button>
       </nav>
 
-      <h2 className="teacher-group">During class</h2>
-      {status.game && card('help', <TeacherSupport key={status.game.id} gameId={status.game.id} token={token} embedded
-        support={status.support ?? { alerts: [], students: [] }}
-        students={[...supportStudents.values()].sort((a, b) => who(a.studentKey, a.name).localeCompare(who(b.studentKey, b.name)))}
-        who={who} action={action} failed={failed} />)}
-
-      {card('chat', <>
-        {waiting.length > 0 && <div className="teacher-queue">
-          <strong>{waiting.length} waiting</strong>
-          <button className="btn btn-primary" onClick={() => void action('approve-all', {})}>Approve all ({waiting.length})</button>
-          <small>or press <kbd>A</kbd> to approve and <kbd>R</kbd> to reject the oldest</small>
-        </div>}
-        {status.entries.length === 0 && <p>No messages yet.</p>}
-        {status.entries.map(entry => <article key={entry.id} className={`teacher-entry${entry === oldest ? ' teacher-oldest' : ''}`}>
-          <div><strong>{who(entry.studentKey, entry.sender)}</strong>{entry.target && <> → <strong>{entry.target}</strong> <em>(whisper)</em></>}{entry.everyone && <> → <strong>everyone</strong></>} <small>{new Date(entry.timestamp).toLocaleTimeString()} · {entry.status}</small></div>
-          <p>{entry.text}</p>
-          {entry.note && <p className="teacher-note">{entry.note.startsWith('Investigation:') ? entry.note : `Grammar hint: ${entry.note}`}</p>}
-          {entry.flag && <p className="teacher-flag">{entry.status === 'blocked' ? 'Blocked by moderation' : 'Not checked by moderation'}: {entry.flag}</p>}
-          <div className="teacher-actions">
-            {entry.status === 'pending' && <>
-              <button className="btn btn-sm btn-primary" onClick={() => void action('review', { id: entry.id, approve: true })}>Approve</button>
-              <button className="btn btn-sm" onClick={() => void action('review', { id: entry.id, approve: false })}>Reject</button>
-            </>}
-            {entry.status === 'approved' && <button className="btn btn-sm" onClick={() => void action('review', { id: entry.id, approve: false })}>Remove</button>}
-            {entry.status === 'approved' && <StarButton starred={entry.starred} onStar={() => void action('xp', { chatId: entry.id })} />}
-            <button className="btn btn-sm" onClick={() => void action('mute', { studentKey: entry.studentKey, muted: !status.muted.includes(entry.studentKey) })}>
-              {status.muted.includes(entry.studentKey) ? 'Unmute' : 'Mute'} student
-            </button>
-          </div>
-        </article>)}
-      </>)}
-
+      <h2 className="teacher-group">More during class</h2>
       {status.game && card('live', <>
         <p>{status.open ? 'Updates every 2 seconds. Select a student to find them on the map.' : 'The class is closed.'}</p>
         <div className="teacher-actions" style={{ marginBottom: '1rem' }}>
@@ -330,6 +315,11 @@ export default function Teacher() {
           </button>
         </li>)}</ul> : <p>No students in the plaza right now.</p>}
       </>)}
+
+      {status.game && card('help', <TeacherSupport key={status.game.id} gameId={status.game.id} token={token} embedded
+        support={status.support ?? { alerts: [], students: [] }}
+        students={[...supportStudents.values()].sort((a, b) => who(a.studentKey, a.name).localeCompare(who(b.studentKey, b.name)))}
+        who={who} action={action} failed={failed} />)}
 
       {status.game && <h2 className="teacher-group">Activities</h2>}
       {status.game && card('warmup', <>
@@ -503,7 +493,7 @@ export default function Teacher() {
   </main>;
 }
 
-type CardId = 'help' | 'chat' | 'live' | 'campaign' | 'warmup' | 'vision' | 'games' | 'mode' | 'laptop' | 'report';
+type CardId = 'help' | 'live' | 'campaign' | 'warmup' | 'vision' | 'games' | 'mode' | 'laptop' | 'report';
 // badge: a number to show; alert: that number is something waiting on the teacher; label: a word of status instead.
 type CardInfo = { id: CardId; title: string; badge?: number; alert?: boolean; label?: string };
 // Every card starts closed; the counts in the bar say where to look. (A new key, so cards left open before close once.)
@@ -511,7 +501,7 @@ const DEFAULT_OPEN: CardId[] = [];
 const CARDS_KEY = 'pixelplaza.teacher.cards.v2';
 // The page in four parts, in the order a lesson uses them.
 const GROUPS: { title: string; cards: CardId[] }[] = [
-  { title: 'During class', cards: ['help', 'chat', 'live'] },
+  { title: 'During class', cards: ['live', 'help'] },
   { title: 'Activities', cards: ['warmup', 'campaign'] },
   { title: 'Setup', cards: ['games', 'vision', 'mode', 'laptop'] },
   { title: 'After class', cards: ['report'] },
