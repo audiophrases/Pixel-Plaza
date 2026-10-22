@@ -17,10 +17,12 @@ export type PlazaEvent =
   | { t: 'leave'; id: string }
   | { t: 'move'; id: string; x: number; y: number }
   | { t: 'emote'; id: string; emote: string }
-  | { t: 'chat'; id?: string; sender: string; text: string; ts: number; whisper?: boolean; to?: string; marks?: [number, number][]; voice?: string; history?: boolean }
+  // all: for the whole plaza; heard: on the sender's own copy, how many classmates it reached
+  | { t: 'chat'; id?: string; sender: string; text: string; ts: number; whisper?: boolean; to?: string; all?: boolean; heard?: number; marks?: [number, number][]; voice?: string; history?: boolean }
+  | { t: 'typing'; id: string; scope: 'private' | 'nearby' | 'all' } // a classmate is writing a message that will reach you
   | { t: 'retract'; id: string } // the teacher took a posted message down
-  | { t: 'notice'; level: 'info' | 'warning'; text: string; cid?: string } // cid: the chat message this answers
-  | { t: 'result'; cid: string }
+  | { t: 'notice'; level: 'info' | 'warning'; text: string; cid?: string; id?: string } // cid: the attempt this answers; id: the chat message it is about
+  | { t: 'result'; cid: string; id?: string }
   | { t: 'snap'; x: number; y: number }                                    // the server put you back: your last move was not possible
   | { t: 'warmup'; warmup: WarmupView | null }                               // your part of the warm-up, or null when it is over
   | { t: 'warmup-answered'; correct: boolean; wait: boolean }

@@ -5,9 +5,10 @@ import LobbyScene from '../game/scenes/LobbyScene';
 
 interface PhaserGameProps {
   connection: PlazaConnection;
+  onPick?: (id: string) => void; // a classmate was clicked on the map
 }
 
-export default function PhaserGame({ connection }: PhaserGameProps) {
+export default function PhaserGame({ connection, onPick }: PhaserGameProps) {
   const gameRef = useRef<HTMLDivElement>(null);
   const phaserGameRef = useRef<Phaser.Game | null>(null);
 
@@ -37,13 +38,13 @@ export default function PhaserGame({ connection }: PhaserGameProps) {
 
     phaserGameRef.current = new Phaser.Game(config);
     
-    phaserGameRef.current.scene.start('LobbyScene', { connection });
+    phaserGameRef.current.scene.start('LobbyScene', { connection, onPick });
 
     return () => {
       phaserGameRef.current?.destroy(true);
       phaserGameRef.current = null;
     };
-  }, [connection]);
+  }, [connection, onPick]);
 
   return <div ref={gameRef} style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, zIndex: 0 }} />;
 }

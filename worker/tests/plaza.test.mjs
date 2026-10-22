@@ -2581,3 +2581,121 @@ test('teacher magic authorizes spells, blocks frozen movement and revives lightn
         await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
     }
 });
+
+test('chat for everyone, who heard it, "is writing", and the lesson\'s chat back after a reload', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-chat-'));
+    // Speech goes to a closed port: allowed requests fail as unavailable, refused ones as not found.
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, { EDGE_TTS_URL: 'http://127.0.0.1:9/tts' });
+    let alex, sam, chris;
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        const base = plaza.base;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, ...(body ? { body } : {}) });
+        PIN = (await teacher('class', { open: true })).body.pin;
+        alex = await enter(base, 'signed-a', null); sam = await enter(base, 'signed-b', null); chris = await enter(base, 'signed-c', null);
+        // Alex and Sam stand together; Chris is far away.
+        alex.send({ t: 'move', x: 1100, y: 740 }); sam.send({ t: 'move', x: 920, y: 810 }); chris.send({ t: 'move', x: 100, y: 100 });
+        await pause(400);
+
+        // Waiting for the teacher, a message is named, so the page can show it waiting where it was written.
+        alex.send({ t: 'chat', cid: 'near', text: 'Hello near me' });
+        const near = await alex.next(m => m.t === 'notice' && m.cid === 'near', 'pending notice');
+        assert.match(near.text, /approval/);
+        assert.ok(near.id, 'the waiting message is named');
+        await teacher('review', { id: near.id, approve: true });
+        const own = await alex.next(m => m.t === 'chat' && m.id === near.id, 'own copy');
+        assert.deepEqual([own.heard, own.all], [1, undefined], 'only Sam was near enough to hear it');
+        assert.equal((await sam.next(m => m.t === 'chat' && m.id === near.id, 'nearby chat')).heard, undefined, 'only the sender learns who heard it');
+        assert.equal((await alex.next(m => m.t === 'notice' && m.id === near.id, 'decision')).level, 'info', 'the decision names the message');
+        assert.equal(chris.inbox.some(m => m.id === near.id), false);
+
+        // A message for everyone reaches the whole plaza, however far, and the teacher sees who it was for.
+        await pause(1600);
+        alex.send({ t: 'chat', cid: 'all', text: 'Hello everyone', to: 'everyone' });
+        const shout = await alex.next(m => m.t === 'notice' && m.cid === 'all', 'pending shout');
+        const entries = (await teacher('status')).body.entries;
+        assert.deepEqual([entries.find(e => e.id === shout.id).everyone, entries.find(e => e.id === shout.id).target], [true, null]);
+        assert.equal(entries.find(e => e.id === near.id).everyone, false);
+        await teacher('review', { id: shout.id, approve: true });
+        assert.equal((await chris.next(m => m.t === 'chat' && m.id === shout.id, 'shout far away')).all, true);
+        assert.equal((await alex.next(m => m.t === 'chat' && m.id === shout.id, 'own shout')).heard, 2);
+        const report = await fetch(`${base}/api/teacher/report?scope=lesson`, { headers: { 'x-teacher-session': session } }).then(r => r.json());
+        assert.equal(report.students.find(s => s.studentKey === 'stu_a').lines.find(line => line.text === 'Hello everyone').target, 'Everyone');
+
+        // Nobody near: delivered to nobody, and the sender is told.
+        chris.send({ t: 'chat', cid: 'alone', text: 'Is anybody there?' });
+        const alone = await chris.next(m => m.t === 'notice' && m.cid === 'alone', 'pending alone');
+        await teacher('review', { id: alone.id, approve: true });
+        assert.equal((await chris.next(m => m.t === 'chat' && m.id === alone.id, 'own lonely message')).heard, 0);
+
+        // A message the teacher does not post is named too.
+        await pause(1600);
+        sam.send({ t: 'chat', cid: 'no', text: 'Not this one' });
+        const refused = await sam.next(m => m.t === 'notice' && m.cid === 'no', 'pending refused');
+        await teacher('review', { id: refused.id, approve: false });
+        assert.match((await sam.next(m => m.t === 'notice' && m.id === refused.id, 'not posted')).text, /not posted/);
+
+        // "Is writing" carries no words and reaches whoever the message would reach, and only them.
+        const writingFrom = (socket, from) => socket.inbox.filter(m => m.t === 'typing' && m.id === from.me.id);
+        chris.send({ t: 'typing', to: sam.me.id });
+        assert.deepEqual(await sam.next(m => m.t === 'typing', 'private writing'), { t: 'typing', id: chris.me.id, scope: 'private' });
+        alex.send({ t: 'typing' });
+        alex.send({ t: 'typing' }); // too soon: passed on once
+        assert.equal((await sam.next(m => m.t === 'typing' && m.id === alex.me.id, 'nearby writing')).scope, 'nearby');
+        await pause(1100);
+        alex.send({ t: 'typing', to: 'everyone' });
+        assert.equal((await chris.next(m => m.t === 'typing' && m.id === alex.me.id, 'writing to everyone')).scope, 'all');
+        await sam.next(m => m.t === 'typing' && m.id === alex.me.id && m.scope === 'all', 'Sam hears it too');
+        await pause(1100);
+        alex.send({ t: 'typing', to: 'teacher' });
+        await teacher('mute', { studentKey: 'stu_c', muted: true });
+        chris.send({ t: 'typing', to: alex.me.id });
+        await pause(400);
+        assert.equal(writingFrom(sam, alex).length, 0, 'writing to the teacher reaches no classmate, and the first nearby report was passed on once');
+        assert.equal(writingFrom(chris, alex).length, 0, 'nearby writing never reached Chris, far away');
+        assert.equal(writingFrom(alex, chris).length, 0, 'a muted student cannot be seen writing, nor a private one to someone else');
+        await teacher('mute', { studentKey: 'stu_c', muted: false });
+
+        // A private message to the teacher, which a reload must keep with the teacher's replies.
+        await pause(1600);
+        alex.send({ t: 'chat', cid: 'help', text: 'Ajuda, si us plau', to: 'teacher' });
+        const help = await alex.next(m => m.t === 'result' && m.cid === 'help', 'teacher message taken');
+        assert.ok(help.id);
+
+        // A whisper approved while Sam was away waits for Sam to come back.
+        await pause(1600);
+        alex.send({ t: 'chat', cid: 'psst', text: 'Psst, Sam', to: sam.me.id });
+        const psst = await alex.next(m => m.t === 'notice' && m.cid === 'psst', 'pending whisper');
+        sam.ws.close(); await sam.closed;
+        await pause(200);
+        await teacher('review', { id: psst.id, approve: true });
+        assert.equal((await alex.next(m => m.t === 'notice' && m.id === psst.id, 'approved while away')).level, 'warning');
+
+        // A reload brings back the lesson's chat: what reached Sam as history (shown, not read aloud), the whisper that
+        // came while Sam was away as new, and nothing Sam was never meant to have.
+        sam = await enter(base, 'signed-b', null);
+        const back = (id, what) => sam.next(m => m.t === 'chat' && m.id === id, what);
+        assert.equal((await back(near.id, 'nearby again')).history, true);
+        assert.equal((await back(shout.id, 'shout again')).all, true);
+        const missed = await back(psst.id, 'whisper back');
+        assert.deepEqual([missed.whisper, missed.to, missed.sender, missed.history], [true, 'Sam', 'Alex', undefined], 'a whisper that came while away is new');
+        await pause(200);
+        assert.equal(sam.inbox.some(m => m.id === refused.id || m.id === alone.id || m.id === help.id), false, 'nothing that was not posted to Sam comes back');
+        const speech = await fetch(`${base}/api/plaza/speech`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-student-token': 'signed-b' },
+            body: JSON.stringify({ id: psst.id }) });
+        assert.equal(speech.status, 503, 'Sam may now listen to the whisper that waited');
+
+        alex.ws.close(); await alex.closed;
+        alex = await enter(base, 'signed-a', null);
+        const mine = await alex.next(m => m.t === 'chat' && m.id === shout.id, 'own shout again');
+        assert.deepEqual([mine.heard, mine.history], [2, true], 'the sender still sees who heard it');
+        const asked = await alex.next(m => m.t === 'chat' && m.id === help.id, 'teacher message again');
+        assert.deepEqual([asked.to, asked.whisper, asked.text, asked.history], ['Teacher', true, 'Ajuda, si us plau', true]);
+    } finally {
+        for (const socket of [alex, sam, chris]) socket?.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});

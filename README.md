@@ -1,6 +1,6 @@
 # Pixel Plaza
 
-A social plaza for an ESL class. Students sign in through PinPlay's Google student login, choose avatars, move around a shared map, use emotes, and submit chat messages, either to people nearby or as a whisper to one classmate. Every chat message, whispers included, must be approved by the teacher before anyone sees it, unless the teacher chooses the review mode below.
+A social plaza for an ESL class. Students sign in through PinPlay's Google student login, choose avatars, move around a shared map, use emotes, and submit chat messages: to the people nearby, to everyone in the plaza, or as a whisper to one classmate. Every chat message, whispers included, must be approved by the teacher before anyone sees it, unless the teacher chooses the review mode below.
 
 ## Where it runs
 
@@ -58,11 +58,22 @@ Configure PinPlay's roster policy (**PinPlay → Students**) for the intended cl
 1. Open `/teacher`, sign in with the teacher password, and press **Open class**. The page shows a new 6-digit class PIN for this lesson; write it on the board.
 2. Students open the site, type the class PIN, and sign in with their school Google account (once per device; the session lasts as long as PinPlay's).
 3. Approve or reject chat as it arrives: **A** and **R** act on the oldest waiting message, **Approve all** clears the queue, and a beep and the tab title count what is waiting. A message that has already posted can be taken down with **Remove**, and it vanishes from every student's chat. **Mute student** follows the student across reconnects and lessons.
-   With an OpenAI key (see *AI moderation*), **How chat is moderated** starts on *post chat after OpenAI checks it*: messages OpenAI cleared appear at once, nearby or whisper, and you review afterwards. Witness exchanges, flagged messages and anything it could not check still wait for you. Choose *approve every message first* to make every message wait. Without a key, every message waits.
+   With an OpenAI key (see *AI moderation*), **How chat is moderated** starts on *post chat after OpenAI checks it*: messages OpenAI cleared appear at once, nearby, to everyone or whisper, and you review afterwards. Witness exchanges, flagged messages and anything it could not check still wait for you. Choose *approve every message first* to make every message wait. Without a key, every message waits.
 4. **Close class** at the end. Pending chat is rejected and nobody new can join.
 5. For a report on the lesson, open **Class report** (under *After class*), press **Build the prompt**, copy it and paste it into an AI chat such as ChatGPT, Claude or Gemini. It lists what each student wrote, answered and asked for, with how each message ended (posted, stopped by the word check, rejected...), and asks the AI who is doing well, who needs help, who is not doing much, and for the common errors. Choose *this lesson* (since the class was opened) or *the whole game*, and the class level. **Hide names** (on by default) puts Student 1, Student 2... in the prompt, also inside messages, and keeps the key on your screen. The prompt contains students' writing, so use an AI service your school allows.
 
 Teacher controls are grouped as the lesson goes (*During class*, *Activities*, *Setup*, *After class*) and every card starts closed. The bar at the top jumps to a card and shows counts: red for what waits on you, grey for status.
+
+## How students chat
+
+The chat box lists conversations down its left side, as faces: **Nearby** (everyone within 350 map pixels; the chat starts here), **Everyone** (the whole plaza), a private chat with each classmate, the newest on top, and the **Teacher** (private, any language). The top of the open conversation shows who reads it: in Nearby, the faces of the classmates close enough, or *Nobody near you*.
+
+- Messages are bubbles, the student's own on the right with what became of it: 🕓 waiting for the teacher, ✓ reached nobody (nobody was near enough), ✓✓ delivered (in a group chat, with how many got it), ✕ not posted.
+- A private message opens its conversation by itself when the student is not writing anything and the chat they have open has been quiet for 20 seconds. Otherwise it shows as a banner at the top of the chat until they tap it. Each face counts its new messages, and a folded chat shows the newest on its handle.
+- Three dots show who is writing a message that will reach you, in the chat and over their head on the map. What someone says shows over their head for a few seconds (🔒 a whisper, 📢 for everyone), and only to those who received it.
+- Clicking a classmate on the map, or a name in a group chat, opens a private chat with them; **＋** lists everyone, nearest first.
+- A reloaded page or a dropped connection gets this lesson's chat back, and a whisper approved while its reader was away waits for them.
+- Messages for everyone are read aloud only while the Everyone conversation is open; nearby and private ones always are.
 
 A dropped connection (a closed lid, Wi-Fi roaming) reconnects by itself. Opening the plaza in a second tab moves the student's avatar there and tells the first tab why.
 
@@ -150,7 +161,7 @@ The choice is made when the game is created and applies to that game only.
 
 ## AI moderation (optional)
 
-With an OpenAI API key, every message, nearby or whisper, is checked by OpenAI's moderation endpoint (`omni-moderation-latest`, free to use) after the word filter and before it reaches the teacher.
+With an OpenAI API key, every message, nearby, to everyone or whisper, is checked by OpenAI's moderation endpoint (`omni-moderation-latest`, free to use) after the word filter and before it reaches the teacher.
 
 - **Flagged:** the student is asked to rewrite it. The teacher sees it as *blocked*, with the categories OpenAI gave, such as `harassment`.
 - **Clean:** goes to the teacher as before. Approval is still required.
@@ -209,6 +220,8 @@ npm run lint
 npm test
 npm run check:missions
 node scripts/check-audio.mjs
+node scripts/check-chat.mjs
+node scripts/check-student-support.mjs
 ```
 
 `npm test` builds the app, runs the unit tests, then starts `wrangler dev` with a fake PinPlay for a full lesson: PIN and identity checks, moving, chat approval, mutes, a second window, and a restart that must keep every student's avatar and position.
@@ -218,6 +231,6 @@ node scripts/check-audio.mjs
 - The PIN is shared by the class and changes each lesson. PinPlay supplies each student's verified Google identity; this app depends on PinPlay's login and roster policy.
 - There is one plaza. Every class shares it, so open it for one class at a time.
 - The word and phrase filter catches only a small set of obvious cases. Teacher approval is the moderation gate. With an `OPENAI_API_KEY` set, every message also goes through OpenAI's moderation first (see below); the server-side English check runs only on the teacher's laptop.
-- Chat is a whisper to one classmate or nearby chat (heard by students within 350 map pixels of where the sender stood). The chat box starts on a whisper to the nearest classmate; nearby chat is sent only when the student chooses it. Both wait for teacher approval unless review mode posts them, and the teacher sees whispers too. Room decoration, items, and building interiors are not implemented.
+- Chat is nearby (heard by students within 350 map pixels of where the sender stood), for everyone in the plaza, or a whisper to one classmate; the chat box starts on nearby. All of it waits for teacher approval unless review mode posts it, and the teacher sees whispers too. Room decoration, items, and building interiors are not implemented.
 - On the map each avatar is a paper doll made from the same eight parts as the portrait: the head turns the way the student walks (the back of the head when walking away), the torso takes the shirt, and arms and legs swing as they walk. Pants and shoes are derived from the shirt choice, so the saved avatar format is unchanged. See `src/game/AvatarFigure.ts`.
 - Browser controls cannot reliably stop screenshots or external translation tools.

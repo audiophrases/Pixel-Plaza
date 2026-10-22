@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Journal from '../components/Journal';
 import Warmup from '../components/Warmup';
@@ -9,6 +9,7 @@ import { LevelBar, Rewards } from '../components/LevelBar';
 import { DEFAULT_STYLE, emotesFor, levelOf, type Style } from '../../shared/levels';
 import { wordDiff } from '../../shared/diff';
 import { firstName } from '../../shared/names';
+import { ALL, NEAR, TEACHER, TYPING_EVERY_MS, TYPING_SHOWN_MS, conversationOf, inEarshot, opensItself, partnerOf, privateChat, renamed } from '../../shared/chat';
 import PhaserGame from '../components/PhaserGame';
 import type { QuestView } from '../../shared/campaign';
 import type { StudentSupport } from '../../shared/support';
@@ -16,9 +17,9 @@ import { PlazaConnection } from '../plaza';
 import { messageId } from '../utils/messageId';
 import { loadChecker } from '../spellingData';
 import type { Checker, Misspelling } from '../spelling';
-import type { PlazaStatus } from '../plaza';
+import type { PlazaPlayer, PlazaStatus } from '../plaza';
 import { readStudentSession } from '../studentAuth';
-import type { AvatarConfig } from '../utils/AvatarRenderer';
+import { renderFaceSvg, type AvatarConfig } from '../utils/AvatarRenderer';
 import { GameAudio, soundIsMuted, unlockSound, type SoundState } from '../audio';
 import './Game.css';
 
@@ -31,20 +32,22 @@ interface ChatMessage {
   id?: string;
   sender: string;
   text: string;
+  at: number; // when it was said, by the server's clock: conversations are in this order
   timestamp?: number;
   whisper?: boolean;
   to?: string;
+  all?: boolean; // for everyone in the plaza
   marks?: [number, number][]; // words the sender was offered a better version of and kept
   teacher?: boolean;
   voice?: string;
   conv?: string; // a notice belongs to the conversation it answers; '*' shows in every one
+  heard?: number; // on the student's own message: how many classmates it reached
+  waiting?: boolean; // the student's own message, still with the teacher
+  declined?: boolean; // the student's own message, which the teacher did not post
+  read?: boolean; // seen before the page was reloaded: never counted as new
 }
 
-// The chat's conversations, one tab each: 'nearby' (everyone close), 'teacher' (private help), and 'p:<name>' for a
-// private chat with one classmate. 'auto' is where a student starts: a private chat with whoever is nearest, until
-// they send something or choose a tab, when it becomes that classmate's own tab.
-const NEARBY = 'nearby';
-const TEACHER = 'teacher';
+type Typing = { scope: 'private' | 'nearby' | 'all'; until: number };
 
 // Text with some character ranges wrapped, so a changed or mistaken word can have its own shade.
 function Marked({ text, marks, className }: { text: string; marks?: readonly (readonly [number, number])[]; className: string }) {
@@ -60,6 +63,51 @@ function Marked({ text, marks, className }: { text: string; marks?: readonly (re
   return <>{parts}</>;
 }
 
+// A classmate is shown by their avatar's face, so a student finds a conversation by who it is with.
+const faces = new Map<string, string>();
+function faceUrl(look: Partial<AvatarConfig>): string {
+  const key = JSON.stringify([look.head, look.skin, look.hairColor, look.hair, look.eyes, look.mouth, look.glasses, look.shirt, look.hat]);
+  const known = faces.get(key);
+  if (known) return known;
+  const svg = renderFaceSvg(look);
+  if (!svg) return ''; // the artwork has not loaded yet
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  faces.set(key, url);
+  return url;
+}
+
+// Each name keeps one colour, readable on white, for its sender line and its initial.
+const SHADES = ['#c2185b', '#7b1fa2', '#3949ab', '#0277bd', '#00796b', '#558b2f', '#e65100', '#6d4c41'];
+const shade = (name: string) => SHADES[[...name].reduce((sum, character) => (sum * 31 + character.charCodeAt(0)) >>> 0, 7) % SHADES.length];
+
+function Face({ player, name, icon }: { player?: PlazaPlayer | null; name?: string; icon?: string }) {
+  const url = player ? faceUrl(player) : '';
+  return <span className="chat-face" style={!icon && !url && name ? { background: shade(name) } : undefined} aria-hidden="true">
+    {icon ?? (url ? <img src={url} alt="" /> : (name || '?').slice(0, 1).toUpperCase())}
+  </span>;
+}
+
+// What became of the student's own message, in the marks messaging apps use: a clock while it waits
+// for the teacher, one tick when nobody got it, two when someone did, a cross when it was not posted.
+function Ticks({ message, conversation }: { message: ChatMessage; conversation: string }) {
+  const group = conversation === NEAR || conversation === ALL;
+  if (message.declined) return <span className="chat-ticks chat-ticks-no" title="Your teacher did not post this">✕</span>;
+  if (message.waiting) return <span className="chat-ticks" title="Waiting for your teacher">🕓</span>;
+  if (!message.heard) {
+    const why = message.heard === undefined ? 'Sent' : conversation === NEAR ? 'Nobody was near enough to get it' : group ? 'Nobody else is in the Plaza' : 'Not delivered';
+    return <span className="chat-ticks" title={why}>✓</span>;
+  }
+  return <span className="chat-ticks chat-ticks-got" title={group ? `${message.heard} got it` : 'Delivered'}>✓✓{group && <small>{message.heard}</small>}</span>;
+}
+
+const without = <T,>(record: Record<string, T>, key: string): Record<string, T> => {
+  if (!(key in record)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
+};
+const sameClassmates = (a: PlazaPlayer[], b: PlazaPlayer[]) => a.length === b.length && a.every((item, index) => item.id === b[index].id && item.name === b[index].name);
+
 export default function Game() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -72,7 +120,7 @@ export default function Game() {
   }));
   // Shown as the first name, with a surname letter added when a classmate shares it; the plaza tells us which.
   const [myName, setMyName] = useState(() => firstName(readStudentSession()?.student.displayName ?? ''));
-  
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   // A grammar hint waiting for the student's choice: what they wrote, the fix, and why.
@@ -90,29 +138,36 @@ export default function Game() {
   const teacherMessageIds = useRef(new Set<string>());
   const submissionAttemptId = useRef<string | null>(null);
   const plazaRef = useRef<PlazaConnection | null>(null);
-  const pending = useRef<{ cid: string; text: string; timer: number } | null>(null);
+  const pending = useRef<{ cid: string; text: string; timer: number; conv: string } | null>(null);
   const keptRun = useRef(0); // hints in a row the student turned down
   const chatField = useRef<HTMLInputElement>(null);
   const [spelling, setSpelling] = useState<Misspelling[]>([]); // words that stopped the last message
-  // The conversation being written in (see NEARBY above), the private ones begun, and how many messages of each were read.
-  const [active, setActive] = useState('auto');
-  const [opened, setOpened] = useState<string[]>([]);
-  const [lastSeen, setLastSeen] = useState<Record<string, number>>({});
-  const [showPeople, setShowPeople] = useState(false); // the list for starting a private chat
-  const [byDistance, setByDistance] = useState<{ id: string; name: string }[]>([]); // classmates, nearest first
-  const nearest = byDistance[0] ?? null;
-  const draft = useRef(''); // the nearest classmate is not changed while a message is being written
-  useEffect(() => { draft.current = chatInput; }, [chatInput]);
   const [blockedRun, setBlockedRun] = useState(0); // messages stopped in a row by the word check
-  const [classmates, setClassmates] = useState<{ id: string; name: string }[]>([]);
+  // The conversations (see NEAR in shared/chat): the one open, private chats begun before anything was said in
+  // them (and when), and the newest message read in each.
+  const [active, setActive] = useState(NEAR);
+  const [started, setStarted] = useState<Record<string, number>>({});
+  const [lastSeen, setLastSeen] = useState<Record<string, number>>({});
+  const [showPeople, setShowPeople] = useState(false); // the faces for starting a private chat
+  const [classmates, setClassmates] = useState<PlazaPlayer[]>([]); // everyone else here, nearest first
+  const [earshot, setEarshot] = useState<string[]>([]); // who would hear nearby chat right now
+  const [typing, setTyping] = useState<Record<string, Typing>>({}); // classmates writing a message that will reach this student, by id
+  const [peek, setPeek] = useState<{ key: string; message: ChatMessage } | null>(null); // a private message that came while another chat was open
   // Who the open conversation is with, and where its messages go.
-  const partnerName = active.startsWith('p:') ? active.slice(2) : active === 'auto' ? nearest?.name ?? null : null;
+  const partnerName = partnerOf(active);
   const partner = partnerName ? classmates.find(classmate => classmate.name === partnerName) ?? null : null;
-  const whisperTo = active === TEACHER ? 'teacher' : active === NEARBY ? '' : partner?.id ?? '';
-  const convKey = active === 'auto' ? (nearest ? `p:${nearest.name}` : 'auto') : active;
-  const activeRef = useRef('auto');
-  const convRef = useRef(convKey);
-  useEffect(() => { activeRef.current = active; convRef.current = convKey; }, [active, convKey]);
+  const whisperTo = active === TEACHER ? 'teacher' : active === ALL ? 'everyone' : partnerName ? partner?.id ?? '' : '';
+  const activeRef = useRef(NEAR);
+  useEffect(() => { activeRef.current = active; }, [active]);
+  // Something is being written or checked: nothing may switch the conversation under it.
+  const composing = useRef(false);
+  useEffect(() => { composing.current = !!chatInput || !!nudge || spelling.length > 0 || checking || sending; }, [chatInput, nudge, spelling.length, checking, sending]);
+  const newest = useRef<Record<string, number>>({}); // the time of the newest message in each conversation
+  const clock = useRef(0); // the server's clock minus this computer's, so notices fall in place among messages
+  // Where "is writing" goes: the open conversation, nowhere for the teacher or a classmate who left.
+  const typingTo = useRef<string | null>('');
+  useEffect(() => { typingTo.current = whisperTo === 'teacher' || (partnerName && !partner) ? null : whisperTo; }, [whisperTo, partnerName, partner]);
+  const typedAt = useRef(0);
   // Experience and levels: the bar at the bottom, and the look the levels unlock.
   const [xp, setXp] = useState(0);
   const [xpReason, setXpReason] = useState<string | undefined>();
@@ -132,22 +187,74 @@ export default function Game() {
   }, [chatSpot]);
 
   // Which conversation a message belongs to, and what is new in each.
-  const convOf = (message: ChatMessage): string => {
-    if (message.conv) return message.conv;
-    if (message.teacher || (message.whisper && message.to === 'Teacher')) return TEACHER;
-    if (message.whisper) return `p:${message.sender === myName ? message.to : message.sender}`;
-    return NEARBY;
-  };
+  const convOf = (message: ChatMessage) => conversationOf(message, myName);
   const byConv = new Map<string, ChatMessage[]>();
-  for (const message of messages) { const key = convOf(message); byConv.set(key, [...(byConv.get(key) ?? []), message]); }
-  const fromOthers = (message: ChatMessage) => !message.sender.startsWith('System') && message.sender !== myName;
-  const unreadIn = (key: string) => (byConv.get(key) ?? []).slice(lastSeen[key] ?? 0).filter(fromOthers).length;
+  for (const message of messages) {
+    const key = convOf(message);
+    const list = byConv.get(key);
+    if (list) list.push(message); else byConv.set(key, [message]);
+  }
+  for (const list of byConv.values()) list.sort((a, b) => a.at - b.at);
+  const fromOthers = (message: ChatMessage) => !message.sender.startsWith('System') && message.sender !== myName && !message.read;
+  const newIn = (key: string) => (byConv.get(key) ?? []).filter(message => fromOthers(message) && message.at > (lastSeen[key] ?? 0));
   // The open conversation counts as read; new messages in the others (or in all of them, folded) pile up.
-  const activeCount = byConv.get(convKey)?.length ?? 0;
+  const openNewest = byConv.get(active)?.at(-1)?.at ?? 0;
   useEffect(() => {
-    if (!chatSpot.folded) setLastSeen(seen => seen[convKey] === activeCount ? seen : { ...seen, [convKey]: activeCount });
-  }, [chatSpot.folded, convKey, activeCount]);
-  const unread = [...byConv.keys()].filter(key => key !== '*' && (chatSpot.folded || key !== convKey)).reduce((sum, key) => sum + unreadIn(key), 0);
+    if (!chatSpot.folded && openNewest) setLastSeen(seen => (seen[active] ?? 0) >= openNewest ? seen : { ...seen, [active]: openNewest });
+  }, [chatSpot.folded, active, openNewest]);
+  const waitingKeys = [...byConv.keys()].filter(key => key !== '*' && (chatSpot.folded || key !== active));
+  const unread = waitingKeys.reduce((sum, key) => sum + newIn(key).length, 0);
+  const latest = chatSpot.folded ? waitingKeys.flatMap(newIn).sort((a, b) => b.at - a.at)[0] : undefined;
+
+  // The conversation list: the ones always there (nearby, everyone, the teacher) in fixed places at the top, then the
+  // private chats with the newest on top, right under the button that starts one.
+  const privates = new Map<string, number>(Object.entries(started));
+  for (const [key, list] of byConv) if (partnerOf(key)) privates.set(key, Math.max(privates.get(key) ?? 0, list.at(-1)?.at ?? 0));
+  // Someone writing privately for the first time shows up at once, on top, before their message arrives.
+  for (const [id, item] of Object.entries(typing)) {
+    const name = item.scope === 'private' ? classmates.find(classmate => classmate.id === id)?.name : undefined;
+    if (name && !privates.has(privateChat(name))) privates.set(privateChat(name), Number.MAX_SAFE_INTEGER);
+  }
+  const pinned = [NEAR, ALL, TEACHER];
+  const chats = [...privates].sort((a, b) => b[1] - a[1]).map(([key]) => key);
+  // Who is writing in a conversation right now.
+  const writers = (key: string): string[] => Object.keys(typing).flatMap(id => {
+    const name = classmates.find(classmate => classmate.id === id)?.name;
+    const scope = typing[id].scope;
+    return name && (key === NEAR ? scope === 'nearby' : key === ALL ? scope === 'all' : scope === 'private' && key === privateChat(name)) ? [name] : [];
+  });
+
+  // "Is writing" runs out a little after the last report.
+  useEffect(() => {
+    const next = Math.min(...Object.values(typing).map(item => item.until));
+    if (!Number.isFinite(next)) return;
+    const timer = window.setTimeout(() => setTyping(current => Object.fromEntries(Object.entries(current).filter(([, item]) => item.until > Date.now()))),
+      Math.max(0, next - Date.now()) + 50);
+    return () => window.clearTimeout(timer);
+  }, [typing]);
+  // A private message announced at the top of the chat goes away by itself; its conversation keeps it as new.
+  useEffect(() => {
+    if (!peek) return;
+    const timer = window.setTimeout(() => setPeek(null), 12000);
+    return () => window.clearTimeout(timer);
+  }, [peek]);
+
+  // Classmates see "is writing" while a message for them is on its way, so they wait for it.
+  const reportTyping = useCallback(() => {
+    const to = typingTo.current;
+    if (to === null || Date.now() - typedAt.current < TYPING_EVERY_MS) return;
+    if (plazaRef.current?.send({ t: 'typing', ...(to ? { to } : {}) })) typedAt.current = Date.now();
+  }, []);
+  // It stays on while the student checks a hint or the message is on its way.
+  useEffect(() => {
+    if (!nudge && !checking && !sending) return;
+    const timer = window.setInterval(reportTyping, TYPING_EVERY_MS);
+    return () => window.clearInterval(timer);
+  }, [nudge, checking, sending, reportTyping]);
+
+  // A click on a classmate on the map opens a private chat with them.
+  const pick = useRef<(id: string) => void>(() => {});
+  const onPick = useCallback((id: string) => pick.current(id), []);
 
   // Enter jumps to the chat box from the map, and Escape leaves it, so a student never needs the mouse.
   useEffect(() => {
@@ -201,29 +308,72 @@ export default function Game() {
     audioRef.current = audio;
     const unhear = audio.subscribe(setSound);
     plazaRef.current = plaza;
-    // Classmates nearest first, for the starting suggestion and the list of people to chat with. The suggestion
-    // does not change while a message to it is being written.
-    const findNearest = () => {
-      const me = plaza.players.get(plaza.selfId);
-      if (!me || (draft.current && activeRef.current === 'auto')) return;
-      const sorted = [...plaza.players.values()].filter(player => player.id !== me.id)
-        .map(player => ({ id: player.id, name: player.name, distance: Math.hypot(player.x - me.x, player.y - me.y) }))
-        .sort((a, b) => a.distance - b.distance).map(({ id, name }) => ({ id, name }));
-      setByDistance(current => current.length === sorted.length && current.every((item, index) => item.id === sorted[index].id && item.name === sorted[index].name) ? current : sorted);
+    const me = () => plaza.players.get(plaza.selfId)?.name ?? '';
+    const names = new Map<string, string>(); // player id to the name shown, to follow a rename
+    // Classmates nearest first, for the faces to start a chat with, and who would hear nearby chat.
+    const findClassmates = () => {
+      const self = plaza.players.get(plaza.selfId);
+      if (!self) return;
+      const others = [...plaza.players.values()].filter(player => player.id !== self.id)
+        .sort((a, b) => Math.hypot(a.x - self.x, a.y - self.y) - Math.hypot(b.x - self.x, b.y - self.y));
+      setClassmates(current => sameClassmates(current, others) ? current : others.map(player => ({ ...player })));
+      const near = inEarshot(self, others).map(player => player.name);
+      setEarshot(current => current.join('\n') === near.join('\n') ? current : near);
     };
-    const open = (key: string) => setOpened(list => list.includes(key) ? list : [...list, key]);
-    const nearestTimer = window.setInterval(findNearest, 1000);
-    const say = (message: ChatMessage) => setMessages(prev => message.id && prev.some(item => item.id === message.id) ? prev : [...prev, message]);
+    const nearestTimer = window.setInterval(findClassmates, 1000);
+    // Adds a message, or turns one waiting for the teacher into the message as posted, in its place.
+    const say = (message: Omit<ChatMessage, 'at'> & { at?: number }): ChatMessage => {
+      const line = { ...message, at: message.at ?? Date.now() + clock.current };
+      const key = conversationOf(line, me());
+      newest.current[key] = Math.max(newest.current[key] ?? 0, line.at);
+      setMessages(prev => {
+        const index = line.id ? prev.findIndex(item => item.id === line.id) : -1;
+        if (index < 0) return [...prev, line];
+        if (!prev[index].waiting) return prev; // already shown: a replay
+        const next = [...prev];
+        next[index] = { ...line, at: prev[index].at };
+        return next;
+      });
+      return line;
+    };
+    // A private message for a conversation that is not open opens by itself when nothing is being written and the
+    // open one has gone quiet; otherwise it is announced at the top of the chat. The group chats only count as new.
+    const arrived = (key: string, line: ChatMessage) => {
+      const open = activeRef.current;
+      if (key === open || (key !== TEACHER && !partnerOf(key))) return;
+      if (opensItself({ from: key, open, writing: composing.current, lastInOpen: newest.current[open] ?? 0, now: Date.now() + clock.current })) {
+        setActive(key);
+        setShowPeople(false);
+        setPeek(null);
+      } else setPeek({ key, message: line });
+    };
     const unsubscribe = plaza.subscribe(event => {
       if (event.t === 'magic' && event.power === 'lightning') audio.thunder();
       if (event.t === 'xp') { setXpReason(event.reason); setXp(event.xp); return; }
       if (event.t === 'roster' || (event.t === 'style' && event.id === plaza.selfId)) setMyStyle(plaza.players.get(plaza.selfId)?.style ?? DEFAULT_STYLE);
+      // A namesake arrived: the messages of whoever was renamed, and the chat with them, follow the new name.
+      if (event.t === 'rename') {
+        const before = names.get(event.id);
+        if (before && before !== event.name) {
+          const move = (key: string) => key === privateChat(before) ? privateChat(event.name) : key;
+          const moveKeys = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).map(([key, value]) => [move(key), value]));
+          setMessages(prev => renamed(prev, before, event.name));
+          setActive(move);
+          setStarted(moveKeys);
+          setLastSeen(moveKeys);
+          newest.current = moveKeys(newest.current);
+        }
+      }
       if (event.t === 'roster' || event.t === 'join' || event.t === 'leave' || event.t === 'rename') {
-        const me = plaza.players.get(plaza.selfId ?? '');
-        if (me) setMyName(me.name);
-        const others = [...plaza.players.values()].filter(player => player.id !== plaza.selfId);
-        setClassmates(others.map(({ id, name }) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)));
-        findNearest();
+        const self = plaza.players.get(plaza.selfId ?? '');
+        if (self) setMyName(self.name);
+        names.clear();
+        for (const player of plaza.players.values()) names.set(player.id, player.name);
+        findClassmates();
+      }
+      if (event.t === 'typing') {
+        setTyping(current => ({ ...current, [event.id]: { scope: event.scope, until: Date.now() + TYPING_SHOWN_MS } }));
+        return;
       }
       // What became of the message being sent. A refusal gives the draft back, with the reason beside it.
       const settled = (event.t === 'notice' || event.t === 'result') && !!event.cid && event.cid === pending.current?.cid;
@@ -240,6 +390,11 @@ export default function Game() {
         setChatInput('');
         setSendError('');
         chatField.current?.blur(); // sent: the keys walk again until Enter opens the box
+        // Waiting for the teacher: it shows in its conversation, with a clock, until the teacher decides.
+        if (event.t === 'notice' && event.id) {
+          say({ id: event.id, sender: me(), text: sent.text, conv: sent.conv, waiting: true });
+          return;
+        }
       }
       if (event.t === 'result') return;
       if (event.t === 'support') {
@@ -247,10 +402,14 @@ export default function Game() {
         const unseen = event.support.messages.filter(message => !teacherMessageIds.current.has(message.id));
         for (const message of unseen) {
           teacherMessageIds.current.add(message.id);
-          say({ id: `teacher:${message.id}`, sender: 'Teacher', text: message.text, timestamp: message.timestamp, teacher: true });
+          say({ id: `teacher:${message.id}`, sender: 'Teacher', text: message.text, timestamp: message.timestamp, at: message.timestamp, teacher: true, read: !!event.history });
         }
-        if (unseen.length) open(TEACHER);
-        if (unseen.length) setChatSpot(spot => ({ ...spot, folded: false }));
+        // The teacher writing opens the chat on it, unless the student is in the middle of writing something.
+        if (unseen.length && !event.history) {
+          setChatSpot(spot => ({ ...spot, folded: false }));
+          if (composing.current) setPeek({ key: TEACHER, message: { sender: 'Teacher', text: unseen.at(-1)!.text, at: unseen.at(-1)!.timestamp, teacher: true } });
+          else { setActive(TEACHER); setShowPeople(false); }
+        }
         return;
       }
       if (event.t === 'warmup') { setWarmup(event.warmup); setWarmupFeedback(null); return; }
@@ -267,25 +426,34 @@ export default function Game() {
         return;
       }
       if (event.t === 'chat') {
-        say({ id: event.id, sender: event.sender, text: event.text, timestamp: event.ts, whisper: event.whisper, to: event.to, marks: event.marks, voice: event.voice });
-        if (event.id) audio.receive(event.id, !!event.history);
-        // A private message gets its own tab. Someone writing first to a student who has not started a chat
-        // opens that chat, so the reply goes back to them.
-        if (event.whisper && event.to === 'Teacher') open(TEACHER);
-        else if (event.whisper) {
-          const me = plaza.players.get(plaza.selfId)?.name;
-          const other = event.sender === me ? event.to : event.sender;
-          if (other) {
-            open(`p:${other}`);
-            if (event.sender !== me && !event.history && activeRef.current === 'auto' && !draft.current) setActive(`p:${other}`);
-          }
-        }
+        if (!event.history && typeof event.ts === 'number') clock.current = event.ts - Date.now();
+        const mine = event.sender === me();
+        const line = say({ id: event.id, sender: event.sender, text: event.text, timestamp: event.ts, at: event.ts, whisper: event.whisper, to: event.to, all: event.all,
+          heard: event.heard, marks: event.marks, voice: event.voice, read: event.history });
+        // Read aloud as it arrives, except the whole plaza's chatter while another conversation is open.
+        if (event.id) audio.receive(event.id, !!event.history || (!!event.all && !mine && activeRef.current !== ALL));
+        // Whoever was writing has written.
+        const speaker = [...plaza.players.values()].find(player => player.name === event.sender);
+        if (speaker) setTyping(current => without(current, speaker.id));
+        if (!mine && !event.history && event.sender !== 'System') arrived(conversationOf(line, me()), line);
       }
       else if (event.t === 'retract') {
         audio.retract(event.id);
         setMessages(prev => prev.filter(message => message.id !== event.id));
       }
-      else if (event.t === 'notice') say({ sender: event.level === 'warning' ? 'System Warning' : 'System', text: event.text, conv: convRef.current });
+      // The teacher's decision on a message that was waiting shows on the message itself.
+      else if (event.t === 'notice' && event.id && event.level === 'info') {
+        const at = Date.now() + clock.current;
+        setMessages(prev => {
+          const index = prev.findIndex(message => message.id === event.id);
+          if (index < 0) return [...prev, { sender: 'System', text: event.text, conv: activeRef.current, at }];
+          if (!prev[index].waiting) return prev; // approved: it is there, posted
+          const next = [...prev];
+          next[index] = { ...prev[index], waiting: false, declined: true };
+          return next;
+        });
+      }
+      else if (event.t === 'notice') say({ sender: event.level === 'warning' ? 'System Warning' : 'System', text: event.text, conv: activeRef.current });
     });
     const unwatch = plaza.onStatus(next => {
       setStatus(next);
@@ -311,7 +479,29 @@ export default function Game() {
   // Scroll chat to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, convKey]);
+  }, [messages, active, typing]);
+
+  // Opens a conversation, leaving whatever the last one was being told.
+  const choose = (key: string) => {
+    if (checking || sending) return;
+    if (partnerOf(key) && !byConv.has(key)) setStarted(current => key in current ? current : { ...current, [key]: Date.now() + clock.current });
+    setActive(key);
+    setShowPeople(false);
+    setPeek(current => current?.key === key ? null : current);
+    setNudge(null);
+    setSpelling([]);
+    setSendError('');
+    submissionAttemptId.current = null;
+  };
+  // Opening a chat to talk in it: the box unfolds and takes the keys.
+  const talk = (key: string) => {
+    setChatSpot(spot => ({ ...spot, folded: false }));
+    choose(key);
+    window.requestAnimationFrame(() => chatField.current?.focus());
+  };
+  useEffect(() => {
+    pick.current = id => { const name = plazaRef.current?.players.get(id)?.name; if (name) talk(privateChat(name)); };
+  });
 
   if (!state?.roomCode || !session) return null;
 
@@ -341,7 +531,7 @@ export default function Game() {
         setSending(false);
         setSendError('No answer from the server. Your message is still here; check the chat before sending it again.');
       }, 15000);
-      pending.current = { cid, text, timer };
+      pending.current = { cid, text, timer, conv: active };
     } else setSendError('Not connected. Your message is still here; try again in a moment.');
   };
 
@@ -349,12 +539,7 @@ export default function Game() {
     e.preventDefault();
     const plaza = plazaRef.current;
     if (!chatInput.trim() || !plaza || checking || sending || nudge) return;
-    if (active !== NEARBY && !whisperTo) {
-      setSendError(active === 'auto' ? 'Nobody else is in the Plaza yet. Choose 👥 Nearby or your teacher.' : `${partnerName} is not in the Plaza now.`);
-      return;
-    }
-    // The suggested chat with the nearest classmate becomes that classmate's own tab.
-    if (active === 'auto' && nearest) { setOpened(list => list.includes(convKey) ? list : [...list, convKey]); setActive(convKey); }
+    if (partnerName && !partner) { setSendError(`${partnerName} is not in the Plaza now.`); return; }
     const text = chatInput;
     const attemptId = plaza.recordAttempt(text, whisperTo || undefined);
     submissionAttemptId.current = attemptId;
@@ -415,31 +600,34 @@ export default function Game() {
     e.preventDefault();
   };
 
-  const openTeacherChat = () => {
-    setChatSpot(spot => ({ ...spot, folded: false }));
-    if (!checking && !sending) choose(TEACHER);
-    window.requestAnimationFrame(() => chatField.current?.focus());
-  };
+  const openTeacherChat = () => talk(TEACHER);
 
-  // Opens a conversation (and its tab), leaving whatever the last one was being told.
-  const choose = (key: string) => {
-    if (checking || sending) return;
-    if (key !== NEARBY) setOpened(list => list.includes(key) ? list : [...list, key]);
-    setActive(key);
-    setShowPeople(false);
-    setNudge(null);
-    setSpelling([]);
-    setSendError('');
-    submissionAttemptId.current = null;
+  const group = active === NEAR || active === ALL;
+  const shown = [...(byConv.get(active) ?? []), ...(byConv.get('*') ?? [])].sort((a, b) => a.at - b.at);
+  const writing = writers(active);
+  const nameOf = (key: string) => key === NEAR ? 'Nearby' : key === ALL ? 'Everyone' : key === TEACHER ? 'Teacher' : partnerOf(key) ?? '';
+  const iconOf = (key: string) => key === NEAR ? '👥' : key === ALL ? '📢' : key === TEACHER ? '🧑‍🏫' : undefined;
+  const playerOf = (key: string) => classmates.find(classmate => classmate.name === partnerOf(key)) ?? null;
+  const conversationButton = (key: string) => {
+    const count = key === active ? 0 : newIn(key).length;
+    const away = !!partnerOf(key) && !playerOf(key);
+    return <button key={key} type="button" role="tab" aria-selected={key === active}
+      className={`chat-conv${pinned.includes(key) ? ` chat-conv-${key}` : ''}${key === active ? ' active' : ''}${count ? ' chat-conv-new' : ''}${away ? ' chat-conv-away' : ''}`}
+      aria-label={count ? `${nameOf(key)}, ${count} new` : nameOf(key)}
+      title={key === NEAR ? 'Everyone close to you' : key === ALL ? 'Everyone in the Plaza' : key === TEACHER ? 'Only your teacher' : `Only ${nameOf(key)} (and your teacher)`}
+      onClick={() => choose(key)}>
+      <Face player={playerOf(key)} name={nameOf(key)} icon={iconOf(key)} />
+      {count > 0 && <span className="chat-conv-count">{count > 9 ? '9+' : count}</span>}
+      {writers(key).length > 0 && <span className="chat-conv-writing" aria-hidden="true">•••</span>}
+      <span className="chat-conv-name">{nameOf(key)}</span>
+    </button>;
   };
-  const tabLabel = (key: string) => key === NEARBY ? '👥 Nearby' : key === TEACHER ? '🧑‍🏫 Teacher' : `🔒 ${key.slice(2)}`;
-  const shown = messages.filter(message => { const key = convOf(message); return key === '*' || key === convKey; });
 
   return (
     <div className="game-container">
       {/* Background Phaser Canvas */}
-      {connection && <PhaserGame connection={connection} />}
-      
+      {connection && <PhaserGame connection={connection} onPick={onPick} />}
+
       {/* React UI Overlay */}
       <div className="ui-layer">
         <header className="game-header glass-panel">
@@ -513,116 +701,145 @@ export default function Game() {
         <div className={`chat-container glass-panel${chatSpot.folded ? ' chat-folded' : ''}`} ref={chatBox}
           style={{ transform: `translate(${chatSpot.x}px, ${chatSpot.y}px)` }}>
           <div className="chat-handle" onPointerDown={dragChat} title="Drag to move the chat">
-            <span className={unread ? 'chat-unread' : undefined}>{unread ? `Chat · ${unread} new` : 'Chat'}</span>
+            <span className={unread ? 'chat-unread' : undefined}>
+              {unread ? `Chat · ${unread} new` : 'Chat'}
+              {latest && <em className="chat-handle-peek"> · {latest.sender}: {latest.text}</em>}
+            </span>
             <button type="button" aria-label={chatSpot.folded ? 'Show chat' : 'Hide chat'}
               onClick={() => setChatSpot(spot => ({ ...spot, folded: !spot.folded }))}>{chatSpot.folded ? '▲' : '▼'}</button>
           </div>
-          {/* One tab per conversation, so a student always sees who they are talking to. */}
-          <div className="chat-tabs" role="tablist" aria-label="Conversations">
-            {[NEARBY, ...(active === 'auto' ? ['auto'] : []), ...opened].map(key => {
-              const count = key === 'auto' ? 0 : unreadIn(key);
-              const isActive = key === active;
-              return <button key={key} type="button" role="tab" aria-selected={isActive}
-                className={`chat-tab${isActive ? ' active' : ''}${count && !isActive ? ' chat-tab-new' : ''}${key === 'auto' ? ' chat-tab-suggested' : ''}`}
-                title={key === 'auto' ? 'A private chat with the classmate nearest to you' : key === NEARBY ? 'Everyone close to you can read it' : key === TEACHER ? 'Only your teacher' : `Only ${key.slice(2)} (and your teacher)`}
-                onClick={() => choose(key)}>
-                {key === 'auto' ? `🔒 ${nearest?.name ?? 'Nearest'} · nearest` : tabLabel(key)}
-                {count > 0 && !isActive && <span className="chat-tab-count">{count}</span>}
-              </button>;
-            })}
-            <button type="button" className={`chat-tab chat-tab-add${showPeople ? ' active' : ''}`} aria-expanded={showPeople}
-              title="Start a private chat" aria-label="Start a private chat" onClick={() => setShowPeople(show => !show)}>＋</button>
-          </div>
-          {showPeople && <div className="chat-people" role="menu" aria-label="Start a private chat with">
-            <span>Chat privately with:</span>
-            {byDistance.map((person, index) => <button key={person.id} type="button" role="menuitem" onClick={() => choose(`p:${person.name}`)}>
-              🔒 {person.name}{index === 0 && <small> · nearest</small>}</button>)}
-            {byDistance.length === 0 && <em>Nobody else is in the Plaza yet.</em>}
-            <button type="button" role="menuitem" onClick={() => choose(TEACHER)}>🧑‍🏫 Teacher</button>
-          </div>}
-          <div className="chat-messages">
-            {shown.length === 0 && <p className="chat-empty">{active === NEARBY ? 'Say something to the classmates near you.' : active === TEACHER ? 'Ask your teacher for help, in any language.'
-              : partnerName ? `A private chat with ${partnerName}. Only ${partnerName} (and your teacher) can read it.` : 'Nobody else is in the Plaza yet.'}</p>}
-            {shown.map((msg, i) => {
-              const isWarning = msg.sender.includes('Warning');
-              const isSystem = msg.sender.startsWith('System');
-
-              return (
-                <div key={msg.id ?? i} className={`chat-message ${isSystem ? 'system-msg' : ''} ${isWarning ? 'warning-msg' : ''} ${msg.whisper ? 'whisper-msg' : ''} ${msg.teacher ? 'teacher-msg' : ''} ${msg.id && sound.messageId === msg.id ? 'chat-speaking' : ''}`}>
-                  {/* Notices from the game are just the sentence, with no "System:" in front */}
-                  {!isSystem && <span className="chat-sender">{msg.teacher ? 'Teacher' : msg.sender === myName ? 'You' : msg.sender}:</span>}
-                  <span className="chat-text"><Marked text={msg.text} marks={msg.marks} className="slip" /></span>
-                  {!isSystem && !msg.teacher && msg.id && <button type="button" className="chat-listen" disabled={sound.muted || status.state !== 'online'}
-                    aria-label={sound.messageId === msg.id ? `Stop reading ${msg.sender}'s message` : `Listen to ${msg.sender}'s message`}
-                    onClick={() => sound.messageId === msg.id ? audioRef.current?.stop() : audioRef.current?.replay(msg.id!)}>
-                    {sound.messageId === msg.id ? '■ Stop' : '▶ Listen'}
-                  </button>}
-                  {msg.teacher && <button type="button" className="teacher-reply" disabled={checking || sending}
-                    onClick={openTeacherChat}>Reply to teacher</button>}
-                </div>
-              );
-            })}
-            <div ref={messagesEndRef} />
-          </div>
-          {/* Hidden while a stopped message or a hint needs attention, so the conversation keeps its room. */}
-          {spelling.length === 0 && !nudge && <div className="emote-bar">
-            {emotesFor(levelOf(xp).level).map(emote => (
-              <button 
-                key={emote} 
-                className="emote-btn" 
-                onClick={() => connection?.send({ t: 'emote', emote })}
-                title={`Send ${emote} emote`}
-              >
-                {emote}
+          <div className="chat-body">
+            {/* Every conversation as a face, new private ones on top under ＋, so a student sees who is talking to them. */}
+            <div className="chat-rail" role="tablist" aria-label="Conversations" aria-orientation="vertical">
+              {pinned.map(conversationButton)}
+              <button type="button" className={`chat-conv chat-conv-add${showPeople ? ' active' : ''}`} aria-expanded={showPeople}
+                aria-label="Chat with a classmate" title="Chat with a classmate" onClick={() => setShowPeople(show => !show)}>
+                <span className="chat-face" aria-hidden="true">＋</span>
               </button>
-            ))}
-          </div>}
-          
-          {spelling.length > 0 && <div className="spelling-help" role="alert">
-            <strong>✋ Not sent: {spelling.map(item => `“${item.word}”`).join(', ')} {spelling.length === 1 ? 'is' : 'are'} not English. Change it, then press Send.</strong>
-            {blockedRun >= 3 && <span className="spelling-stuck">Stuck? Tap <b>I need help</b> at the top right.</span>}
-            {spelling.map(item => <div key={item.word} className="spelling-word">
-              <span className="spelling-bad">{item.word}</span>
-              {item.suggestions.length ? <>
-                <span>try:</span>
-                {item.suggestions.map(suggestion => <button key={suggestion} type="button" className="spelling-fix"
-                  onClick={() => applySuggestion(item.word, suggestion)}>{suggestion}</button>)}
-              </> : <span>is not an English word. Try a different word.</span>}
-            </div>)}
-          </div>}
-          {sendError && <div className="composer-error" role="alert">{sendError}</div>}
-          {nudge && <div className="grammar-help" role="status">
-            <div className="grammar-fix"><Marked text={nudge.corrected} marks={wordDiff(nudge.original, nudge.corrected).corrected} className="diff-new" /></div>
-            <div className="grammar-actions">
-              <button type="button" className="btn btn-primary" onClick={useHint} title="Send the corrected sentence">OK</button>
-              <button type="button" className="spelling-fix" onClick={keepMine} title="Send my sentence as I wrote it">Ignore</button>
+              {chats.map(conversationButton)}
             </div>
-          </div>}
-          <div className="chat-to" aria-live="polite">
-            {active === NEARBY ? <>To <strong>👥 everyone near you</strong></>
-              : active === TEACHER ? <>To <strong>🧑‍🏫 your teacher</strong> · private, any language</>
-              : partner ? <>To <strong>🔒 {partner.name}</strong> · private (your teacher can read it)</>
-              : partnerName ? <><strong>{partnerName}</strong> is not in the Plaza now</>
-              : <>Nobody else is in the Plaza yet</>}
+            <div className="chat-pane">
+              {/* Who reads what is written here. */}
+              <div className="chat-head">
+                {active === NEAR ? <>
+                  <strong>👥 Nearby</strong>
+                  {earshot.length ? <span className="chat-head-people" title={earshot.join(', ')}>
+                    {earshot.slice(0, 6).map(name => <Face key={name} player={classmates.find(classmate => classmate.name === name)} name={name} />)}
+                    {earshot.length > 6 && <small>+{earshot.length - 6}</small>}
+                  </span> : <span className="chat-head-note">Nobody near you</span>}
+                </> : active === ALL ? <>
+                  <strong>📢 Everyone</strong>
+                  <span className="chat-head-note">{classmates.length ? `${classmates.length} ${classmates.length === 1 ? 'classmate' : 'classmates'}` : 'Nobody else is here yet'}</span>
+                </> : active === TEACHER ? <>
+                  <strong>🧑‍🏫 Teacher</strong><span className="chat-head-note">private · any language</span>
+                </> : <>
+                  <Face player={partner} name={partnerName ?? ''} />
+                  <strong>{partnerName}</strong>
+                  <span className="chat-head-note">{partner ? '🔒 only you two (and your teacher)' : 'not in the Plaza now'}</span>
+                </>}
+              </div>
+              {peek && peek.key !== active && <button type="button" className="chat-peek" onClick={() => talk(peek.key)}>
+                <Face player={playerOf(peek.key)} name={nameOf(peek.key)} icon={peek.key === TEACHER ? '🧑‍🏫' : undefined} />
+                <span><b>{nameOf(peek.key)}:</b> {peek.message.text}</span>
+              </button>}
+              {showPeople ? <div className="chat-people" role="menu" aria-label="Chat with">
+                {classmates.map(person => <button key={person.id} type="button" role="menuitem" onClick={() => talk(privateChat(person.name))}>
+                  <Face player={person} name={person.name} /><span>{person.name}</span>
+                </button>)}
+                {classmates.length === 0 && <em>Nobody else is in the Plaza yet.</em>}
+              </div> : <div className="chat-messages">
+                {shown.length === 0 && <p className="chat-empty">{active === NEAR ? (earshot.length ? '👋 Say hello!' : '🚶 Walk up to a classmate to talk.')
+                  : active === ALL ? '📢 Say something to everyone!' : active === TEACHER ? 'Ask your teacher for help, in any language.' : `👋 Say hi to ${partnerName}!`}</p>}
+                {shown.map((msg, i) => {
+                  if (msg.sender.startsWith('System')) {
+                    // Notices from the game are just the sentence, small, between the messages
+                    return <div key={msg.id ?? `${msg.at}-${i}`} className={`chat-message system-msg${msg.sender.includes('Warning') ? ' warning-msg' : ''}`}>
+                      <span className="chat-text">{msg.text}</span>
+                    </div>;
+                  }
+                  const mine = !msg.teacher && msg.sender === myName;
+                  const named = group && !mine && (shown[i - 1]?.sender !== msg.sender || shown[i - 1]?.teacher);
+                  return <div key={msg.id ?? `${msg.at}-${i}`} className={`chat-message ${mine ? 'mine' : 'theirs'}${msg.teacher ? ' teacher-msg' : ''}${msg.waiting ? ' waiting' : ''}${msg.declined ? ' declined' : ''}${msg.id && sound.messageId === msg.id ? ' chat-speaking' : ''}`}>
+                    {/* In a group chat, a name to tap opens a private chat with them */}
+                    {named && <button type="button" className="chat-sender" style={{ color: shade(msg.sender) }}
+                      title={`Chat with ${msg.sender}`} onClick={() => talk(privateChat(msg.sender))}>{msg.sender}</button>}
+                    <div className="chat-bubble">
+                      <span className="chat-text"><Marked text={msg.text} marks={msg.marks} className="slip" /></span>
+                      {!msg.teacher && msg.id && !msg.waiting && !msg.declined && <button type="button" className="chat-listen" disabled={sound.muted || status.state !== 'online'}
+                        aria-label={sound.messageId === msg.id ? `Stop reading ${msg.sender}'s message` : `Listen to ${msg.sender}'s message`}
+                        onClick={() => sound.messageId === msg.id ? audioRef.current?.stop() : audioRef.current?.replay(msg.id!)}>
+                        {sound.messageId === msg.id ? '■' : '▶'}
+                      </button>}
+                      {mine && <Ticks message={msg} conversation={active} />}
+                    </div>
+                  </div>;
+                })}
+                {/* "Is writing", as dots in a bubble of their own */}
+                {writing.length > 0 && <div className="chat-message theirs chat-typing" aria-label={`${writing.join(', ')} writing`}>
+                  {group && <span className="chat-sender">{writing.join(', ')}</span>}
+                  <div className="chat-bubble"><i /><i /><i /></div>
+                </div>}
+                <div ref={messagesEndRef} />
+              </div>}
+              {/* Hidden while a stopped message or a hint needs attention, so the conversation keeps its room. */}
+              {spelling.length === 0 && !nudge && <div className="emote-bar">
+                {emotesFor(levelOf(xp).level).map(emote => (
+                  <button
+                    key={emote}
+                    className="emote-btn"
+                    onClick={() => connection?.send({ t: 'emote', emote })}
+                    title={`Send ${emote} emote`}
+                  >
+                    {emote}
+                  </button>
+                ))}
+              </div>}
+
+              {spelling.length > 0 && <div className="spelling-help" role="alert">
+                <strong>✋ Not sent: {spelling.map(item => `“${item.word}”`).join(', ')} {spelling.length === 1 ? 'is' : 'are'} not English. Change it, then press Send.</strong>
+                {blockedRun >= 3 && <span className="spelling-stuck">Stuck? Tap <b>Help</b> at the top right.</span>}
+                {spelling.map(item => <div key={item.word} className="spelling-word">
+                  <span className="spelling-bad">{item.word}</span>
+                  {item.suggestions.length ? <>
+                    <span>try:</span>
+                    {item.suggestions.map(suggestion => <button key={suggestion} type="button" className="spelling-fix"
+                      onClick={() => applySuggestion(item.word, suggestion)}>{suggestion}</button>)}
+                  </> : <span>is not an English word. Try a different word.</span>}
+                </div>)}
+              </div>}
+              {sendError && <div className="composer-error" role="alert">{sendError}</div>}
+              {nudge && <div className="grammar-help" role="status">
+                <div className="grammar-fix"><Marked text={nudge.corrected} marks={wordDiff(nudge.original, nudge.corrected).corrected} className="diff-new" /></div>
+                <div className="grammar-actions">
+                  <button type="button" className="btn btn-primary" onClick={useHint} title="Send the corrected sentence">OK</button>
+                  <button type="button" className="spelling-fix" onClick={keepMine} title="Send my sentence as I wrote it">Ignore</button>
+                </div>
+              </div>}
+              <form className="chat-input-wrapper" onSubmit={event => void handleSendMessage(event)}>
+                <input
+                  type="text"
+                  ref={chatField}
+                  className={`chat-input${spelling.length ? ' chat-input-blocked' : ''}`}
+                  placeholder={active === TEACHER ? 'Ask your teacher in any language…' : active === ALL ? 'Message everyone…'
+                    : active === NEAR ? (earshot.length ? 'Talk to people near you…' : 'Nobody near you…')
+                    : partner ? `Message ${partner.name}…` : `${partnerName} is not in the Plaza now`}
+                  maxLength={200}
+                  value={chatInput}
+                  readOnly={checking || sending}
+                  onChange={(e) => {
+                    setChatInput(e.target.value); setNudge(null); submissionAttemptId.current = null; setSendError('');
+                    if (!e.target.value) setSpelling([]); else reportTyping();
+                  }}
+                  onCopy={handlePreventClipboard}
+                  onPaste={handlePreventClipboard}
+                  onCut={handlePreventClipboard}
+                  autoComplete="off"
+                  spellCheck="true"
+                />
+                {!nudge && <button type="submit" className="btn btn-primary chat-send-btn" disabled={checking || sending}>{checking || sending ? '…' : 'Send'}</button>}
+              </form>
+            </div>
           </div>
-          <form className="chat-input-wrapper" onSubmit={event => void handleSendMessage(event)}>
-            <input
-              type="text"
-              ref={chatField}
-              className={`chat-input${spelling.length ? ' chat-input-blocked' : ''}`}
-              placeholder={active === TEACHER ? 'Ask your teacher in any language…' : active === NEARBY ? 'Message everyone near you…' : partner ? `Message ${partner.name}…` : 'Choose who to talk to above'}
-              maxLength={200}
-              value={chatInput}
-              readOnly={checking || sending}
-              onChange={(e) => { setChatInput(e.target.value); setNudge(null); submissionAttemptId.current = null; setSendError(''); if (!e.target.value) setSpelling([]); }}
-              onCopy={handlePreventClipboard}
-              onPaste={handlePreventClipboard}
-              onCut={handlePreventClipboard}
-              autoComplete="off"
-              spellCheck="true"
-            />
-            {!nudge && <button type="submit" className="btn btn-primary chat-send-btn" disabled={checking || sending}>{checking || sending ? '…' : 'Send'}</button>}
-          </form>
         </div>
       </div>
     </div>

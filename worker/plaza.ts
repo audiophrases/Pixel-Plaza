@@ -27,6 +27,7 @@ import { legalMove, zoneAt } from '../shared/plazaMap.ts';
 import { XP, checkStyle, emotesFor, levelOf, readStyle, type Style } from '../shared/levels.ts';
 import { REPORT_LINES_PER_STUDENT, type ClassReportData, type ReportLine } from '../shared/classReport.ts';
 import { type Avatar, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
+import { HEARING_RANGE, TYPING_EVERY_MS } from '../shared/chat.ts';
 
 const TICKET_MS = 60_000;
 const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
@@ -39,8 +40,8 @@ const REROLL_GAP_MS = 300; // between asks for another name
 const WRONG_ANSWER_WAIT_MS = 3000; // before a student can try a chapter question again
 const MOVE_BATCH_MS = 150; // positions go out together this often: one message a student, not one a step
 const CHECK_GAP_MS = 800; // grammar hints cost money: no more than one a student can read
-// Nearby chat reaches students within this many map pixels of where the sender stood.
-export const HEARING_RANGE = 350;
+const TYPING_GAP_MS = TYPING_EVERY_MS / 2; // "is writing" passed on no more often than a page sends it
+const CHAT_HISTORY = 120; // messages of this lesson a returning page gets back
 
 // Close codes the client acts on.
 const CLOSE_JOIN_AGAIN = 4001; // ticket unknown, used or expired
@@ -49,10 +50,10 @@ const CLOSE_CLASS_CLOSED = 4002; // the teacher closed the game
 
 // Per-socket state. It lives in the socket's attachment, so it survives the
 // room hibernating between messages.
-type Seat = { id: string; game: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; style?: Style; x: number; y: number; lastChat: number; lastCheck?: number; lastReroll?: number; movedAt?: number; left?: boolean; frozenUntil?: number; downUntil?: number };
+type Seat = { id: string; game: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; style?: Style; x: number; y: number; lastChat: number; lastCheck?: number; lastTyping?: number; lastReroll?: number; movedAt?: number; left?: boolean; frozenUntil?: number; downUntil?: number };
 
-// 'approve': every message waits for the teacher. 'review': nearby chat that OpenAI
-// cleared posts at once and the teacher reviews afterwards; whispers still wait.
+// 'approve': every message waits for the teacher. 'review': chat that OpenAI cleared
+// posts at once and the teacher reviews afterwards; witness exchanges still wait.
 export type ChatMode = 'approve' | 'review';
 
 export type TeacherAction =
@@ -95,7 +96,8 @@ export type TeacherStatus = {
     realNames: Record<string, string>; // every student's real name, since the plaza may show made-up ones
     games: GameSummary[];                      // every saved game, most recently played first
     pin: string | null; // the open game's PIN, which students type to join
-    entries: { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred: boolean }[];
+    // `target` is the classmate a whisper is for; `everyone` marks a message for the whole plaza.
+    entries: { id: string; studentKey: string; sender: string; target: string | null; everyone: boolean; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred: boolean }[];
     mode: ChatMode;
     moderation: boolean; // an OpenAI key is set, so 'review' mode can post anything
     muted: string[];
@@ -488,12 +490,12 @@ export class PlazaRoom extends DurableObject<Env> {
                 'SELECT id, name, pin, last_opened AS lastOpened, random_names AS randomNames FROM games ORDER BY last_opened DESC').toArray()
                 .map(game => ({ ...game, randomNames: game.randomNames === 1, open: this.isOpen() && game.id === current?.id })),
             pin: this.classPin(),
-            entries: this.sql.exec<Omit<TeacherStatus['entries'][number], 'starred'>>(`SELECT id, student_key AS studentKey, sender, target_name AS target, flag, note, text,
-                ts AS timestamp, status FROM (
+            entries: this.sql.exec<Omit<TeacherStatus['entries'][number], 'starred' | 'everyone'> & { everyone: number }>(`SELECT id, student_key AS studentKey, sender, target_name AS target,
+                (target_key IS NULL AND x IS NULL) AS everyone, flag, note, text, ts AS timestamp, status FROM (
                     SELECT * FROM chat WHERE status = 'pending' AND game_id IS ?
                     UNION SELECT * FROM (SELECT * FROM chat WHERE game_id IS ? ORDER BY ts DESC LIMIT ?))
                 ORDER BY ts DESC`, current?.id ?? null, current?.id ?? null, STATUS_HISTORY).toArray()
-                .map(entry => ({ ...entry, starred: this.starred(entry.studentKey, `teacher:${entry.id}`) })),
+                .map(entry => ({ ...entry, everyone: entry.everyone === 1, starred: this.starred(entry.studentKey, `teacher:${entry.id}`) })),
             mode: this.mode(),
             moderation: !!this.env.OPENAI_API_KEY,
             muted: this.sql.exec<{ student_key: string }>('SELECT student_key FROM mutes').toArray().map(row => row.student_key),
@@ -628,7 +630,7 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     private beginAttempt(seat: Seat, text: string, source: AttemptSource, id?: string, to?: unknown, objective?: string): string {
-        const target = to === 'teacher' ? 'Teacher' : this.seats().find(s => s.game === seat.game && s.id === to)?.name;
+        const target = to === 'teacher' ? 'Teacher' : to === 'everyone' ? 'Everyone' : this.seats().find(s => s.game === seat.game && s.id === to)?.name;
         return this.assistance.begin({ game: seat.game, studentKey: seat.studentKey, name: seat.name,
             text, source, id: id && id.length <= 80 ? id : undefined, target, objective });
     }
@@ -689,6 +691,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (this.lateWarmupPart(seat.game, seat.studentKey)) this.sendWarmupToAll(seat.game);
         else this.sendWarmup(server, seat.game, seat.studentKey);
         this.sendSupport(seat.game, seat.studentKey, true);
+        this.sendChatHistory(server, seat);
         this.refreshBoard(seat.game);
         return new Response(null, { status: 101, webSocket: client });
     }
@@ -756,6 +759,8 @@ export class PlazaRoom extends DurableObject<Env> {
             seat.style = style;
             ws.serializeAttachment(seat);
             this.broadcast({ t: 'style', id: seat.id, style });
+        } else if (data?.t === 'typing') {
+            this.typing(ws, seat, data.to);
         } else if (data?.t === 'check') {
             await this.grammar(ws, seat, data.id, data.text, typeof data.attemptId === 'string' ? data.attemptId : undefined);
         } else if (data?.t === 'chat') {
@@ -1553,9 +1558,10 @@ export class PlazaRoom extends DurableObject<Env> {
         return 'Choose a message or a report.';
     }
 
-    private notify(studentKey: string, level: 'info' | 'warning', text: string): void {
+    // `id` names the chat message the notice is about, so the page can show it on that message.
+    private notify(studentKey: string, level: 'info' | 'warning', text: string, id?: string): void {
         for (const ws of this.ctx.getWebSockets(studentKey)) {
-            try { ws.send(JSON.stringify({ t: 'notice', level, text })); } catch { /* closing */ }
+            try { ws.send(JSON.stringify({ t: 'notice', level, text, ...(id ? { id } : {}) })); } catch { /* closing */ }
         }
     }
 
@@ -1608,7 +1614,9 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         if (audit && typeof value === 'string') this.assistance.submitted(audit, value);
         const refused = (reason: string, status = 'invalid') => { if (audit) this.attemptStatus(audit, status, reason); };
-        const reply = (level: 'info' | 'warning', text: string) => { try { ws.send(JSON.stringify({ t: 'notice', level, text, cid })); } catch { /* the class changed while checking */ } };
+        const reply = (level: 'info' | 'warning', text: string, id?: string) => {
+            try { ws.send(JSON.stringify({ t: 'notice', level, text, cid, ...(id ? { id } : {}) })); } catch { /* the class changed while checking */ }
+        };
         if (to === 'teacher' && typeof value === 'string') {
             if (!value.trim() || value.length > 200) { refused('Write up to 200 characters.'); return reply('warning', 'Write up to 200 characters.'); }
             if (!this.isOpen() || this.activeGame() !== seat.game || (ws.deserializeAttachment() as Seat | null)?.left) { refused('The class is closed.', 'unavailable'); return reply('warning', 'The class is closed.'); }
@@ -1623,7 +1631,7 @@ export class PlazaRoom extends DurableObject<Env> {
                     if (audit) this.sql.exec('INSERT OR IGNORE INTO chat_audience (chat_id, game_id, student_key, voice) VALUES (?, ?, ?, ?)', audit, seat.game, seat.studentKey, normalizeVoice(seat.avatar.voice));
                 } catch { /* reconnect */ }
             }
-            if (cid) ws.send(JSON.stringify({ t: 'result', cid }));
+            if (cid) ws.send(JSON.stringify({ t: 'result', cid, ...(audit ? { id: audit } : {}) }));
             return;
         }
         const unavailable = () => !this.isOpen() || this.activeGame() !== seat.game || (ws.deserializeAttachment() as Seat | null)?.left
@@ -1648,9 +1656,11 @@ export class PlazaRoom extends DurableObject<Env> {
         ws.serializeAttachment(seat);
         if (typeof value !== 'string') return reply('warning', 'Enter a text message.');
 
-        // `to` is the id of the classmate being whispered to; without it, the message is for whoever is nearby.
+        // `to` is the id of the classmate being whispered to, or 'everyone' for the whole plaza; without it,
+        // the message is for whoever is nearby.
+        const everyone = to === 'everyone';
         let target: Seat | undefined;
-        if (to !== undefined && to !== null) {
+        if (to !== undefined && to !== null && !everyone) {
             target = this.seats().find(other => other.game === seat.game && other.id === to);
             if (!target || target.studentKey === seat.studentKey) { refused('That student is not in the Plaza right now.'); return reply('warning', 'That student is not in the Plaza right now.'); }
         }
@@ -1667,11 +1677,12 @@ export class PlazaRoom extends DurableObject<Env> {
             // The class may have closed or the student been muted while OpenAI answered.
             if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
         }
-        // Review mode posts what OpenAI cleared, nearby or whisper. A witness exchange (the only caller
+        // Review mode posts what OpenAI cleared, nearby, for everyone or whisper. A witness exchange (the only caller
         // that passes `valid`) always waits: the teacher's approval is part of that activity.
         const posts = !problem && cleared && !valid && this.mode() === 'review';
+        // A message for everyone keeps no place: where the sender stood decides nothing.
         const entry = { id: crypto.randomUUID(), game_id: seat.game, student_key: seat.studentKey, sender: seat.name, text: value.trim().slice(0, 200),
-            target_key: target?.studentKey ?? null, x: seat.x, y: seat.y, marks: null as string | null, voice: normalizeVoice(seat.avatar.voice) };
+            target_key: target?.studentKey ?? null, x: everyone ? null : seat.x, y: everyone ? null : seat.y, marks: null as string | null, voice: normalizeVoice(seat.avatar.voice) };
         // Sent as written although a better version was offered: mark the words that differ, for everyone who reads it.
         const slips = better ? wordDiff(entry.text, better).original : [];
         if (slips.length) entry.marks = JSON.stringify(slips);
@@ -1688,9 +1699,11 @@ export class PlazaRoom extends DurableObject<Env> {
             AND chat_id NOT IN (SELECT id FROM chat) AND chat_id NOT IN (SELECT id FROM assistance_attempts WHERE status = 'teacher-inbox')`, seat.game);
         if (posts) {
             this.deliver(entry);
-            if (cid) ws.send(JSON.stringify({ t: 'result', cid })); // posted at once: nothing else to say
+            if (cid) ws.send(JSON.stringify({ t: 'result', cid, id: entry.id })); // posted at once: nothing else to say
         }
-        else reply(problem ? 'warning' : 'info', problem ?? 'Sent to your teacher for approval.');
+        // A message waiting for the teacher is named, so the page can show it waiting in its conversation.
+        else if (problem) reply('warning', problem);
+        else reply('info', 'Sent to your teacher for approval.', entry.id);
         return { id: entry.id, status: problem ? 'blocked' : posts ? 'approved' : 'pending' };
     }
 
@@ -1708,7 +1721,7 @@ export class PlazaRoom extends DurableObject<Env> {
                 const game = this.activeGame(); if (game) this.sendQuestToAll(game);
             }
             this.broadcast({ t: 'retract', id });
-            this.notify(entry.student_key, 'warning', 'Your teacher removed one of your messages.');
+            this.notify(entry.student_key, 'warning', 'Your teacher removed one of your messages.', id);
             return true;
         }
         if (entry.status !== 'pending') return false;
@@ -1720,18 +1733,18 @@ export class PlazaRoom extends DurableObject<Env> {
             const game = this.activeGame(); if (game) this.sendQuestToAll(game);
         }
         if (!approved) {
-            this.notify(entry.student_key, 'info', 'Your message was not posted.');
+            this.notify(entry.student_key, 'info', 'Your message was not posted.', id);
             return true;
         }
         const delivered = this.deliver(entry);
         this.notify(entry.student_key, delivered ? 'info' : 'warning',
-            delivered ? 'Your message was approved.' : 'Your message was approved, but that student has left the Plaza.');
+            delivered ? 'Your message was approved.' : 'Your message was approved, but that student has left the Plaza.', id);
         return true;
     }
 
-    // A whisper goes to its two students, nearby chat to whoever stands within
-    // earshot of where the sender stood; the sender always sees their own.
-    // False when a whisper had nobody to reach.
+    // A whisper goes to its two students, a message for everyone to the whole plaza,
+    // and nearby chat to whoever stands within earshot of where the sender stood;
+    // the sender always sees their own. False when a whisper had nobody to reach.
     private deliver(entry: { id: string; student_key: string; sender: string; text: string; target_key: string | null; x: number | null; y: number | null; marks?: string | null; game_id?: string | null; voice?: string | null }): boolean {
         const game = entry.game_id ?? this.activeGame();
         const recipients = new Set([entry.student_key]);
@@ -1741,15 +1754,19 @@ export class PlazaRoom extends DurableObject<Env> {
                 : entry.x === null || entry.y === null || Math.hypot(seat.x - entry.x, seat.y - entry.y) <= HEARING_RANGE;
             if (heard) recipients.add(seat.studentKey);
         }
-        const message = JSON.stringify({ t: 'chat', id: entry.id, sender: entry.sender, text: entry.text, voice: normalizeVoice(entry.voice), ts: Date.now(),
+        const body = { t: 'chat', id: entry.id, sender: entry.sender, text: entry.text, voice: normalizeVoice(entry.voice), ts: Date.now(),
             ...(entry.marks ? { marks: JSON.parse(entry.marks) } : {}),
-            ...(entry.target_key !== null ? { whisper: true, to: this.rosterNames(this.activeGame() ?? '').get(entry.target_key) ?? 'a classmate' } : {}) });
+            ...(entry.target_key !== null ? { whisper: true, to: this.rosterNames(this.activeGame() ?? '').get(entry.target_key) ?? 'a classmate' }
+                : entry.x === null || entry.y === null ? { all: true } : {}) };
+        const message = JSON.stringify(body);
+        // The sender's copy says how many classmates it reached: none means nobody was near enough to hear.
+        const own = JSON.stringify({ ...body, heard: recipients.size - 1 });
         for (const studentKey of recipients) {
             for (const ws of this.ctx.getWebSockets(studentKey)) {
                 const seat = ws.deserializeAttachment() as Seat | null;
                 if (!seat || seat.left || seat.game !== game) continue;
                 try {
-                    ws.send(message);
+                    ws.send(studentKey === entry.student_key ? own : message);
                     if (game) this.sql.exec('INSERT OR IGNORE INTO chat_audience (chat_id, game_id, student_key, voice) VALUES (?, ?, ?, ?)', entry.id, game, studentKey, normalizeVoice(entry.voice));
                 } catch { /* closing */ }
             }
@@ -1763,6 +1780,61 @@ export class PlazaRoom extends DurableObject<Env> {
             }));
         }
         return entry.target_key === null || recipients.size > 1;
+    }
+
+    // "Is writing": no words, only who, so a slow writer's classmates wait for the reply instead of giving up.
+    // It reaches whoever the message being written would reach, and nobody else.
+    private typing(ws: WebSocket, seat: Seat, to: unknown): void {
+        const now = Date.now();
+        if (to === 'teacher' || now - (seat.lastTyping ?? 0) < TYPING_GAP_MS || !this.isOpen() || this.activeGame() !== seat.game) return;
+        if (this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', seat.studentKey).toArray().length) return;
+        if (this.isRandom(seat.game) && !this.alias(seat.game, seat.studentKey).kept) return;
+        seat.lastTyping = now;
+        ws.serializeAttachment(seat);
+        const scope = to === 'everyone' ? 'all' : typeof to === 'string' ? 'private' : 'nearby';
+        const message = JSON.stringify({ t: 'typing', id: seat.id, scope });
+        for (const socket of this.ctx.getWebSockets()) {
+            const other = socket.deserializeAttachment() as Seat | null;
+            if (!other || other.left || other.game !== seat.game || other.studentKey === seat.studentKey) continue;
+            const reached = scope === 'private' ? other.id === to : scope === 'all' || Math.hypot(other.x - seat.x, other.y - seat.y) <= HEARING_RANGE;
+            if (reached) try { socket.send(message); } catch { /* closing */ }
+        }
+    }
+
+    // This lesson's chat that reached the student, or was meant for them while they were away (a page reloaded,
+    // a connection dropped), so no reply is lost. What they had already received comes as history: shown, not read
+    // aloud or counted as new. A whisper that arrived while they were away is new.
+    private sendChatHistory(ws: WebSocket, seat: Seat): void {
+        const me = seat.studentKey;
+        const from = this.sql.exec<{ last_opened: number }>('SELECT last_opened FROM games WHERE id = ?', seat.game).toArray()[0]?.last_opened ?? 0;
+        const names = this.rosterNames(seat.game);
+        const rows = this.sql.exec<{ id: string; student_key: string; sender: string; text: string; ts: number; target_key: string | null; x: number | null;
+            marks: string | null; voice: string | null; heard: number; received: number }>(
+            `SELECT c.id, c.student_key, c.sender, c.text, c.ts, c.target_key, c.x, c.marks, c.voice,
+                (SELECT COUNT(*) FROM chat_audience a WHERE a.chat_id = c.id AND a.student_key != c.student_key) AS heard,
+                EXISTS (SELECT 1 FROM chat_audience a WHERE a.chat_id = c.id AND a.student_key = ?) AS received
+             FROM chat c WHERE c.game_id = ? AND c.status = 'approved' AND c.ts >= ?
+                AND (c.student_key = ? OR c.target_key = ? OR (c.target_key IS NULL AND c.x IS NULL)
+                    OR EXISTS (SELECT 1 FROM chat_audience a WHERE a.chat_id = c.id AND a.student_key = ?))
+             ORDER BY c.ts DESC LIMIT ?`, me, seat.game, from, me, me, me, CHAT_HISTORY).toArray().reverse();
+        // Their own private messages to the teacher, which the teacher's replies (sent with the help state) answer.
+        const toTeacher = this.sql.exec<{ id: string; text: string; ts: number }>(`SELECT id, TRIM(COALESCE(final_text, text)) AS text, ts FROM assistance_attempts
+            WHERE game_id = ? AND student_key = ? AND source = 'chat' AND target = 'Teacher' AND status = 'teacher-inbox'
+            ORDER BY ts DESC LIMIT 50`, seat.game, me).toArray().reverse();
+        try {
+            for (const row of rows) {
+                // Listening to it later needs proof it reached them.
+                this.sql.exec('INSERT OR IGNORE INTO chat_audience (chat_id, game_id, student_key, voice) VALUES (?, ?, ?, ?)', row.id, seat.game, me, normalizeVoice(row.voice));
+                ws.send(JSON.stringify({ t: 'chat', id: row.id, sender: names.get(row.student_key) ?? row.sender, text: row.text, voice: normalizeVoice(row.voice), ts: row.ts,
+                    ...(row.target_key === me && !row.received ? {} : { history: true }),
+                    ...(row.marks ? { marks: JSON.parse(row.marks) } : {}),
+                    ...(row.target_key !== null ? { whisper: true, to: names.get(row.target_key) ?? 'a classmate' } : row.x === null ? { all: true } : {}),
+                    ...(row.student_key === me ? { heard: row.heard } : {}) }));
+            }
+            for (const row of toTeacher) {
+                ws.send(JSON.stringify({ t: 'chat', id: row.id, sender: seat.name, text: row.text, voice: normalizeVoice(seat.avatar.voice), ts: row.ts, history: true, whisper: true, to: 'Teacher' }));
+            }
+        } catch { /* closing */ }
     }
 
     private async rewardParticipation(id: string, game: string, student: string): Promise<void> {

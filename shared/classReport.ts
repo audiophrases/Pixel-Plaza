@@ -51,7 +51,8 @@ export function buildReportPrompt(data: ClassReportData, options: ReportOptions)
     const day = new Date(data.from || data.to).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: options.timeZone });
 
     const activity = (line: ReportLine) => {
-        if (line.source === 'chat') return !line.target ? 'chat to classmates nearby' : line.target === 'Teacher' ? 'private message to the teacher' : `whisper to ${hide(line.target)}`;
+        if (line.source === 'chat') return !line.target ? 'chat to classmates nearby' : line.target === 'Teacher' ? 'private message to the teacher'
+            : line.target === 'Everyone' ? 'chat to the whole class' : `whisper to ${hide(line.target)}`;
         if (line.source === 'answer') return `journal answer${line.question ? ` to ${quote(line.question)}` : ''}`;
         if (line.source === 'interview') return `witness exchange${line.target ? ` with ${hide(line.target)}` : ''}`;
         if (line.source === 'warmup') return 'warm-up answer';

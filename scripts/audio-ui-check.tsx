@@ -108,6 +108,8 @@ try {
   await act(async () => { socket.receive(chat('retracted')); socket.receive({ t: 'retract', id: 'retracted' }); });
   assert.equal(sources.length, played, 'retraction cancels pending synthesis before it plays');
   assert.ok(!document.querySelector('.chat-messages')?.textContent?.includes('retracted'));
+  await act(async () => socket.receive({ ...chat('for-everyone', 'Chris'), all: true }));
+  assert.ok(!speech().some(request => request.body.id === 'for-everyone'), "the whole plaza's chatter is not read aloud while another conversation is open");
   await act(async () => socket.receive({ t: 'support', support: { ...oldSupport,
     messages: [...oldSupport.messages, { id: 'live-help', text: 'A new private reply.', timestamp: 2 }] } }));
   assert.ok(!speech().some(request => request.body.id.startsWith('teacher:')), 'teacher help is never synthesized');

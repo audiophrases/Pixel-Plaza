@@ -13,7 +13,7 @@ import { XP } from '../../shared/levels';
 import TeacherSupport from '../components/TeacherSupport';
 import ClassReport from '../components/ClassReport';
 
-type Entry = { id: string; studentKey: string; sender: string; target: string | null; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred?: boolean };
+type Entry = { id: string; studentKey: string; sender: string; target: string | null; everyone?: boolean; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred?: boolean };
 type CampaignInfo = {
   id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string; chapterTitles?: string[];
   reveals: { shown: number; total: number; next: string | null };
@@ -232,7 +232,7 @@ export default function Teacher() {
 
   return <main className="teacher-page">
     <header className="teacher-header">
-      <div><h1>Teacher controls</h1><p>{status?.mode === 'review' ? 'Chat posts after an OpenAI check, nearby or whisper. Review it here and remove anything unsuitable.' : 'All student chat waits for your approval.'}</p></div>
+      <div><h1>Teacher controls</h1><p>{status?.mode === 'review' ? 'Chat posts after an OpenAI check: nearby, to everyone or a whisper. Review it here and remove anything unsuitable.' : 'All student chat waits for your approval.'}</p></div>
       <span><Link to="/quest-library">Side quest library</Link> · <Link to="/mission-studio">Mission Studio</Link> · <Link to="/studio">Theme studio</Link> · <Link to="/">Student entrance</Link></span>
     </header>
     {!token || !status ? <form className="teacher-signin" onSubmit={event => { event.preventDefault(); void signIn(); }}>
@@ -279,7 +279,7 @@ export default function Teacher() {
         </div>}
         {status.entries.length === 0 && <p>No messages yet.</p>}
         {status.entries.map(entry => <article key={entry.id} className={`teacher-entry${entry === oldest ? ' teacher-oldest' : ''}`}>
-          <div><strong>{who(entry.studentKey, entry.sender)}</strong>{entry.target && <> → <strong>{entry.target}</strong> <em>(whisper)</em></>} <small>{new Date(entry.timestamp).toLocaleTimeString()} · {entry.status}</small></div>
+          <div><strong>{who(entry.studentKey, entry.sender)}</strong>{entry.target && <> → <strong>{entry.target}</strong> <em>(whisper)</em></>}{entry.everyone && <> → <strong>everyone</strong></>} <small>{new Date(entry.timestamp).toLocaleTimeString()} · {entry.status}</small></div>
           <p>{entry.text}</p>
           {entry.note && <p className="teacher-note">{entry.note.startsWith('Investigation:') ? entry.note : `Grammar hint: ${entry.note}`}</p>}
           {entry.flag && <p className="teacher-flag">{entry.status === 'blocked' ? 'Blocked by moderation' : 'Not checked by moderation'}: {entry.flag}</p>}
@@ -485,7 +485,7 @@ export default function Teacher() {
           onChange={() => void action('mode', { mode: 'review' })} />
           Post chat after OpenAI checks it, and review afterwards</label>
         <p>{status.moderation
-          ? 'In the second mode only messages OpenAI cleared post at once, nearby or whisper. Witness exchanges, flagged messages and anything it could not check still wait for you.'
+          ? 'In the second mode only messages OpenAI cleared post at once: nearby, to everyone or a whisper. Witness exchanges, flagged messages and anything it could not check still wait for you.'
           : 'The second mode needs an OPENAI_API_KEY (see the README), so it is off.'}</p>
       </>)}
 

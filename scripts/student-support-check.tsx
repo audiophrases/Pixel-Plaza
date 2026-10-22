@@ -22,6 +22,7 @@ class Socket {
   static OPEN = 1;
   readyState = 0;
   sent: any[] = [];
+  typing: any[] = []; // "is writing" reports, kept apart: they are not submissions
   onopen?: () => void;
   onmessage?: (event: { data: string }) => void;
   onclose?: (event: { code: number }) => void;
@@ -32,6 +33,7 @@ class Socket {
   drop() { this.readyState = 3; this.onclose?.({ code: 1006 }); }
   send(raw: string) {
     const message = JSON.parse(raw);
+    if (message.t === 'typing') { this.typing.push(message); return; }
     this.sent.push(message);
     if (message.t === 'attempt' || message.t === 'attempt-outcome') queueMicrotask(() => this.receive({ t: 'attempt-recorded', id: message.id, kind: message.t }));
     if (message.t === 'check') queueMicrotask(() => this.receive({ t: 'checked', id: message.id, ok: false,
@@ -62,6 +64,7 @@ async function type(field: HTMLInputElement | HTMLTextAreaElement, value: string
     field.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
   });
 }
+const conversation = (name: string) => document.querySelector(`.chat-rail [role="tab"][aria-label^="${name}"]`) as HTMLButtonElement;
 async function select(field: HTMLSelectElement, value: string) {
   await act(async () => { field.value = value; field.dispatchEvent(new dom.window.Event('change', { bubbles: true })); });
 }
@@ -78,7 +81,7 @@ try {
   testAIHelp = true;
   await act(async () => socket.receive({ t: 'support', support: { request: null, messages: [], ai: aiSupport() } }));
   await type(input(), 'I want tell');
-  await click('I need help');
+  await click('Help');
   assert.equal((document.querySelector('.student-help-panel textarea') as HTMLTextAreaElement).value, 'I want tell', 'help starts with a copy of the unfinished chat draft');
   assert.equal(button('Ask my teacher directly'), undefined);
   await click('Get help');
@@ -95,6 +98,7 @@ try {
 
   await type(input(), 'No entenc');
   assert.equal(socket.sent.length, 0, 'typing an unsent draft never creates a teacher log');
+  assert.deepEqual(socket.typing.at(-1), { t: 'typing' }, 'classmates nearby are told someone is writing, without the words');
   await click('Send');
   assert.deepEqual(socket.sent.map(event => event.t), ['attempt', 'attempt-outcome'], 'a blocked Send is logged before the language outcome');
   assert.equal(socket.sent[0].text, 'No entenc');
@@ -102,9 +106,9 @@ try {
   const firstId = socket.sent[0].id;
   await click('Send');
   assert.notEqual(socket.sent[2].id, firstId, 'retrying the same draft creates a distinct attempt');
-  assert.ok(button('I need help'), 'the help button stays available beside a blocked draft');
+  assert.ok(button('Help'), 'the help button stays available beside a blocked draft');
 
-  await click('I need help');
+  await click('Help');
   await select(document.querySelector('.student-help-panel select') as HTMLSelectElement, 'instructions');
   await type(document.querySelector('.student-help-panel textarea') as HTMLTextAreaElement, 'No entenc què he de fer.');
   await click('Get help');
@@ -119,24 +123,29 @@ try {
 
   const support = { request: { id: 'request-a', topic: 'instructions', status: 'acknowledged' }, messages: [{ id: 'reply-a', text: 'Tell me your idea and we can write it together.', timestamp: 100 }] };
   await act(async () => { socket.receive({ t: 'support', support }); socket.receive({ t: 'support', support }); });
+  assert.ok(document.querySelector('.chat-peek')?.textContent?.includes('Tell me your idea'), 'a reply under an unfinished draft is announced, not forced open');
+  assert.equal(conversation('Teacher').getAttribute('aria-label'), 'Teacher, 1 new');
+  await act(async () => (document.querySelector('.chat-peek') as HTMLButtonElement).click());
   assert.equal(document.querySelectorAll('.teacher-msg').length, 1, 'replayed teacher messages appear once by persisted id');
-  assert.ok(document.body.textContent?.includes('Teacher (private)'));
+  assert.ok(document.querySelector('.chat-head')?.textContent?.includes('Teacher'));
+  assert.equal(input().value, 'No entenc', 'opening the reply keeps the draft');
   assert.ok(document.body.textContent?.includes('Teacher is helping'));
-  await click('I need help');
+  await click('Help');
   await type(document.querySelector('.student-help-panel textarea') as HTMLTextAreaElement, 'Another idea I need help with');
   await act(async () => socket.receive({ t: 'support', support }));
   assert.equal((document.querySelector('.student-help-panel textarea') as HTMLTextAreaElement).value, 'Another idea I need help with', 'incoming status updates do not discard an unsent help note');
   await click('Close');
-  await click('Reply to teacher');
-  assert.equal((document.querySelector('.chat-target') as HTMLSelectElement).value, 'teacher');
-  await type(input(), 'No entenc');
+  assert.equal(conversation('Teacher').getAttribute('aria-selected'), 'true');
+  const typed = socket.typing.length;
+  await type(input(), 'No entenc, ajuda');
+  assert.equal(socket.typing.length, typed, 'writing to the teacher is never announced to classmates');
   const start = socket.sent.length;
   await click('Send');
   assert.deepEqual(socket.sent.slice(start).map(event => event.t), ['attempt', 'chat'], 'private teacher replies bypass language filters while preserving the original attempt');
   assert.equal(socket.sent.at(-1).to, 'teacher');
   assert.equal(socket.sent.at(-1).attemptId, socket.sent.at(-2).id);
 
-  await select(document.querySelector('.chat-target') as HTMLSelectElement, '');
+  await act(async () => conversation('Nearby').click());
   await type(input(), 'He walk home');
   await click('Send');
   const hintedAttempt = socket.sent.findLast(event => event.t === 'attempt');
@@ -154,6 +163,8 @@ try {
   assert.equal(socket.sent.at(-1).better, 'He walks home.');
   await act(async () => socket.receive({ t: 'support', support: { ...support, request: { ...support.request, status: 'resolved' } } }));
   assert.ok(document.body.textContent?.includes('Help completed'));
+  assert.equal(conversation('Teacher').getAttribute('aria-label'), 'Teacher', 'the same reply again is not a new one');
+  await act(async () => conversation('Teacher').click());
   assert.equal(document.querySelectorAll('.teacher-msg').length, 1);
   assert.ok(!Object.keys(localStorage).some(key => key.startsWith('pixelplaza.pending-attempts')), 'acknowledged audit records leave no pending message text in browser storage');
 
@@ -212,7 +223,7 @@ try {
   assert.equal(stored()[0].objective, 'where');
   assert.equal(stored()[0].text, 'Offline journal conclusion');
   assert.equal(stored()[1].status, 'not-sent');
-  await click('I need help');
+  await click('Help');
   await select(document.querySelector('.student-help-panel select') as HTMLSelectElement, 'classmate-message');
   await type(document.querySelector('.student-help-panel textarea') as HTMLTextAreaElement, '');
   await click('Get help');

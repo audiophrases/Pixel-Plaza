@@ -3,6 +3,7 @@ import { AvatarFigure, FIGURE_BODY, FIGURE_TOP } from '../AvatarFigure';
 import { ART, MAP_SIZE, SCALE, plazaMap, worldRects, worldZones } from '../../../shared/plazaMap';
 import type { PlazaConnection, PlazaEvent, PlazaPlayer } from '../../plaza';
 import { NAME_COLOURS } from '../../../shared/levels';
+import { TYPING_SHOWN_MS } from '../../../shared/chat';
 
 // A nameplate: the flair a student chose, then their name, in the colour they chose.
 const plateText = (player: PlazaPlayer) => (player.style?.flair ? `${player.style.flair} ` : '') + player.name;
@@ -13,6 +14,14 @@ const plateColour = (player: PlazaPlayer) => NAME_COLOURS[player.style?.colour ?
 // on a busy network keeps them walking instead of stopping and starting.
 const SEND_EVERY_MS = 150;
 const GLIDE_MS = 225;
+
+// What someone says shows over their head for a while, longer for more words, as in a comic.
+const SPEECH_MS = 4500;
+const SPEECH_MS_PER_CHARACTER = 60;
+const SPEECH_MAX_MS = 11000;
+const SPEECH_SHOWN = 90; // characters; the chat has the rest
+// Bubbles: white for nearby, lilac for a private message, yellow for everyone.
+const BUBBLE = { near: 0xffffff, private: 0xefe6ff, all: 0xfff4cc } as const;
 
 export default class LobbyScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -32,13 +41,18 @@ export default class LobbyScene extends Phaser.Scene {
   private rainGraphic?: Phaser.GameObjects.Graphics;
   private artwork: Record<string, Phaser.GameObjects.Container> = {};
   private magicLabels: Record<string, Phaser.GameObjects.Text> = {};
+  private speech: Record<string, { box: Phaser.GameObjects.Container; until: number }> = {};
+  private writing: Record<string, { box: Phaser.GameObjects.Container; dots: Phaser.GameObjects.Text; until: number }> = {};
+  private onPick?: (id: string) => void;
+  private pointing = false; // the pointer is over a classmate
 
   constructor() {
     super('LobbyScene');
   }
 
-  init(data: { connection: PlazaConnection }) {
+  init(data: { connection: PlazaConnection; onPick?: (id: string) => void }) {
     this.connection = data.connection;
+    this.onPick = data.onPick;
   }
 
   preload() {
@@ -87,8 +101,17 @@ export default class LobbyScene extends Phaser.Scene {
       else overlay.strokePoints(piece.points.map(([x, y]) => new Phaser.Math.Vector2(x * SCALE, y * SCALE)), true);
     }
     this.input.keyboard?.on('keydown-F2', () => overlay.setVisible(!overlay.visible));
-    // Phaser swallows the click, so the chat box would keep the keyboard: hand it back.
-    this.input.on('pointerdown', () => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); });
+    // A click on a classmate opens a private chat with them. Anywhere else, Phaser swallows the click, so the
+    // chat box would keep the keyboard: hand it back.
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      const picked = this.onPick && this.playerAt(pointer.worldX, pointer.worldY);
+      if (picked) this.onPick!(picked);
+      else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      const pointing = !!this.onPick && !!this.playerAt(pointer.worldX, pointer.worldY);
+      if (pointing !== this.pointing) { this.pointing = pointing; this.input.setDefaultCursor(pointing ? 'pointer' : 'default'); }
+    });
 
     this.syncRoster();
     const unsubscribe = this.connection.subscribe(event => this.onPlazaEvent(event));
@@ -183,6 +206,75 @@ export default class LobbyScene extends Phaser.Scene {
     } else if (event.t === 'emote') {
       const container = this.playerEntities[event.id];
       if (container) this.showEmote(container, event.emote);
+    } else if (event.t === 'chat' && !event.history && event.sender !== 'System' && event.to !== 'Teacher') {
+      // Only what reached this student arrives here, so a private message shows only to the two of them.
+      const speaker = [...this.connection.players.values()].find(player => player.name === event.sender);
+      if (speaker) this.say(speaker.id, event.text, event.whisper ? 'private' : event.all ? 'all' : 'near');
+    } else if (event.t === 'typing' && this.playerEntities[event.id]) {
+      this.writing[event.id] ??= this.dotsFor();
+      this.writing[event.id].until = Date.now() + TYPING_SHOWN_MS;
+    }
+  }
+
+  // The classmate drawn under a point of the map, if any: their figure or their nameplate.
+  private playerAt(x: number, y: number): string | null {
+    let found: string | null = null;
+    let best = Infinity;
+    for (const [id, container] of Object.entries(this.playerEntities)) {
+      if (id === this.connection.selfId || !container.visible || container.alpha < 0.3) continue;
+      if (Math.abs(x - container.x) > 26 || y < container.y + FIGURE_TOP - 22 || y > container.y + 12) continue;
+      const distance = Math.hypot(x - container.x, y - (container.y + FIGURE_TOP / 2));
+      if (distance < best) { found = id; best = distance; }
+    }
+    return found;
+  }
+
+  // A rounded bubble with a tail pointing down at the speaker, its text above the tail.
+  private bubble(text: string, colour: number, wrap = 180): { box: Phaser.GameObjects.Container; label: Phaser.GameObjects.Text } {
+    const label = this.add.text(0, -13, text, {
+      fontFamily: 'system-ui, "Segoe UI", sans-serif', fontSize: '14px', color: '#1d2433', align: 'center',
+      wordWrap: { width: wrap, useAdvancedWrap: true }, resolution: 2
+    }).setOrigin(0.5, 1);
+    const width = Math.ceil(label.width) + 18;
+    const height = Math.ceil(label.height) + 10;
+    const shape = this.add.graphics();
+    shape.fillStyle(colour, 0.96).fillRoundedRect(-width / 2, -height - 8, width, height, 9);
+    shape.fillTriangle(-6, -9, 6, -9, 0, 0);
+    shape.lineStyle(1, 0x1d2433, 0.18).strokeRoundedRect(-width / 2, -height - 8, width, height, 9);
+    return { box: this.add.container(0, 0, [shape, label]).setDepth(999997), label };
+  }
+
+  private say(id: string, text: string, kind: keyof typeof BUBBLE) {
+    this.speech[id]?.box.destroy();
+    const shown = text.length > SPEECH_SHOWN ? `${text.slice(0, SPEECH_SHOWN - 1)}…` : text;
+    const { box } = this.bubble(`${kind === 'private' ? '🔒 ' : kind === 'all' ? '📢 ' : ''}${shown}`, BUBBLE[kind]);
+    this.speech[id] = { box, until: Date.now() + Math.min(SPEECH_MAX_MS, SPEECH_MS + text.length * SPEECH_MS_PER_CHARACTER) };
+    // Whoever was writing has written.
+    this.writing[id]?.box.destroy();
+    delete this.writing[id];
+  }
+
+  private dotsFor() {
+    const { box, label } = this.bubble('•••', BUBBLE.near, 60);
+    return { box, dots: label, until: 0 };
+  }
+
+  // Bubbles follow their speakers, above the nameplate (and a frozen label), and fade at the end.
+  private placeBubbles(time: number) {
+    const now = Date.now();
+    const place = (id: string, box: Phaser.GameObjects.Container, until: number, shown: boolean): boolean => {
+      const container = this.playerEntities[id];
+      const left = until - now;
+      if (!container || left <= 0) { box.destroy(); return false; }
+      const lifted = this.magicLabels[id]?.text ? 34 : 0;
+      box.setPosition(container.x, container.y + FIGURE_TOP - 22 - lifted)
+        .setVisible(container.visible && shown).setAlpha(container.alpha * Math.min(1, left / 400));
+      return true;
+    };
+    for (const [id, item] of Object.entries(this.speech)) if (!place(id, item.box, item.until, true)) delete this.speech[id];
+    for (const [id, item] of Object.entries(this.writing)) {
+      if (!place(id, item.box, item.until, !this.speech[id])) delete this.writing[id]; // words already show
+      else item.dots.setText('•••'.slice(0, 1 + Math.floor(time / 300) % 3));
     }
   }
 
@@ -255,6 +347,10 @@ export default class LobbyScene extends Phaser.Scene {
     }
     this.magicLabels[id]?.destroy();
     delete this.magicLabels[id];
+    this.speech[id]?.box.destroy();
+    delete this.speech[id];
+    this.writing[id]?.box.destroy();
+    delete this.writing[id];
     delete this.artwork[id];
     delete this.nameplates[id];
     this.figures[id]?.destroy(); // after the container, which still shows its pictures
@@ -315,6 +411,7 @@ export default class LobbyScene extends Phaser.Scene {
       }
     }
     if (this.fog && me) this.fog.setPosition(me.x, me.y);
+    this.placeBubbles(time);
 
     if (!this.cursors || !this.localPlayerContainer || !this.localPlayerContainer.body) return;
 

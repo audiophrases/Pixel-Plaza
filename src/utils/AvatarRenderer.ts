@@ -34,7 +34,10 @@ export function balanced(svg: string): string {
 
 const cleanPart = (item: any) => Object.fromEntries(Object.entries(item).map(([key, value]) => [key, typeof value === 'string' ? balanced(value) : value])) as any;
 
-export function renderAvatarSvg(avatar: Partial<AvatarConfig> = {}): string {
+// The portrait cropped to the head (a circle around 50,45) and its hat, for a small round picture beside a name.
+export const renderFaceSvg = (avatar: Partial<AvatarConfig> = {}): string => renderAvatarSvg(avatar, '10 -4 80 80');
+
+export function renderAvatarSvg(avatar: Partial<AvatarConfig> = {}, crop?: string): string {
   const data = window.CUP_AVATAR;
   if (!data) return ''; // Loading fallback
 
@@ -67,7 +70,9 @@ export function renderAvatarSvg(avatar: Partial<AvatarConfig> = {}): string {
     .replace(/#00FFFF/gi, skinColor)
     .replace(/#FF00FF/gi, hairColorHex);
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${data.viewBox}" width="100" height="104">${coloredBody}</svg>`;
+  const viewBox: string = crop ?? data.viewBox;
+  const [, , width, height] = viewBox.split(/\s+/);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" width="${width}" height="${height}">${coloredBody}</svg>`;
 }
 
 // ---------- The full figure for the map ----------
