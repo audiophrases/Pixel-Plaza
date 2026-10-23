@@ -1598,7 +1598,7 @@ export class PlazaRoom extends DurableObject<Env> {
             const existing = this.assistance.get(audit);
             if (existing && ['submitted', 'language-checked', 'hint-offered'].includes(existing.status)) {
                 this.assistance.update(audit, answer.ok ? 'language-checked' : 'hint-offered', answer.ok ? undefined : answer.why, answer.ok ? existing.correction : answer.corrected);
-                if (!answer.ok && !existing.correction) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Grammar hint: ${answer.why}`, String(text));
+                if (!answer.ok && !existing.correction) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Grammar hint: ${answer.why} Try: “${answer.corrected}”`, String(text));
             }
         }
         try { ws.send(JSON.stringify({ t: 'checked', id, ...answer })); } catch { /* closing */ }

@@ -3,6 +3,7 @@ import type { AttemptPage, AttemptSource, HelpAlert, HelpStatus, HelpTopic, Mess
 const TEXT_LIMIT = 1000;
 const SIGNAL_WINDOW = 5 * 60_000;
 const SIGNAL_THRESHOLD = 3;
+const SORTED_AFTER = 2; // successes after the trouble that show a suggested check-in is no longer needed
 
 type BeginAttempt = {
     game: string; studentKey: string; name: string; id?: string; text: string; source: AttemptSource;
@@ -132,7 +133,14 @@ export class StudentAssistance {
 
     alerts(game: string, names: ReadonlyMap<string, string> | Record<string, string>): HelpAlert[] {
         return this.sql.exec<AlertRow>(`SELECT * FROM assistance_help WHERE game_id = ? AND status != 'resolved' ORDER BY updated DESC, id DESC`, game)
-            .toArray().map(row => this.alert(row, names instanceof Map ? names.get(row.student_key) : (names as Record<string, string>)[row.student_key]));
+            .toArray().map(row => this.alert(row, names instanceof Map ? names.get(row.student_key) : (names as Record<string, string>)[row.student_key]))
+            // A suggested check-in that the student has since got past (two messages posted or answers right) takes
+            // itself off the list, so the teacher is not sent to a difficulty that is over. A request for help stays.
+            .filter(alert => {
+                if (alert.kind !== 'suggested' || alert.status !== 'open' || (alert.since ?? 0) < SORTED_AFTER) return true;
+                this.helpStatus(game, alert.id, 'resolved');
+                return false;
+            });
     }
 
     helpStatus(game: string, id: string, status: HelpStatus): boolean {
@@ -255,8 +263,11 @@ export class StudentAssistance {
             row.game_id, row.student_key).toArray()[0];
         const ai = latestHelp?.status === 'ai-help-pending' ? { pending: true, tip: null }
             : latestHelp?.status === 'ai-help' ? { pending: false, tip: latestHelp.reason } : undefined;
+        const last = evidence.at(-1)?.timestamp ?? row.ts;
+        const since = this.sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM assistance_attempts WHERE game_id = ? AND student_key = ? AND ts > ?
+            AND status IN ('approved', 'delivered', 'correct')`, row.game_id, row.student_key, last).toArray()[0].n;
         return { id: row.id, studentKey: row.student_key, name: name ?? row.name, topic: row.topic, kind: row.kind,
-            status: row.status, note: row.note, timestamp: row.ts, updated: row.updated, evidence, ...(ai ? { ai } : {}) };
+            status: row.status, note: row.note, timestamp: row.ts, updated: row.updated, evidence, since, ...(ai ? { ai } : {}) };
     }
 
     private cursor(value: string, game: string, studentKey?: string): Cursor {

@@ -249,3 +249,21 @@ test('teacher alert exposes pending AI help and feedback without losing the orig
     assert.equal(support.alerts('game', {}).length, 1);
     assert.equal(support.alerts('game', {})[0].ai, undefined);
 });
+
+test('a suggested check-in quotes the attempts, counts successes since, and clears itself once the student is past it', t => {
+    const { support, db } = repository(); t.after(() => db.close());
+    for (const text of ['it is lamaine', 'si', 'siii']) support.signal('game', 'alex', 'Alex', `English word check: ${text}`, text);
+    let [alert] = support.alerts('game', {});
+    assert.deepEqual([alert.kind, alert.evidence.map(item => item.text), alert.since], ['suggested', ['it is lamaine', 'si', 'siii'], 0]);
+    const succeed = () => { const id = attempt(support, { text: 'Is it Lamine?' }); support.update(id, 'approved');
+        db.prepare('UPDATE assistance_attempts SET ts = ts + 1000 WHERE id = ?').run(id); };
+    succeed();
+    [alert] = support.alerts('game', {});
+    assert.equal(alert.since, 1, 'one success: still on the list, with the count');
+    succeed();
+    assert.deepEqual(support.alerts('game', {}), [], 'two successes: the difficulty is over');
+    // A student who asked for help keeps their request, however well they write afterwards.
+    support.request('game', 'alex', 'Alex', 'writing', 'Can you help me?');
+    succeed(); succeed();
+    assert.equal(support.alerts('game', {})[0]?.kind, 'requested');
+});

@@ -83,3 +83,13 @@
 .live-spells { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .55rem; }
 .live-spells button { padding: .3rem .65rem; border: 1px solid var(--line); border-radius: 999px; background: #fff; font: inherit; font-size: .85rem; cursor: pointer; }
 .live-spells button:hover { background: #f4f6fa; }
+
+/* A suggested check-in: the attempts that caused it, why, and a fix to send. */
+.live-evidence { list-style: none; margin: .35rem 0; padding: 0; display: grid; gap: .3rem; font-size: .88rem; }
+.live-evidence li { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem; }
+.live-evidence small { color: #8a93a3; min-width: 2.2em; }
+.live-evidence q { font-weight: 600; }
+.live-why { color: #a33b00; }
+.live-fix { margin-left: auto; padding: .1rem .45rem; border: 1px solid var(--line); border-radius: .4rem; background: #fff; font: inherit; font-size: .78rem; cursor: pointer; }
+.live-fix:hover { border-color: #c9ced8; background: #f4f6fa; }
+.live-tag-ok { background: #e6f4ea; color: #1e6b34; }

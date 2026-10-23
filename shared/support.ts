@@ -11,6 +11,7 @@ export type HelpAlert = {
     status: HelpStatus; note: string; timestamp: number; updated: number;
     ai?: { pending: boolean; tip: string | null };
     evidence: { reason: string; text: string; timestamp: number }[];
+    since?: number; // messages posted or answers right since the last attempt in the evidence
 };
 export type TeacherSupport = { alerts: HelpAlert[]; students: { studentKey: string; name: string }[]; ai?: { used: number; students: number } };
 export type StudentSupport = {

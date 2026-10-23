@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import type { HelpAlert } from '../../shared/support';
+import { loadChecker } from '../spellingData';
+import { IDENTITY_NAMES } from '../../shared/warmupKinds';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
 import { XP } from '../../shared/levels';
 import Face from './Face';
@@ -39,6 +41,21 @@ const outcome: Record<string, [string, string]> = {
 };
 
 type Todo = { at: number; entry?: LiveEntry; alert?: HelpAlert };
+type Evidence = HelpAlert['evidence'][number];
+
+// The reason without the "Word check:" the game puts in front of word-check reasons.
+const plainReason = (reason: string) => reason.replace(/^Word check:\s*/, '');
+
+// Why an attempt went wrong, in a few words, from the reason the game recorded.
+function why(recorded: string): string {
+  const reason = plainReason(recorded);
+  const words = reason.match(/^(?:English word check|Use English words only):\s*(.+?)\.?$/);
+  if (words) return `not English: ${words[1]}`;
+  if (reason.startsWith('Grammar hint:')) return `grammar: ${reason.slice('Grammar hint:'.length).replace(/\s*Try: “.*”$/, '').trim()}`;
+  if (reason.startsWith('Answer not accepted:')) return `wrong answer to: ${reason.slice('Answer not accepted:'.length).trim()}`;
+  if (reason.startsWith('Message filter:')) return `blocked: ${reason.slice('Message filter:'.length).trim()}`;
+  return reason;
+}
 
 export default function LiveClass({ gameId, entries, alerts, online, known, muted, mode, moderation, open, who, action, selected, onSelect }: Props) {
   const [replies, setReplies] = useState<Record<string, string>>({}); // drafts, by student
@@ -52,6 +69,24 @@ export default function LiveClass({ gameId, entries, alerts, online, known, mute
   const recent = entries.filter(entry => entry.status !== 'pending').slice(0, 40);
   const lookOf = (studentKey: string) => online.find(student => student.studentKey === studentKey)?.look;
   const nameOf = (studentKey: string) => online.find(student => student.studentKey === studentKey)?.name ?? known.find(student => student.studentKey === studentKey)?.name ?? 'Student';
+
+  // A private reply ready to send: what the student wrote, and a better version when the game has one.
+  const prefill = async (studentKey: string, item: Evidence) => {
+    let fixed = item.reason.match(/Try: “(.*)”$/)?.[1] ?? null;
+    const flagged = plainReason(item.reason).match(/^(?:English word check|Use English words only):/);
+    if (!fixed && flagged) {
+      try {
+        const check = await loadChecker();
+        fixed = check(item.text, [...known.map(student => student.name), ...IDENTITY_NAMES])
+          .reduce((text, mistake) => mistake.suggestions[0] ? text.replace(mistake.word, mistake.suggestions[0]) : text, item.text);
+        if (fixed === item.text) fixed = null;
+      } catch { /* no dictionary: the quote alone */ }
+    }
+    const question = item.reason.match(/^Answer not accepted:\s*(.+)$/)?.[1];
+    const text = question ? `About “${question}”, you wrote “${item.text}”. `
+      : `You wrote “${item.text}”.${fixed ? ` Try: “${fixed}”` : ' '}`;
+    setReplies(current => ({ ...current, [studentKey]: text }));
+  };
 
   const reply = async (studentKey: string, alert?: HelpAlert) => {
     const text = (replies[studentKey] ?? '').trim();
@@ -114,7 +149,13 @@ export default function LiveClass({ gameId, entries, alerts, online, known, mute
         <div className="live-item-top">{person(alert.studentKey, alert.name)}
           <span className="live-scope">{alert.kind === 'requested' ? '🙋 asks for help' : '💡 may need help'}{alert.status === 'acknowledged' && ' · 👀 you’re on it'}</span>
           <small>{ago(alert.timestamp)}</small></div>
-        {(alert.note || alert.evidence.at(-1)) && <p className="live-text">{alert.note || alert.evidence.at(-1)!.text}</p>}
+        {alert.kind === 'suggested' && alert.evidence.length > 0
+          ? <ul className="live-evidence">{alert.evidence.map((item, index) => <li key={index}>
+              <small>{ago(item.timestamp)}</small> <q>{item.text}</q> <span className="live-why">{why(item.reason)}</span>
+              <button type="button" className="live-fix" onClick={() => void prefill(alert.studentKey, item)} title="Put a correction in the private reply below">Send a fix</button>
+            </li>)}</ul>
+          : (alert.note || alert.evidence.at(-1)) && <p className="live-text">{alert.note || alert.evidence.at(-1)!.text}</p>}
+        {(alert.since ?? 0) > 0 && <p className="live-notes"><span className="live-tag live-tag-ok">✓ Since then: {alert.since} {alert.since === 1 ? 'message posted or answer right' : 'messages posted or answers right'}</span></p>}
         {alert.ai?.tip && <p className="live-notes"><span className="live-tag">🤖 AI hint given: {alert.ai.tip}</span></p>}
         {replyBox(alert.studentKey, alert)}
         <div className="live-actions">
