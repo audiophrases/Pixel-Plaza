@@ -21,7 +21,7 @@ import { cleanName, shownNames } from '../shared/names.ts';
 import { normalizeVoice } from '../shared/voices.ts';
 import { fillThiefClue, lookOf, thiefCount } from '../shared/thief.ts';
 import { assignLateJoiner, assignWarmup, factById, type WarmupView } from '../shared/warmup.ts';
-import { assignIdentities, assignLateIdentity, assignLatePair, assignPairs, identityById, isWarmupKind, type WarmupKind } from '../shared/warmupKinds.ts';
+import { IDENTITY_NAMES, assignIdentities, assignLateIdentity, assignLatePair, assignPairs, identityById, isWarmupKind, type WarmupKind } from '../shared/warmupKinds.ts';
 import { randomName } from '../shared/randomNames.ts';
 import { legalMove, zoneAt } from '../shared/plazaMap.ts';
 import { XP, checkStyle, emotesFor, levelOf, readStyle, type Style } from '../shared/levels.ts';
@@ -1642,7 +1642,7 @@ export class PlazaRoom extends DurableObject<Env> {
         // On the teacher's laptop every word must be English, whatever the page did.
         if (typeof value === 'string' && this.env.LAN_URL) {
             const { notEnglish } = await import('./english.ts');
-            const words = notEnglish(value, this.seats().map(other => other.name));
+            const words = notEnglish(value, [...this.seats().map(other => other.name), ...IDENTITY_NAMES]);
             if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
             if (words.length) {
                 const reason = `Use English words only: ${words.map(item => item.word).join(', ')}.`;

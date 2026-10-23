@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Journal from '../components/Journal';
 import Warmup from '../components/Warmup';
 import type { WarmupView } from '../../shared/warmup';
+import { IDENTITY_NAMES } from '../../shared/warmupKinds';
 import NamePicker from '../components/NamePicker';
 import HelpRequest from '../components/HelpRequest';
 import { LevelBar, Rewards } from '../components/LevelBar';
@@ -527,7 +528,8 @@ export default function Game() {
     try {
       // Every word must be English. Names of people in the Plaza are fine.
       // If the dictionary cannot load, chat carries on rather than stopping.
-      const names = [session.student.displayName, ...[...plaza.players.values()].map(player => player.name)];
+      // Names of classmates and of the famous people in the "Who am I?" warm-up are fine.
+      const names = [session.student.displayName, ...[...plaza.players.values()].map(player => player.name), ...IDENTITY_NAMES];
       let check: Checker | null = null;
       try {
         check = await loadChecker();

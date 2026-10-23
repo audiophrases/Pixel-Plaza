@@ -75,3 +75,12 @@ test("words from the class's own languages are stopped with the English word to 
     // "vale" is English too (a valley), so a dictionary cannot stop it.
     assert.deepEqual(suggestion('vale'), []);
 });
+
+test('famous names from "Who am I?" are fine, and a misspelt name is offered the name', async () => {
+    const { IDENTITY_NAMES } = await import('../../shared/warmupKinds.ts');
+    assert.deepEqual(words("it's Lamine Yamal? Are you Ronaldo or shakira? Einstein? Darth Vader!", IDENTITY_NAMES), []);
+    const [mistake] = check("it's lamaine yamal", IDENTITY_NAMES);
+    assert.deepEqual([mistake.word, mistake.suggestions[0]], ['lamaine', 'Lamine']);
+    assert.equal(new Set(check('Einstien', IDENTITY_NAMES)[0].suggestions).size, check('Einstien', IDENTITY_NAMES)[0].suggestions.length, 'no repeats');
+    assert.deepEqual(words('hola', IDENTITY_NAMES), ['hola'], 'other languages are still stopped');
+});

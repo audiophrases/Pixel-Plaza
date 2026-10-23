@@ -49,6 +49,17 @@ function unstretched(word: string): string[] {
   return words.filter(short => short !== word);
 }
 
+// How many letters must change to turn one word into the other.
+function editDistance(a: string, b: string): number {
+  let row = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    row = next;
+  }
+  return row[b.length];
+}
+
 // aff and dic are a Hunspell dictionary, as in the dictionary-en package: American
 // English, the one dialect the class uses, so every suggestion is American. `alsoAccept`
 // is another dictionary (British) whose words are fine when typed but never suggested.
@@ -58,6 +69,12 @@ export function createChecker(aff: string, dic: string, alsoAccept?: Dictionary)
   const correct = (word: string) => speller.correct(word) || !!other?.correct(word);
   return (text, names = []) => {
     const known = new Set(names.flatMap(name => name.toLowerCase().split(/[^\p{L}]+/u)).filter(Boolean));
+    // Name words as written ("Lamine", not "lamine"), to suggest for a misspelt name.
+    const nameWords = new Map<string, string>();
+    for (const part of names.flatMap(name => name.split(/[^\p{L}]+/u)).filter(part => part.length > 3)) {
+      const key = part.toLowerCase();
+      if (!nameWords.has(key) || /^\p{Lu}/u.test(part)) nameWords.set(key, part);
+    }
     const found = new Map<string, Misspelling>();
     for (const [raw] of text.matchAll(WORD)) {
       const word = raw.replace(/’/g, "'");
@@ -73,9 +90,13 @@ export function createChecker(aff: string, dic: string, alsoAccept?: Dictionary)
       if (unstretched(lower).some(short => CHAT_WORDS.has(short) || LAUGH.test(short) || known.has(short) || (short.length > 1 && correct(short)))) continue;
       // Learners type "cafe" and "café" alike: accents do not make a word foreign.
       const plain = lower.normalize('NFD').replace(/\p{M}/gu, '');
-      if (plain !== lower && correct(plain)) continue;
+      if (plain !== lower && (correct(plain) || known.has(plain))) continue;
       const home = HOME_WORDS[lower] ?? HOME_WORDS[plain] ?? unstretched(lower).map(short => HOME_WORDS[short]).find(Boolean);
-      found.set(lower, { word: raw, suggestions: home ? [home] : lower.length > 1 ? speller.suggest(lower).slice(0, 3) : [] });
+      // A name typed nearly right ("lamaine" for Lamine) is offered the name first.
+      const name = lower.length > 3 ? [...nameWords].map(([key, written]) => ({ written, distance: editDistance(plain, key.normalize('NFD').replace(/\p{M}/gu, '')) }))
+        .filter(item => item.distance <= 2).sort((a, b) => a.distance - b.distance)[0]?.written : undefined;
+      const words = lower.length > 1 ? speller.suggest(lower) : [];
+      found.set(lower, { word: raw, suggestions: home ? [home] : [...new Set(name ? [name, ...words] : words)].slice(0, 3) });
     }
     return [...found.values()];
   };

@@ -61,6 +61,9 @@ export const IDENTITIES: Identity[] = [
     { id: 'yamal', name: 'Lamine Yamal', accept: ['yamal', 'lamine yamal', 'lamine'] },
 ];
 
+// Every name of the famous people above, for the English word check: guessing "Is it Lamine Yamal?" is English.
+export const IDENTITY_NAMES: string[] = IDENTITIES.flatMap(identity => [identity.name, ...identity.accept]);
+
 export const identityById = (id: string): Identity | undefined => IDENTITIES.find(identity => identity.id === id);
 
 // Each student is a different person, and is asked to find out who one classmate is, in a circle, so everybody has
