@@ -12,7 +12,7 @@ import type { CampaignChoice } from '../../shared/missionTypes';
 import { XP } from '../../shared/levels';
 import TeacherSupport from '../components/TeacherSupport';
 import ClassReport from '../components/ClassReport';
-import LiveClass from '../components/LiveClass';
+import LiveClass, { type LiveSound } from '../components/LiveClass';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; everyone?: boolean; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred?: boolean };
@@ -30,7 +30,7 @@ type LiveStudent = { studentKey: string; name: string; x: number; y: number; zon
 type Status = {
   campaign: CampaignInfo | null; campaigns: CampaignChoice[];
   warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
-  open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; online: LiveStudent[];
+  open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; sound?: LiveSound; online: LiveStudent[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
   support: Support;
 };
@@ -265,7 +265,7 @@ export default function Teacher() {
           }}>{campaign.chapter + 1 < campaign.chapters ? '▶ Next chapter' : '🏁 End campaign'}</button></span>}
       </section>}
       {status.game && <LiveClass gameId={status.game.id} entries={status.entries} alerts={status.support?.alerts ?? []} online={status.online}
-        known={[...supportStudents.values()]} muted={status.muted} mode={status.mode} moderation={status.moderation} open={status.open}
+        known={[...supportStudents.values()]} muted={status.muted} sound={status.sound ?? { off: [], now: Date.now(), plays: [] }} mode={status.mode} moderation={status.moderation} open={status.open}
         who={who} action={action} selected={selectedStudent} onSelect={setSelectedStudent} />}
       <nav className="teacher-nav" aria-label="Sections">
         {GROUPS.map(group => {

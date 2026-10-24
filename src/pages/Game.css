@@ -51,6 +51,7 @@
   font-size: .8rem;
 }
 .sound-toggle[aria-pressed="false"] { background: #f5f5f5; color: #555; }
+.sound-toggle:disabled { border-color: #e2b4b0; background: #fdf0ef; color: #8a2b22; cursor: default; }
 .sound-error { flex-basis: 100%; margin: 0; color: #7b5318; font-size: .8rem; }
 .chat-speaking .chat-bubble { background: #fff3c4; outline: 2px solid #e9cb6d; }
 .chat-listen { margin-left: .35rem; padding: 0 .15rem; border: 0; background: transparent; color: #286647; font: inherit; font-size: .7rem; vertical-align: 1px; cursor: pointer; opacity: .7; }

@@ -120,6 +120,9 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     if (path === '/api/teacher/mute' && typeof body?.studentKey === 'string' && typeof body?.muted === 'boolean') {
         return { kind: 'mute', studentKey: body.studentKey, muted: body.muted };
     }
+    if (path === '/api/teacher/sound' && typeof body?.studentKey === 'string' && typeof body?.off === 'boolean') {
+        return { kind: 'sound', studentKey: body.studentKey, off: body.off };
+    }
     return null;
 }
 
@@ -176,6 +179,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
             return json({ error: 'Choose a valid voice or chat message.' }, 400);
         }
         const room = plaza(env);
+        if (await room.soundOff(student.studentKey)) return json({ error: 'Your teacher turned your sound off.' }, 403);
         const message = preview ? { text: VOICE_SAMPLE, voice: body.voice as string } : await room.speechMessage(student.studentKey, body.id);
         if (!message) return json({ error: 'That message is not available.' }, 404);
         if (!(await room.spendSpeech(student.studentKey, preview))) return json({ error: 'Wait a moment before playing more sounds.' }, 429);
@@ -187,6 +191,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
             await audio.body?.cancel();
             return json({ error: 'That message is no longer available.' }, 404);
         }
+        await room.heard(student.studentKey, preview ? null : body.id);
         return audio;
     }
 

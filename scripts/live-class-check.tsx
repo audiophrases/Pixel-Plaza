@@ -20,6 +20,13 @@ const help = { id: 'help-ana', studentKey: 'ana', name: 'Ana', topic: 'writing' 
   note: 'No entiendo qué tengo que hacer.', timestamp: now - 300_000, updated: now - 300_000, evidence: [] };
 let props: any = {
   gameId: 'game-a', alerts: [help], muted: ['cleo'], mode: 'approve', moderation: true, open: true,
+  // Ana's device read Ben's message twice, a moment ago, and Cleo's once; Ben's read Cleo's ten minutes ago. Cleo's sound is off.
+  sound: { off: ['cleo'], now, plays: [
+    { at: now - 3_000, studentKey: 'ana', id: 'c5', senderKey: 'ben', text: 'I love you!!' },
+    { at: now - 5_000, studentKey: 'ana', id: 'c5', senderKey: 'ben', text: 'I love you!!' },
+    { at: now - 20_000, studentKey: 'cleo', id: 'c5', senderKey: 'ben', text: 'I love you!!' },
+    { at: now - 600_000, studentKey: 'ben', id: 'c4', senderKey: 'cleo', text: 'The basket is in the cellar.' },
+  ] },
   entries: [
     entry('c2', 'ben', 'Ben', 'Hello everyone!', 'pending', 30_000, { everyone: true }),
     entry('c1', 'cleo', 'Cleo', 'Psst, Ben', 'pending', 120_000, { target: 'Ben' }),
@@ -93,6 +100,34 @@ try {
   assert.equal(tiles()[1].querySelector('.live-tile-count')?.textContent, '1');
   assert.ok(tiles()[2].querySelector('.live-tile-muted'));
 
+  // Heard something in the room: the faces say whose device is reading aloud now, and whose sound is off.
+  assert.ok(tiles()[0].querySelector('.live-tile-playing'), "Ana's device is reading aloud");
+  assert.equal(tiles()[2].querySelector('.live-tile-sound')?.textContent, '🔇');
+  assert.equal(tiles()[1].querySelector('.live-tile-sound'), null);
+  const heard = () => [...document.querySelectorAll('.live-heard > li')];
+  // A device as the teacher reads it, after its face: name, how often, and its sound.
+  const devices = (line: Element) => [...line.querySelectorAll('.live-heard-device')].map(device => [...device.childNodes].slice(1).map(node => node.textContent).join(''));
+  assert.equal(heard().length, 1, 'with nothing typed, only what played in the last minutes');
+  assert.match(heard()[0].textContent!, /I love you!!.*Ben/);
+  assert.deepEqual(devices(heard()[0]), ['Ana×2🔈', 'Cleo🔇']);
+  const search = document.querySelector('.live-heard-search') as HTMLInputElement;
+  await type(search, 'basket in the CELLAR');
+  assert.equal(heard().length, 1);
+  assert.match(heard()[0].textContent!, /The basket is in the cellar\..*Cleo.*10m/);
+  assert.deepEqual(devices(heard()[0]), ['Ben🔈']);
+  await type(search, 'i love you');
+  await press(heard()[0].querySelector('.live-heard-device'));
+  assert.deepEqual(actions.at(-1), { path: 'sound', body: { studentKey: 'ana', off: true } }, 'one click silences the device it played on');
+  await press(heard()[0].querySelectorAll('.live-heard-device')[1]);
+  assert.deepEqual(actions.at(-1), { path: 'sound', body: { studentKey: 'cleo', off: false } });
+  await press(heard()[0].querySelector('.live-person'));
+  assert.equal(selected, 'ben', 'the writer opens like any other student');
+  await press(document.querySelector('.live-close'));
+  await type(search, 'nothing like this');
+  assert.equal(heard().length, 0);
+  assert.match(document.querySelector('.live-heard-none')!.textContent!, /Nothing like that/);
+  await type(search, '');
+
   // A face opens that student: what they wrote, a private message, and the spells.
   await press(tiles()[1]);
   assert.match(document.querySelector('.live-student')!.textContent!, /Ben.*cafe · Lv 2.*Hello everyone!/);
@@ -100,6 +135,8 @@ try {
   assert.deepEqual(actions.at(-1), { path: 'magic', body: { power: 'freeze', studentKey: 'ben' } });
   await press([...document.querySelectorAll('.live-spells button')].find(button => button.textContent?.includes('Mute')));
   assert.deepEqual(actions.at(-1), { path: 'mute', body: { studentKey: 'ben', muted: true } });
+  await press([...document.querySelectorAll('.live-spells button')].find(button => button.textContent === '🔇 Sound off'));
+  assert.deepEqual(actions.at(-1), { path: 'sound', body: { studentKey: 'ben', off: true } });
   await press(items()[2].querySelector('.live-person'));
   assert.equal(selected, 'ben', 'a name in the queue opens that student');
 
@@ -107,7 +144,7 @@ try {
   props = { ...props, entries: [], alerts: [] };
   await render();
   assert.equal(document.querySelector('.live-clear')?.textContent, '✓ All caught up');
-  console.log('Live class UI checks pass: one queue oldest first, approve and reject in a click, replies that count as helping, the moderation switch, stars and take-downs, faces in order of need, and a student panel with spells.');
+  console.log('Live class UI checks pass: one queue oldest first, approve and reject in a click, replies that count as helping, the moderation switch, stars and take-downs, faces in order of need, a phrase heard in the room traced to the devices that played it and silenced in a click, and a student panel with spells.');
 } finally {
   await act(async () => root.unmount());
   dom.window.close();

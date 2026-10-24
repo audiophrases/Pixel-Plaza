@@ -79,6 +79,31 @@ test('muting aborts in-flight work and discards queued/muted messages; choice pe
     } finally { sound.dispose(); restored?.dispose(); globalThis.localStorage = original; }
 });
 
+test("the teacher's sound-off stops playback, outranks the student's own button and leaves no backlog", async () => {
+    const fetched = []; const effects = []; let playSignal;
+    const sound = new GameAudio('', 'no-headphones', {
+        speech: async id => { fetched.push(id); return bytes; },
+        effect: async path => { effects.push(path); return bytes; },
+        play: async (_bytes, signal) => { playSignal = signal; await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true })); },
+    });
+    try {
+        sound.receive('loud'); await tick();
+        sound.setLocked(true);
+        assert.equal(playSignal.aborted, true, 'what is playing stops at once');
+        assert.equal(sound.snapshot.locked, true);
+        assert.equal(sound.snapshot.muted, false, "the student's own choice is kept for later");
+        sound.receive('while-off'); sound.replay('loud'); sound.goal(); sound.thunder();
+        sound.setMuted(false); sound.receive('still-off');
+        await tick();
+        assert.deepEqual(fetched, ['loud'], 'nothing is fetched while the teacher has sound off');
+        assert.deepEqual(effects, []);
+        sound.setLocked(false); await tick();
+        assert.deepEqual(fetched, ['loud'], 'turning sound back on does not read what arrived meanwhile');
+        sound.receive('after'); await tick();
+        assert.deepEqual(fetched, ['loud', 'after']);
+    } finally { sound.dispose(); }
+});
+
 test('retracting cancels active speech and removes queued speech; replay can retry a failed message', async () => {
     const fetched = []; const stops = []; let fail = true;
     const sound = new GameAudio('', 'retract', {

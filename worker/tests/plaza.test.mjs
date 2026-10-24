@@ -304,6 +304,25 @@ test('chat speech uses persisted sender voices and only synthesizes messages del
         assert.equal(requests.at(-1).authorization, 'Bearer server-only-test-secret');
         assert.equal((await speech(id, 'signed-c')).status, 404, 'moving closer later cannot grant an unheard message');
 
+        // Each clip a device fetches is listed for the teacher with who wrote it, so a phrase heard in the room leads to its speakers.
+        let sound = (await teacher('status')).body.sound;
+        assert.deepEqual(sound.plays.map(play => [play.studentKey, play.senderKey, play.id, play.text]), [['stu_b', 'stu_a', id, text]]);
+        assert.ok(sound.now >= sound.plays[0].at);
+        // Sound off for Sam: the device is told at once, and its speech and voice samples are refused until it is back on.
+        assert.equal((await sam.next(m => m.t === 'sound', 'sound state on joining')).off, false);
+        await teacher('sound', { studentKey: 'stu_b', off: true });
+        assert.equal((await sam.next(m => m.t === 'sound', 'sound off')).off, true);
+        const asked = requests.length;
+        assert.equal((await speech(id)).status, 403);
+        assert.equal((await preview(chosen)).status, 403);
+        assert.equal(requests.length, asked, 'a silenced device never reaches the speech service');
+        sound = (await teacher('status')).body.sound;
+        assert.deepEqual(sound.off, ['stu_b']);
+        assert.equal(sound.plays.length, 1, 'refused clips are not listed as played');
+        await teacher('sound', { studentKey: 'stu_b', off: false });
+        assert.equal((await sam.next(m => m.t === 'sound', 'sound back on')).off, false);
+        assert.deepEqual((await teacher('status')).body.sound.off, []);
+
         const changed = await enter(base, 'signed-a', { voice: 'en-AU-NatashaNeural' }); sockets.push(changed);
         assert.equal((await api(base, '/api/student/me', { token: 'signed-a' })).body.avatar.voice, 'en-AU-NatashaNeural');
         assert.equal((await speech(id)).status, 200);
@@ -314,6 +333,8 @@ test('chat speech uses persisted sender voices and only synthesizes messages del
         const ownHelp = await sam.next(m => m.t === 'chat' && m.to === 'Teacher');
         assert.equal((await speech(ownHelp.id)).status, 200);
         assert.equal(requests.at(-1).body.text, ownHelp.text);
+        const own = (await teacher('status')).body.sound.plays[0];
+        assert.deepEqual([own.studentKey, own.senderKey, own.id, own.text], ['stu_b', 'stu_b', ownHelp.id, ownHelp.text]);
         assert.equal((await speech(ownHelp.id, 'signed-a')).status, 404);
         await teacher('help-message', { studentKey: 'stu_b', text: 'Tell me your idea.' });
         const support = await sam.next(m => m.t === 'support' && m.support.messages.length);
@@ -348,6 +369,8 @@ test('chat speech uses persisted sender voices and only synthesizes messages del
         assert.equal(sample.status, 200); await sample.arrayBuffer();
         assert.equal(requests.at(-1).body.text, 'Hello! This is my voice in Pixel Plaza.');
         assert.equal(requests.at(-1).body.voice, chosen);
+        const tried = (await teacher('status')).body.sound.plays[0];
+        assert.deepEqual([tried.studentKey, tried.senderKey, tried.id, tried.text], ['stu_b', 'stu_b', null, 'Hello! This is my voice in Pixel Plaza.'], 'voice samples are listed too');
         await teacher('game', { name: 'Another game', randomNames: false });
         assert.equal((await speech(reply)).status, 404, 'private help from another game remains private');
         assert.equal((await speech(ownHelp.id)).status, 404);

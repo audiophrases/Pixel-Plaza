@@ -115,6 +115,16 @@ try {
   assert.ok(!speech().some(request => request.body.id.startsWith('teacher:')), 'teacher help is never synthesized');
   assert.equal(document.querySelector('.teacher-msg .chat-listen'), null);
   await finish();
+  // The teacher turns this device's sound off: the button locks, and nothing is read aloud until it is back on.
+  await act(async () => socket.receive({ t: 'sound', off: true }));
+  assert.equal(button('🔒 Sound off').disabled, true);
+  const asked = speech().length;
+  await act(async () => socket.receive(chat('while-off')));
+  assert.equal(speech().length, asked);
+  assert.ok([...document.querySelectorAll('.chat-listen')].every(listen => (listen as HTMLButtonElement).disabled), 'Listen is off too');
+  await act(async () => socket.receive({ t: 'sound', off: false }));
+  assert.equal(button('🔊 Sound on').disabled, false);
+  assert.equal(speech().length, asked, 'no backlog when sound comes back');
   await click('🔊 Sound on');
   await act(async () => root.unmount());
   root = createRoot(document.getElementById('root')!);

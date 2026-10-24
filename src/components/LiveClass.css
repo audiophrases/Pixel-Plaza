@@ -71,7 +71,25 @@
 .live-tile-flag { position: absolute; top: .2rem; left: .3rem; font-size: 1rem; }
 .live-tile-count { position: absolute; top: .25rem; right: .3rem; min-width: 1.3em; padding: 0 .3rem; border-radius: 999px; background: #1e88e5; color: #fff; font-size: .72rem; font-weight: 700; line-height: 1.4; }
 .live-tile-muted { position: absolute; bottom: 1.4rem; right: .35rem; font-size: .8rem; }
+.live-tile-sound { position: absolute; bottom: 1.4rem; left: .35rem; font-size: .8rem; }
+.live-tile-playing { animation: live-loud .8s ease-in-out infinite alternate; }
 @keyframes live-call { 50% { box-shadow: 0 0 0 4px rgba(229, 57, 53, .18); } }
+@keyframes live-loud { to { transform: scale(1.35); } }
+
+/* Heard something in the room: the message, who wrote it, and every device that read it aloud. */
+.live-heard-search { flex: 1 1 12rem; min-width: 0; padding: .3rem .6rem; border: 1px solid #cfd5de; border-radius: 999px; font: inherit; font-size: .85rem; }
+.live-heard { list-style: none; margin: 0 0 .6rem; padding: 0; display: grid; gap: .35rem; }
+.live-heard li { padding: .45rem .6rem; border: 1px solid var(--line); border-left: 4px solid #f0a500; border-radius: 10px; background: #fffaf0; }
+.live-heard-top { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem; }
+.live-heard-top q { flex: 1 1 10rem; min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+.live-heard-top small { color: #6b7480; font-size: .78rem; }
+.live-heard-on { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; margin-top: .3rem; }
+.live-heard-device { display: inline-flex; align-items: center; gap: .3rem; padding: .15rem .5rem .15rem .2rem; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--text-dark); font: inherit; font-size: .82rem; cursor: pointer; }
+.live-heard-device:hover { border-color: #c62828; background: #fdecea; }
+.live-heard-device[aria-pressed="true"] { background: #f1f2f5; color: #6b7480; }
+.live-heard-device small { color: #a33b00; font-weight: 700; }
+.live-heard .chat-face { width: 22px; height: 22px; font-size: .7rem; }
+.live-heard-none { margin: 0 0 .6rem; color: #6b7480; font-size: .85rem; }
 
 /* One student, chosen: what they wrote lately, a private message, and the spells. */
 .live-student { margin-top: .75rem; padding: .75rem; border: 1px solid var(--line); border-radius: 12px; background: #f9fafc; }

@@ -95,7 +95,7 @@ export default function Game() {
   const audioRef = useRef<GameAudio | null>(null);
   const [sound, setSound] = useState<SoundState>(() => ({
     muted: session ? soundIsMuted(session.student.studentKey) : false,
-    messageId: null, needsInteraction: false, error: '',
+    locked: false, messageId: null, needsInteraction: false, error: '',
   }));
   // Shown as the first name, with a surname letter added when a classmate shares it; the plaza tells us which.
   const [myName, setMyName] = useState(() => firstName(readStudentSession()?.student.displayName ?? ''));
@@ -327,6 +327,7 @@ export default function Game() {
       } else setPeek({ key, message: line });
     };
     const unsubscribe = plaza.subscribe(event => {
+      if (event.t === 'sound') { audio.setLocked(event.off); return; }
       if (event.t === 'magic' && event.power === 'lightning') audio.thunder();
       if (event.t === 'xp') { setXpReason(event.reason); setXp(event.xp); return; }
       if (event.t === 'roster' || (event.t === 'style' && event.id === plaza.selfId)) setMyStyle(plaza.players.get(plaza.selfId)?.style ?? DEFAULT_STYLE);
@@ -620,13 +621,13 @@ export default function Game() {
               {status.state === 'stopped' ? 'Disconnected' : status.state === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
             </span>}
           </div>
-          <button type="button" className="sound-toggle" aria-pressed={!sound.muted}
-            title={sound.muted ? 'Turn on chat voices and game sounds' : 'Mute chat voices and game sounds'}
+          <button type="button" className="sound-toggle" aria-pressed={!sound.muted && !sound.locked} disabled={sound.locked}
+            title={sound.locked ? 'Your teacher turned your sound off' : sound.muted ? 'Turn on chat voices and game sounds' : 'Mute chat voices and game sounds'}
             onClick={() => audioRef.current?.setMuted(!sound.muted)}>
-            {sound.muted ? '🔇 Sound off' : '🔊 Sound on'}
+            {sound.locked ? '🔒 Sound off' : sound.muted ? '🔇 Sound off' : '🔊 Sound on'}
           </button>
-          {!sound.muted && sound.needsInteraction && <button type="button" className="sound-enable" onClick={unlockSound}>Enable sound</button>}
-          {!sound.muted && sound.error && <p className="sound-error" role="status">{sound.error}</p>}
+          {!sound.muted && !sound.locked && sound.needsInteraction && <button type="button" className="sound-enable" onClick={unlockSound}>Enable sound</button>}
+          {!sound.muted && !sound.locked && sound.error && <p className="sound-error" role="status">{sound.error}</p>}
         </header>
 
         <LevelBar xp={xp} reason={xpReason} onOpen={() => setShowRewards(open => !open)} />
@@ -745,7 +746,7 @@ export default function Game() {
                       title={`Chat with ${msg.sender}`} onClick={() => talk(privateChat(msg.sender))}>{msg.sender}</button>}
                     <div className="chat-bubble">
                       <span className="chat-text"><Marked text={msg.text} marks={msg.marks} className="slip" /></span>
-                      {!msg.teacher && msg.id && !msg.waiting && !msg.declined && <button type="button" className="chat-listen" disabled={sound.muted || status.state !== 'online'}
+                      {!msg.teacher && msg.id && !msg.waiting && !msg.declined && <button type="button" className="chat-listen" disabled={sound.muted || sound.locked || status.state !== 'online'}
                         aria-label={sound.messageId === msg.id ? `Stop reading ${msg.sender}'s message` : `Listen to ${msg.sender}'s message`}
                         onClick={() => sound.messageId === msg.id ? audioRef.current?.stop() : audioRef.current?.replay(msg.id!)}>
                         {sound.messageId === msg.id ? '■' : '▶'}

@@ -5,5 +5,9 @@ import { build } from 'esbuild';
 const root = path.join(import.meta.dirname, '..');
 const out = path.join(root, '.wrangler', 'live-class-check.mjs');
 fs.mkdirSync(path.dirname(out), { recursive: true });
-await build({ entryPoints: [path.join(root, 'scripts', 'live-class-check.tsx')], outfile: out, bundle: true, platform: 'node', format: 'esm', loader: { '.css': 'empty' }, jsx: 'automatic', external: ['jsdom'], logLevel: 'error', banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" } });
+await build({ entryPoints: [path.join(root, 'scripts', 'live-class-check.tsx')], outfile: out, bundle: true, platform: 'node', format: 'esm', loader: { '.css': 'empty' }, jsx: 'automatic', external: ['jsdom'], logLevel: 'error', banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
+    // The dictionaries load through Vite's ?raw imports; "Send a fix" works with no checker too.
+    plugins: [{ name: 'live-class-test-boundaries', setup(build) {
+        build.onLoad({ filter: /[/\\]spellingData\.ts$/ }, () => ({ contents: 'export async function loadChecker() { return () => []; }', loader: 'ts' }));
+    } }] });
 process.exit(spawnSync(process.execPath, [out], { stdio: 'inherit', cwd: root }).status ?? 1);

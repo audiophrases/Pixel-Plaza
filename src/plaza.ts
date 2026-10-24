@@ -27,6 +27,7 @@ export type PlazaEvent =
   | { t: 'warmup'; warmup: WarmupView | null }                               // your part of the warm-up, or null when it is over
   | { t: 'warmup-answered'; correct: boolean; wait: boolean }
   | { t: 'vision'; radius: number }                                        // how far you see, in map pixels; 0 is everyone
+  | { t: 'sound'; off: boolean }                                           // the teacher turned your sound off, or back on
   | { t: 'alias'; name: string; kept: boolean }                            // your made-up name, and whether you have kept it
   | { t: 'rename'; id: string; name: string }                              // a namesake arrived: this player's shown name changed
   | { t: 'quest'; quest: QuestView | null }                                  // this student's view of the campaign

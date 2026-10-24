@@ -28,6 +28,7 @@ import { XP, checkStyle, emotesFor, levelOf, readStyle, type Style } from '../sh
 import { REPORT_LINES_PER_STUDENT, type ClassReportData, type ReportLine } from '../shared/classReport.ts';
 import { type Avatar, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 import { HEARING_RANGE, TYPING_EVERY_MS } from '../shared/chat.ts';
+import { VOICE_SAMPLE } from './speech.ts';
 
 const TICKET_MS = 60_000;
 const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
@@ -42,6 +43,9 @@ const MOVE_BATCH_MS = 150; // positions go out together this often: one message 
 const CHECK_GAP_MS = 800; // grammar hints cost money: no more than one a student can read
 const TYPING_GAP_MS = TYPING_EVERY_MS / 2; // "is writing" passed on no more often than a page sends it
 const CHAT_HISTORY = 120; // messages of this lesson a returning page gets back
+const PLAYS_KEEP_MS = 60 * 60 * 1000; // what each device read aloud, kept for an hour
+const PLAYS_SHOWN_MS = 15 * 60 * 1000; // and shown to the teacher for the last 15 minutes
+const PLAYS_SHOWN = 300;
 
 // Close codes the client acts on.
 const CLOSE_JOIN_AGAIN = 4001; // ticket unknown, used or expired
@@ -70,6 +74,7 @@ export type TeacherAction =
     | { kind: 'approveAll' }
     | { kind: 'mode'; mode: ChatMode }
     | { kind: 'mute'; studentKey: string; muted: boolean }
+    | { kind: 'sound'; studentKey: string; off: boolean } // silences one student's device (no headphones) until turned back on
     | { kind: 'xp'; chatId?: string; report?: { studentKey: string; objective: string } } // the teacher stars a message or a report
     | { kind: 'helpStatus'; id: string; status: HelpStatus; gameId?: string }
     | { kind: 'helpMessage'; studentKey: string; text: string; gameId?: string };
@@ -101,6 +106,9 @@ export type TeacherStatus = {
     mode: ChatMode;
     moderation: boolean; // an OpenAI key is set, so 'review' mode can post anything
     muted: string[];
+    // Every clip a device read aloud lately, newest first, so a phrase heard in the room leads to the speakers
+    // it came from. `id` is the chat message (null for a voice sample); `now` is the server's clock, to age them by.
+    sound: { off: string[]; now: number; plays: { at: number; studentKey: string; id: string | null; senderKey: string; text: string }[] };
     online: { studentKey: string; name: string; x: number; y: number; zone: string | null; level: number; look: Avatar }[]; // look: the avatar, for the teacher to recognise them by
 };
 
@@ -142,6 +150,10 @@ export class PlazaRoom extends DurableObject<Env> {
                 student_key TEXT NOT NULL, kind TEXT NOT NULL, window INTEGER NOT NULL, used INTEGER NOT NULL,
                 PRIMARY KEY (student_key, kind));
             CREATE TABLE IF NOT EXISTS mutes (student_key TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS sound_off (student_key TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS speech_plays (
+                ts INTEGER NOT NULL, game_id TEXT NOT NULL, student_key TEXT NOT NULL, chat_id TEXT, sender_key TEXT NOT NULL, text TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS speech_plays_game ON speech_plays (game_id, ts);
             CREATE TABLE IF NOT EXISTS teacher_sessions (token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS games (
@@ -472,6 +484,11 @@ export class PlazaRoom extends DurableObject<Env> {
             if (action.muted) this.sql.exec('INSERT OR IGNORE INTO mutes (student_key) VALUES (?)', action.studentKey);
             else this.sql.exec('DELETE FROM mutes WHERE student_key = ?', action.studentKey);
         }
+        if (action.kind === 'sound') {
+            if (action.off) this.sql.exec('INSERT OR IGNORE INTO sound_off (student_key) VALUES (?)', action.studentKey);
+            else this.sql.exec('DELETE FROM sound_off WHERE student_key = ?', action.studentKey);
+            for (const ws of this.ctx.getWebSockets(action.studentKey)) this.sendSound(ws, action.studentKey);
+        }
         // The dashboard polls every 2 seconds: send everything still pending plus
         // recent history, read through the indexes, not the whole log each time.
         const current = this.game(this.activeGame());
@@ -499,6 +516,13 @@ export class PlazaRoom extends DurableObject<Env> {
             mode: this.mode(),
             moderation: !!this.env.OPENAI_API_KEY,
             muted: this.sql.exec<{ student_key: string }>('SELECT student_key FROM mutes').toArray().map(row => row.student_key),
+            sound: {
+                off: this.sql.exec<{ student_key: string }>('SELECT student_key FROM sound_off').toArray().map(row => row.student_key),
+                now: Date.now(),
+                plays: current ? this.sql.exec<TeacherStatus['sound']['plays'][number]>(`SELECT ts AS at, student_key AS studentKey, chat_id AS id,
+                    sender_key AS senderKey, text FROM speech_plays WHERE game_id = ? AND ts > ? ORDER BY ts DESC LIMIT ?`,
+                    current.id, Date.now() - PLAYS_SHOWN_MS, PLAYS_SHOWN).toArray() : []
+            },
             online: this.seats().filter(seat => seat.game === current?.id).map(seat => ({
                 studentKey: seat.studentKey, name: seat.name, x: seat.x, y: seat.y, zone: zoneAt(seat.x, seat.y), level: levelOf(this.xpOf(seat.studentKey)).level, look: seat.avatar
             }))
@@ -558,7 +582,7 @@ export class PlazaRoom extends DurableObject<Env> {
     // fail closed for legacy messages without delivery provenance.
     speechMessage(studentKey: string, id: string): { text: string; voice: string } | null {
         const game = this.activeGame();
-        if (!game || !this.isOpen()) return null;
+        if (!game || !this.isOpen() || this.soundOff(studentKey)) return null;
         if (id.startsWith('teacher:')) return null; // Teacher help may mix Catalan and English.
         const row = this.sql.exec<{ text: string; voice: string }>(`SELECT c.text, a.voice FROM chat c
             JOIN chat_audience a ON a.chat_id = c.id AND a.game_id = c.game_id
@@ -569,6 +593,26 @@ export class PlazaRoom extends DurableObject<Env> {
             WHERE p.id = ? AND p.game_id = ? AND p.student_key = ? AND a.student_key = ?
             AND p.status = 'teacher-inbox' AND p.source = 'chat' AND p.target = 'Teacher'`, id, game, studentKey, studentKey).toArray()[0];
         return privateMessage?.text ? { text: privateMessage.text, voice: normalizeVoice(privateMessage.voice) } : null;
+    }
+
+    // The teacher turned this student's sound off: their device gets no speech until it is turned back on.
+    soundOff(studentKey: string): boolean {
+        return this.sql.exec('SELECT 1 FROM sound_off WHERE student_key = ?', studentKey).toArray().length > 0;
+    }
+
+    // A clip this student's device is about to play, so a teacher who hears a phrase in the room can find
+    // whose speakers it came from. Chat has its sender; a voice sample or a note to the teacher is the student's own.
+    heard(studentKey: string, id: string | null): void {
+        const game = this.activeGame();
+        if (!game) return;
+        const message = id ? this.sql.exec<{ student_key: string; text: string }>('SELECT student_key, text FROM chat WHERE id = ? AND game_id = ?', id, game).toArray()[0]
+            ?? this.sql.exec<{ student_key: string; text: string }>('SELECT student_key, TRIM(final_text) AS text FROM assistance_attempts WHERE id = ? AND game_id = ?', id, game).toArray()[0]
+            : { student_key: studentKey, text: VOICE_SAMPLE };
+        if (!message) return;
+        const now = Date.now();
+        this.sql.exec('DELETE FROM speech_plays WHERE ts < ?', now - PLAYS_KEEP_MS);
+        this.sql.exec('INSERT INTO speech_plays (ts, game_id, student_key, chat_id, sender_key, text) VALUES (?, ?, ?, ?, ?, ?)',
+            now, game, studentKey, id, message.student_key, message.text);
     }
 
     // An independent budget: listening must never consume sign-in/PIN attempts.
@@ -687,6 +731,7 @@ export class PlazaRoom extends DurableObject<Env> {
         try { server.send(JSON.stringify({ t: 'xp', xp: saved.xp })); } catch { /* closing */ }
         this.sendAlias(server, seat.game, seat.studentKey);
         this.sendVision(server, seat.game);
+        this.sendSound(server, seat.studentKey);
         // A late arrival's part changes everyone's team total, so all get the warm-up again.
         if (this.lateWarmupPart(seat.game, seat.studentKey)) this.sendWarmupToAll(seat.game);
         else this.sendWarmup(server, seat.game, seat.studentKey);
@@ -1267,6 +1312,10 @@ export class PlazaRoom extends DurableObject<Env> {
         try { target.send(JSON.stringify({ t: 'vision', radius: this.vision(game) })); } catch { /* closing */ }
     }
 
+    private sendSound(target: WebSocket, studentKey: string): void {
+        try { target.send(JSON.stringify({ t: 'sound', off: this.soundOff(studentKey) })); } catch { /* closing */ }
+    }
+
     // Everything saved in a game goes with it: where students stood, chat, made-up names, the story and the warm-up.
     // Students' own avatars are theirs and stay. An open game is closed first, which sends everyone out.
     private deleteGame(game: string): void {
@@ -1276,7 +1325,7 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         this.assistance.clear(game);
         this.participation.clear(game);
-        for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'warmups', 'warmup_players']) {
+        for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'warmups', 'warmup_players', 'speech_plays']) {
             this.sql.exec(`DELETE FROM ${table} WHERE game_id = ?`, game);
         }
         this.sql.exec('DELETE FROM games WHERE id = ?', game);

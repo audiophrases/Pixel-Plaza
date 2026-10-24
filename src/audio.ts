@@ -1,6 +1,7 @@
 // One optional audio queue per player. Text and game progress never wait for sound.
 export type SoundState = {
   muted: boolean;
+  locked: boolean; // the teacher turned this student's sound off; only the teacher turns it back on
   messageId: string | null;
   needsInteraction: boolean;
   error: string;
@@ -83,6 +84,7 @@ async function fetchAudio(path: string, signal: AbortSignal, token?: string, bod
     headers: token ? { 'Content-Type': 'application/json', 'x-student-token': token } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   }).catch(() => { throw new Error('Sound is temporarily unavailable. You can keep playing.'); });
+  if (response.status === 403) throw new Error('Your teacher turned your sound off.');
   if (!response.ok) throw new Error('Could not play this message. You can try Listen again.');
   if (!(response.headers.get('Content-Type') ?? '').startsWith('audio/')) throw new Error('Speech is temporarily unavailable. You can keep reading.');
   // Do not let a faulty upstream put an unbounded recording into the browser.
@@ -117,14 +119,14 @@ export class GameAudio {
   private dependencies: SoundDependencies;
   private studentKey: string;
   private resume = () => {
-    if (this.disposed || this.state.muted || !this.state.needsInteraction) return;
+    if (this.disposed || this.silent || !this.state.needsInteraction) return;
     this.update({ needsInteraction: false });
     void this.drain();
   };
 
   constructor(token: string, studentKey: string, dependencies?: SoundDependencies) {
     this.studentKey = studentKey;
-    this.state = { muted: soundIsMuted(studentKey), messageId: null, needsInteraction: false, error: '' };
+    this.state = { muted: soundIsMuted(studentKey), locked: false, messageId: null, needsInteraction: false, error: '' };
     this.dependencies = dependencies ?? {
       speech: (id, signal) => fetchAudio('/api/plaza/speech', signal, token, { id }),
       effect: (path, signal) => fetchAudio(path, signal),
@@ -134,6 +136,7 @@ export class GameAudio {
   }
 
   get snapshot(): SoundState { return { ...this.state }; }
+  private get silent(): boolean { return this.state.muted || this.state.locked; }
   subscribe(listener: (state: SoundState) => void): () => void {
     this.listeners.add(listener); listener(this.snapshot);
     return () => { this.listeners.delete(listener); };
@@ -151,30 +154,37 @@ export class GameAudio {
     if (!muted) unlockSound();
   }
 
+  // The teacher's switch: it stops what is playing and outranks the student's own button.
+  setLocked(locked: boolean): void {
+    if (locked === this.state.locked) return;
+    if (locked) this.stop();
+    this.update({ locked, needsInteraction: false });
+  }
+
   // Even muted/history messages count as seen: unmuting or reconnecting must not
   // cause a backlog of old chat to start speaking.
   receive(id: string, history = false): void {
     if (!id || this.seen.has(id) || this.disposed) return;
     this.seen.add(id);
-    if (!history && !this.state.muted) this.enqueue({ kind: 'speech', id });
+    if (!history && !this.silent) this.enqueue({ kind: 'speech', id });
   }
 
   replay(id: string): void {
-    if (this.disposed || this.state.muted) return;
+    if (this.disposed || this.silent) return;
     unlockSound();
     this.stop();
     this.enqueue({ kind: 'speech', id });
   }
 
   goal(): void {
-    if (this.disposed || this.state.muted) return;
+    if (this.disposed || this.silent) return;
     this.clip = this.clip % 4 + 1;
     this.enqueue({ kind: 'goal', path: `/sounds/pinplay/correct-${this.clip}.mp3` });
   }
 
   // Thunder starts alongside the bolt, even while a chat message is speaking.
   thunder(): void {
-    if (this.disposed || this.state.muted) return;
+    if (this.disposed || this.silent) return;
     this.thunderController?.abort();
     const controller = new AbortController();
     this.thunderController = controller;
@@ -224,10 +234,10 @@ export class GameAudio {
   }
 
   private async drain(): Promise<void> {
-    if (this.busy || this.disposed || this.state.muted || this.state.needsInteraction) return;
+    if (this.busy || this.disposed || this.silent || this.state.needsInteraction) return;
     this.busy = true;
     try {
-      while (this.queue.length && !this.disposed && !this.state.muted && !this.state.needsInteraction) {
+      while (this.queue.length && !this.disposed && !this.silent && !this.state.needsInteraction) {
         const job = this.queue.shift()!;
         const generation = this.generation;
         const controller = new AbortController();
