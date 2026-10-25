@@ -11,6 +11,7 @@
 
 .warmup h2 { margin: 0.2rem 0 0.4rem; font-size: 1rem; }
 .warmup p { margin: 0.15rem 0; }
+.warmup .warmup-rule { padding: .4rem 0; font-size: .8rem; color: #445064; }
 .warmup-block { margin-top: 0.4rem; padding: 0.4rem 0.6rem; border-left: 4px solid #adc6ff; border-radius: 4px; background: #f5f8ff; }
 .warmup-block h3 { margin: 0 0 0.2rem; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; color: #556; }
 .warmup-fact { border-left-color: #b37feb; background: #f9f0ff; font-weight: 700; }

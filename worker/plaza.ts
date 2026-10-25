@@ -28,6 +28,7 @@ import { XP, checkStyle, emotesFor, levelOf, readStyle, type Style } from '../sh
 import { REPORT_LINES_PER_STUDENT, type ClassReportData, type ReportLine } from '../shared/classReport.ts';
 import { type Avatar, chatProblem, clampPosition, defaultAvatar, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 import { HEARING_RANGE, TYPING_EVERY_MS } from '../shared/chat.ts';
+import { identityRevealProblem } from '../shared/activityChat.ts';
 import { VOICE_SAMPLE } from './speech.ts';
 import { buildGuide, type TeacherGuide } from '../shared/teacherGuide.ts';
 import { missionId } from '../shared/missionSchema.ts';
@@ -1416,6 +1417,12 @@ export class PlazaRoom extends DurableObject<Env> {
         return isWarmupKind(kind) ? kind : 'facts';
     }
 
+    private identityChatProblem(game: string | null, studentKey: string, text: string): string | null {
+        if (!game || !this.warmupActive(game) || this.warmupKind(game) !== 'identity') return null;
+        const player = this.sql.exec<{ fact: string }>('SELECT fact FROM warmup_players WHERE game_id = ? AND student_key = ?', game, studentKey).toArray()[0];
+        return player ? identityRevealProblem(text, player.fact) : null;
+    }
+
     // Starts afresh for the students who are here; anyone who arrives later is given a part when they do.
     private startWarmup(game: string, kind: WarmupKind): string | null {
         const here = this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey);
@@ -1756,7 +1763,8 @@ export class PlazaRoom extends DurableObject<Env> {
         }
 
         // Blocked messages are kept too, so the teacher sees what was attempted.
-        let problem = chatProblem(value);
+        let activityProblem = this.identityChatProblem(seat.game, seat.studentKey, value);
+        let problem = chatProblem(value) ?? activityProblem;
         let flag: string | null = null;
         let cleared = false; // OpenAI looked at it and found nothing
         if (!problem) {
@@ -1766,6 +1774,13 @@ export class PlazaRoom extends DurableObject<Env> {
             else if (verdict.result === 'unchecked') flag = 'moderation unavailable';
             // The class may have closed or the student been muted while OpenAI answered.
             if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
+        }
+        // Assignments can change while moderation is in flight. Check durable state
+        // again before either automatic delivery or the teacher's queue.
+        activityProblem = this.identityChatProblem(seat.game, seat.studentKey, value);
+        if (activityProblem) {
+            problem = activityProblem;
+            note = [note, `Activity rule — Who am I?: ${activityProblem}`].filter(Boolean).join('\n');
         }
         // Review mode posts what OpenAI cleared, nearby, for everyone or whisper. A witness exchange (the only caller
         // that passes `valid`) always waits: the teacher's approval is part of that activity.
@@ -1815,6 +1830,19 @@ export class PlazaRoom extends DurableObject<Env> {
             return true;
         }
         if (entry.status !== 'pending') return false;
+
+        // A message queued before this warm-up began may now reveal its sender's
+        // assigned identity. Approval and approve-all must enforce the current rule.
+        const activityProblem = approve && this.isOpen() ? this.identityChatProblem(entry.game_id, entry.student_key, entry.text) : null;
+        if (activityProblem) {
+            this.sql.exec("UPDATE chat SET status = 'blocked', note = ? WHERE id = ?", `Activity rule — Who am I?: ${activityProblem}`, id);
+            this.assistance.chatStatus(id, 'blocked');
+            if (entry.game_id) this.assistance.signal(entry.game_id, entry.student_key, entry.sender, `Activity rule: ${activityProblem}`, entry.text, 'other');
+            if (this.interviews.review(id, 'rejected') && entry.game_id) this.sendQuestToAll(entry.game_id);
+            this.notify(entry.student_key, 'info', 'Your message was not posted.', id);
+            this.notify(entry.student_key, 'warning', activityProblem);
+            return true;
+        }
 
         const approved = approve && this.isOpen();
         this.sql.exec('UPDATE chat SET status = ? WHERE id = ?', approved ? 'approved' : 'rejected', id);

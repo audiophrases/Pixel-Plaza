@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { WarmupView } from '../../shared/warmup';
+import { IDENTITY_CHAT_REMINDER } from '../../shared/activityChat';
 import './Warmup.css';
 
 type Props = { warmup: WarmupView; feedback: { correct: boolean; wait: boolean } | null; onAnswer: (text: string) => void };
@@ -11,13 +12,14 @@ export default function Warmup({ warmup, feedback, onAnswer }: Props) {
   const title = warmup.kind === 'identity' ? 'Who am I?' : warmup.kind === 'pairs' ? 'Find your pair' : 'Find someone who…';
   return <aside className="warmup glass-panel">
     <h2>Warm-up: {title}</h2>
+    {warmup.kind === 'identity' && <p className="warmup-rule">{IDENTITY_CHAT_REMINDER}</p>}
     <section className="warmup-block warmup-fact">
       <h3>{warmup.kind === 'pairs' ? 'Your word' : 'Your secret'}</h3>
       <p>{warmup.fact}</p>
     </section>
     {finished ? <section className="warmup-block warmup-done">
       <h3>Done</h3>
-      <p>You found everyone. Help your classmates!</p>
+      <p>{warmup.kind === 'identity' ? 'You solved your task. Keep helping with yes or no answers, without giving away your identity.' : 'You found everyone. Help your classmates!'}</p>
     </section> : <section className="warmup-block warmup-task">
       <h3>{warmup.of > 1 ? `Find (${warmup.step + 1} of ${warmup.of})` : 'Find'}</h3>
       <p className="warmup-ask">{warmup.task}</p>

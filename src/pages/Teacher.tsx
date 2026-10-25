@@ -345,6 +345,7 @@ export default function Teacher() {
           {status.warmup?.active && <button className="btn btn-secondary" onClick={() => void action('warmup', { op: 'end' })}>End the warm-up</button>}
         </div>
         {status.warmup && <>
+          {status.warmup.active && status.warmup.kind === 'identity' && <p className="teacher-muted">Helpers’ secret names are blocked in student chat. Guesses and yes/no replies are allowed. Private messages to you remain available.</p>}
           <p>{status.warmup.active ? 'In progress' : 'Finished'}: {status.warmup.team.done} of {status.warmup.team.total} found.</p>
           <ul>{status.warmup.players.map(player => <li key={player.studentKey}>
             <span><strong>{who(player.studentKey, player.name)}</strong> · {player.fact} · found {player.found} of {player.of}</span>

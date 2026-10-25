@@ -41,7 +41,7 @@ function ago(timestamp: number, now = Date.now()): string {
 // Who a message was for, as the students' chat shows it.
 const scope = (entry: LiveEntry) => entry.target ? `🔒 ${entry.target}` : entry.everyone ? '📢 everyone' : '👥 nearby';
 const outcome: Record<string, [string, string]> = {
-  approved: ['✓', 'Posted'], rejected: ['✕', 'Not posted'], removed: ['🗑', 'Removed'], blocked: ['⛔', 'Blocked by moderation'], pending: ['🕓', 'Waiting for you'],
+  approved: ['✓', 'Posted'], rejected: ['✕', 'Not posted'], removed: ['🗑', 'Removed'], blocked: ['⛔', 'Blocked'], pending: ['🕓', 'Waiting for you'],
 };
 
 type Todo = { at: number; entry?: LiveEntry; alert?: HelpAlert };
