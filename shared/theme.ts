@@ -14,7 +14,7 @@ export type WalkBehind =
     | { shape: 'ellipse'; rect: Rect; sortY: number }
     | { shape: 'poly'; points: readonly Point[]; sortY: number };
 
-export type Zone = { id: string; rect: Rect };
+export type Zone = { id: string; rect: Rect; name?: string };
 
 // A transparent piece of an art sheet. Source coordinates are fractions of its
 // image, so 1024px and 2048px versions fit the same layout. sortY makes a piece
@@ -40,6 +40,7 @@ export type Theme = {
     zones: Zone[];          // named places, for the story
     layout?: string;       // stable layout version shared by seasonal treatments
     layers?: ArtLayer[];
+    scenery?: { setting: string; ground: string; objects: string[] };
 };
 
 // The avatar's feet: what bumps into walls, in world pixels (FIGURE_BODY in src/game/AvatarFigure.ts).
@@ -156,6 +157,9 @@ export function validateTheme(theme: Theme): { errors: string[]; warnings: strin
         if (!(piece.sortY >= 0 && piece.sortY <= theme.art)) errors.push(`${label} has its ground line outside the picture.`);
     });
     const seen = new Set<string>();
+    if (theme.scenery && (typeof theme.scenery.setting !== 'string' || !theme.scenery.setting.trim() || theme.scenery.setting.length > 200
+        || typeof theme.scenery.ground !== 'string' || theme.scenery.ground.length > 4000 || !Array.isArray(theme.scenery.objects)
+        || theme.scenery.objects.length !== 6 || theme.scenery.objects.some(s => typeof s !== 'string' || !s.trim() || s.length > 500))) errors.push('Scenery needs a setting, ground description and six object descriptions.');
     for (const [index, layer] of (theme.layers ?? []).entries()) {
         const [x, y, w, h] = layer.source;
         if (!layer.image.trim() || ![...layer.source, ...layer.rect].every(Number.isFinite)
@@ -166,6 +170,7 @@ export function validateTheme(theme: Theme): { errors: string[]; warnings: strin
     }
     for (const zone of theme.zones) {
         if (!zone.id.trim()) errors.push('A zone has no name.');
+        if (zone.name !== undefined && (typeof zone.name !== 'string' || !zone.name.trim() || zone.name.length > 120)) errors.push('Place labels must be between 1 and 120 characters.');
         else if (seen.has(zone.id)) errors.push(`Two zones are called "${zone.id}".`);
         seen.add(zone.id);
         if (!(zone.rect[2] > 0 && zone.rect[3] > 0)) errors.push(`Zone "${zone.id}" has no size.`);
@@ -198,6 +203,7 @@ export function parseTheme(value: unknown): Theme {
         || !list(t.walkBehind) || !t.walkBehind.every(p => shape(p) && Number.isFinite((p as WalkBehind).sortY))
         || !list(t.zones) || !t.zones.every(z => z && typeof z.id === 'string' && rect(z.rect))
         || t.layout !== undefined && typeof t.layout !== 'string'
+        || t.scenery !== undefined && (!t.scenery || typeof t.scenery !== 'object')
         || t.layers !== undefined && (!list(t.layers) || !t.layers.every(p => p && typeof p.image === 'string' && rect(p.rect) && rect(p.source)))) {
         throw new Error('That theme has missing or malformed shapes, places or art pieces.');
     }
@@ -218,6 +224,7 @@ export function formatTheme(theme: Theme): string {
         ` "art": ${theme.art},`,
         ` "world": ${theme.world},`,
         ...(theme.layout ? [` "layout": ${line(theme.layout)},`] : []),
+        ...(theme.scenery ? [` "scenery": ${line(theme.scenery)},`] : []),
         ...(theme.layers?.length ? [` "layers": ${lines(theme.layers)},`] : []),
         ` "spawn": ${line(theme.spawn)},`,
         ` "blocked": ${lines(theme.blocked.map(rect => [...rect]))},`,

@@ -3,6 +3,9 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getTheme, themes } from '../../shared/themeCatalog';
 import { COMMONS_LAYOUT } from '../../shared/commons';
+import { artGrid, SCENERY_PRESETS, sceneryTheme, type SceneryPreset } from '../../shared/scenery';
+import { layoutGuide } from '../../shared/artTemplate';
+import { sceneryPrompts } from '../../shared/sceneryPrompts';
 import { sheetTransparencyProblem } from '../../shared/artSheet';
 import { ArtPiece } from '../components/ThemePicture';
 import { downloadArtTemplate, loadPicture } from '../themeFiles';
@@ -60,11 +63,12 @@ const polygon = (points: readonly (readonly [number, number])[]) => points.map(p
 
 export default function Studio() {
   const [params] = useSearchParams();
-  const initial = getTheme(params.get('theme') ?? 'commons-garden');
+  const initial = getTheme(params.get('theme') ?? 'scene-beach');
   const [theme, setTheme] = useState<Theme>(() => clone(initial));
   const [imageUrl, setImageUrl] = useState(initial.image);
   const [sheetUrl, setSheetUrl] = useState<string | undefined>();
-  const [direction, setDirection] = useState('A welcoming autumn village with amber leaves and warm windows.');
+  const [direction, setDirection] = useState('A welcoming, colorful world with generous space for a class to gather.');
+  const [sceneryPreset, setSceneryPreset] = useState<SceneryPreset>('beach');
   const [exporting, setExporting] = useState(false);
   const [tool, setTool] = useState<Tool>('select');
   const [picked, setSelection] = useState<Selection>(null);
@@ -338,6 +342,7 @@ export default function Studio() {
     try {
       const probe = await loadPicture(url);
       if (probe.naturalWidth !== probe.naturalHeight) throw new Error('Use a square background. The current picture and geometry have been kept.');
+      if (theme.scenery && Object.hasOwn(themes, theme.id)) newTreatment();
       setImageUrl(url);
       setMessage(`Opened ${probe.naturalWidth} × ${probe.naturalHeight}. The map coordinates stay at ${theme.art} × ${theme.art}, so every shape stays in place.`);
     } catch (cause) { URL.revokeObjectURL(url); setMessage(cause instanceof Error ? cause.message : 'Could not open that picture.'); }
@@ -347,22 +352,30 @@ export default function Studio() {
     const url = URL.createObjectURL(file);
     try {
       const img = await loadPicture(url);
-      if (img.naturalWidth !== img.naturalHeight || img.naturalWidth < 512) throw new Error('Use a square art sheet at least 512 pixels across, with four equal slots.');
-      const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
-      const ctx = canvas.getContext('2d')!; ctx.drawImage(img, 0, 0, 64, 64);
-      const pixels = ctx.getImageData(0, 0, 64, 64).data;
-      const problem = sheetTransparencyProblem(pixels, 64, 64);
+      if (Math.min(img.naturalWidth, img.naturalHeight) < 512 || (!theme.scenery && img.naturalWidth !== img.naturalHeight)) throw new Error(theme.scenery ? 'Use a transparent art sheet at least 512 pixels per side, with three columns and two rows.' : 'Use a square art sheet at least 512 pixels across, with four equal slots.');
+      const grid = artGrid(theme), width = grid.columns * 32, height = grid.rows * 32;
+      const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d')!; ctx.drawImage(img, 0, 0, width, height);
+      const pixels = ctx.getImageData(0, 0, width, height).data;
+      const problem = sheetTransparencyProblem(pixels, width, height, grid.columns, grid.rows);
       if (problem) throw new Error(problem);
       if (Object.hasOwn(themes, theme.id)) newTreatment();
-      setSheetUrl(url); setMessage('Art sheet opened. All collisions stay in place. Walk behind both trees to check their shape and trunk position.');
+      setSheetUrl(url); setMessage(theme.scenery ? 'Six scenery objects opened. Walk behind the two tall objects and around the low obstacle to check their fit.' : 'Art sheet opened. All collisions stay in place. Walk behind both trees to check their shape and trunk position.');
     } catch (cause) { URL.revokeObjectURL(url); setMessage(cause instanceof Error ? cause.message : 'Could not open that art sheet.'); }
   };
   const newTreatment = () => {
-    const id = 'commons-custom';
-    change({ ...clone(theme), id, name: 'My Commons', layers: theme.layers?.map(layer => ({ ...layer, image: `/assets/maps/${id}.png` })) });
+    const id = theme.scenery ? 'scene-custom' : 'commons-custom';
+    change({ ...clone(theme), id, name: theme.scenery ? 'My scenery' : 'My Commons',
+      layers: theme.layers?.map(layer => ({ ...layer, image: theme.scenery ? layer.image : `/assets/maps/${id}.png` })) });
     // Keep the current art visible until a replacement sheet is chosen.
     if (!sheetUrl) setSheetUrl(theme.layers?.[0]?.image);
-    setMessage('Name your new treatment and choose an unused id. Open its AI art sheet, walk around it, then download the theme file.');
+    setMessage('Name your new scenery and choose an unused id. Import its art, walk around it, then download the theme file.');
+  };
+  const newScenery = () => {
+    const next = sceneryTheme(sceneryPreset, `scene-${sceneryPreset}-custom`);
+    change(next); setImageUrl(URL.createObjectURL(new Blob([layoutGuide(next)], { type: 'image/svg+xml' })));
+    setSheetUrl('/assets/maps/empty.svg'); setSelection(null); setPreview(false); keys.current.clear();
+    setMessage('Your new setting is ready to brief. This is a layout guide: generate and open both the ground and scenery sheet to see the finished world.');
   };
   const loadRegistered = (id: string) => {
     const chosen = themes[id];
@@ -408,6 +421,7 @@ export default function Studio() {
   const pickedPolygon = pickedPiece?.shape === 'poly' ? pickedPiece.points : null;
 
   const setField = (patch: Partial<Theme>) => change({ ...theme, ...patch });
+  const prompts = theme.scenery ? sceneryPrompts(theme, direction) : null;
   const footW = (FOOT.left + FOOT.right) / world.scale;
   const footH = (FOOT.up + FOOT.down) / world.scale;
 
@@ -437,7 +451,7 @@ export default function Studio() {
           {layers.zones && !preview && theme.zones.map((zone, index) => <g key={zone.id + index}>
             <rect className={`zone${edited('zone', index) ? ' picked' : ''}`} x={zone.rect[0]} y={zone.rect[1]} width={zone.rect[2]} height={zone.rect[3]}
               onPointerDown={event => grab(event, 'zone', index)} />
-            <text className="zone-label" x={zone.rect[0] + 4} y={zone.rect[1] + 14 / zoom} fontSize={13 / zoom} pointerEvents="none">{zone.id}</text>
+            <text className="zone-label" x={zone.rect[0] + 4} y={zone.rect[1] + 14 / zoom} fontSize={13 / zoom} pointerEvents="none">{zone.name ?? zone.id}</text>
           </g>)}
           {layers.behind && !preview && theme.walkBehind.map((piece, index) => {
             const box = bounds(piece);
@@ -488,20 +502,39 @@ export default function Studio() {
       </header>
 
       <section className="studio-template">
-        <span className="studio-eyebrow">SEASON WORKSHOP</span>
+        <span className="studio-eyebrow">SCENERY WORKSHOP</span>
         <label className="studio-field">Choose a map
           <select aria-label="Choose a map" value={Object.hasOwn(themes, theme.id) ? theme.id : ''} onChange={event => loadRegistered(event.target.value)}>
             {!Object.hasOwn(themes, theme.id) && <option value="">{theme.name} · draft</option>}
             {Object.values(themes).map(item => <option key={item.id} value={item.id}>{item.name}{item.id === 'plaza' ? ' · Season 1' : ''}</option>)}
           </select>
         </label>
+        <label className="studio-field">Start a different setting
+          <select aria-label="Scenery preset" value={sceneryPreset} onChange={event => setSceneryPreset(event.target.value as SceneryPreset)}>
+            {Object.entries(SCENERY_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.name}</option>)}
+          </select>
+        </label>
+        <button onClick={newScenery}>New scenery</button>
         <p>{theme.blocked.length + (theme.blockedShapes?.length ?? 0)} collision pieces · {theme.walkBehind.length + (theme.layers ?? []).filter(p => p.sortY !== undefined).length} walk-behind pieces · {theme.zones.length} places</p>
+        {theme.scenery && <>
+          <p className="studio-hint">Change the whole world: ground, six scenery objects and place names. Reuse the clear walking routes and two places to walk behind.</p>
+          <div className="studio-row"><button onClick={newTreatment}>New treatment</button>
+            <label className="file">Open AI ground<input type="file" accept="image/png,image/webp" onChange={event => void openPicture(event.target.files?.[0])} /></label>
+            <label className="file">Open AI art sheet<input type="file" accept="image/png,image/webp" onChange={event => void openSheet(event.target.files?.[0])} /></label></div>
+          <label className="studio-field">Setting<input aria-label="Setting" maxLength={200} value={theme.scenery.setting} onChange={event => setField({ scenery: { ...theme.scenery!, setting: event.target.value } })} /></label>
+          <label className="studio-field">Ground and atmosphere<textarea aria-label="Ground and atmosphere" rows={3} maxLength={4000} value={theme.scenery.ground} onChange={event => setField({ scenery: { ...theme.scenery!, ground: event.target.value } })} /></label>
+          <details><summary>Scenery objects and place names</summary>
+            {theme.scenery.objects.map((object, i) => <label key={i} className="studio-field">{i < 3 ? `Large object ${i + 1}` : i < 5 ? `Tall object ${i - 2} · walk behind` : 'Low rounded object'}
+              <input aria-label={`Scenery object ${i + 1}`} maxLength={500} value={object} onChange={event => setField({ scenery: { ...theme.scenery!, objects: theme.scenery!.objects.map((s, n) => n === i ? event.target.value : s) } })} /></label>)}
+            {theme.zones.map((zone, i) => <label key={i} className="studio-field">Place {i + 1}<input aria-label={`Place ${i + 1}`} maxLength={120} value={zone.name ?? zone.id} onChange={event => setField({ zones: theme.zones.map((z, n) => n === i ? { ...z, name: event.target.value } : z) })} /></label>)}
+          </details>
+        </>}
         {theme.layout === COMMONS_LAYOUT && <>
           <p className="studio-hint">Hotel, café, shop and tree: four art slots, one layout. Both seasonal maps use exactly the same paths.</p>
           <div className="studio-row"><button onClick={newTreatment}>New treatment</button>
             <label className="file">Open AI art sheet<input type="file" accept="image/png,image/webp" onChange={event => void openSheet(event.target.files?.[0])} /></label></div>
         </>}
-        <label className="studio-field">Describe the next season
+        <label className="studio-field">Art direction
           <textarea aria-label="Art direction" value={direction} onChange={event => setDirection(event.target.value)} rows={3} maxLength={2000} />
         </label>
         <button className="primary" disabled={exporting || problems.errors.length > 0} onClick={async () => {
@@ -510,7 +543,14 @@ export default function Studio() {
           catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Could not export the template.'); }
           finally { setExporting(false); }
         }}>{exporting ? 'Making the kit…' : 'Download AI Template'}</button>
-        <p className="studio-hint">A ZIP with the prompt, map guide, art-slot guide, current reference and theme file.</p>
+        <p className="studio-hint">{theme.scenery ? 'A ZIP with separate ground and scenery prompts, visual guides, story setting and theme file.' : 'A ZIP with the prompt, map guide, art-slot guide, current reference and theme file.'}</p>
+        {prompts && <details><summary>Preview or copy the art prompts</summary>
+          <label className="studio-field">1. Ground prompt<textarea aria-label="Ground prompt" readOnly rows={6} value={prompts.ground} /></label>
+          <label className="studio-field">2. Scenery prompt<textarea aria-label="Scenery prompt" readOnly rows={6} value={prompts.objects} /></label>
+          <p className="studio-hint">Generate the ground first. Use it as a style reference when generating the transparent scenery sheet.</p>
+          <p className="studio-hint">For a matching adventure, use story-context.md from the kit in Mission Studio. Saved campaigns keep their original story and answers.</p>
+          <Link to={`/mission-studio?theme=${encodeURIComponent(theme.id)}`}>Open Mission Studio</Link>
+        </details>}
         {!preview && <div className="studio-row"><button onClick={startPreview}>Walk around it</button><button onClick={check}>Check paths</button></div>}
         {message && <p className="studio-message" role="status">{message}</p>}
       </section>
@@ -574,7 +614,7 @@ export default function Studio() {
         <button className="primary" onClick={download} disabled={problems.errors.length > 0}>Download the theme file</button>
         <button onClick={() => { void navigator.clipboard?.writeText(formatTheme(theme)); setMessage('The theme is copied.'); }}>Copy it</button>
       </div>
-      {theme.layout === COMMONS_LAYOUT && <p className="studio-hint">Install a new treatment: <code>npm run theme -- "theme.json" --sheet "art.png"</code>. Restart to offer it for new games.</p>}
+      {(theme.layout === COMMONS_LAYOUT || theme.scenery) && <p className="studio-hint">Install this scenery: <code>npm run theme -- "theme.json" {theme.scenery ? '--picture "ground.png" ' : ''}--sheet "art.png"</code>. Restart to offer it for new games.</p>}
     </aside>
   </main>;
 }

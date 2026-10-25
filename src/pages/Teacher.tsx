@@ -61,6 +61,7 @@ export default function Teacher() {
   const [newGameName, setNewGameName] = useState('');
   const [newThemeId, setNewThemeId] = useState('commons-garden');
   const plazaMap = getTheme(status?.game?.themeId);
+  const placeName = (id: string | null) => plazaMap.zones.find(z => z.id === id)?.name ?? id ?? plazaMap.name;
   const MAP_SIZE = plazaMap.world;
   const [warmupKind, setWarmupKind] = useState<WarmupKind>('facts');
   const [copyNote, setCopyNote] = useState(''); // shown when the browser would not copy
@@ -275,7 +276,7 @@ export default function Teacher() {
             if (window.confirm(next)) void action('campaign', { op: 'next' });
           }}>{campaign.chapter + 1 < campaign.chapters ? '▶ Next chapter' : '🏁 End campaign'}</button></span>}
       </section>}
-      {status.game && <LiveClass gameId={status.game.id} entries={status.entries} alerts={status.support?.alerts ?? []} online={status.online}
+      {status.game && <LiveClass gameId={status.game.id} entries={status.entries} alerts={status.support?.alerts ?? []} online={status.online.map(s => ({ ...s, zone: placeName(s.zone) }))}
         known={[...supportStudents.values()]} muted={status.muted} sound={status.sound ?? { off: [], now: Date.now(), plays: [] }} mode={status.mode} moderation={status.moderation} open={status.open}
         who={who} action={action} selected={selectedStudent} onSelect={setSelectedStudent} />}
       <nav className="teacher-nav" aria-label="Sections">
@@ -313,8 +314,8 @@ export default function Teacher() {
             style={{ left: `${student.x / MAP_SIZE * 100}%`, top: `${student.y / MAP_SIZE * 100}%` }}
             onClick={event => { event.stopPropagation(); setSelectedStudent(student.studentKey); }}
             aria-pressed={selectedStudent === student.studentKey}
-            aria-label={`${who(student.studentKey, student.name)}: ${student.zone ?? 'plaza'}`}
-            title={`${who(student.studentKey, student.name)} · ${student.zone ?? 'plaza'}`}>
+            aria-label={`${who(student.studentKey, student.name)}: ${placeName(student.zone)}`}
+            title={`${who(student.studentKey, student.name)} · ${placeName(student.zone)}`}>
             {index + 1}
             {selectedStudent === student.studentKey && <span className="teacher-map-label">{who(student.studentKey, student.name)}</span>}
           </button>)}
@@ -322,7 +323,7 @@ export default function Teacher() {
         {status.online.length ? <ul className="teacher-map-roster">{status.online.map((student, index) => <li key={student.studentKey}>
           <button type="button" aria-pressed={selectedStudent === student.studentKey}
             onClick={event => { event.stopPropagation(); setSelectedStudent(student.studentKey); }}>
-            <strong>{index + 1}. {who(student.studentKey, student.name)}</strong> · {student.zone ?? 'plaza'}{student.level !== undefined && <> · Lv {student.level}</>}
+            <strong>{index + 1}. {who(student.studentKey, student.name)}</strong> · {placeName(student.zone)}{student.level !== undefined && <> · Lv {student.level}</>}
           </button>
         </li>)}</ul> : <p>No students in the plaza right now.</p>}
       </>)}

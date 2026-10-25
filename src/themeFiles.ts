@@ -21,12 +21,12 @@ async function canvasPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
-async function svgPng(svg: string, size: number): Promise<Uint8Array> {
+async function svgPng(svg: string, size: number, height = size): Promise<Uint8Array> {
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
   try {
     const image = await loadPicture(url), canvas = document.createElement('canvas');
-    canvas.width = size; canvas.height = size;
-    canvas.getContext('2d')!.drawImage(image, 0, 0, size, size);
+    canvas.width = size; canvas.height = height;
+    canvas.getContext('2d')!.drawImage(image, 0, 0, size, height);
     return await canvasPng(canvas);
   } finally { URL.revokeObjectURL(url); }
 }
@@ -35,7 +35,7 @@ export async function downloadArtTemplate(theme: Theme, direction: string, backg
   const encoder = new TextEncoder();
   const files: Record<string, Uint8Array> = Object.fromEntries(Object.entries(templateTextFiles(theme, direction)).map(([path, text]) => [path, encoder.encode(text)]));
   files['layout.png'] = await svgPng(layoutGuide(theme), theme.art);
-  if (theme.layout === COMMONS_LAYOUT) files['art-sheet-guide.png'] = await svgPng(sheetGuide(), 1024);
+  if (theme.layout === COMMONS_LAYOUT || theme.scenery) files['art-sheet-guide.png'] = await svgPng(sheetGuide(theme), theme.scenery ? 1536 : 1024, 1024);
   const canvas = document.createElement('canvas'); canvas.width = theme.art; canvas.height = theme.art;
   const ctx = canvas.getContext('2d')!;
   ctx.drawImage(await loadPicture(background), 0, 0, theme.art, theme.art);

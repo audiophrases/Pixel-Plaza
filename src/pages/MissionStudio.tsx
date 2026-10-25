@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { getTheme, themes } from '../../shared/themeCatalog';
 import type { Campaign } from '../../shared/campaign';
 import { missionEnvelope, missionId, missionJson, MISSION_MAX_BYTES, validateMission } from '../../shared/missionSchema';
 import { importMission, type MissionImport } from '../../shared/missionImport';
@@ -21,6 +22,8 @@ function download(text: string, filename: string, type = 'application/json') {
 }
 
 export default function MissionStudio() {
+    const [params] = useSearchParams();
+    const [promptThemeId, setPromptThemeId] = useState(() => getTheme(params.get('theme') ?? undefined).id);
     const [token, setToken] = useState(readTeacherSession); const [password, setPassword] = useState('');
     const [library, setLibrary] = useState<MissionSummary[]>([]); const [draft, setDraft] = useState<MissionDraft | null>(null);
     const [campaign, setCampaign] = useState<Campaign | null>(null); const [chapterIndex, setChapterIndex] = useState(0);
@@ -96,13 +99,15 @@ export default function MissionStudio() {
                 <details className="mission-card mission-validation" open={!!checked?.errors.length}><summary>{checked?.errors.length ? `${checked.errors.length} issues to fix before publishing` : 'Ready to publish · review clue coverage'}</summary>
                     {!!checked?.errors.length && <ul className="mission-error">{checked.errors.map((item, i) => <li key={i}><strong>{item.path}</strong>: {item.message}</li>)}</ul>}
                     <ul className="mission-warning">{checked?.warnings.map((item, i) => <li key={i}>{item.message}</li>)}</ul></details>
-                <MissionEditor campaign={campaign} chapterIndex={chapterIndex} setChapterIndex={index => { setChapterIndex(index); setCandidate(null); setPrompt(''); }} onChange={edit} />
+                <MissionEditor campaign={campaign} theme={getTheme(promptThemeId)} chapterIndex={chapterIndex} setChapterIndex={index => { setChapterIndex(index); setCandidate(null); setPrompt(''); }} onChange={edit} />
                 <MissionPreview campaign={campaign} chapter={campaign.chapters[chapterIndex]} />
                 <LiveMissionPanel token={token} campaign={campaign} chapter={campaign.chapters[chapterIndex]} version={draft.version} dirty={dirty} onError={failed} />
                 <section className="mission-card"><h2>Create with an AI prompt</h2><p>Describe your idea, copy or download the prompt, then import the AI's JSON response below.</p>
+                    <label className="mission-field"><span>Story scenery</span><select aria-label="Story scenery" value={promptThemeId} onChange={e => { setPromptThemeId(e.target.value); setPrompt(''); }}>{Object.values(themes).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+                    <p className="mission-muted">The prompt uses this map's place names. Existing chapters and answers keep their wording. For uninstalled scenery, paste story-context.md from its art kit into your brief.</p>
                     <div className="mission-two-columns"><label className="mission-field"><span>Language level</span><select value={level} onChange={e => { setLevel(e.target.value); setPrompt(''); }}>{['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map(l => <option key={l}>{l}</option>)}</select></label><label className="mission-field"><span>Task</span><select value={promptMode} onChange={e => { setPromptMode(e.target.value as 'create' | 'extend' | 'quests'); setPrompt(''); }}><option value="quests">Add quests to the selected chapter</option><option value="extend">Extend this campaign with chapters</option><option value="create">Create a new campaign</option></select></label></div>
                     <MissionField label="Your mission brief" value={brief} multiline onChange={text => { setBrief(text); setPrompt(''); }} />
-                    <button className="mission-button" disabled={!brief.trim() || (promptMode === 'quests' && !campaign.chapters[chapterIndex])} onClick={() => setPrompt(buildMissionPrompt(campaign, brief, level, promptMode, campaign.chapters[chapterIndex]?.id))}>Build prompt</button>
+                    <button className="mission-button" disabled={!brief.trim() || (promptMode === 'quests' && !campaign.chapters[chapterIndex])} onClick={() => setPrompt(buildMissionPrompt(campaign, brief, level, promptMode, campaign.chapters[chapterIndex]?.id, getTheme(promptThemeId)))}>Build prompt</button>
                     {prompt && <><label className="mission-field"><span>Prompt to give your AI</span><textarea readOnly rows={10} value={prompt} /></label><div className="mission-toolbar"><button className="mission-button" onClick={() => void run(async () => {
                         try { await navigator.clipboard.writeText(prompt); setNotice('Prompt copied.'); } catch { download(prompt, `${campaign.id}-prompt.md`, 'text/markdown'); setNotice('Clipboard unavailable. Prompt downloaded.'); }
                     })}>Copy prompt</button><button className="mission-button" onClick={() => download(prompt, `${campaign.id}-prompt.md`, 'text/markdown')}>Download prompt</button></div></>}

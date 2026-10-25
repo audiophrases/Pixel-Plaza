@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { boardWait, isUnlocked, prerequisiteIds, type Campaign, type Chapter, type Objective, type Role } from '../../shared/campaign';
 import { plazaMap } from '../../shared/plazaMap';
+import type { Theme } from '../../shared/theme';
 
 export function MissionField({ label, value, onChange, multiline = false, maxLength = 6000 }: { label: string; value: string; onChange: (value: string) => void; multiline?: boolean; maxLength?: number }) {
     return <label className="mission-field"><span>{label}</span>{multiline
@@ -26,7 +27,7 @@ function RoleClues({ roles, value, onChange, label }: { roles: Role[]; value?: R
     }} />)}</details>;
 }
 
-export default function MissionEditor({ campaign, chapterIndex, setChapterIndex, onChange }: { campaign: Campaign; chapterIndex: number; setChapterIndex: (value: number) => void; onChange: (campaign: Campaign) => void }) {
+export default function MissionEditor({ campaign, chapterIndex, setChapterIndex, onChange, theme = plazaMap }: { campaign: Campaign; chapterIndex: number; setChapterIndex: (value: number) => void; onChange: (campaign: Campaign) => void; theme?: Theme }) {
     const chapter = campaign.chapters[chapterIndex];
     const updateChapter = (patch: Partial<Chapter>) => onChange({ ...campaign, chapters: campaign.chapters.map((c, i) => i === chapterIndex ? { ...c, ...patch } : c) });
     const updateObjective = (index: number, patch: Partial<Objective>) => updateChapter({ objectives: chapter.objectives.map((o, i) => i === index ? { ...o, ...patch } : o) });
@@ -103,10 +104,10 @@ export default function MissionEditor({ campaign, chapterIndex, setChapterIndex,
                 </fieldset>)}
                 <button className="mission-button" disabled={chapter.objectives.length >= 100} onClick={() => updateChapter({ objectives: [...chapter.objectives, { id: freshId('quest'), text: '', accept: [] }] })}>Add objective or quest</button>
                 <details className="mission-details"><summary>Discoveries on the map ({chapter.discoveries.length})</summary>{chapter.discoveries.map((discovery, i) => <fieldset key={discovery.id}><legend>{discovery.id}</legend>
-                    <label className="mission-field"><span>Location</span><select value={discovery.zone} onChange={e => updateChapter({ discoveries: chapter.discoveries.map((d, j) => i === j ? { ...d, zone: e.target.value } : d) })}>{plazaMap.zones.map(z => <option key={z.id}>{z.id}</option>)}</select></label>
+                    <label className="mission-field"><span>Location</span><select value={discovery.zone} onChange={e => updateChapter({ discoveries: chapter.discoveries.map((d, j) => i === j ? { ...d, zone: e.target.value } : d) })}>{theme.zones.map(z => <option key={z.id} value={z.id}>{z.name ?? z.id}</option>)}</select></label>
                     <MissionField label="Discovery clue" value={discovery.text} multiline onChange={text => updateChapter({ discoveries: chapter.discoveries.map((d, j) => i === j ? { ...d, text } : d) })} />
                     <button className="mission-button danger" onClick={() => updateChapter({ discoveries: chapter.discoveries.filter((_, j) => i !== j) })}>Remove discovery</button></fieldset>)}
-                    <button className="mission-button" disabled={chapter.discoveries.length >= 100} onClick={() => updateChapter({ discoveries: [...chapter.discoveries, { id: freshId('clue'), zone: plazaMap.zones[0].id, text: '' }] })}>Add discovery</button></details>
+                    <button className="mission-button" disabled={chapter.discoveries.length >= 100} onClick={() => updateChapter({ discoveries: [...chapter.discoveries, { id: freshId('clue'), zone: theme.zones[0].id, text: '' }] })}>Add discovery</button></details>
                 <details className="mission-details"><summary>Teacher news ({chapter.reveals.length})</summary>{chapter.reveals.map((news, i) => <fieldset key={news.id}><legend>News {i + 1}</legend>
                     <MissionField label="News text" value={news.text} multiline onChange={text => updateChapter({ reveals: chapter.reveals.map((n, j) => i === j ? { ...n, text } : n) })} />
                     <button className="mission-button" disabled={i === 0} onClick={() => updateChapter({ reveals: move(chapter.reveals, i, -1) })}>Move earlier</button> <button className="mission-button danger" onClick={() => updateChapter({ reveals: chapter.reveals.filter((_, j) => i !== j) })}>Remove news</button></fieldset>)}

@@ -8,6 +8,7 @@ import sharp from 'sharp';
 import { formatTheme, parseTheme, validateTheme } from '../shared/theme.ts';
 import { walkReport } from '../shared/walk.ts';
 import { sheetTransparencyProblem } from '../shared/artSheet.ts';
+import { artGrid } from '../shared/scenery.ts';
 
 export async function installTheme({ root, source, sheet, picture }) {
     const theme = parseTheme(JSON.parse(fs.readFileSync(source, 'utf8')));
@@ -17,11 +18,12 @@ export async function installTheme({ root, source, sheet, picture }) {
     for (const [kind, file] of [['sheet', sheet], ['picture', picture]]) {
         if (!file) continue;
         const metadata = await sharp(file, { limitInputPixels: 4096 * 4096 }).metadata();
-        if (!['png', 'webp'].includes(metadata.format) || metadata.width !== metadata.height) throw new Error(`Use a square PNG or WebP ${kind}.`);
-        if (kind === 'sheet' && (!theme.layers?.length || !metadata.hasAlpha || metadata.width < 512)) throw new Error('An art sheet needs a layered theme, transparency and at least 512 pixels per side.');
+        if (!['png', 'webp'].includes(metadata.format) || (kind === 'picture' || !theme.scenery) && metadata.width !== metadata.height) throw new Error(`Use a ${kind === 'picture' || !theme.scenery ? 'square ' : ''}PNG or WebP ${kind}.`);
+        if (kind === 'sheet' && (!theme.layers?.length || !metadata.hasAlpha || Math.min(metadata.width, metadata.height) < 512)) throw new Error('An art sheet needs a layered theme, transparency and at least 512 pixels per side.');
         if (kind === 'sheet') {
             const { data, info } = await sharp(file, { limitInputPixels: 4096 * 4096 }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-            const problem = sheetTransparencyProblem(data, info.width, info.height);
+            const grid = artGrid(theme);
+            const problem = sheetTransparencyProblem(data, info.width, info.height, grid.columns, grid.rows);
             if (problem) throw new Error(problem);
         }
         const filename = `${theme.id}${kind === 'picture' ? '-background' : ''}.${metadata.format}`;
