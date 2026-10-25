@@ -230,6 +230,11 @@ async function handle(request: Request, env: Env): Promise<Response> {
         const result = await plaza(env).classReport(request.headers.get('x-teacher-session') || '', scope);
         return 'error' in result ? json({ error: result.error }, result.status) : json(result);
     }
+    if (path === '/api/teacher/campaign-guide' && get) {
+        const query = new URL(request.url).searchParams;
+        const result = await plaza(env).campaignGuide(request.headers.get('x-teacher-session') || '', query.get('campaign') ?? undefined, query.get('game') ?? undefined);
+        return 'error' in result ? json({ error: result.error }, result.status) : json(result);
+    }
     if (path === '/api/teacher/attempts' && get) {
         const query = new URL(request.url).searchParams;
         const result = await plaza(env).teacherAttempts(request.headers.get('x-teacher-session') || '', query.get('studentKey') || undefined, query.get('cursor'), query.get('gameId') || undefined);

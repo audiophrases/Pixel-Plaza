@@ -1,0 +1,28 @@
+.mission-guide { width: 100%; box-sizing: border-box; margin: .75rem 0; border: 1px solid #c9d9d4; border-radius: 10px; background: #f5faf7; font-size: .9rem; }
+.mission-guide > summary { cursor: pointer; padding: .75rem .9rem; }
+.mission-guide > summary > span { margin-left: .7rem; color: #596d66; font-size: .8rem; }
+.mission-guide-body { padding: 0 .9rem .75rem; }
+.mission-guide-body p { margin: .55rem 0; line-height: 1.5; }
+.mission-guide-select { display: flex; align-items: center; gap: .6rem; font-weight: 600; margin: .7rem 0; }
+.mission-guide-select select { font: inherit; padding: .4rem .6rem; max-width: 100%; min-width: 0; border: 1px solid #bdccc5; border-radius: 6px; background: white; }
+.mission-guide-body h4 { margin: .8rem 0 .35rem; font-size: 1rem; }
+.mission-guide-body h5 { margin: .8rem 0 .35rem; font-size: .8rem; color: #456557; }
+.mission-guide-body ol { padding-left: 1.4rem; margin: .5rem 0; }
+.mission-guide-body ol > li { display: list-item; margin: .3rem 0; line-height: 1.5; }
+.mission-guide-note { font-size: .8rem; color: #596d66; }
+.mission-guide-task { margin: .35rem 0; background: white; border: 1px solid #dce6e0; border-radius: 7px; }
+.mission-guide-task > summary { display: flex; align-items: baseline; gap: .55rem; padding: .6rem .7rem; cursor: pointer; }
+.mission-guide-task > summary > span:nth-child(2) { min-width: 0; flex: 1; }
+.mission-guide-number { color: #6e8c7c; font-size: .8rem; }
+.mission-guide-answer { display: block; margin-top: .2rem; font-size: .85rem; color: #315642; overflow-wrap: anywhere; }
+.mission-guide-tag { white-space: nowrap; padding: .15rem .4rem; border-radius: 5px; background: #e5edf9; color: #315281; font-size: .7rem; }
+.mission-guide-task-body { padding: 0 .8rem .65rem; }
+.mission-guide-evidence, .mission-guide-optional { margin-top: .75rem; }
+.mission-guide-evidence > summary, .mission-guide-optional > summary { cursor: pointer; font-weight: 600; font-size: .85rem; padding: .3rem 0; }
+.mission-guide-body dl { margin: .5rem 0; }
+.mission-guide-body dl > div { display: grid; grid-template-columns: 130px 1fr; gap: .6rem; padding: .35rem 0; border-bottom: 1px solid #e2e9e4; font-size: .85rem; }
+.mission-guide-body dt { font-weight: 600; }
+.mission-guide-body dd { margin: 0; line-height: 1.5; }
+.teacher-campaign-choices > li:has(.mission-guide) { flex-wrap: wrap; }
+.teacher-campaign-choices > li > .mission-guide { flex-basis: 100%; margin: .3rem 0 0; }
+@media (max-width: 600px) { .mission-guide > summary > span { display: block; margin: .25rem 0 0; } .mission-guide-body dl > div { grid-template-columns: 1fr; gap: .2rem; } .mission-guide-select { align-items: stretch; flex-direction: column; } .mission-guide-task > summary { flex-wrap: wrap; } }

@@ -997,7 +997,10 @@ test('Mission Studio migration: legacy games retain roles, progress and thief as
         assert.ok(migrated, 'test found the isolated PlazaRoom database');
         plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); base = plaza.base;
         const after = (await teacher('status')).body.campaign;
-        assert.deepEqual(after, before, 'migration preserves campaign state exactly');
+        const { guideVersion: beforeGuide, ...beforeProgress } = before;
+        const { guideVersion: afterGuide, ...afterProgress } = after;
+        assert.deepEqual(afterProgress, beforeProgress, 'migration preserves campaign state exactly');
+        assert.notEqual(afterGuide, beforeGuide, 'a rebuilt mission epoch refreshes the teacher guide');
         const seed = (await api(base, '/api/teacher/missions/get?id=castanyada', { session })).body.draft;
         const edit = structuredClone(seed.campaign); edit.title = 'A new template';
         const saved = (await api(base, '/api/teacher/missions/save', { session, body: { id: 'castanyada', version: seed.version, envelope: missionEnvelope(edit) } })).body.draft;
@@ -1697,7 +1700,7 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         assert.equal(opened.campaign, null);
         assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada', 'castanyada-side-quests', 'castanyada-complete', 'castanyada-investigations', 'plaza-free-play']);
         assert.deepEqual(opened.campaigns.find(item => item.id === 'castanyada-investigations'),
-            { id: 'castanyada-investigations', title: 'Castanyada: Witness Investigations', chapters: ['The Missing Chestnuts', 'Conflicting Stories', 'The Hotel Cellar', 'The Missing Festival Plan', 'The Haunted Celebration'],
+            { id: 'castanyada-investigations', title: 'Castanyada: Witness Investigations', revision: 'builtin-castanyada-investigations-v1', chapters: ['The Missing Chestnuts', 'Conflicting Stories', 'The Hotel Cellar', 'The Missing Festival Plan', 'The Haunted Celebration'],
                 mystery: true, partnerQuests: true, witnesses: true });
 
         // No story yet: nothing is sent.
@@ -2779,6 +2782,97 @@ test('saved games keep their maps, authoritative geometry and positions across s
         assert.deepEqual(new Set(original.games.map(g => g.themeId)), new Set(['plaza', 'commons-garden', 'commons-autumn']));
     } finally {
         alex?.ws.close(); await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
+test('teacher guides are private and follow published previews, pinned games, live additions and current thieves', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-guide-'));
+    const pinPlayUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    let plaza = await startPlaza(pinPlayUrl, persistTo); const sockets = [];
+    try {
+        let base = plaza.base;
+        assert.equal((await api(base, '/api/teacher/campaign-guide?campaign=castanyada')).status, 401);
+        assert.equal((await api(base, '/api/teacher/campaign-guide?campaign=castanyada', { token: 'signed-a' })).status, 401);
+        const session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+        const basic = await teacher('campaign-guide?campaign=castanyada');
+        assert.equal(basic.status, 200); assert.equal(basic.body.chapters.length, 3);
+        assert.equal(basic.body.chapters[0].main[0].witnesses, 0);
+        assert.equal(basic.body.chapters[0].main[0].answer, 'park / pond');
+        const strict = (await teacher('campaign-guide?campaign=castanyada-investigations')).body;
+        assert.equal(strict.chapters.length, 5);
+        assert.equal(strict.chapters[1].main.find(o => o.id === 'thief').witnesses, 2);
+        assert.equal((await teacher('campaign-guide?campaign=not-published')).status, 404);
+
+        let draft = (await teacher('missions/create', { id: 'guide-custom', source: 'castanyada' })).body.draft;
+        draft.campaign.title = 'Original guide';
+        draft = (await teacher('missions/save', { id: 'guide-custom', version: draft.version, envelope: missionEnvelope(draft.campaign) })).body.draft;
+        draft = (await teacher('missions/publish', { id: 'guide-custom', version: draft.version })).body.draft;
+        const opened = (await teacher('game', { name: 'Guide class', randomNames: false })).body;
+        PIN = opened.pin; const game = opened.game.id;
+        const alex = await enter(base, 'signed-a', null), sam = await enter(base, 'signed-b', null); sockets.push(alex, sam);
+        const previousVisitor = await enter(base, 'signed-c', null); sockets.push(previousVisitor);
+        previousVisitor.ws.close(); await previousVisitor.closed;
+        await teacher('campaign', { op: 'start', campaign: 'guide-custom' });
+        const beforeArrival = (await teacher('status')).body.campaign.guideVersion;
+        const late = await enter(base, 'signed-c', null); sockets.push(late);
+        assert.notEqual((await teacher('status')).body.campaign.guideVersion, beforeArrival, 'a returning student’s newly assigned role refreshes the guide');
+        const student = (await alex.next(m => m.t === 'quest' && m.quest)).quest;
+        assert.equal(JSON.stringify(student).includes('"unlockedClues"'), false, 'teacher clue trails never enter a student message');
+        assert.equal(JSON.stringify(student).includes('"accept"'), false);
+        let live = (await teacher(`campaign-guide?game=${game}`)).body;
+        const originalRevision = live.campaign.revision;
+        assert.equal(live.game.id, game); assert.equal(live.campaign.title, 'Original guide');
+        assert.equal((await teacher(`campaign-guide?campaign=guide-custom&game=${game}`)).status, 400);
+        draft.campaign.title = 'Revised guide'; draft.campaign.chapters[0].objectives[0].accept = ['cafe'];
+        draft = (await teacher('missions/save', { id: 'guide-custom', version: draft.version, envelope: missionEnvelope(draft.campaign) })).body.draft;
+        draft = (await teacher('missions/publish', { id: 'guide-custom', version: draft.version })).body.draft;
+        const preview = (await teacher('campaign-guide?campaign=guide-custom')).body;
+        assert.equal(preview.chapters[0].main[0].answer, 'cafe');
+        assert.notEqual(preview.campaign.revision, originalRevision);
+        assert.equal((await teacher('status')).body.campaigns.find(c => c.id === 'guide-custom').revision, preview.campaign.revision, 'the campaign picker can refresh an open preview after publication');
+        live = (await teacher(`campaign-guide?game=${game}`)).body;
+        assert.equal(live.campaign.revision, originalRevision);
+        assert.equal(live.chapters[0].main[0].answer, 'park / pond', 'guide matches the played revision rather than a new draft');
+
+        draft.campaign.chapters[0].objectives.push({ id: 'guide-addon', text: 'Interview your partner about the next delivery.', accept: [], kind: 'report', optional: true,
+            activity: 'interview', board: { minPlayers: 2 } });
+        draft = (await teacher('missions/save', { id: 'guide-custom', version: draft.version, envelope: missionEnvelope(draft.campaign) })).body.draft;
+        const target = (await teacher('missions/live')).body.target;
+        const beforeVersion = (await teacher('status')).body.campaign.guideVersion;
+        const review = await teacher('missions/live-preview', { gameId: game, targetVersion: target.version, targetEpoch: target.epoch, chapterId: target.chapter.id,
+            sourceId: 'guide-custom', sourceVersion: draft.version, objectiveIds: ['guide-addon'] });
+        assert.equal(review.status, 200, JSON.stringify(review.body));
+        assert.equal((await teacher('missions/live-release', { previewId: review.body.preview.id })).status, 200);
+        assert.notEqual((await teacher('status')).body.campaign.guideVersion, beforeVersion);
+        live = (await teacher(`campaign-guide?game=${game}`)).body;
+        assert.ok(live.chapters[0].optional.some(o => o.id === 'guide-addon'));
+        assert.equal(live.chapters[0].main[0].answer, 'park / pond');
+
+        const advanced = (await teacher('campaign', { op: 'next' })).body.campaign;
+        const culprit = advanced.players.find(p => p.thief); assert.ok(culprit);
+        live = (await teacher(`campaign-guide?game=${game}`)).body;
+        assert.equal(live.currentChapter, 1);
+        assert.ok(live.chapters[1].main.find(o => o.id === 'thief').answer.includes(culprit.name));
+        assert.equal(JSON.stringify(live.chapters[1].clues).includes('{hat}'), false);
+        for (const socket of sockets) { socket.ws.close(); await socket.closed; }
+        await plaza.stop(); plaza = await startPlaza(pinPlayUrl, persistTo); base = plaza.base;
+        live = (await teacher(`campaign-guide?game=${game}`)).body;
+        assert.equal(live.campaign.revision, originalRevision);
+        assert.ok(live.chapters[0].optional.some(o => o.id === 'guide-addon'), 'live additions appear after restart');
+        assert.ok(live.chapters[1].main.find(o => o.id === 'thief').answer.includes(culprit.name));
+        await teacher('campaign', { op: 'reset', confirm: true });
+        const restarted = (await teacher('campaign', { op: 'start', campaign: 'guide-custom' })).body.campaign.guideVersion;
+        await teacher('campaign', { op: 'reset', confirm: true });
+        const restartedAgain = (await teacher('campaign', { op: 'start', campaign: 'guide-custom' })).body.campaign.guideVersion;
+        assert.notEqual(restartedAgain, restarted, 'resetting the same campaign refreshes an already open guide');
+        await teacher('game', { name: 'Other class', randomNames: false });
+        assert.equal((await teacher(`campaign-guide?game=${game}`)).status, 409, 'a stale tab cannot show another game’s answers');
+        assert.equal((await teacher('campaign-guide')).status, 404);
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
         await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
     }
 });

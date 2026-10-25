@@ -15,6 +15,7 @@
     "check:studio": "node scripts/check-studio.mjs",
     "check:themes": "node scripts/check-theme-browser.mjs",
     "check:missions": "node scripts/check-mission-studio.mjs",
+    "check:teacher-guide": "node scripts/check-teacher-guide.mjs",
     "theme": "node scripts/install-theme.mjs"
   },
   "dependencies": {

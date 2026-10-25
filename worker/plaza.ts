@@ -29,6 +29,8 @@ import { REPORT_LINES_PER_STUDENT, type ClassReportData, type ReportLine } from 
 import { type Avatar, chatProblem, clampPosition, defaultAvatar, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 import { HEARING_RANGE, TYPING_EVERY_MS } from '../shared/chat.ts';
 import { VOICE_SAMPLE } from './speech.ts';
+import { buildGuide, type TeacherGuide } from '../shared/teacherGuide.ts';
+import { missionId } from '../shared/missionSchema.ts';
 
 const TICKET_MS = 60_000;
 const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
@@ -83,6 +85,7 @@ export type GameSummary = { id: string; name: string; pin: string; lastOpened: n
 
 // Where this game's campaign stands, and what every student has done in it.
 export type CampaignStatus = {
+    guideVersion: string;
     id: string; title: string; status: QuestView['status']; chapter: number; chapters: number; chapterTitle: string; chapterTitles: string[];
     reveals: { shown: number; total: number; next: string | null }; // prepared news the teacher can release
     players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
@@ -303,6 +306,34 @@ export class PlazaRoom extends DurableObject<Env> {
             const game = this.activeGame(); if (game) this.sendQuestToAll(game);
         }
         return result;
+    }
+
+    campaignGuide(token: string, campaignId?: string, gameId?: string): TeacherGuide | { error: string; status: number } {
+        if (!token || !this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray().length) {
+            return { error: 'Please sign in again.', status: 401 };
+        }
+        if (campaignId !== undefined) {
+            if (gameId !== undefined || !missionId(campaignId)) return { error: 'Choose one campaign or the current game.', status: 400 };
+            const published = this.missions.latest(campaignId);
+            if (!published) return { error: 'Published campaign not found.', status: 404 };
+            return { campaign: { id: published.campaign.id, title: published.campaign.title, revision: published.revision },
+                game: null, currentChapter: 0, ...buildGuide(published.campaign) };
+        }
+        const game = this.game(this.activeGame());
+        if (gameId !== undefined && game?.id !== gameId) return { error: 'The active game changed. Reopen its teacher guide.', status: 409 };
+        const row = game && this.campaignRow(game.id);
+        const campaign = game && this.gameCampaign(game.id);
+        if (!game || !row || !campaign) return { error: 'Start a campaign to see its teacher guide.', status: 404 };
+        const names = this.rosterNames(game.id);
+        const players = this.campaignPlayers(game.id);
+        const thieves = campaign.chapters.map((_, index) => this.chapterThieves(game.id, campaign, index));
+        return { campaign: { id: campaign.id, title: campaign.title, revision: row.revision_id ?? '' },
+            game: { id: game.id, name: game.name }, currentChapter: row.chapter, ...buildGuide(campaign, {
+                roleNames: Object.fromEntries(campaign.roles.map(role => [role.id, players.filter(p => p.role_id === role.id).map(p => names.get(p.student_key) ?? 'Student')])),
+                thiefNames: thieves.map(keys => keys.map(key => names.get(key) ?? 'Student')),
+                clueText: (text, chapter) => thieves[chapter].length ? fillThiefClue(text, thieves[chapter].map(key => lookOf(this.avatarOf(key))))
+                    : text.replace(/\{(?:hat|coat|glasses|hair)\}/g, '(an avatar detail revealed when the thief is chosen)'),
+            }) };
     }
 
     private gameCampaign(game: string | null): Campaign | undefined {
@@ -1220,7 +1251,10 @@ export class PlazaRoom extends DurableObject<Env> {
         const campaign = row && this.gameCampaign(game);
         if (!game || !row || !campaign) return null;
         const names = this.rosterNames(game);
+        const players = this.campaignPlayers(game);
+        const thieves = this.chapterThieves(game, campaign, row.chapter);
         return {
+            guideVersion: JSON.stringify([row.revision_id, row.live_epoch, row.live_version, row.chapter, [...names], players.map(player => [player.student_key, player.role_id]), thieves.map(key => [key, this.avatarOf(key)])]),
             id: campaign.id, title: campaign.title, status: row.status, chapter: row.chapter, chapters: campaign.chapters.length,
             chapterTitle: campaign.chapters[Math.min(row.chapter, campaign.chapters.length - 1)].title,
             chapterTitles: campaign.chapters.map(chapter => chapter.title),
@@ -1228,10 +1262,10 @@ export class PlazaRoom extends DurableObject<Env> {
                 const reveals = campaign.chapters[Math.min(row.chapter, campaign.chapters.length - 1)].reveals;
                 return { shown: Math.min(row.revealed, reveals.length), total: reveals.length, next: reveals[row.revealed]?.text ?? null };
             })(),
-            players: this.campaignPlayers(game).map(item => ({
+            players: players.map(item => ({
                 studentKey: item.student_key, name: names.get(item.student_key) ?? 'Student',
                 role: campaign.roles.find(role => role.id === item.role_id)?.name ?? item.role_id, clues: item.clues.length, done: item.done,
-                thief: this.chapterThieves(game, campaign, row.chapter).includes(item.student_key)
+                thief: thieves.includes(item.student_key)
             })),
             ...(campaign.chapters[row.chapter].objectives.some(o => o.board) ? { board: this.questBoard.summary(game, campaign.chapters[row.chapter]) } : {}),
             interviews: this.interviews.rows(game, row.chapter).map(i => ({

@@ -58,7 +58,7 @@ export class MissionRepository {
                 const campaign = this.revision(revision);
                 if (!campaign) return [];
                 const objectives = campaign.chapters.flatMap(chapter => chapter.objectives);
-                return [{ id: campaign.id, title: campaign.title, chapters: campaign.chapters.map(chapter => chapter.title),
+                return [{ id: campaign.id, title: campaign.title, revision, chapters: campaign.chapters.map(chapter => chapter.title),
                     mystery: objectives.some(objective => objective.answerThief), partnerQuests: objectives.some(objective => objective.board),
                     witnesses: objectives.some(objective => objective.conversation) }];
             })

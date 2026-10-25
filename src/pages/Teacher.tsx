@@ -7,6 +7,7 @@ import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import './Teacher.css';
 import { getTheme, themes } from '../../shared/themeCatalog';
 import ThemePicture from '../components/ThemePicture';
+import TeacherMissionGuide from '../components/TeacherMissionGuide';
 import type { InterviewView } from '../../shared/campaign';
 import type { TeacherSupport as Support } from '../../shared/support';
 import type { CampaignChoice } from '../../shared/missionTypes';
@@ -18,6 +19,7 @@ import type { AvatarConfig } from '../utils/AvatarRenderer';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; everyone?: boolean; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred?: boolean };
 type CampaignInfo = {
+  guideVersion?: string;
   id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string; chapterTitles?: string[];
   reveals: { shown: number; total: number; next: string | null };
   reports: { studentKey: string; objective: string; text: string; partner?: string; starred?: boolean }[];
@@ -262,6 +264,11 @@ export default function Teacher() {
         {status.warmup?.active && <span className="teacher-now-item">🧩 Warm-up · {status.warmup.team.done} of {status.warmup.team.total} found
           <button className="btn btn-secondary btn-sm" onClick={() => void action('warmup', { op: 'end' })}>End</button></span>}
         {campaign && campaign.status !== 'campaign_complete' && <span className="teacher-now-item">📖 {campaign.title} · chapter {campaign.chapter + 1} of {campaign.chapters}
+          <button className="btn btn-secondary btn-sm" onClick={() => {
+            choose('campaign');
+            const guide = document.querySelector<HTMLDetailsElement>('#card-campaign .mission-guide');
+            if (guide) guide.open = true;
+          }}>Teacher guide</button>
           {campaign.reveals.next && <button className="btn btn-secondary btn-sm" title={campaign.reveals.next} onClick={() => void action('campaign', { op: 'reveal' })}>📰 Next news</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => {
             const next = campaign.chapter + 1 < campaign.chapters ? `Start chapter ${campaign.chapter + 2}: ${campaign.chapterTitles?.[campaign.chapter + 1] ?? ''}?` : 'End the campaign?';
@@ -353,6 +360,7 @@ export default function Teacher() {
             <ol className="teacher-chapter-line">{chapterPreview(choice.chapters).map(([number, title]) => <li key={title}>{number > 0 && <span>{number}.</span>}{title}</li>)}</ol>
           </div>
           <button className="btn btn-primary btn-sm" onClick={() => void action('campaign', { op: 'start', campaign: choice.id })}>Start</button>
+          <TeacherMissionGuide token={token} campaignId={choice.id} refreshKey={choice.revision} />
         </li>)}</ul>
         <p className="teacher-muted">Change these chapters or write your own campaign in <Link to="/mission-studio">Mission Studio</Link>.</p>
       </> : <>
@@ -365,6 +373,8 @@ export default function Teacher() {
             {state === 'now' && <small>now</small>}
           </li>;
         })}</ol>
+        <TeacherMissionGuide key={`${status.game.id}:${campaign.id}`} token={token} gameId={status.game.id}
+          currentChapter={campaign.chapter} refreshKey={campaign.guideVersion} />
         {campaign.status !== 'campaign_complete' && <div className="teacher-newgame">
           {campaign.reveals.next && <button className="btn btn-secondary" title={campaign.reveals.next}
             onClick={() => void action('campaign', { op: 'reveal' })}>Reveal the next news ({campaign.reveals.shown} of {campaign.reveals.total} shown)</button>}
@@ -544,7 +554,7 @@ function Card({ info, open, onToggle, children }: { info: CardInfo; open: boolea
 function features(choice: CampaignChoice): string {
   return [
     choice.mystery ? 'a mystery: find the thief' : 'no mystery',
-    choice.witnesses && 'witness exchanges before each conclusion',
+    choice.witnesses && 'witness exchanges for marked questions',
     choice.partnerQuests && 'partner quests on a quest board',
   ].filter(Boolean).join(' · ');
 }
