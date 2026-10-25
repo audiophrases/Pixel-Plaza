@@ -33,4 +33,3 @@ export function sceneryTheme(preset: SceneryPreset, id = `scene-${preset}`): The
 }
 
 export const isBackgroundBrief = (theme: Theme) => theme.scenery?.format === 'background';
-export const artGrid = (theme: Theme) => theme.scenery && !isBackgroundBrief(theme) ? { columns: 3, rows: 2 } : { columns: 2, rows: 2 };

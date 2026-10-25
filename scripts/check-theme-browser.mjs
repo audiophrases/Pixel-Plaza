@@ -109,51 +109,53 @@ try {
     await upload('input[accept="image/*"]', sheet);
     await waitFor(`document.body.textContent.includes('map coordinates stay at 1024')`);
     assert.equal(await evaluate(`document.querySelector('svg.studio-canvas').getAttribute('viewBox')`), '0 0 1024 1024');
-    // Full scenery changes the ground, every prop and the place names together.
+    // The handoff starts with a neutral guide and asks an external AI for one background.
     await send('Page.navigate', { url: `${origin}/studio` });
-    await waitFor(`document.querySelector('input[aria-label="Setting"]')?.value==='Summer beach'`);
-    await evaluate(`Promise.all([...document.querySelectorAll('svg image')].map(el=>new Promise((resolve,reject)=>{const i=new Image();i.onload=resolve;i.onerror=reject;i.src=el.getAttribute('href')})))`);
-    assert.equal(await evaluate(`document.querySelectorAll('svg.studio-canvas > svg').length`), 6);
-    assert.ok(await evaluate(`document.querySelector('svg.studio-canvas > image').getAttribute('href').includes('scene-beach-ground.png')`));
-    await click('Check paths'); await waitFor(`document.body.textContent.includes('Every place can be reached')`);
-    await click('Walk around it');
-    const beachShot = await send('Page.captureScreenshot', { format: 'png' });
-    fs.writeFileSync(path.join(previews, 'scene-beach-studio.png'), Buffer.from(beachShot.data, 'base64'));
-    await click('Back to drawing');
+    await waitFor(`document.querySelector('input[aria-label="Setting"]')?.value==='Custom setting'`);
+    assert.equal(await evaluate(`document.querySelectorAll('svg.studio-canvas > svg').length`), 0);
+    assert.equal(await evaluate(`document.querySelectorAll('svg.studio-canvas ellipse.behind').length`), 2);
+    assert.ok(await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='Download the theme file').disabled`), 'final export waits for imported art');
+    await click('Copy AI art prompt');
+    await waitFor(`document.body.textContent.includes('Art prompt copied') || document.body.textContent.includes('Prompt downloaded')`);
     await click('Download AI Template'); await waitFor(`document.body.textContent.includes('Downloaded the AI template kit')`);
-    const beachZip = path.join(downloads, 'scene-beach-ai-template.zip');
-    for (let i = 0; !fs.existsSync(beachZip); i++) { if (i > 100) throw new Error('Beach kit not downloaded.'); await pause(100); }
-    const sceneryResult = spawnSync('python', ['-c', 'import zipfile,sys,json,struct; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; assert {"ground-prompt.md","scenery-prompt.md","story-context.md"} <= set(z.namelist()); t=json.loads(z.read("scene-beach.json")); assert len(t["layers"])==6; assert "park: Palm cove" in z.read("story-context.md").decode(); assert struct.unpack(">II",z.read("art-sheet-guide.png")[16:24])==(1536,1024); print("Full scenery ZIP: prompts, labels, geometry and rectangular PNG guide verified")', beachZip], { encoding: 'utf8', windowsHide: true });
-    assert.equal(sceneryResult.status, 0, sceneryResult.stderr); console.log(sceneryResult.stdout.trim());
-    fs.copyFileSync(beachZip, path.join(root, 'art/templates/scene-beach-ai-template.zip'));
-    for (const [preset, setting, ground, object, place] of [['snow', 'Snowy plaza', 'Snow-covered', 'Snow-covered chalet', 'Winter garden'], ['deck', 'Cruise-ship deck', 'wooden cruise-ship deck', 'Passenger cabin', 'Sun deck']]) {
+    const briefZip = path.join(downloads, 'scenery-draft-ai-template.zip');
+    for (let i = 0; !fs.existsSync(briefZip); i++) { if (i > 100) throw new Error('Brief kit not downloaded.'); await pause(100); }
+    const briefResult = spawnSync('python', ['-c', 'import zipfile,sys,json; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; assert {"prompt.md","layout.png","story-context.md","reference.png"} <= set(z.namelist()); assert "art-sheet-guide.png" not in z.namelist(); t=json.loads(z.read("scenery-draft.json")); assert len(t["walkBehind"])==2; assert not t.get("layers"); assert "ONE complete square background" in z.read("prompt.md").decode(); print("External AI kit: one background prompt, guide, scale, simple geometry and ZIP CRCs verified")', briefZip], { encoding: 'utf8', windowsHide: true });
+    assert.equal(briefResult.status, 0, briefResult.stderr); console.log(briefResult.stdout.trim());
+    fs.copyFileSync(briefZip, path.join(root, 'art/templates/external-background-template.zip'));
+    for (const [preset, setting, ground, object, place] of [['snow', 'Snowy plaza', 'Snow-covered', 'Snow-covered chalet', 'Winter garden'], ['beach', 'Summer beach', 'Warm pale sand', 'Beach bungalow', 'Palm cove'], ['deck', 'Cruise-ship deck', 'wooden cruise-ship deck', 'Passenger cabin', 'Sun deck']]) {
         await evaluate(`(()=>{const s=document.querySelector('select[aria-label="Scenery preset"]');s.value=${JSON.stringify(preset)};s.dispatchEvent(new Event('change',{bubbles:true}))})()`);
-        await click('New scenery');
+        await click('New background brief');
         await waitFor(`document.querySelector('input[aria-label="Setting"]')?.value===${JSON.stringify(setting)}`);
-        assert.ok(await evaluate(`document.querySelector('textarea[aria-label="Ground prompt"]').value.includes(${JSON.stringify(ground)})`));
+        assert.ok(await evaluate(`document.querySelector('textarea[aria-label="Background art prompt"]').value.includes(${JSON.stringify(ground)})`));
         assert.equal(await evaluate(`document.querySelector('input[aria-label="Scenery object 1"]').value`), object);
         assert.equal(await evaluate(`document.querySelector('input[aria-label="Place 5"]').value`), place);
     }
     await evaluate(`(()=>{const i=document.querySelector('input[aria-label="Place 5"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(i,'Observation deck');i.dispatchEvent(new Event('input',{bubbles:true}))})()`);
-    assert.ok(await evaluate(`document.querySelector('svg.studio-canvas').textContent.includes('Observation deck')`), 'visible map labels follow place edits');
-    // Identify the two file controls by their labels rather than assuming DOM order.
-    await evaluate(`for(const l of document.querySelectorAll('label.file')){if(l.textContent==='Open AI ground')l.querySelector('input').id='qa-ground';if(l.textContent==='Open AI art sheet')l.querySelector('input').id='qa-sheet'}`);
-    const groundBefore = await evaluate(`document.querySelector('svg.studio-canvas > image').getAttribute('href')`);
-    await upload('#qa-ground', invalid); await waitFor(`document.body.textContent.includes('Use a square background')`);
-    assert.equal(await evaluate(`document.querySelector('svg.studio-canvas > image').getAttribute('href')`), groundBefore);
-    await upload('#qa-ground', path.join(root, 'public/assets/maps/scene-beach-ground.png'));
+    assert.ok(await evaluate(`document.querySelector('svg.studio-canvas').textContent.includes('Observation deck')`));
+    await evaluate(`(()=>{const s=document.querySelector('select[aria-label="Adjust an area"]');s.value='block:4';s.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+    await evaluate(`(()=>{const i=document.querySelector('input[aria-label="Area X"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(i,'112');i.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+    assert.ok(await evaluate(`document.querySelector('textarea[aria-label="Background art prompt"]').value.includes('[112,64,240,256]')`), 'prompt follows adjusted collision geometry');
+    await evaluate(`(()=>{const s=document.querySelector('select[aria-label="Adjust an area"]');s.value='behind:0';s.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+    await evaluate(`(()=>{const i=document.querySelector('input[aria-label="Area Width"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(i,'184');i.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+    const backgroundBefore = await evaluate(`document.querySelector('svg.studio-canvas > image').getAttribute('href')`);
+    await upload('.studio-template input[type="file"]', invalid); await waitFor(`document.body.textContent.includes('Use a square background')`);
+    assert.equal(await evaluate(`document.querySelector('svg.studio-canvas > image').getAttribute('href')`), backgroundBefore);
+    // Plain white decoding fixture: no artwork is commissioned for this test.
+    await upload('.studio-template input[type="file"]', opaquePath);
     await waitFor(`document.body.textContent.includes('map coordinates stay at 1024')`);
-    await upload('#qa-sheet', opaquePath); await waitFor(`document.body.textContent.includes('Each slot needs one visible object')`);
-    await upload('#qa-sheet', path.join(root, 'public/assets/maps/scene-beach.png'));
-    await waitFor(`document.body.textContent.includes('Six scenery objects opened')`);
-    await click('Download the theme file');
-    const sceneryJson = path.join(downloads, 'scene-deck-custom.json');
-    for (let i = 0; !fs.existsSync(sceneryJson); i++) { if (i > 100) throw new Error('Scenery JSON not downloaded.'); await pause(100); }
-    const editedScenery = JSON.parse(fs.readFileSync(sceneryJson));
-    assert.equal(editedScenery.layers.length, 6); assert.equal(editedScenery.zones[4].name, 'Observation deck');
-    assert.equal(editedScenery.scenery.setting, 'Cruise-ship deck');
-    assert.deepEqual(editedScenery.blocked, custom.blocked); assert.deepEqual(editedScenery.blockedShapes, custom.blockedShapes);
-    console.log('Full scenery: preset briefs, editable labels, square ground and rectangular transparent sheet imports passed.');
+    await click('Check paths'); await waitFor(`document.body.textContent.includes('Every place can be reached')`);
+    await click('Walk around it');
+    assert.equal(await evaluate(`document.querySelectorAll('svg.studio-canvas image[clip-path]').length`), 2, 'walking preview uses the two hiding masks');
+    await click('Back to drawing'); await click('Download the theme file');
+    const backgroundJson = path.join(downloads, 'scene-deck-custom.json');
+    for (let i = 0; !fs.existsSync(backgroundJson); i++) { if (i > 100) throw new Error('Theme JSON not downloaded.'); await pause(100); }
+    const editedBackground = JSON.parse(fs.readFileSync(backgroundJson));
+    assert.equal(editedBackground.scenery.format, 'background'); assert.equal(editedBackground.zones[4].name, 'Observation deck');
+    assert.equal(editedBackground.blocked[4][0], 112); assert.equal(editedBackground.walkBehind[0].rect[2], 184);
+    assert.equal(editedBackground.walkBehind.length, 2); assert.equal(editedBackground.blockedShapes.length, 2);
+    assert.ok(!editedBackground.layers?.length);
+    console.log('External AI workflow: neutral brief, presets, prompt copy/download, one background import, area edits, hiding preview and final export passed.');
     if (process.argv.includes('--tester')) {
         assert.ok(['localhost', '127.0.0.1'].includes(new URL(origin).hostname), 'tester mutations require a local server');
         const request = async (route, body, token) => {
@@ -162,7 +164,7 @@ try {
         };
         const { token } = await request('login', { password: 'tester' });
         await send('Network.enable');
-        for (const themeId of ['commons-garden', 'commons-autumn', 'scene-beach']) {
+        for (const themeId of ['commons-garden', 'commons-autumn']) {
             const game = await request('game', { name: `${themeId === 'commons-garden' ? 'Garden' : 'Autumn'} preview`, themeId, randomNames: false, vision: 0 }, token);
             frames.length = 0;
             await send('Page.navigate', { url: `${origin}/?tester=Ana&pin=${game.pin}` });
@@ -196,20 +198,9 @@ try {
         await evaluate(`(()=>{const s=document.querySelector('select[aria-label="Map for a new game"]');s.value='commons-garden';s.dispatchEvent(new Event('change',{bubbles:true}))})()`);
         await waitFor(`document.querySelector('.teacher-map-choice > svg')?.getAttribute('aria-label')==='Garden Commons'`);
         console.log('Teacher map picker previews both original and layered maps.');
-        await send('Page.navigate', { url: `${origin}/mission-studio?theme=scene-beach` });
-        await waitFor(`document.querySelector('nav[aria-label="Campaign library"] button')`);
-        await evaluate(`document.querySelector('nav[aria-label="Campaign library"] button').click()`);
-        await waitFor(`document.querySelector('select[aria-label="Story scenery"]')`);
-        assert.equal(await evaluate(`document.querySelector('select[aria-label="Story scenery"]').value`), 'scene-beach');
-        await evaluate(`(()=>{const l=[...document.querySelectorAll('label')].find(l=>l.querySelector('span')?.textContent==='Task');const s=l.querySelector('select');s.value='create';s.dispatchEvent(new Event('change',{bubbles:true}))})()`);
-        await evaluate(`(()=>{const l=[...document.querySelectorAll('label')].find(l=>l.querySelector('span')?.textContent==='Your mission brief');const t=l.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(t,'A missing invitation at the surf shack');t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
-        await click('Build prompt');
-        await waitFor(`[...document.querySelectorAll('textarea')].some(t=>t.readOnly&&t.value.includes('park: Palm cove'))`);
-        assert.ok(await evaluate(`[...document.querySelectorAll('select option')].some(o=>o.value==='hotel'&&o.textContent==='Bungalow')`), 'discovery editor shows scenery names while preserving IDs');
-        console.log('Mission Studio builds a beach-specific prompt and shows matching discovery labels.');
     }
     assert.deepEqual(errors, [], 'no uncaught browser exceptions');
-    console.log('PASS: seasonal and complete scenery maps, walking previews, PNG/SVG rendering, ZIP prompts, 2K/six-cell imports, geometry preservation and non-square rejection.');
+    console.log('PASS: external-AI background handoff and existing seasonal maps, walking, ZIP prompts, imports, adjustable geometry and non-square rejection.');
     console.log(`Screenshots: ${previews}`);
     await send('Browser.close');
 } finally {

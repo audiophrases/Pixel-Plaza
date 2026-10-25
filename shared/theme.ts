@@ -40,7 +40,7 @@ export type Theme = {
     zones: Zone[];          // named places, for the story
     layout?: string;       // stable layout version shared by seasonal treatments
     layers?: ArtLayer[];
-    scenery?: { format?: 'background'; setting: string; ground: string; objects: string[] };
+    scenery?: { format: 'background'; setting: string; ground: string; objects: string[] };
 };
 
 // The avatar's feet: what bumps into walls, in world pixels (FIGURE_BODY in src/game/AvatarFigure.ts).
@@ -159,8 +159,7 @@ export function validateTheme(theme: Theme): { errors: string[]; warnings: strin
     const seen = new Set<string>();
     if (theme.scenery && (typeof theme.scenery.setting !== 'string' || !theme.scenery.setting.trim() || theme.scenery.setting.length > 200
         || typeof theme.scenery.ground !== 'string' || theme.scenery.ground.length > 4000 || !Array.isArray(theme.scenery.objects)
-        || theme.scenery.format !== undefined && theme.scenery.format !== 'background'
-        || (theme.scenery.format === 'background' ? theme.scenery.objects.length > 8 : theme.scenery.objects.length !== 6)
+        || theme.scenery.format !== 'background' || theme.scenery.objects.length > 8
         || theme.scenery.objects.some(s => typeof s !== 'string' || !s.trim() || s.length > 500))) errors.push('Scenery needs a setting, scene description and up to eight simple feature descriptions.');
     for (const [index, layer] of (theme.layers ?? []).entries()) {
         const [x, y, w, h] = layer.source;

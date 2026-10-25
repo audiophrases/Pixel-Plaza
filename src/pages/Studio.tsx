@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getTheme, themes } from '../../shared/themeCatalog';
 import { COMMONS_LAYOUT } from '../../shared/commons';
-import { artGrid, isBackgroundBrief, SCENERY_PRESETS, sceneryTheme, type SceneryPreset } from '../../shared/scenery';
+import { isBackgroundBrief, SCENERY_PRESETS, sceneryTheme, type SceneryPreset } from '../../shared/scenery';
 import { layoutGuide } from '../../shared/artTemplate';
 import { sceneryPrompts } from '../../shared/sceneryPrompts';
 import { sheetTransparencyProblem } from '../../shared/artSheet';
@@ -66,8 +66,8 @@ export default function Studio() {
   const [params] = useSearchParams();
   const [initial] = useState(() => params.get('theme') ? getTheme(params.get('theme')) : sceneryTheme('custom', 'scenery-draft'));
   const [theme, setTheme] = useState<Theme>(() => clone(initial));
-  const [imageUrl, setImageUrl] = useState(() => isBackgroundBrief(initial) ? guideUrl(initial) : initial.image);
-  const [hasBackground, setHasBackground] = useState(!isBackgroundBrief(initial));
+  const [imageUrl, setImageUrl] = useState(() => isBackgroundBrief(initial) && !Object.hasOwn(themes, initial.id) ? guideUrl(initial) : initial.image);
+  const [hasBackground, setHasBackground] = useState(!isBackgroundBrief(initial) || Object.hasOwn(themes, initial.id));
   const [sheetUrl, setSheetUrl] = useState<string | undefined>();
   const [direction, setDirection] = useState('A welcoming, colorful world with generous space for a class to gather.');
   const [sceneryPreset, setSceneryPreset] = useState<SceneryPreset>('custom');
@@ -354,15 +354,15 @@ export default function Studio() {
     const url = URL.createObjectURL(file);
     try {
       const img = await loadPicture(url);
-      if (Math.min(img.naturalWidth, img.naturalHeight) < 512 || (!theme.scenery && img.naturalWidth !== img.naturalHeight)) throw new Error(theme.scenery ? 'Use a transparent art sheet at least 512 pixels per side, with three columns and two rows.' : 'Use a square art sheet at least 512 pixels across, with four equal slots.');
-      const grid = artGrid(theme), width = grid.columns * 32, height = grid.rows * 32;
+      if (img.naturalWidth < 512 || img.naturalWidth !== img.naturalHeight) throw new Error('Use a square art sheet at least 512 pixels across, with four equal slots.');
+      const width = 64, height = 64;
       const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
       const ctx = canvas.getContext('2d')!; ctx.drawImage(img, 0, 0, width, height);
       const pixels = ctx.getImageData(0, 0, width, height).data;
-      const problem = sheetTransparencyProblem(pixels, width, height, grid.columns, grid.rows);
+      const problem = sheetTransparencyProblem(pixels, width, height);
       if (problem) throw new Error(problem);
       if (Object.hasOwn(themes, theme.id)) newTreatment();
-      setSheetUrl(url); setMessage(theme.scenery ? 'Six scenery objects opened. Walk behind the two tall objects and around the low obstacle to check their fit.' : 'Art sheet opened. All collisions stay in place. Walk behind both trees to check their shape and trunk position.');
+      setSheetUrl(url); setMessage('Art sheet opened. All collisions stay in place. Walk behind both trees to check their shape and trunk position.');
     } catch (cause) { URL.revokeObjectURL(url); setMessage(cause instanceof Error ? cause.message : 'Could not open that art sheet.'); }
   };
   const newTreatment = () => {
@@ -545,11 +545,11 @@ export default function Studio() {
         </ol>}
         <p>{theme.blocked.length + (theme.blockedShapes?.length ?? 0)} collision pieces · {theme.walkBehind.length + (theme.layers ?? []).filter(p => p.sortY !== undefined).length} walk-behind pieces · {theme.zones.length} places</p>
         {theme.scenery && <>
-          <p className="studio-hint">{backgroundBrief ? 'Starter: five solid features, two hiding areas and broad open routes. Every feature can change with the setting. Move, resize or delete areas after importing your AI’s background.' : 'Existing layered draft. New background briefs use one complete image.'}</p>
+          <p className="studio-hint">Starter: five solid features, two hiding areas and broad open routes. Every feature can change with the setting. Move, resize or delete areas after importing your AI’s background.</p>
           {backgroundBrief && !hasBackground && <p className="studio-message">Layout guide only. Your art AI supplies the finished background.</p>}
           <div className="studio-row">
             <label className="file">Import AI background<input type="file" accept="image/png,image/webp" onChange={event => void openPicture(event.target.files?.[0])} /></label>
-            {!backgroundBrief && <label className="file">Open AI art sheet<input type="file" accept="image/png,image/webp" onChange={event => void openSheet(event.target.files?.[0])} /></label>}</div>
+          </div>
           <label className="studio-field">Setting<input aria-label="Setting" maxLength={200} value={theme.scenery.setting} onChange={event => setField({ scenery: { ...theme.scenery!, setting: event.target.value } })} /></label>
           <label className="studio-field">Scene description<textarea aria-label="Scene description" rows={3} maxLength={4000} value={theme.scenery.ground} onChange={event => setField({ scenery: { ...theme.scenery!, ground: event.target.value } })} /></label>
           <details><summary>Suggested features and place names</summary>

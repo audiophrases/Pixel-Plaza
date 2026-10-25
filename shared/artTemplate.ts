@@ -1,7 +1,6 @@
 import { COMMONS_LAYOUT } from './commons.ts';
 import { formatTheme, type Theme } from './theme.ts';
 import { sceneryPrompts } from './sceneryPrompts.ts';
-import { isBackgroundBrief } from './scenery.ts';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]!);
 
@@ -24,9 +23,9 @@ ${theme.zones.map(z => `<rect x="${z.rect[0]}" y="${z.rect[1]}" width="${z.rect[
 <rect x="${theme.art * .3}" y="${theme.art - 30}" width="${theme.art * .4}" height="24" rx="6" fill="white"/><text x="50%" y="${theme.art - 12}" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#334155">RED: solid · BLUE: walk behind · GREEN: open ground</text></svg>`;
 }
 
-export function sheetGuide(theme?: Theme): string {
-    const labels = theme?.scenery?.objects ?? ['HOTEL', 'CAFÉ', 'SHOP', 'TREE'];
-    const columns = theme?.scenery ? 3 : 2;
+export function sheetGuide(): string {
+    const labels = ['HOTEL', 'CAFÉ', 'SHOP', 'TREE'];
+    const columns = 2;
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${columns * 512}" height="1024" viewBox="0 0 ${columns * 512} 1024"><rect width="100%" height="100%" fill="#f3f0e8"/>
 ${labels.map((label, i) => {
         const name = esc(label.slice(0, 30));
@@ -43,10 +42,8 @@ export function artInstructions(theme: Theme, direction: string): string {
 export function templateTextFiles(theme: Theme, direction: string): Record<string, string> {
     if (theme.scenery) {
         const prompts = sceneryPrompts(theme, direction);
-        if (isBackgroundBrief(theme)) return { 'instructions.md': prompts.instructions, 'prompt.md': prompts.background,
+        return { 'instructions.md': prompts.instructions, 'prompt.md': prompts.background,
             'story-context.md': prompts.context, [`${theme.id}.json`]: formatTheme(theme), 'layout.svg': layoutGuide(theme) };
-        return { 'instructions.md': prompts.instructions, 'ground-prompt.md': prompts.ground, 'scenery-prompt.md': prompts.objects,
-            'story-context.md': prompts.context, [`${theme.id}.json`]: formatTheme(theme), 'layout.svg': layoutGuide(theme), 'art-sheet-guide.svg': sheetGuide(theme) };
     }
     return { 'instructions.md': artInstructions(theme, direction), [`${theme.id}.json`]: formatTheme(theme), 'layout.svg': layoutGuide(theme),
         ...(theme.layout === COMMONS_LAYOUT ? { 'art-sheet-guide.svg': sheetGuide() } : {}) };
