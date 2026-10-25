@@ -23,10 +23,10 @@ import { fillThiefClue, lookOf, thiefCount } from '../shared/thief.ts';
 import { assignLateJoiner, assignWarmup, factById, type WarmupView } from '../shared/warmup.ts';
 import { IDENTITY_NAMES, assignIdentities, assignLateIdentity, assignLatePair, assignPairs, identityById, isWarmupKind, type WarmupKind } from '../shared/warmupKinds.ts';
 import { randomName } from '../shared/randomNames.ts';
-import { legalMove, zoneAt } from '../shared/plazaMap.ts';
+import { DEFAULT_THEME, getTheme, getWorld, hasTheme } from '../shared/themeCatalog.ts';
 import { XP, checkStyle, emotesFor, levelOf, readStyle, type Style } from '../shared/levels.ts';
 import { REPORT_LINES_PER_STUDENT, type ClassReportData, type ReportLine } from '../shared/classReport.ts';
-import { type Avatar, SPAWN, chatProblem, clampPosition, defaultAvatar, isBlocked, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
+import { type Avatar, chatProblem, clampPosition, defaultAvatar, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 import { HEARING_RANGE, TYPING_EVERY_MS } from '../shared/chat.ts';
 import { VOICE_SAMPLE } from './speech.ts';
 
@@ -54,7 +54,7 @@ const CLOSE_CLASS_CLOSED = 4002; // the teacher closed the game
 
 // Per-socket state. It lives in the socket's attachment, so it survives the
 // room hibernating between messages.
-type Seat = { id: string; game: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; style?: Style; x: number; y: number; lastChat: number; lastCheck?: number; lastTyping?: number; lastReroll?: number; movedAt?: number; left?: boolean; frozenUntil?: number; downUntil?: number };
+type Seat = { id: string; game: string; themeId?: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; style?: Style; x: number; y: number; lastChat: number; lastCheck?: number; lastTyping?: number; lastReroll?: number; movedAt?: number; left?: boolean; frozenUntil?: number; downUntil?: number };
 
 // 'approve': every message waits for the teacher. 'review': chat that OpenAI cleared
 // posts at once and the teacher reviews afterwards; witness exchanges still wait.
@@ -64,7 +64,7 @@ export type TeacherAction =
     | { kind: 'magic'; power: 'freeze' | 'thaw' | 'lightning' | 'teleport' | 'rain'; studentKey?: string; x?: number; y?: number }
     | { kind: 'status' }
     | { kind: 'open'; open: boolean; game?: string } // a saved game (the last played by default), or close the open one
-    | { kind: 'newGame'; name: string; randomNames?: boolean; vision?: number } // a new game with its own PIN, opened at once
+    | { kind: 'newGame'; name: string; randomNames?: boolean; vision?: number; themeId?: string } // a new game with its own PIN, opened at once
     | { kind: 'deleteGame'; game: string; confirm?: boolean } // erases a game and everything saved in it
     | { kind: 'vision'; radius: number }                // how far a student sees, in map pixels; 0 shows everyone
     | { kind: 'warmup'; op: 'start' | 'end'; type?: WarmupKind } // a get-to-know-you warm-up at the start of a lesson
@@ -79,7 +79,7 @@ export type TeacherAction =
     | { kind: 'helpStatus'; id: string; status: HelpStatus; gameId?: string }
     | { kind: 'helpMessage'; studentKey: string; text: string; gameId?: string };
 
-export type GameSummary = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean };
+export type GameSummary = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean; themeId: string };
 
 // Where this game's campaign stands, and what every student has done in it.
 export type CampaignStatus = {
@@ -97,7 +97,7 @@ export type TeacherStatus = {
     campaign: CampaignStatus | null; // the open game's campaign, once started
     campaigns: CampaignChoice[]; // those that can be started, in the order to offer them
     open: boolean;
-    game: { id: string; name: string; randomNames: boolean; vision: number } | null; // the open game, or the one last played
+    game: { id: string; name: string; randomNames: boolean; vision: number; themeId: string } | null; // the open game, or the one last played
     realNames: Record<string, string>; // every student's real name, since the plaza may show made-up ones
     games: GameSummary[];                      // every saved game, most recently played first
     pin: string | null; // the open game's PIN, which students type to join
@@ -209,6 +209,10 @@ export class PlazaRoom extends DurableObject<Env> {
             this.sql.exec("ALTER TABLE warmups ADD COLUMN kind TEXT NOT NULL DEFAULT 'facts'");
         }
         this.adoptOldClass();
+        // Existing games retain Season 1, including saved positions and campaign progress.
+        if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('games')").toArray().some(row => row.name === 'theme_id')) {
+            this.sql.exec("ALTER TABLE games ADD COLUMN theme_id TEXT NOT NULL DEFAULT 'plaza'");
+        }
         this.missions = new MissionRepository(this.sql);
         this.missions.initialize();
         this.questBoard = new QuestBoard(this.sql);
@@ -439,7 +443,8 @@ export class PlazaRoom extends DurableObject<Env> {
         if (action.kind === 'newGame') {
             const name = action.name.trim().replace(/\s+/g, ' ').slice(0, 40);
             if (!name) return { error: 'Give the game a name.', status: 400 };
-            this.setOpen(true, this.createGame(name, action.randomNames !== false, action.vision ?? DEFAULT_VISION));
+            if (action.themeId !== undefined && !hasTheme(action.themeId)) return { error: 'Choose an available map.', status: 400 };
+            this.setOpen(true, this.createGame(name, action.randomNames !== false, action.vision ?? DEFAULT_VISION, action.themeId));
         }
         if (action.kind === 'review' && !this.review(action.id, action.approve)) {
             return { error: 'That message is no longer pending.', status: 400 };
@@ -464,8 +469,8 @@ export class PlazaRoom extends DurableObject<Env> {
                 const seat = socket?.deserializeAttachment() as Seat | undefined;
                 if (!socket || !seat) return { error: 'Select a student who is online.', status: 400 };
                 if (action.power === 'teleport') {
-                    const position = clampPosition(action.x, action.y);
-                    if (!position || isBlocked(position.x, position.y)) return { error: 'Choose an open path on the map.', status: 400 };
+                    const position = clampPosition(action.x, action.y, getTheme(seat.themeId).world);
+                    if (!position || getWorld(seat.themeId).isBlocked(position.x, position.y)) return { error: 'Choose an open path on the map.', status: 400 };
                     seat.x = position.x; seat.y = position.y; seat.movedAt = Date.now();
                     this.discover(seat);
                     this.moves.delete(seat.id);
@@ -500,11 +505,11 @@ export class PlazaRoom extends DurableObject<Env> {
             campaign: this.campaignStatus(current?.id ?? null),
             campaigns: this.missions.published(),
             open: this.isOpen(),
-            game: current && { id: current.id, name: current.name, randomNames: this.isRandom(current.id), vision: this.vision(current.id) },
+            game: current && { id: current.id, name: current.name, randomNames: this.isRandom(current.id), vision: this.vision(current.id), themeId: current.themeId },
             realNames: Object.fromEntries(this.sql.exec<{ student_key: string; full: string }>(
                 'SELECT student_key, COALESCE(full_name, name) AS full FROM students').toArray().map(row => [row.student_key, row.full])),
-            games: this.sql.exec<{ id: string; name: string; pin: string; lastOpened: number; randomNames: number }>(
-                'SELECT id, name, pin, last_opened AS lastOpened, random_names AS randomNames FROM games ORDER BY last_opened DESC').toArray()
+            games: this.sql.exec<{ id: string; name: string; pin: string; lastOpened: number; randomNames: number; themeId: string }>(
+                'SELECT id, name, pin, last_opened AS lastOpened, random_names AS randomNames, theme_id AS themeId FROM games ORDER BY last_opened DESC').toArray()
                 .map(game => ({ ...game, randomNames: game.randomNames === 1, open: this.isOpen() && game.id === current?.id })),
             pin: this.classPin(),
             entries: this.sql.exec<Omit<TeacherStatus['entries'][number], 'starred' | 'everyone'> & { everyone: number }>(`SELECT id, student_key AS studentKey, sender, target_name AS target,
@@ -524,7 +529,7 @@ export class PlazaRoom extends DurableObject<Env> {
                     current.id, Date.now() - PLAYS_SHOWN_MS, PLAYS_SHOWN).toArray() : []
             },
             online: this.seats().filter(seat => seat.game === current?.id).map(seat => ({
-                studentKey: seat.studentKey, name: seat.name, x: seat.x, y: seat.y, zone: zoneAt(seat.x, seat.y), level: levelOf(this.xpOf(seat.studentKey)).level, look: seat.avatar
+                studentKey: seat.studentKey, name: seat.name, x: seat.x, y: seat.y, zone: getWorld(seat.themeId).zoneAt(seat.x, seat.y), level: levelOf(this.xpOf(seat.studentKey)).level, look: seat.avatar
             }))
         };
     }
@@ -702,6 +707,8 @@ export class PlazaRoom extends DurableObject<Env> {
         }
 
         const game = this.activeGame() ?? '';
+        const themeId = this.game(game)?.themeId ?? DEFAULT_THEME;
+        const { isBlocked, SPAWN } = getWorld(themeId);
         // Joining may make two students share a first name: everyone already here is told their new name.
         this.sql.exec('INSERT OR IGNORE INTO game_students (game_id, student_key) VALUES (?, ?)', game, row.student_key);
         this.assistance.joinSession(this.helpSession(), game, row.student_key);
@@ -715,7 +722,7 @@ export class PlazaRoom extends DurableObject<Env> {
             ? { x: saved.x, y: saved.y }
             : { x: SPAWN.x + Math.round(Math.random() * 100 - 50), y: SPAWN.y + Math.round(Math.random() * 100 - 50) };
         const seat: Seat = {
-            id: crypto.randomUUID().slice(0, 8), game, studentKey: row.student_key, name: this.rosterNames(game).get(row.student_key) ?? saved.name,
+            id: crypto.randomUUID().slice(0, 8), game, themeId, studentKey: row.student_key, name: this.rosterNames(game).get(row.student_key) ?? saved.name,
             avatar: (saved.avatar && sanitizeAvatar(JSON.parse(saved.avatar))) || defaultAvatar(),
             style: readStyle(saved.style, levelOf(saved.xp).level),
             x: spot.x, y: spot.y,
@@ -724,7 +731,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const others = this.seats();
         this.ctx.acceptWebSocket(server, [seat.studentKey]);
         server.serializeAttachment(seat);
-        server.send(JSON.stringify({ t: 'welcome', id: seat.id, gameId: seat.game, players: [...others, seat].map(publicSeat) }));
+        server.send(JSON.stringify({ t: 'welcome', id: seat.id, gameId: seat.game, themeId, players: [...others, seat].map(publicSeat) }));
         this.broadcast({ t: 'join', player: publicSeat(seat) }, server);
         if (replaced.length === 0) this.systemChat(`${seat.name} has joined the Plaza.`, server);
         this.sendQuest(server, seat.game, seat.studentKey, true);
@@ -770,11 +777,11 @@ export class PlazaRoom extends DurableObject<Env> {
         } else if (data?.t === 'help-request') {
             await this.requestHelp(seat, data);
         } else if (data?.t === 'move') {
-            const position = clampPosition(data.x, data.y);
+            const position = clampPosition(data.x, data.y, getTheme(seat.themeId).world);
             if (!position) return;
             // A move through a wall, or further than anyone can walk, puts the student back where they were.
             const now = Date.now();
-            if (Math.max(seat.frozenUntil ?? 0, seat.downUntil ?? 0) > now || this.env.MOVEMENT_CHECK !== '0' && !legalMove(seat.x, seat.y, position.x, position.y, now - (seat.movedAt ?? now))) {
+            if (Math.max(seat.frozenUntil ?? 0, seat.downUntil ?? 0) > now || this.env.MOVEMENT_CHECK !== '0' && !getWorld(seat.themeId).legalMove(seat.x, seat.y, position.x, position.y, now - (seat.movedAt ?? now))) {
                 try { ws.send(JSON.stringify({ t: 'snap', x: seat.x, y: seat.y })); } catch { /* closing */ }
                 return;
             }
@@ -1080,7 +1087,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // Stepping into a named place can reveal a clue, once.
     private discover(seat: Seat): void {
-        const zone = zoneAt(seat.x, seat.y);
+        const zone = getWorld(seat.themeId).zoneAt(seat.x, seat.y);
         if (zone === (seat.zone ?? null)) return;
         seat.zone = zone;
         const row = zone ? this.campaignRow(seat.game) : null;
@@ -1283,9 +1290,9 @@ export class PlazaRoom extends DurableObject<Env> {
         return this.setting('active_game');
     }
 
-    private game(id: string | null): { id: string; name: string; pin: string } | null {
+    private game(id: string | null): { id: string; name: string; pin: string; themeId: string } | null {
         return id === null ? null
-            : this.sql.exec<{ id: string; name: string; pin: string }>('SELECT id, name, pin FROM games WHERE id = ?', id).toArray()[0] ?? null;
+            : this.sql.exec<{ id: string; name: string; pin: string; themeId: string }>('SELECT id, name, pin, theme_id AS themeId FROM games WHERE id = ?', id).toArray()[0] ?? null;
     }
 
     // A game keeps its PIN for good, so a PIN is never reused.
@@ -1296,11 +1303,11 @@ export class PlazaRoom extends DurableObject<Env> {
         }
     }
 
-    private createGame(name: string, randomNames: boolean, vision: number): string {
+    private createGame(name: string, randomNames: boolean, vision: number, themeId = DEFAULT_THEME): string {
         const id = crypto.randomUUID().slice(0, 8);
         const now = Date.now();
-        this.sql.exec('INSERT INTO games (id, name, pin, created, last_opened, random_names, vision) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            id, name, this.newPin(), now, now, randomNames ? 1 : 0, Math.max(0, Math.min(MAX_VISION, Math.round(vision))));
+        this.sql.exec('INSERT INTO games (id, name, pin, created, last_opened, random_names, vision, theme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            id, name, this.newPin(), now, now, randomNames ? 1 : 0, Math.max(0, Math.min(MAX_VISION, Math.round(vision))), themeId);
         return id;
     }
 

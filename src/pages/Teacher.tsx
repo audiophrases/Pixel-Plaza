@@ -5,7 +5,8 @@ import { WARMUP_KINDS } from '../../shared/warmupKinds';
 import type { WarmupKind } from '../../shared/warmupKinds';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import './Teacher.css';
-import { MAP_SIZE, plazaMap } from '../../shared/plazaMap';
+import { getTheme, themes } from '../../shared/themeCatalog';
+import ThemePicture from '../components/ThemePicture';
 import type { InterviewView } from '../../shared/campaign';
 import type { TeacherSupport as Support } from '../../shared/support';
 import type { CampaignChoice } from '../../shared/missionTypes';
@@ -24,13 +25,13 @@ type CampaignInfo = {
   board?: { id: string; text: string; teacherReleased: boolean; released: boolean; accepted: number; completed: number }[];
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
 };
-type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean };
+type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean; themeId?: string };
 type LiveStudent = { studentKey: string; name: string; x: number; y: number; zone: string | null; level?: number; look?: Partial<AvatarConfig> };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
   campaign: CampaignInfo | null; campaigns: CampaignChoice[];
   warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
-  open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; sound?: LiveSound; online: LiveStudent[];
+  open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number; themeId?: string } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; sound?: LiveSound; online: LiveStudent[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
   support: Support;
 };
@@ -56,6 +57,9 @@ export default function Teacher() {
   // A problem sending students to this laptop, from sign-in or opening the class.
   const [notice, setNotice] = useState('');
   const [newGameName, setNewGameName] = useState('');
+  const [newThemeId, setNewThemeId] = useState('commons-garden');
+  const plazaMap = getTheme(status?.game?.themeId);
+  const MAP_SIZE = plazaMap.world;
   const [warmupKind, setWarmupKind] = useState<WarmupKind>('facts');
   const [copyNote, setCopyNote] = useState(''); // shown when the browser would not copy
   const [copied, setCopied] = useState(''); // the PIN whose link was just copied
@@ -296,7 +300,7 @@ export default function Teacher() {
           void action('magic', { power: 'teleport', studentKey: selectedStudent, x: (event.clientX - bounds.left) / bounds.width * MAP_SIZE, y: (event.clientY - bounds.top) / bounds.height * MAP_SIZE });
           setMovingStudent(false);
         }}>
-          <img src={plazaMap.image} alt="Plaza map" />
+          <ThemePicture theme={plazaMap} />
           {status.online.map((student, index) => <button key={student.studentKey} type="button"
             className={`teacher-map-marker${selectedStudent === student.studentKey ? ' selected' : ''}`}
             style={{ left: `${student.x / MAP_SIZE * 100}%`, top: `${student.y / MAP_SIZE * 100}%` }}
@@ -424,12 +428,19 @@ export default function Teacher() {
         <form className="teacher-newgame" onSubmit={event => {
           event.preventDefault();
           if (!newGameName.trim()) return;
-          void action('game', { name: newGameName, randomNames, vision });
+          void action('game', { name: newGameName, randomNames, vision, themeId: newThemeId });
           setNewGameName('');
         }}>
           <input aria-label="Name for a new game" placeholder="New game, e.g. 3A Castanyada" maxLength={40}
             value={newGameName} onChange={event => setNewGameName(event.target.value)} />
           <button className="btn btn-primary" disabled={!newGameName.trim()}>New game</button>
+          <div className="teacher-map-choice">
+            <label>Map for this game <select aria-label="Map for a new game" value={newThemeId} onChange={event => setNewThemeId(event.target.value)}>
+              {Object.values(themes).map(theme => <option key={theme.id} value={theme.id}>{theme.name}{theme.id === 'plaza' ? ' · Season 1' : ''}</option>)}
+            </select></label>
+            <ThemePicture theme={getTheme(newThemeId)} />
+            <small>The map stays with this saved game. <Link to={`/studio?theme=${newThemeId}`}>Try it in Studio</Link></small>
+          </div>
           <label className="teacher-toggle">
             Vision:
             <select value={vision} onChange={event => setVision(Number(event.target.value))} aria-label="How far students see">
@@ -444,7 +455,7 @@ export default function Teacher() {
         </form>
         {status.games.length > 0 && <ul>
           {status.games.map(game => <li key={game.id}>
-            <span><strong>{game.name}</strong> · PIN {game.pin} · {game.randomNames ? 'random names' : 'real first names'} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
+            <span><strong>{game.name}</strong> · PIN {game.pin} · {getTheme(game.themeId).name} · {game.randomNames ? 'random names' : 'real first names'} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
             <span className="teacher-actions">
               <button className="btn btn-secondary btn-sm" onClick={() => void copyLink(game.pin)} title={linkFor(game.pin)}>{copied === game.pin ? 'Link copied' : 'Copy join link'}</button>
               {!game.open && <button className="btn btn-secondary btn-sm" onClick={() => void action('class', { open: true, game: game.id })}>

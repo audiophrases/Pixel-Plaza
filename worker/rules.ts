@@ -31,9 +31,9 @@ export function sanitizeAvatar(value: unknown): Avatar | null {
 
 export const defaultAvatar = (): Avatar => sanitizeAvatar({}) as Avatar;
 
-export function clampPosition(x: unknown, y: unknown): { x: number; y: number } | null {
+export function clampPosition(x: unknown, y: unknown, size = MAP_SIZE): { x: number; y: number } | null {
     if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return null;
-    if (x < 0 || x > MAP_SIZE || y < 0 || y > MAP_SIZE) return null;
+    if (x < 0 || x > size || y < 0 || y > size) return null;
     return { x: Math.round(x), y: Math.round(y) };
 }
 

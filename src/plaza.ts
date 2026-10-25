@@ -4,6 +4,7 @@ import type { QuestView } from '../shared/campaign';
 import type { WarmupView } from '../shared/warmup';
 import type { AttemptSource, StudentSupport } from '../shared/support';
 import type { Style } from '../shared/levels';
+import { DEFAULT_THEME, hasTheme } from '../shared/themeCatalog.ts';
 
 export type PlazaPlayer = AvatarConfig & { id: string; name: string; x: number; y: number; style?: Style; frozenUntil?: number; downUntil?: number };
 // A hint on one chat message, from the server. Never a refusal.
@@ -57,6 +58,7 @@ class Refused extends Error {}
 export class PlazaConnection {
   players = new Map<string, PlazaPlayer>();
   selfId = '';
+  themeId = DEFAULT_THEME;
   vision = 0; // how far this student sees, from the server; 0 shows everyone
   xp = 0; // this student's experience, kept for good
   status: PlazaStatus = { state: 'connecting' };
@@ -272,6 +274,12 @@ export class PlazaConnection {
 
   private receive(message: any): void {
     if (message.t === 'welcome') {
+      if (message.themeId !== undefined && !hasTheme(message.themeId)) {
+        this.stop('This map needs an updated page. Reload Pixel Plaza to join.');
+        this.ws?.close();
+        return;
+      }
+      this.themeId = message.themeId ?? DEFAULT_THEME;
       this.selfId = message.id;
       this.players = new Map((message.players as PlazaPlayer[]).map(player => [player.id, player]));
       this.fails = 0;

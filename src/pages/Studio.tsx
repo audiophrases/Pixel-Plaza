@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { Link } from 'react-router-dom';
-import { themes } from '../../shared/plazaMap';
-import { FOOT, formatTheme, makeWorld, validateTheme } from '../../shared/theme';
+import { Link, useSearchParams } from 'react-router-dom';
+import { getTheme, themes } from '../../shared/themeCatalog';
+import { COMMONS_LAYOUT } from '../../shared/commons';
+import { sheetTransparencyProblem } from '../../shared/artSheet';
+import { ArtPiece } from '../components/ThemePicture';
+import { downloadArtTemplate, loadPicture } from '../themeFiles';
+import { FOOT, formatTheme, makeWorld, parseTheme, validateTheme } from '../../shared/theme';
 import type { Rect, Theme, WalkBehind } from '../../shared/theme';
 import { feetBlocked, walkReport } from '../../shared/walk';
 import './Studio.css';
@@ -55,8 +59,13 @@ function resized(rect: Rect, corner: Corner, x: number, y: number): Rect {
 const polygon = (points: readonly (readonly [number, number])[]) => points.map(point => point.join(',')).join(' ');
 
 export default function Studio() {
-  const [theme, setTheme] = useState<Theme>(() => clone(themes.plaza));
-  const [imageUrl, setImageUrl] = useState(themes.plaza.image);
+  const [params] = useSearchParams();
+  const initial = getTheme(params.get('theme') ?? 'commons-garden');
+  const [theme, setTheme] = useState<Theme>(() => clone(initial));
+  const [imageUrl, setImageUrl] = useState(initial.image);
+  const [sheetUrl, setSheetUrl] = useState<string | undefined>();
+  const [direction, setDirection] = useState('A welcoming autumn village with amber leaves and warm windows.');
+  const [exporting, setExporting] = useState(false);
   const [tool, setTool] = useState<Tool>('select');
   const [picked, setSelection] = useState<Selection>(null);
   const [zoom, setZoom] = useState(0.6);
@@ -73,6 +82,9 @@ export default function Studio() {
   const svg = useRef<SVGSVGElement>(null);
   const drag = useRef<Drag | null>(null);
   const keys = useRef(new Set<string>());
+
+  useEffect(() => () => { if (imageUrl.startsWith('blob:')) URL.revokeObjectURL(imageUrl); }, [imageUrl]);
+  useEffect(() => () => { if (sheetUrl?.startsWith('blob:')) URL.revokeObjectURL(sheetUrl); }, [sheetUrl]);
 
   const world = useMemo(() => makeWorld(theme), [theme]);
   // What is picked, unless undo or a new file has taken it away
@@ -314,29 +326,48 @@ export default function Studio() {
   const openTheme = async (file: File | undefined) => {
     if (!file) return;
     try {
-      const loaded = JSON.parse(await file.text()) as Theme;
-      if (!loaded.blocked || !loaded.zones || !loaded.walkBehind || !loaded.spawn) throw new Error('not a theme');
-      setTheme(loaded); setPast([]); setFuture([]); setSelection(null); setReport(null); setOverlay('');
-      setImageUrl(loaded.image);
+      const loaded = parseTheme(JSON.parse(await file.text()));
+      setTheme(loaded); setPast([]); setFuture([]); setSelection(null); setReport(null); setOverlay(''); setPreview(false); keys.current.clear();
+      setImageUrl(loaded.image); setSheetUrl(undefined);
       setMessage(`Opened ${loaded.name}. If its picture does not show, use "Open picture".`);
-    } catch { setMessage('That file is not a theme file.'); }
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'That file is not a theme file.'); }
   };
-  const openPicture = (file: File | undefined) => {
+  const openPicture = async (file: File | undefined) => {
     if (!file) return;
     const url = URL.createObjectURL(file);
-    const probe = new Image();
-    probe.onload = () => {
+    try {
+      const probe = await loadPicture(url);
+      if (probe.naturalWidth !== probe.naturalHeight) throw new Error('Use a square background. The current picture and geometry have been kept.');
       setImageUrl(url);
-      if (probe.naturalWidth !== probe.naturalHeight) setMessage(`The picture is ${probe.naturalWidth}×${probe.naturalHeight}. Themes are square, so it will be stretched.`);
-      else setMessage('');
-      change({ ...theme, art: probe.naturalWidth });
-    };
-    probe.src = url;
+      setMessage(`Opened ${probe.naturalWidth} × ${probe.naturalHeight}. The map coordinates stay at ${theme.art} × ${theme.art}, so every shape stays in place.`);
+    } catch (cause) { URL.revokeObjectURL(url); setMessage(cause instanceof Error ? cause.message : 'Could not open that picture.'); }
+  };
+  const openSheet = async (file: File | undefined) => {
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await loadPicture(url);
+      if (img.naturalWidth !== img.naturalHeight || img.naturalWidth < 512) throw new Error('Use a square art sheet at least 512 pixels across, with four equal slots.');
+      const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
+      const ctx = canvas.getContext('2d')!; ctx.drawImage(img, 0, 0, 64, 64);
+      const pixels = ctx.getImageData(0, 0, 64, 64).data;
+      const problem = sheetTransparencyProblem(pixels, 64, 64);
+      if (problem) throw new Error(problem);
+      if (Object.hasOwn(themes, theme.id)) newTreatment();
+      setSheetUrl(url); setMessage('Art sheet opened. All collisions stay in place. Walk behind both trees to check their shape and trunk position.');
+    } catch (cause) { URL.revokeObjectURL(url); setMessage(cause instanceof Error ? cause.message : 'Could not open that art sheet.'); }
+  };
+  const newTreatment = () => {
+    const id = 'commons-custom';
+    change({ ...clone(theme), id, name: 'My Commons', layers: theme.layers?.map(layer => ({ ...layer, image: `/assets/maps/${id}.png` })) });
+    // Keep the current art visible until a replacement sheet is chosen.
+    if (!sheetUrl) setSheetUrl(theme.layers?.[0]?.image);
+    setMessage('Name your new treatment and choose an unused id. Open its AI art sheet, walk around it, then download the theme file.');
   };
   const loadRegistered = (id: string) => {
     const chosen = themes[id];
     if (!chosen) return;
-    setTheme(clone(chosen)); setImageUrl(chosen.image); setPast([]); setFuture([]); setSelection(null); setReport(null); setOverlay('');
+    setTheme(clone(chosen)); setImageUrl(chosen.image); setSheetUrl(undefined); setPast([]); setFuture([]); setSelection(null); setReport(null); setOverlay(''); setMessage(''); setPreview(false); keys.current.clear();
   };
 
   // ---------- the walking check ----------
@@ -394,6 +425,7 @@ export default function Studio() {
             </clipPath>)}
           </defs>
           <image href={imageUrl} width={theme.art} height={theme.art} />
+          {(theme.layers ?? []).filter(layer => !preview || layer.sortY === undefined || avatar[1] >= layer.sortY).map((layer, index) => <ArtPiece key={`art-${index}`} layer={layer} image={sheetUrl} />)}
           {overlay && !preview && <image href={overlay} width={theme.art} height={theme.art} style={{ imageRendering: 'pixelated' }} pointerEvents="none" />}
 
           {layers.blocks && !preview && theme.blocked.map((rect, index) => <rect key={index} className={`block${edited('block', index) ? ' picked' : ''}`}
@@ -417,6 +449,10 @@ export default function Studio() {
               <line className="ground" x1={box[0] - 6} x2={box[0] + box[2] + 6} y1={piece.sortY} y2={piece.sortY} pointerEvents="none" />
             </g>;
           })}
+          {layers.behind && !preview && (theme.layers ?? []).filter(piece => piece.sortY !== undefined).map((piece, index) => <g key={`art-guide-${index}`} pointerEvents="none">
+            <rect className="behind" x={piece.rect[0]} y={piece.rect[1]} width={piece.rect[2]} height={piece.rect[3]} />
+            <line className="ground" x1={piece.rect[0]} x2={piece.rect[0] + piece.rect[2]} y1={piece.sortY} y2={piece.sortY} />
+          </g>)}
 
           {!preview && <g onPointerDown={event => grab(event, 'spawn')}>
             <circle className={`spawn${selection?.kind === 'spawn' ? ' picked' : ''}`} cx={theme.spawn.x} cy={theme.spawn.y} r={9 / zoom} />
@@ -434,11 +470,12 @@ export default function Studio() {
           {preview && <>
             <g>
               <rect x={avatar[0] - footW / 2} y={avatar[1] - FOOT.up / world.scale} width={footW} height={footH} className="feet" />
-              <circle cx={avatar[0]} cy={avatar[1] - 28} r={7} className="head" />
-              <rect x={avatar[0] - 7} y={avatar[1] - 22} width={14} height={22} rx={4} className="body" />
+              <circle cx={avatar[0]} cy={avatar[1] - 82 / world.scale} r={13 / world.scale} className="head" />
+              <rect x={avatar[0] - 12 / world.scale} y={avatar[1] - 65 / world.scale} width={24 / world.scale} height={65 / world.scale} rx={4 / world.scale} className="body" />
             </g>
             {theme.walkBehind.map((piece, index) => avatar[1] < piece.sortY
               ? <image key={index} href={imageUrl} width={theme.art} height={theme.art} clipPath={`url(#behind-${index})`} pointerEvents="none" /> : null)}
+            {(theme.layers ?? []).filter(layer => layer.sortY !== undefined && avatar[1] < layer.sortY).map((layer, index) => <ArtPiece key={`foreground-${index}`} layer={layer} image={sheetUrl} />)}
           </>}
         </svg>
       </div>
@@ -449,6 +486,34 @@ export default function Studio() {
         <h1>Theme studio</h1>
         <Link to="/teacher">Teacher controls</Link>
       </header>
+
+      <section className="studio-template">
+        <span className="studio-eyebrow">SEASON WORKSHOP</span>
+        <label className="studio-field">Choose a map
+          <select aria-label="Choose a map" value={Object.hasOwn(themes, theme.id) ? theme.id : ''} onChange={event => loadRegistered(event.target.value)}>
+            {!Object.hasOwn(themes, theme.id) && <option value="">{theme.name} · draft</option>}
+            {Object.values(themes).map(item => <option key={item.id} value={item.id}>{item.name}{item.id === 'plaza' ? ' · Season 1' : ''}</option>)}
+          </select>
+        </label>
+        <p>{theme.blocked.length + (theme.blockedShapes?.length ?? 0)} collision pieces · {theme.walkBehind.length + (theme.layers ?? []).filter(p => p.sortY !== undefined).length} walk-behind pieces · {theme.zones.length} places</p>
+        {theme.layout === COMMONS_LAYOUT && <>
+          <p className="studio-hint">Hotel, café, shop and tree: four art slots, one layout. Both seasonal maps use exactly the same paths.</p>
+          <div className="studio-row"><button onClick={newTreatment}>New treatment</button>
+            <label className="file">Open AI art sheet<input type="file" accept="image/png,image/webp" onChange={event => void openSheet(event.target.files?.[0])} /></label></div>
+        </>}
+        <label className="studio-field">Describe the next season
+          <textarea aria-label="Art direction" value={direction} onChange={event => setDirection(event.target.value)} rows={3} maxLength={2000} />
+        </label>
+        <button className="primary" disabled={exporting || problems.errors.length > 0} onClick={async () => {
+          setExporting(true);
+          try { await downloadArtTemplate(theme, direction, imageUrl, sheetUrl); setMessage('Downloaded the AI template kit. Give instructions.md and the reference and guide PNGs to your art AI.'); }
+          catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Could not export the template.'); }
+          finally { setExporting(false); }
+        }}>{exporting ? 'Making the kit…' : 'Download AI Template'}</button>
+        <p className="studio-hint">A ZIP with the prompt, map guide, art-slot guide, current reference and theme file.</p>
+        {!preview && <div className="studio-row"><button onClick={startPreview}>Walk around it</button><button onClick={check}>Check paths</button></div>}
+        {message && <p className="studio-message" role="status">{message}</p>}
+      </section>
 
       <div className="studio-row">
         <button onClick={undo} disabled={!past.length}>Undo</button>
@@ -489,7 +554,6 @@ export default function Studio() {
         </div>}
         {problems.errors.length > 0 && <ul className="studio-errors">{problems.errors.map(error => <li key={error}>{error}</li>)}</ul>}
         {problems.warnings.length > 0 && <ul className="studio-warnings">{problems.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>}
-        <button onClick={startPreview}>Walk around it</button>
       </> : <>
         <h2>Walking</h2>
         <p>Use WASD or the arrow keys. You are blocked by the same walls as in the game, and hidden behind the walk-behind areas.</p>
@@ -497,15 +561,10 @@ export default function Studio() {
       </>}
 
       <h2>Theme</h2>
-      <label className="studio-field">Open one of the themes
-        <select value="" onChange={event => loadRegistered(event.target.value)}>
-          <option value="">Choose…</option>
-          {Object.values(themes).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select></label>
       <div className="studio-row">
-        <button onClick={() => { setTheme(blank()); setImageUrl(''); setPast([]); setFuture([]); setSelection(null); setReport(null); setOverlay(''); }}>New theme</button>
+        <button onClick={() => { setTheme(blank()); setImageUrl(''); setSheetUrl(undefined); setPast([]); setFuture([]); setSelection(null); setReport(null); setOverlay(''); setPreview(false); keys.current.clear(); }}>New theme</button>
         <label className="file">Open a theme file<input type="file" accept="application/json,.json" onChange={event => void openTheme(event.target.files?.[0])} /></label>
-        <label className="file">Open a picture<input type="file" accept="image/*" onChange={event => openPicture(event.target.files?.[0])} /></label>
+        <label className="file">Open a picture<input type="file" accept="image/*" onChange={event => void openPicture(event.target.files?.[0])} /></label>
       </div>
       <label className="studio-field">Name <input value={theme.name} onChange={event => setField({ name: event.target.value })} /></label>
       <label className="studio-field">Id (lower case, no spaces) <input value={theme.id} onChange={event => setField({ id: event.target.value })} /></label>
@@ -515,7 +574,7 @@ export default function Studio() {
         <button className="primary" onClick={download} disabled={problems.errors.length > 0}>Download the theme file</button>
         <button onClick={() => { void navigator.clipboard?.writeText(formatTheme(theme)); setMessage('The theme is copied.'); }}>Copy it</button>
       </div>
-      {message && <p className="studio-message">{message}</p>}
+      {theme.layout === COMMONS_LAYOUT && <p className="studio-hint">Install a new treatment: <code>npm run theme -- "theme.json" --sheet "art.png"</code>. Restart to offer it for new games.</p>}
     </aside>
   </main>;
 }

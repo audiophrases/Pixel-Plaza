@@ -16,6 +16,7 @@ import { identityById } from '../../shared/warmupKinds.ts';
 import { missionEnvelope } from '../../shared/missionSchema.ts';
 import { legalMove } from '../../shared/plazaMap.ts';
 import { SIDE_QUEST_SOURCE, sideQuests } from '../../shared/sideQuests.ts';
+import { getWorld } from '../../shared/themeCatalog.ts';
 
 const root = path.join(import.meta.dirname, '..', '..');
 const wrangler = path.join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
@@ -2719,6 +2720,65 @@ test('chat for everyone, who heard it, "is writing", and the lesson\'s chat back
     } finally {
         for (const socket of [alex, sam, chris]) socket?.ws.close();
         await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
+test('saved games keep their maps, authoritative geometry and positions across switches and restart', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-themes-'));
+    const pinPlayUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    const vars = { MOVEMENT_CHECK: '1' };
+    let plaza = await startPlaza(pinPlayUrl, persistTo, vars), alex;
+    try {
+        let base = plaza.base;
+        const session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (op, body) => api(base, `/api/teacher/${op}`, { session, body });
+        const legacy = (await teacher('game', { name: 'Season 1', randomNames: false })).body;
+        assert.equal(legacy.game.themeId, 'plaza', 'older creation requests keep the original map');
+        const bad = await teacher('game', { name: 'Unknown map', themeId: '__proto__' });
+        assert.equal(bad.status, 400);
+        assert.equal((await teacher('status')).body.game.id, legacy.game.id, 'bad map selection does not switch the game');
+        const garden = (await teacher('game', { name: 'Garden', themeId: 'commons-garden', randomNames: false })).body;
+        PIN = garden.pin;
+        alex = await enter(base, 'signed-a', null);
+        assert.equal(alex.welcome.themeId, 'commons-garden');
+        assert.equal(getWorld('plaza').isBlocked(680, 400), true);
+        assert.equal(getWorld('commons-garden').isBlocked(680, 400), false);
+        const moved = await teacher('magic', { power: 'teleport', studentKey: 'stu_a', x: 680, y: 400 });
+        assert.equal(moved.status, 200, 'teleport uses this game’s geometry');
+        await alex.next(m => m.t === 'snap' && m.x === 680 && m.y === 400);
+        alex.send({ t: 'move', x: 680, y: 410 });
+        await alex.next(m => m.t === 'move' && m.id === alex.me.id && m.y === 410, 'walk in the gap');
+        alex.send({ t: 'move', x: 630, y: 410 });
+        const snap = await alex.next(m => m.t === 'snap', 'blocked by this map');
+        assert.deepEqual([snap.x, snap.y], [680, 410]);
+        const invalid = await teacher('magic', { power: 'teleport', studentKey: 'stu_a', x: 400, y: 400 });
+        assert.equal(invalid.status, 400);
+        alex.ws.close(); await alex.closed;
+        await plaza.stop();
+        plaza = await startPlaza(pinPlayUrl, persistTo, vars); base = plaza.base;
+        const resumed = (await teacher('status')).body;
+        assert.equal(resumed.game.themeId, 'commons-garden');
+        PIN = resumed.pin;
+        alex = await enter(base, 'signed-a', null);
+        assert.equal(alex.welcome.themeId, 'commons-garden');
+        assert.deepEqual([alex.me.x, alex.me.y], [680, 410]);
+        const autumn = (await teacher('game', { name: 'Autumn', themeId: 'commons-autumn', randomNames: false })).body;
+        await alex.closed;
+        PIN = autumn.pin; alex = await enter(base, 'signed-a', null);
+        assert.equal(alex.welcome.themeId, 'commons-autumn');
+        assert.notEqual(alex.me.x, 680, 'a new game has its own spawn and position');
+        await teacher('class', { open: true, game: garden.game.id }); await alex.closed;
+        PIN = garden.pin; alex = await enter(base, 'signed-a', null);
+        assert.deepEqual([alex.me.x, alex.me.y], [680, 410]);
+        assert.equal(alex.welcome.themeId, 'commons-garden');
+        const original = (await teacher('class', { open: true, game: legacy.game.id })).body; await alex.closed;
+        PIN = original.pin; alex = await enter(base, 'signed-a', null);
+        assert.equal(alex.welcome.themeId, 'plaza');
+        assert.deepEqual(new Set(original.games.map(g => g.themeId)), new Set(['plaza', 'commons-garden', 'commons-autumn']));
+    } finally {
+        alex?.ws.close(); await plaza.stop();
         await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
     }
 });

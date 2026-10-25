@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { AvatarFigure, FIGURE_BODY, FIGURE_TOP } from '../AvatarFigure';
-import { ART, MAP_SIZE, SCALE, plazaMap, worldRects, worldZones } from '../../../shared/plazaMap';
+import { getTheme } from '../../../shared/themeCatalog';
+import { makeWorld, type Theme } from '../../../shared/theme';
 import type { PlazaConnection, PlazaEvent, PlazaPlayer } from '../../plaza';
 import { NAME_COLOURS } from '../../../shared/levels';
 import { TYPING_SHOWN_MS } from '../../../shared/chat';
@@ -45,6 +46,8 @@ export default class LobbyScene extends Phaser.Scene {
   private writing: Record<string, { box: Phaser.GameObjects.Container; dots: Phaser.GameObjects.Text; until: number }> = {};
   private onPick?: (id: string) => void;
   private pointing = false; // the pointer is over a classmate
+  private theme!: Theme;
+  private layerImages = new Map<string, string>();
 
   constructor() {
     super('LobbyScene');
@@ -52,15 +55,26 @@ export default class LobbyScene extends Phaser.Scene {
 
   init(data: { connection: PlazaConnection; onPick?: (id: string) => void }) {
     this.connection = data.connection;
+    this.theme = getTheme(data.connection.themeId);
     this.onPick = data.onPick;
   }
 
   preload() {
-    this.load.image('plaza_bg', plazaMap.image);
+    this.load.image('plaza_bg', this.theme.image);
+    for (const layer of this.theme.layers ?? []) {
+      if (this.layerImages.has(layer.image)) continue;
+      const key = `art_sheet_${this.layerImages.size}`;
+      this.layerImages.set(layer.image, key);
+      this.load.image(key, layer.image);
+    }
   }
 
   create() {
+    const plazaMap = this.theme;
+    const MAP_SIZE = plazaMap.world;
+    const { worldRects, worldZones, scale: SCALE } = makeWorld(plazaMap);
     this.add.image(0, 0, 'plaza_bg').setOrigin(0, 0).setDisplaySize(MAP_SIZE, MAP_SIZE);
+    this.addArtLayers(SCALE);
     const mapWidth = MAP_SIZE;
     const mapHeight = MAP_SIZE;
 
@@ -122,6 +136,9 @@ export default class LobbyScene extends Phaser.Scene {
   // Trees and lamp posts are cut out of the background and drawn again at the depth of
   // the ground they stand on, so a player north of one is hidden behind it.
   private addWalkBehind() {
+    const plazaMap = this.theme;
+    const ART = plazaMap.art;
+    const SCALE = plazaMap.world / ART;
     const source = this.textures.get('plaza_bg').getSourceImage() as HTMLImageElement;
     const pixels = source.width / ART; // the picture's own pixels per art pixel
     plazaMap.walkBehind.forEach((piece, index) => {
@@ -143,6 +160,22 @@ export default class LobbyScene extends Phaser.Scene {
       context.drawImage(source, x * pixels, y * pixels, w * pixels, h * pixels, 0, 0, canvas.width, canvas.height);
       canvas.refresh();
       this.add.image(x * SCALE, y * SCALE, key).setOrigin(0, 0).setDepth(piece.sortY * SCALE);
+    });
+  }
+
+  private addArtLayers(scale: number) {
+    (this.theme.layers ?? []).forEach((layer, index) => {
+      const texture = this.textures.get(this.layerImages.get(layer.image)!);
+      if (texture.key === '__MISSING') return;
+      const source = texture.getSourceImage() as HTMLImageElement;
+      const [sx, sy, sw, sh] = layer.source;
+      const [x, y, w, h] = layer.rect;
+      const key = `art_piece_${index}`;
+      const canvas = this.textures.createCanvas(key, Math.ceil(w * scale), Math.ceil(h * scale));
+      if (!canvas) return;
+      canvas.getContext().drawImage(source, sx * source.width, sy * source.height, sw * source.width, sh * source.height, 0, 0, canvas.width, canvas.height);
+      canvas.refresh();
+      this.add.image(x * scale, y * scale, key).setOrigin(0, 0).setDepth(layer.sortY === undefined ? 0 : layer.sortY * scale);
     });
   }
 

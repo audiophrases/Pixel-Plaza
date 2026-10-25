@@ -13,6 +13,7 @@
     "deploy": "npm run build && wrangler deploy",
     "tester": "node scripts/tester.mjs",
     "check:studio": "node scripts/check-studio.mjs",
+    "check:themes": "node scripts/check-theme-browser.mjs",
     "check:missions": "node scripts/check-mission-studio.mjs",
     "theme": "node scripts/install-theme.mjs"
   },
@@ -35,6 +36,7 @@
     "esbuild": "^0.28.1",
     "jsdom": "^29.1.1",
     "oxlint": "^1.81.0",
+    "sharp": "^0.35.5",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
     "wrangler": "^4.149.0"

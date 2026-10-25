@@ -16,6 +16,11 @@ export type WalkBehind =
 
 export type Zone = { id: string; rect: Rect };
 
+// A transparent piece of an art sheet. Source coordinates are fractions of its
+// image, so 1024px and 2048px versions fit the same layout. sortY makes a piece
+// hide avatars north of its base, using its real alpha instead of a traced mask.
+export type ArtLayer = { image: string; source: Rect; rect: Rect; sortY?: number };
+
 // A place nobody can walk that is not a rectangle: an oval inside `rect`, or a polygon. The game turns it into thin
 // strips (see shapeRects), so walls, the server's check and the walking test all keep working with rectangles.
 export type BlockShape =
@@ -33,6 +38,8 @@ export type Theme = {
     blockedShapes?: BlockShape[]; // where nobody can walk, as ovals and free shapes
     walkBehind: WalkBehind[];
     zones: Zone[];          // named places, for the story
+    layout?: string;       // stable layout version shared by seasonal treatments
+    layers?: ArtLayer[];
 };
 
 // The avatar's feet: what bumps into walls, in world pixels (FIGURE_BODY in src/game/AvatarFigure.ts).
@@ -130,7 +137,7 @@ export function validateTheme(theme: Theme): { errors: string[]; warnings: strin
     if (!/^[a-z0-9-]+$/.test(theme.id)) errors.push('The id should be lower-case letters, numbers and dashes, such as "castle".');
     if (!theme.name.trim()) errors.push('The theme needs a name.');
     if (!theme.image.trim()) errors.push('The theme needs a picture address.');
-    if (!(theme.art > 0) || !(theme.world > 0)) errors.push('The picture and world sizes must be more than zero.');
+    if (!Number.isFinite(theme.art) || !Number.isFinite(theme.world) || !(theme.art > 0) || !(theme.world > 0) || theme.art > 8192 || theme.world > 4096) errors.push('Use a picture size between 1 and 8192 and a world size between 1 and 4096.');
     const within = (x: number, y: number) => x >= 0 && y >= 0 && x <= theme.art && y <= theme.art;
     if (!within(theme.spawn.x, theme.spawn.y)) errors.push('The start position is outside the picture.');
     theme.blocked.forEach(([x, y, w, h], index) => {
@@ -149,6 +156,14 @@ export function validateTheme(theme: Theme): { errors: string[]; warnings: strin
         if (!(piece.sortY >= 0 && piece.sortY <= theme.art)) errors.push(`${label} has its ground line outside the picture.`);
     });
     const seen = new Set<string>();
+    for (const [index, layer] of (theme.layers ?? []).entries()) {
+        const [x, y, w, h] = layer.source;
+        if (!layer.image.trim() || ![...layer.source, ...layer.rect].every(Number.isFinite)
+            || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > 1 || y + h > 1 || layer.rect[2] <= 0 || layer.rect[3] <= 0
+            || layer.sortY !== undefined && (!Number.isFinite(layer.sortY) || layer.sortY < 0 || layer.sortY > theme.art)) {
+            errors.push(`Art piece ${index + 1} needs a picture, a valid crop and a ground line inside the map.`);
+        }
+    }
     for (const zone of theme.zones) {
         if (!zone.id.trim()) errors.push('A zone has no name.');
         else if (seen.has(zone.id)) errors.push(`Two zones are called "${zone.id}".`);
@@ -162,6 +177,35 @@ export function validateTheme(theme: Theme): { errors: string[]; warnings: strin
     return { errors, warnings };
 }
 
+// Files are untrusted input. Check structure before either validation or rendering
+// can touch nested shapes; also bound the reachability grid and shape count.
+export function parseTheme(value: unknown): Theme {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('That file is not a theme object.');
+    const t = value as Theme;
+    const rect = (v: unknown): v is Rect => Array.isArray(v) && v.length === 4 && v.every(n => typeof n === 'number' && Number.isFinite(n));
+    const point = (v: unknown): v is Point => Array.isArray(v) && v.length === 2 && v.every(n => typeof n === 'number' && Number.isFinite(n));
+    const list = (v: unknown): v is unknown[] => Array.isArray(v) && v.length <= 2000;
+    const shape = (v: unknown): v is BlockShape => {
+        if (!v || typeof v !== 'object') return false;
+        const p = v as BlockShape;
+        return p.shape === 'ellipse' ? rect(p.rect) : p.shape === 'poly' && list(p.points) && p.points.length >= 3 && p.points.every(point);
+    };
+    if (![t.id, t.name, t.image].every(v => typeof v === 'string')
+        || typeof t.art !== 'number' || typeof t.world !== 'number'
+        || !t.spawn || !Number.isFinite(t.spawn.x) || !Number.isFinite(t.spawn.y)
+        || !list(t.blocked) || !t.blocked.every(rect)
+        || t.blockedShapes !== undefined && (!list(t.blockedShapes) || !t.blockedShapes.every(shape))
+        || !list(t.walkBehind) || !t.walkBehind.every(p => shape(p) && Number.isFinite((p as WalkBehind).sortY))
+        || !list(t.zones) || !t.zones.every(z => z && typeof z.id === 'string' && rect(z.rect))
+        || t.layout !== undefined && typeof t.layout !== 'string'
+        || t.layers !== undefined && (!list(t.layers) || !t.layers.every(p => p && typeof p.image === 'string' && rect(p.rect) && rect(p.source)))) {
+        throw new Error('That theme has missing or malformed shapes, places or art pieces.');
+    }
+    const { errors } = validateTheme(t);
+    if (errors.length) throw new Error(errors.join(' '));
+    return t;
+}
+
 // The theme as a file: compact, one shape to a line, always in the same order, so two versions can be compared.
 export function formatTheme(theme: Theme): string {
     const line = (value: unknown) => JSON.stringify(value).replace(/,/g, ', ');
@@ -173,6 +217,8 @@ export function formatTheme(theme: Theme): string {
         ` "image": ${line(theme.image)},`,
         ` "art": ${theme.art},`,
         ` "world": ${theme.world},`,
+        ...(theme.layout ? [` "layout": ${line(theme.layout)},`] : []),
+        ...(theme.layers?.length ? [` "layers": ${lines(theme.layers)},`] : []),
         ` "spawn": ${line(theme.spawn)},`,
         ` "blocked": ${lines(theme.blocked.map(rect => [...rect]))},`,
         ...(theme.blockedShapes?.length ? [` "blockedShapes": ${lines(theme.blockedShapes)},`] : []),

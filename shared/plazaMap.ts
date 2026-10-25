@@ -1,14 +1,15 @@
 // The map the plaza is played on: the theme in shared/themes/plaza.json, ready for the game and the server to use.
 // To change the map, edit that file with the theme studio (/studio). Press F2 in the game to see the walls, the
 // walk-behind areas and the zones drawn over the art.
-import plazaTheme from './themes/plaza.json' with { type: 'json' };
 import { MAX_SPEED, makeWorld, type Theme } from './theme.ts';
+import { themes } from './themeCatalog.ts';
 
 export type { Point, Rect, Theme, WalkBehind, Zone } from './theme.ts';
 export { MAX_SPEED };
 
-// The themes there are, by id. A new one is a new file in shared/themes/ and a line here.
-export const themes: Record<string, Theme> = { plaza: plazaTheme as unknown as Theme };
+// The original map's compatibility exports, used by existing missions and tests.
+// New maps are installed and registered by npm run theme; games select from themeCatalog.
+export { themes };
 
 export const plazaMap: Theme = themes.plaza;
 const world = makeWorld(plazaMap);

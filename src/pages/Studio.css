@@ -1,6 +1,6 @@
 .studio { display: flex; height: 100vh; background: #1f2430; color: #222; font-size: 0.9rem; }
 .studio-stage { flex: 1; min-width: 0; }
-.studio-scroll { width: 100%; height: 100%; overflow: auto; background: #11141b; }
+.studio-scroll { width: 100%; height: 100%; overflow: auto; background: #171f25; display: grid; justify-items: center; align-items: start; padding: 1.5rem; box-sizing: border-box; }
 .studio-canvas { display: block; touch-action: none; }
 .studio-canvas.tool-block, .studio-canvas.tool-zone, .studio-canvas.tool-ellipse, .studio-canvas.tool-poly, .studio-canvas.tool-spawn { cursor: crosshair; }
 
@@ -19,6 +19,12 @@
 .studio-canvas .body { fill: #4a6fa5; stroke: #333; }
 
 .studio-panel { width: 340px; flex: none; overflow-y: auto; padding: 0.8rem 1rem 2rem; background: #f6f7fb; }
+.studio-template { margin: .8rem 0 1rem; padding: .9rem; border: 1px solid #cad8cc; border-radius: 12px; background: #edf4ed; }
+.studio-template p { font-size: .8rem; line-height: 1.5; }
+.studio-eyebrow { font-size: .65rem; font-weight: 800; letter-spacing: .15em; color: #4f725d; }
+.studio-field textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; padding: .5rem; border: 1px solid #c5cad6; border-radius: 6px; }
+.studio-panel code { overflow-wrap: anywhere; }
+@media (max-width: 700px) { .studio { flex-direction: column; height: 100dvh; } .studio-stage { min-height: 45vh; } .studio-panel { width: auto; max-height: 50vh; } }
 .studio-panel header { display: flex; justify-content: space-between; align-items: baseline; }
 .studio-panel h1 { margin: 0 0 0.5rem; font-size: 1.2rem; }
 .studio-panel h2 { margin: 1.1rem 0 0.4rem; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: #667; }

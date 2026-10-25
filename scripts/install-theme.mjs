@@ -1,50 +1,84 @@
-// Puts a theme downloaded from the studio into the project: checks it, writes it in the usual form, and says what
-// changed. With no file given it takes the newest <id>.json from your Downloads folder.
-//
-//   npm run theme -- plaza                 (the newest plaza.json in Downloads)
-//   npm run theme -- C:\path\to\plaza.json
+// Installs a Studio download, optional local art, and the generated registry.
+// npm run theme -- commons-custom --sheet "C:\path\to\art.png"
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { formatTheme, validateTheme } from '../shared/theme.ts';
+import { pathToFileURL } from 'node:url';
+import sharp from 'sharp';
+import { formatTheme, parseTheme, validateTheme } from '../shared/theme.ts';
 import { walkReport } from '../shared/walk.ts';
+import { sheetTransparencyProblem } from '../shared/artSheet.ts';
 
-const root = path.join(import.meta.dirname, '..');
-const argument = process.argv[2];
-if (!argument) {
-    console.error('Say which theme: npm run theme -- plaza   (or give the path of the downloaded file)');
-    process.exit(1);
-}
-
-// A path, or the id of a theme whose newest download is wanted
-let source = argument;
-if (!/[\\/]|\.json$/i.test(argument)) {
-    const downloads = path.join(os.homedir(), 'Downloads');
-    // Browsers add (1), (2) to repeat downloads: plaza.json, plaza (1).json
-    const matches = fs.readdirSync(downloads).filter(name => new RegExp(`^${argument}( \\(\\d+\\))?\\.json$`, 'i').test(name))
-        .map(name => path.join(downloads, name)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-    if (matches.length === 0) {
-        console.error(`No ${argument}.json in ${downloads}. Download it from the studio first.`);
-        process.exit(1);
+export async function installTheme({ root, source, sheet, picture }) {
+    const theme = parseTheme(JSON.parse(fs.readFileSync(source, 'utf8')));
+    const report = walkReport(theme);
+    if (report.problems.length) throw new Error(`Not installed: ${report.problems.join(' ')}`);
+    const assets = [];
+    for (const [kind, file] of [['sheet', sheet], ['picture', picture]]) {
+        if (!file) continue;
+        const metadata = await sharp(file, { limitInputPixels: 4096 * 4096 }).metadata();
+        if (!['png', 'webp'].includes(metadata.format) || metadata.width !== metadata.height) throw new Error(`Use a square PNG or WebP ${kind}.`);
+        if (kind === 'sheet' && (!theme.layers?.length || !metadata.hasAlpha || metadata.width < 512)) throw new Error('An art sheet needs a layered theme, transparency and at least 512 pixels per side.');
+        if (kind === 'sheet') {
+            const { data, info } = await sharp(file, { limitInputPixels: 4096 * 4096 }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+            const problem = sheetTransparencyProblem(data, info.width, info.height);
+            if (problem) throw new Error(problem);
+        }
+        const filename = `${theme.id}${kind === 'picture' ? '-background' : ''}.${metadata.format}`;
+        const url = `/assets/maps/${filename}`;
+        if (kind === 'sheet') theme.layers = theme.layers.map(layer => ({ ...layer, image: url }));
+        else theme.image = url;
+        assets.push({ source: path.resolve(file), target: path.join(root, 'public', 'assets', 'maps', filename) });
     }
-    source = matches[0];
+    const assetTargets = new Set(assets.map(a => a.target));
+    for (const image of [theme.image, ...(theme.layers ?? []).map(layer => layer.image)]) {
+        if (!/^\/assets\/maps\/[a-zA-Z0-9_.-]+\.(png|webp|svg)$/.test(image)) throw new Error('Installed art must use a local /assets/maps/ PNG, WebP or SVG address.');
+        const target = path.join(root, 'public', image.slice(1));
+        if (!assetTargets.has(target) && !fs.existsSync(target)) throw new Error(`Missing ${image}. Supply --sheet or --picture with your downloaded art.`);
+    }
+    const directory = path.join(root, 'shared', 'themes');
+    fs.mkdirSync(directory, { recursive: true });
+    const registered = fs.readdirSync(directory).filter(file => file.endsWith('.json') && file !== 'plaza.json' && file !== `${theme.id}.json`)
+        .map(file => ({ file, theme: parseTheme(JSON.parse(fs.readFileSync(path.join(directory, file), 'utf8'))) }));
+    if (theme.id !== 'plaza') registered.push({ file: `${theme.id}.json`, theme });
+    registered.sort((a, b) => a.file.localeCompare(b.file));
+    const ids = registered.map(item => item.theme.id);
+    if (new Set(ids).size !== ids.length) throw new Error('Two installed themes share an id. Give the new treatment an unused id.');
+    for (const asset of assets) {
+        fs.mkdirSync(path.dirname(asset.target), { recursive: true });
+        if (asset.source !== path.resolve(asset.target)) fs.copyFileSync(asset.source, asset.target);
+    }
+    fs.writeFileSync(path.join(directory, `${theme.id}.json`), formatTheme(theme));
+    fs.writeFileSync(path.join(directory, 'installed.ts'), '// Generated by npm run theme. Keep custom map JSON in this directory.\n'
+        + (registered.length ? "import { parseTheme, type Theme } from '../theme.ts';\n" : "import type { Theme } from '../theme.ts';\n")
+        + registered.map((item, i) => `import data${i} from './${item.file}' with { type: 'json' };\n`).join('')
+        + `export const installedThemes: Record<string, Theme> = {${registered.map((item, i) => `${JSON.stringify(item.theme.id)}: parseTheme(data${i})`).join(', ')}};\n`);
+    return { theme, warnings: validateTheme(theme).warnings };
 }
 
-const theme = JSON.parse(fs.readFileSync(source, 'utf8'));
-const { errors, warnings } = validateTheme(theme);
-if (errors.length) {
-    console.error(`Not installed. ${path.basename(source)} has problems:`);
-    for (const error of errors) console.error('  - ' + error);
-    process.exit(1);
+async function main() {
+    const [argument, ...options] = process.argv.slice(2);
+    if (!argument) throw new Error('Use: npm run theme -- <id or theme.json> [--sheet art.png] [--picture background.png]');
+    const args = {};
+    for (let i = 0; i < options.length; i += 2) {
+        if (!['--sheet', '--picture'].includes(options[i]) || !options[i + 1]) throw new Error('Use --sheet art.png or --picture background.png.');
+        args[options[i].slice(2)] = options[i + 1];
+    }
+    let source = argument;
+    if (!/[\\/]|\.json$/i.test(argument)) {
+        if (!/^[a-z0-9-]+$/.test(argument)) throw new Error('Use a lower-case theme id or a path to its JSON file.');
+        const downloads = path.join(os.homedir(), 'Downloads');
+        const matches = fs.readdirSync(downloads).filter(name => new RegExp(`^${argument}( \\(\\d+\\))?\\.json$`, 'i').test(name))
+            .map(name => path.join(downloads, name)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+        if (!matches.length) throw new Error(`No ${argument}.json in Downloads. Download the theme file from Studio first.`);
+        source = matches[0];
+    }
+    const { theme, warnings } = await installTheme({ root: path.join(import.meta.dirname, '..'), source, ...args });
+    for (const warning of warnings) console.warn('Note: ' + warning);
+    console.log(`Installed ${theme.name} (${theme.id}) and registered it in the map picker.`);
+    console.log('Restart classroom.bat or tester.bat. For the online site, build and deploy. Choose this map when creating a new game.');
 }
-for (const warning of warnings) console.warn('  note: ' + warning);
-const report = walkReport(theme);
-for (const problem of report.problems) console.warn('  walking: ' + problem);
 
-const target = path.join(root, 'shared', 'themes', `${theme.id}.json`);
-const before = fs.existsSync(target) ? JSON.parse(fs.readFileSync(target, 'utf8')) : null;
-fs.writeFileSync(target, formatTheme(theme));
-const count = (value) => ({ blocks: value?.blocked?.length ?? 0, behind: value?.walkBehind?.length ?? 0, zones: value?.zones?.length ?? 0 });
-console.log(`Installed ${path.basename(source)} as shared/themes/${theme.id}.json`);
-console.log('  before:', before ? JSON.stringify(count(before)) : 'new theme', '  now:', JSON.stringify(count(theme)));
-console.log('Restart classroom.bat (or tester.bat) to play it. To undo, run: git checkout shared/themes/' + theme.id + '.json');
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+    main().catch(error => { console.error(error.message); process.exitCode = 1; });
+}

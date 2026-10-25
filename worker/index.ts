@@ -98,7 +98,7 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     if (path === '/api/teacher/class' && typeof body?.open === 'boolean') {
         return { kind: 'open', open: body.open, ...(typeof body.game === 'string' ? { game: body.game } : {}) };
     }
-    if (path === '/api/teacher/game' && typeof body?.name === 'string') return { kind: 'newGame', name: body.name, randomNames: body.randomNames !== false, ...(typeof body.vision === 'number' ? { vision: body.vision } : {}) };
+    if (path === '/api/teacher/game' && typeof body?.name === 'string') return { kind: 'newGame', name: body.name, randomNames: body.randomNames !== false, ...(typeof body.vision === 'number' ? { vision: body.vision } : {}), ...(body.themeId !== undefined ? { themeId: body.themeId } : {}) };
     if (path === '/api/teacher/game/delete' && typeof body?.game === 'string') return { kind: 'deleteGame', game: body.game, confirm: body.confirm === true };
     if (path === '/api/teacher/magic' && method === 'POST' && ['freeze', 'thaw', 'lightning', 'teleport', 'rain'].includes(body?.power)) return { kind: 'magic', power: body.power, studentKey: body.studentKey, x: body.x, y: body.y };
     if (path === '/api/teacher/vision' && typeof body?.radius === 'number') return { kind: 'vision', radius: body.radius };

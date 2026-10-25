@@ -21,7 +21,7 @@ const { MemoryRouter } = await import('react-router-dom');
 const { default: Studio } = await import('../src/pages/Studio');
 
 const root = createRoot(document.getElementById('root')!);
-await act(async () => { root.render(<MemoryRouter><Studio /></MemoryRouter>); });
+await act(async () => { root.render(<MemoryRouter initialEntries={['/studio?theme=plaza']}><Studio /></MemoryRouter>); });
 
 const svg = () => document.querySelector('svg.studio-canvas')!;
 const count = (selector: string) => document.querySelectorAll(selector).length;
@@ -82,29 +82,30 @@ await act(async () => { fire(svg(), 'dblclick', ...at(560, 560)); });
 check('a walk-behind polygon is added', count('polygon.behind') === behindBefore + 1);
 
 // 5b. Blocks that are not rectangles: an oval, and a free shape with a corner that can be dragged
+const ovalBefore = count('ellipse.block'), polyBefore = count('polygon.block');
 await act(async () => { button('Block (oval)').click(); });
 await act(async () => { fire(svg(), 'pointerdown', ...at(700, 100)); });
 await act(async () => { fire(svg(), 'pointermove', ...at(780, 140)); });
 await act(async () => { fire(svg(), 'pointerup', ...at(780, 140)); });
-check('an oval block is added', count('ellipse.block') === 1);
+check('an oval block is added', count('ellipse.block') === ovalBefore + 1);
 await act(async () => { button('Block (shape)').click(); });
 for (const [x, y] of [[900, 100], [960, 100], [960, 160]]) await act(async () => { fire(svg(), 'pointerdown', ...at(x, y)); });
 await act(async () => { fire(svg(), 'dblclick', ...at(960, 160)); });
-check('a free-shaped block is added', count('polygon.block') === 1);
+check('a free-shaped block is added', count('polygon.block') === polyBefore + 1);
 const corner = document.querySelector('circle.vertex');
 check('its corners can be dragged', !!corner);
 if (corner) {
   await act(async () => { fire(corner, 'pointerdown', ...at(960, 160)); });
   await act(async () => { fire(svg(), 'pointermove', ...at(990, 190)); });
   await act(async () => { fire(svg(), 'pointerup', ...at(990, 190)); });
-  check('dragging a corner reshapes it', document.querySelector('polygon.block')!.getAttribute('points')!.includes('990,190'));
+  check('dragging a corner reshapes it', [...document.querySelectorAll('polygon.block')].at(-1)!.getAttribute('points')!.includes('990,190'));
 }
 await act(async () => { button('Undo').click(); });
-check('undo puts the corner back', document.querySelector('polygon.block')!.getAttribute('points')!.includes('960,160'));
-await act(async () => { fire(document.querySelector('ellipse.block')!, 'pointerdown', ...at(740, 120)); });
+check('undo puts the corner back', [...document.querySelectorAll('polygon.block')].at(-1)!.getAttribute('points')!.includes('960,160'));
+await act(async () => { fire([...document.querySelectorAll('ellipse.block')].at(-1)!, 'pointerdown', ...at(740, 120)); });
 await act(async () => { fire(svg(), 'pointerup', ...at(740, 120)); });
 await act(async () => { window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Delete' })); });
-check('an oval can be selected and deleted', count('ellipse.block') === 0);
+check('an oval can be selected and deleted', count('ellipse.block') === ovalBefore);
 
 // 6. The walking check on the real plaza is clean; a wall across the start is reported
 await act(async () => { button('Check where students can walk').click(); });
