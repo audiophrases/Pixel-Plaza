@@ -36,14 +36,14 @@ export const FACTS: Fact[] = [
 // How many people each student has to find
 export const WARMUP_ROUNDS = 3;
 
-export const factById = (id: string): Fact | undefined => FACTS.find(fact => fact.id === id);
+export const factById = (id: string, facts: readonly Fact[] = FACTS): Fact | undefined => facts.find(fact => fact.id === id);
 
 export type Assignment = { fact: string; targets: string[] };
 
 // Gives each student a fact and a list of facts to find. Enough different facts are used for everyone to have
 // something to look for, every fact in use is held by at least one student, and nobody is sent to look for their own.
 // `random` returns a number in [0, 1). With fewer than two students there is nobody to find, so nothing is assigned.
-export function assignWarmup(students: readonly string[], random: () => number = Math.random): Map<string, Assignment> {
+export function assignWarmup(students: readonly string[], random: () => number = Math.random, facts: readonly Fact[] = FACTS, rounds = WARMUP_ROUNDS): Map<string, Assignment> {
     const result = new Map<string, Assignment>();
     if (students.length < 2) return result;
     const shuffle = <T,>(items: readonly T[]): T[] => {
@@ -54,17 +54,17 @@ export function assignWarmup(students: readonly string[], random: () => number =
         }
         return copy;
     };
-    const used = shuffle(FACTS.map(fact => fact.id)).slice(0, Math.min(FACTS.length, Math.max(3, Math.ceil(students.length / 2)), students.length));
+    const used = shuffle(facts.map(fact => fact.id)).slice(0, Math.min(facts.length, Math.max(3, Math.ceil(students.length / 2)), students.length));
     shuffle(students).forEach((student, index) => result.set(student, { fact: used[index % used.length], targets: [] }));
     for (const [student, assignment] of result) {
-        assignment.targets = shuffle(used.filter(id => id !== assignment.fact)).slice(0, WARMUP_ROUNDS);
+        assignment.targets = shuffle(used.filter(id => id !== assignment.fact)).slice(0, rounds);
         result.set(student, assignment);
     }
     return result;
 }
 
 // A student who arrives after the warm-up has started: a fact from those already in use, and facts to find.
-export function assignLateJoiner(inUse: readonly string[], random: () => number = Math.random): Assignment | null {
+export function assignLateJoiner(inUse: readonly string[], random: () => number = Math.random, rounds = WARMUP_ROUNDS): Assignment | null {
     const facts = [...new Set(inUse)];
     if (facts.length < 2) return null;
     const pick = Math.floor(random() * facts.length);
@@ -74,11 +74,12 @@ export function assignLateJoiner(inUse: readonly string[], random: () => number 
         const j = Math.floor(random() * (i + 1));
         [others[i], others[j]] = [others[j], others[i]];
     }
-    return { fact, targets: others.slice(0, WARMUP_ROUNDS) };
+    return { fact, targets: others.slice(0, rounds) };
 }
 
 // What one student is shown: their own fact and the one they are looking for now.
 export type WarmupView = {
+    title?: string; instructions?: string; level?: string; vocabulary?: string[];
     kind: WarmupKind;
     fact: string;                 // "You have a cat."
     task: string | null;          // "Find someone who plays football." or null when they have found everyone

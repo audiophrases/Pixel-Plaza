@@ -64,24 +64,24 @@ export const IDENTITIES: Identity[] = [
 // Every name of the famous people above, for the English word check: guessing "Is it Lamine Yamal?" is English.
 export const IDENTITY_NAMES: string[] = IDENTITIES.flatMap(identity => [identity.name, ...identity.accept]);
 
-export const identityById = (id: string): Identity | undefined => IDENTITIES.find(identity => identity.id === id);
+export const identityById = (id: string, identities: readonly Identity[] = IDENTITIES): Identity | undefined => identities.find(identity => identity.id === id);
 
 // Each student is a different person, and is asked to find out who one classmate is, in a circle, so everybody has
 // someone to ask about and everybody is asked about. `targets` holds the classmate to find out about.
-export function assignIdentities(students: readonly string[], random: () => number = Math.random): Map<string, Assignment> {
+export function assignIdentities(students: readonly string[], random: () => number = Math.random, identities: readonly Identity[] = IDENTITIES): Map<string, Assignment> {
     const result = new Map<string, Assignment>();
     if (students.length < 2) return result;
     const order = shuffled(students, random);
-    const people = shuffled(IDENTITIES.map(identity => identity.id), random);
+    const people = shuffled(identities.map(identity => identity.id), random);
     order.forEach((student, index) => result.set(student, { fact: people[index % people.length], targets: [order[(index + 1) % order.length]] }));
     return result;
 }
 
 // Someone arriving late is a person nobody else is, and is asked about one classmate already there.
-export function assignLateIdentity(taken: readonly string[], classmates: readonly string[], random: () => number = Math.random): Assignment | null {
+export function assignLateIdentity(taken: readonly string[], classmates: readonly string[], random: () => number = Math.random, identities: readonly Identity[] = IDENTITIES): Assignment | null {
     if (classmates.length === 0) return null;
-    const free = IDENTITIES.map(identity => identity.id).filter(id => !taken.includes(id));
-    const pool = free.length ? free : IDENTITIES.map(identity => identity.id);
+    const free = identities.map(identity => identity.id).filter(id => !taken.includes(id));
+    const pool = free.length ? free : identities.map(identity => identity.id);
     return { fact: pool[Math.floor(random() * pool.length)], targets: [classmates[Math.floor(random() * classmates.length)]] };
 }
 
@@ -94,18 +94,18 @@ export const PAIRS: [string, string][] = [
     ['pen', 'paper'], ['shoes', 'socks'], ['summer', 'winter'], ['yes', 'no'], ['in', 'out'], ['north', 'south'],
 ];
 
-export const complementOf = (word: string): string | undefined => {
-    const pair = PAIRS.find(([a, b]) => a === word || b === word);
+export const complementOf = (word: string, pairs: readonly (readonly [string, string])[] = PAIRS): string | undefined => {
+    const pair = pairs.find(([a, b]) => a === word || b === word);
     return pair ? (pair[0] === word ? pair[1] : pair[0]) : undefined;
 };
 
 // Each pair of students gets the two words of one pair. With an odd number the extra student gets a second copy of
 // one of the words, so two classmates are right for the student who has the other word.
-export function assignPairs(students: readonly string[], random: () => number = Math.random): Map<string, Assignment> {
+export function assignPairs(students: readonly string[], random: () => number = Math.random, wordPairs: readonly (readonly [string, string])[] = PAIRS): Map<string, Assignment> {
     const result = new Map<string, Assignment>();
     if (students.length < 2) return result;
     const people = shuffled(students, random);
-    const pairs = shuffled(PAIRS, random);
+    const pairs = shuffled(wordPairs, random);
     for (let index = 0; index + 1 < people.length; index += 2) {
         const pair = pairs[(index / 2) % pairs.length];
         const [first, second] = random() < 0.5 ? pair : [pair[1], pair[0]];
@@ -120,9 +120,9 @@ export function assignPairs(students: readonly string[], random: () => number = 
 }
 
 // Someone arriving late has the word of someone already there, so a partner exists.
-export function assignLatePair(inUse: readonly string[], random: () => number = Math.random): Assignment | null {
-    const words = inUse.filter(word => complementOf(word));
+export function assignLatePair(inUse: readonly string[], random: () => number = Math.random, pairs: readonly (readonly [string, string])[] = PAIRS): Assignment | null {
+    const words = inUse.filter(word => complementOf(word, pairs));
     if (words.length === 0) return null;
     const word = words[Math.floor(random() * words.length)];
-    return { fact: word, targets: [complementOf(word)!] };
+    return { fact: word, targets: [complementOf(word, pairs)!] };
 }

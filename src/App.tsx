@@ -5,6 +5,7 @@ import Game from './pages/Game';
 import Studio from './pages/Studio';
 import Teacher from './pages/Teacher';
 import MissionStudio from './pages/MissionStudio';
+import WarmupStudio from './pages/WarmupStudio';
 // The side quest library is large, so it loads only when a teacher opens it.
 const QuestLibrary = lazy(() => import('./pages/QuestLibrary'));
 
@@ -41,6 +42,7 @@ function App() {
           <Route path="/teacher" element={<Teacher />} />
           <Route path="/studio" element={<Studio />} />
           <Route path="/mission-studio" element={<MissionStudio />} />
+          <Route path="/warmup-studio" element={<WarmupStudio />} />
           <Route path="/quest-library" element={<Suspense fallback={<p style={{ padding: '2rem' }}>Loading the quest library…</p>}><QuestLibrary /></Suspense>} />
         </Routes>
       </div>

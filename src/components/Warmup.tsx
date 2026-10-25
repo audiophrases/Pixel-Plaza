@@ -11,7 +11,8 @@ export default function Warmup({ warmup, feedback, onAnswer }: Props) {
   const finished = warmup.task === null;
   const title = warmup.kind === 'identity' ? 'Who am I?' : warmup.kind === 'pairs' ? 'Find your pair' : 'Find someone who…';
   return <aside className="warmup glass-panel">
-    <h2>Warm-up: {title}</h2>
+    <h2>Warm-up: {warmup.title ?? title}</h2>
+    {warmup.instructions && <p>{warmup.instructions}</p>}
     {warmup.kind === 'identity' && <p className="warmup-rule">{IDENTITY_CHAT_REMINDER}</p>}
     <section className="warmup-block warmup-fact">
       <h3>{warmup.kind === 'pairs' ? 'Your word' : 'Your secret'}</h3>

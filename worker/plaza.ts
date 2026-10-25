@@ -29,6 +29,7 @@ import { REPORT_LINES_PER_STUDENT, type ClassReportData, type ReportLine } from 
 import { type Avatar, chatProblem, clampPosition, defaultAvatar, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 import { HEARING_RANGE, TYPING_EVERY_MS } from '../shared/chat.ts';
 import { identityRevealProblem } from '../shared/activityChat.ts';
+import { defaultWarmup, validateWarmup, warmupVocabulary, type SavedWarmup, type WarmupDefinition } from '../shared/warmupConfig.ts';
 import { VOICE_SAMPLE } from './speech.ts';
 import { buildGuide, type TeacherGuide } from '../shared/teacherGuide.ts';
 import { missionId } from '../shared/missionSchema.ts';
@@ -97,7 +98,7 @@ export type CampaignStatus = {
 
 export type TeacherStatus = {
     support: TeacherSupport;
-    warmup: { active: boolean; kind: WarmupKind; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
+    warmup: { active: boolean; kind: WarmupKind; title?: string; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
     campaign: CampaignStatus | null; // the open game's campaign, once started
     campaigns: CampaignChoice[]; // those that can be started, in the order to offer them
     open: boolean;
@@ -170,6 +171,7 @@ export class PlazaRoom extends DurableObject<Env> {
             CREATE TABLE IF NOT EXISTS campaigns (
                 game_id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, chapter INTEGER NOT NULL, status TEXT NOT NULL, started INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS warmups (game_id TEXT PRIMARY KEY, active INTEGER NOT NULL DEFAULT 1, started INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS warmup_templates (kind TEXT PRIMARY KEY, version INTEGER NOT NULL, definition TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS warmup_players (
                 game_id TEXT NOT NULL, student_key TEXT NOT NULL, fact TEXT NOT NULL, targets TEXT NOT NULL,
                 step INTEGER NOT NULL DEFAULT 0, last_wrong INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (game_id, student_key));
@@ -212,6 +214,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('warmups')").toArray().some(row => row.name === 'kind')) {
             this.sql.exec("ALTER TABLE warmups ADD COLUMN kind TEXT NOT NULL DEFAULT 'facts'");
         }
+        if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('warmups')").toArray().some(row => row.name === 'definition')) this.sql.exec('ALTER TABLE warmups ADD COLUMN definition TEXT');
         this.adoptOldClass();
         // Existing games retain Season 1, including saved positions and campaign progress.
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('games')").toArray().some(row => row.name === 'theme_id')) {
@@ -1402,6 +1405,32 @@ export class PlazaRoom extends DurableObject<Env> {
     // A few minutes at the start of a lesson: each student has a made-up fact about themselves and looks for
     // classmates who have other facts, typing their names. It is separate from the campaign.
 
+    warmupEditor(token: string, kind: unknown, input?: unknown): SavedWarmup | { error: string; status: number } {
+        if (!token || !this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray().length) return { error: 'Please sign in again.', status: 401 };
+        if (!isWarmupKind(kind)) return { error: 'Choose a warm-up type.', status: 400 };
+        return this.ctx.storage.transactionSync(() => {
+            const current = this.savedWarmup(kind);
+            if (input === undefined) return current;
+            const body = input as { definition?: unknown; version?: unknown } | null;
+            if (!body || body.version !== current.version) return { error: 'This warm-up was changed in another tab. Export your edits, then reload the saved version.', status: 409 };
+            const checked = validateWarmup(body.definition);
+            if (!checked.definition || checked.definition.kind !== kind) return { error: checked.errors.join(' ') || 'The warm-up type does not match.', status: 400 };
+            const next = { definition: checked.definition, version: current.version + 1 };
+            this.sql.exec('INSERT INTO warmup_templates (kind, version, definition) VALUES (?, ?, ?) ON CONFLICT(kind) DO UPDATE SET version = excluded.version, definition = excluded.definition', kind, next.version, JSON.stringify(next.definition));
+            return next;
+        });
+    }
+
+    private savedWarmup(kind: WarmupKind): SavedWarmup {
+        const row = this.sql.exec<{ version: number; definition: string }>('SELECT version, definition FROM warmup_templates WHERE kind = ?', kind).toArray()[0];
+        return row ? { version: row.version, definition: JSON.parse(row.definition) } : { version: 0, definition: defaultWarmup(kind) };
+    }
+
+    private warmupDefinition(game: string): WarmupDefinition {
+        const row = this.sql.exec<{ definition: string | null }>('SELECT definition FROM warmups WHERE game_id = ?', game).toArray()[0];
+        return row?.definition ? JSON.parse(row.definition) : defaultWarmup(this.warmupKind(game));
+    }
+
     private warmupActive(game: string | null): boolean {
         return game !== null && this.sql.exec<{ active: number }>('SELECT active FROM warmups WHERE game_id = ?', game).toArray()[0]?.active === 1;
     }
@@ -1420,16 +1449,20 @@ export class PlazaRoom extends DurableObject<Env> {
     private identityChatProblem(game: string | null, studentKey: string, text: string): string | null {
         if (!game || !this.warmupActive(game) || this.warmupKind(game) !== 'identity') return null;
         const player = this.sql.exec<{ fact: string }>('SELECT fact FROM warmup_players WHERE game_id = ? AND student_key = ?', game, studentKey).toArray()[0];
-        return player ? identityRevealProblem(text, player.fact) : null;
+        const definition = this.warmupDefinition(game);
+        return player && definition.kind === 'identity' ? identityRevealProblem(text, player.fact, definition.identities) : null;
     }
 
     // Starts afresh for the students who are here; anyone who arrives later is given a part when they do.
     private startWarmup(game: string, kind: WarmupKind): string | null {
         const here = this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey);
         if (here.length < 2) return 'At least two students need to be in the plaza.';
+        const definition = this.savedWarmup(kind).definition;
+        if (definition.kind === 'identity' && definition.identities.length < here.length) return `Add at least ${here.length} identities in the warm-up editor so every student has a different one.`;
         this.sql.exec('DELETE FROM warmup_players WHERE game_id = ?', game);
-        this.sql.exec('INSERT INTO warmups (game_id, active, started, kind) VALUES (?, 1, ?, ?) ON CONFLICT (game_id) DO UPDATE SET active = 1, started = excluded.started, kind = excluded.kind', game, Date.now(), kind);
-        for (const [key, assignment] of (kind === 'identity' ? assignIdentities(here) : kind === 'pairs' ? assignPairs(here) : assignWarmup(here))) {
+        this.sql.exec('INSERT INTO warmups (game_id, active, started, kind, definition) VALUES (?, 1, ?, ?, ?) ON CONFLICT (game_id) DO UPDATE SET active = 1, started = excluded.started, kind = excluded.kind, definition = excluded.definition', game, Date.now(), kind, JSON.stringify(definition));
+        for (const [key, assignment] of (definition.kind === 'identity' ? assignIdentities(here, Math.random, definition.identities)
+            : definition.kind === 'pairs' ? assignPairs(here, Math.random, definition.pairs) : assignWarmup(here, Math.random, definition.facts, definition.rounds))) {
             this.sql.exec('INSERT INTO warmup_players (game_id, student_key, fact, targets) VALUES (?, ?, ?, ?)', game, key, assignment.fact, JSON.stringify(assignment.targets));
         }
         this.sendWarmupToAll(game);
@@ -1446,9 +1479,15 @@ export class PlazaRoom extends DurableObject<Env> {
         const online = new Set(this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey));
         const here = players.filter(player => online.has(player.student_key));
         const kind = this.warmupKind(game);
-        const late = kind === 'identity' ? assignLateIdentity(players.map(player => player.fact), here.map(player => player.student_key))
-            : kind === 'pairs' ? assignLatePair(here.map(player => player.fact)) : assignLateJoiner(here.map(player => player.fact));
+        const definition = this.warmupDefinition(game);
+        const late = definition.kind === 'identity' ? assignLateIdentity(players.map(player => player.fact), here.map(player => player.student_key), Math.random, definition.identities)
+            : definition.kind === 'pairs' ? assignLatePair(here.map(player => player.fact), Math.random, definition.pairs) : assignLateJoiner(here.map(player => player.fact), Math.random, definition.rounds);
         if (!late) return false;
+        if (kind === 'identity') {
+            const different = here.filter(player => player.fact !== late.fact);
+            if (!different.length) return false;
+            late.targets = [different[Math.floor(Math.random() * different.length)].student_key];
+        }
         this.sql.exec('INSERT INTO warmup_players (game_id, student_key, fact, targets) VALUES (?, ?, ?, ?)', game, studentKey, late.fact, JSON.stringify(late.targets));
         return true;
     }
@@ -1456,18 +1495,20 @@ export class PlazaRoom extends DurableObject<Env> {
     private warmupView(game: string, studentKey: string): WarmupView | null {
         if (!this.warmupActive(game)) return null;
         const kind = this.warmupKind(game);
+        const definition = this.warmupDefinition(game);
         this.lateWarmupPart(game, studentKey);
         const players = this.warmupPlayers(game);
         const me = players.find(player => player.student_key === studentKey);
         if (!me) return null;
         const open = me.step < me.targets.length;
         const classmate = this.rosterNames(game).get(me.targets[0]) ?? 'a classmate';
-        const card = kind === 'identity' ? { fact: `You are ${identityById(me.fact)?.name ?? '?'}. Do not say your name! Answer yes or no.`,
+        const card = definition.kind === 'identity' ? { fact: `You are ${identityById(me.fact, definition.identities)?.name ?? '?'}. Do not say your name! Answer yes or no.`,
             task: `Find out who ${classmate} is. Ask yes or no questions. Then type their secret name.` }
             : kind === 'pairs' ? { fact: `Your word is ${me.fact}.`, task: `Find the person with the word that goes with ${me.fact}. Then type their name.` }
-            : { fact: factById(me.fact)?.mine ?? '', task: `Find someone who ${factById(me.targets[me.step])?.find ?? ''}.` };
+            : { fact: factById(me.fact, definition.kind === 'facts' ? definition.facts : [])?.mine ?? '', task: `Find someone who ${factById(me.targets[me.step], definition.kind === 'facts' ? definition.facts : [])?.find ?? ''}.` };
         return {
             kind,
+            title: definition.title, instructions: definition.instructions, level: definition.level, vocabulary: warmupVocabulary(definition),
             fact: card.fact,
             task: open ? card.task : null,
             step: me.step, of: me.targets.length,
@@ -1507,7 +1548,8 @@ export class PlazaRoom extends DurableObject<Env> {
         if (view.kind === 'identity') {
             // The secret identity of the classmate they were asked about
             const partner = players.find(player => player.student_key === me.targets[me.step]);
-            const identity = partner && identityById(partner.fact);
+            const definition = this.warmupDefinition(seat.game);
+            const identity = partner && definition.kind === 'identity' && identityById(partner.fact, definition.identities);
             right = !!identity && answerMatches({ id: 'warmup', text: '', accept: identity.accept }, typed);
         } else {
             // The name of a classmate who has the fact (or word) being looked for; never one's own.
@@ -1534,13 +1576,15 @@ export class PlazaRoom extends DurableObject<Env> {
         const players = this.warmupPlayers(game);
         if (players.length === 0 && !this.warmupActive(game)) return null;
         const names = this.rosterNames(game);
+        const definition = this.warmupDefinition(game);
         return {
             active: this.warmupActive(game),
+            title: definition.title,
             kind: this.warmupKind(game),
             players: players.map(player => ({ studentKey: player.student_key, name: names.get(player.student_key) ?? 'Student',
-                fact: this.warmupKind(game) === 'identity' ? `${identityById(player.fact)?.name ?? '?'} (finds out about ${names.get(player.targets[0]) ?? '?'})`
+                fact: definition.kind === 'identity' ? `${identityById(player.fact, definition.identities)?.name ?? '?'} (finds out about ${names.get(player.targets[0]) ?? '?'})`
                     : this.warmupKind(game) === 'pairs' ? `word: ${player.fact} (looks for ${player.targets[0]})`
-                    : factById(player.fact)?.mine ?? '', found: player.step, of: player.targets.length })),
+                    : factById(player.fact, definition.kind === 'facts' ? definition.facts : [])?.mine ?? '', found: player.step, of: player.targets.length })),
             team: { done: players.reduce((sum, player) => sum + player.step, 0), total: players.reduce((sum, player) => sum + player.targets.length, 0) },
         };
     }
@@ -1739,7 +1783,7 @@ export class PlazaRoom extends DurableObject<Env> {
         // On the teacher's laptop every word must be English, whatever the page did.
         if (typeof value === 'string' && this.env.LAN_URL) {
             const { notEnglish } = await import('./english.ts');
-            const words = notEnglish(value, [...this.seats().map(other => other.name), ...IDENTITY_NAMES]);
+            const words = notEnglish(value, [...this.seats().map(other => other.name), ...IDENTITY_NAMES, ...(this.warmupActive(seat.game) ? warmupVocabulary(this.warmupDefinition(seat.game)) : [])]);
             if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
             if (words.length) {
                 const reason = `Use English words only: ${words.map(item => item.word).join(', ')}.`;

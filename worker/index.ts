@@ -132,8 +132,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
     const post = request.method === 'POST';
     const studio = path.startsWith('/api/teacher/missions/');
     const speech = path === '/api/plaza/speech' || path === '/api/plaza/voice-preview';
+    const warmupEditor = path === '/api/teacher/warmup-editor';
     let body: any = {};
-    if (post && (studio || speech)) {
+    if (post && (studio || speech || warmupEditor)) {
         // Bound authoring input before buffering or parsing JSON, even without Content-Length.
         const reader = request.body?.getReader();
         if (!reader) return json({ error: 'Expected JSON.' }, 400);
@@ -142,9 +143,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
             const { done, value } = await reader.read();
             if (done) break;
             size += value.byteLength;
-            if (size > (studio ? MISSION_MAX_BYTES + 4096 : 1024)) {
+            if (size > (warmupEditor ? 68_096 : studio ? MISSION_MAX_BYTES + 4096 : 1024)) {
                 await reader.cancel();
-                return json({ error: studio ? 'Mission request exceeds 512 KB.' : 'Speech request is too large.' }, 413);
+                return json({ error: warmupEditor ? 'Warm-up request exceeds 64 KB.' : studio ? 'Mission request exceeds 512 KB.' : 'Speech request is too large.' }, 413);
             }
             chunks.push(value);
         }
@@ -229,6 +230,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
         const scope = new URL(request.url).searchParams.get('scope') === 'game' ? 'game' : 'lesson';
         const result = await plaza(env).classReport(request.headers.get('x-teacher-session') || '', scope);
         return 'error' in result ? json({ error: result.error }, result.status) : json(result);
+    }
+    if (warmupEditor && (get || post)) {
+        const result = await plaza(env).warmupEditor(request.headers.get('x-teacher-session') || '', new URL(request.url).searchParams.get('kind'), post ? body : undefined);
+        return json(result, 'error' in result ? result.status : 200);
     }
     if (path === '/api/teacher/campaign-guide' && get) {
         const query = new URL(request.url).searchParams;

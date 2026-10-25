@@ -343,6 +343,7 @@ export default function Teacher() {
           <button className="btn btn-primary" disabled={!status.open} onClick={() => void action('warmup', { op: 'start', type: warmupKind })}>
             {status.warmup?.active ? 'Start again' : 'Start the warm-up'}</button>
           {status.warmup?.active && <button className="btn btn-secondary" onClick={() => void action('warmup', { op: 'end' })}>End the warm-up</button>}
+          <Link to={`/warmup-studio?kind=${warmupKind}`}>Edit warm-up</Link>
         </div>
         {status.warmup && <>
           {status.warmup.active && status.warmup.kind === 'identity' && <p className="teacher-muted">Helpers’ secret names are blocked in student chat. Guesses and yes/no replies are allowed. Private messages to you remain available.</p>}
