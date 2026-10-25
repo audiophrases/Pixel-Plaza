@@ -241,7 +241,7 @@ export default function Teacher() {
   return <main className="teacher-page">
     <header className="teacher-header">
       <h1>Teacher controls</h1>
-      <span><Link to="/quest-library">Side quest library</Link> · <Link to="/mission-studio">Mission Studio</Link> · <Link to="/studio">Theme studio</Link> · <Link to="/">Student entrance</Link></span>
+      <span><Link to="/quest-library">Side quest library</Link> · <Link to="/warmup-studio">Warm-up editor</Link> · <Link to="/mission-studio">Mission Studio</Link> · <Link to="/studio">Theme studio</Link> · <Link to="/">Student entrance</Link></span>
     </header>
     {!token || !status ? <form className="teacher-signin" onSubmit={event => { event.preventDefault(); void signIn(); }}>
       <label htmlFor="teacher-password">Teacher password (the same as PinPlay)</label>

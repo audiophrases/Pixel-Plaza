@@ -119,10 +119,10 @@ export function assignPairs(students: readonly string[], random: () => number = 
     return result;
 }
 
-// Someone arriving late has the word of someone already there, so a partner exists.
+// Someone arriving late gets the complement of a present classmate's word.
 export function assignLatePair(inUse: readonly string[], random: () => number = Math.random, pairs: readonly (readonly [string, string])[] = PAIRS): Assignment | null {
     const words = inUse.filter(word => complementOf(word, pairs));
     if (words.length === 0) return null;
     const word = words[Math.floor(random() * words.length)];
-    return { fact: word, targets: [complementOf(word, pairs)!] };
+    return { fact: complementOf(word, pairs)!, targets: [word] };
 }

@@ -52,7 +52,7 @@ export function validateWarmup(value: unknown): { definition: WarmupDefinition |
             const accept = [...new Set([name, ...list(row.accept, `Aliases for identity ${i + 1}`, 0, 20).map(a => text(a, 'Alias', 80))].filter(Boolean))];
             for (const alias of accept) {
                 const key = fold(alias);
-                if (key.length < 2 || key.split(' ').length > 8 || ['yes', 'no', 'i', 'you', 'yes i am', 'no i am not'].includes(key)) errors.push(`“${alias}” cannot be a secret name: keep yes/no replies available.`);
+                if (key.length < 2 || key.split(' ').length > 8 || ['yes', 'no', 'i', 'you', 'yes i am', 'no i am not'].includes(key.replace(/(.)\1+/gu, '$1'))) errors.push(`“${alias}” cannot be a secret name: keep yes/no replies available.`);
                 if (names.has(key) && names.get(key) !== rowId) errors.push(`“${alias}” belongs to more than one identity. Use distinct names and aliases.`);
                 names.set(key, rowId);
             }

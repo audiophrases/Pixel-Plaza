@@ -1483,8 +1483,12 @@ export class PlazaRoom extends DurableObject<Env> {
         const late = definition.kind === 'identity' ? assignLateIdentity(players.map(player => player.fact), here.map(player => player.student_key), Math.random, definition.identities)
             : definition.kind === 'pairs' ? assignLatePair(here.map(player => player.fact), Math.random, definition.pairs) : assignLateJoiner(here.map(player => player.fact), Math.random, definition.rounds);
         if (!late) return false;
-        if (kind === 'identity') {
-            const different = here.filter(player => player.fact !== late.fact);
+        if (definition.kind === 'identity') {
+            let different = here.filter(player => player.fact !== late.fact);
+            if (!different.length) {
+                late.fact = definition.identities.find(identity => identity.id !== here[0]?.fact)?.id ?? late.fact;
+                different = here.filter(player => player.fact !== late.fact);
+            }
             if (!different.length) return false;
             late.targets = [different[Math.floor(Math.random() * different.length)].student_key];
         }

@@ -4,7 +4,6 @@ import { WARMUP_KINDS, isWarmupKind, type WarmupKind } from '../../shared/warmup
 import { defaultWarmup, validateWarmup, WARMUP_LEVELS, WARMUP_MAX_BYTES, type SavedWarmup, type WarmupDefinition } from '../../shared/warmupConfig';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import { downloadFile } from '../themeFiles';
-import '../components/Warmup.css';
 import './MissionStudio.css';
 import './WarmupStudio.css';
 
