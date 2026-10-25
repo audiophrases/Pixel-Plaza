@@ -103,11 +103,13 @@ The class can play on the teacher's laptop instead, over the school network. Stu
 
 The laptop's address is plain HTTP, so student sessions cross the school network unencrypted. Sign in to the teacher controls on the laptop itself (`localhost`), not from another device.
 
-## Student assistance
+## Warm-up editor
 
 Open **Warm-up editor** from Teacher controls, or **Edit warm-up** beside the activity selector, to customize the three built-in modes. Edit identities and accepted aliases, facts and the number to find, word pairs, titles, language levels and student instructions. Save to use the content on the next start/restart; an active round keeps its original definition. JSON import/export and **Use built-in content** provide backup and restore. See the [warm-up editor guide](docs/warmup-editor.md).
 
 In **Who am I?**, the server blocks students from writing their own assigned secret identity or aliases in student chat. Guessing another student's identity and replying yes/no stay allowed, as do private answers and teacher help. The teacher sees blocked attempts. Other student-chosen guessing games include separate clue-giver/guesser reminders and need teacher review. See [activity chat rules](docs/activity-chat-rules.md).
+
+## Student assistance
 
 **I need help** offers one AI language hint per student per classroom session when the existing OpenAI key is configured. It uses a short vocabulary tip, grammar explanation or unfinished starter while preserving the student's chat draft. Further requests notify the teacher; students can also ask the teacher directly at any time. Failed AI calls fall back to teacher help without using the allowance. Usage survives reconnects and server restarts and resets when the teacher opens a new classroom session. Teacher controls shows the used/student count, explicit requests and existing suggested check-ins. You can help in person, acknowledge/complete a check-in, or send a private message that appears in the student's chatbox. Students can reply through **Teacher (private help)** using their own words without English checks blocking that explanation.
 
@@ -131,6 +133,8 @@ Sound starts **on**. New chat messages are read aloud in the sender's chosen cha
 **Sound on/off** mutes both voices and celebrations immediately and remembers the student's choice on that device. Unmuting does not play a backlog. Chat and gameplay continue normally if sound is muted or speech is unavailable. Headphones are recommended. A browser that blocks autoplay offers **Enable sound**.
 
 A web page cannot tell headphones from speakers (browsers hide the device names), so the teacher finds the speakers instead. Every clip a device reads aloud is listed for the last 15 minutes. Heard a phrase in the room? Type what you remember of it in **Heard something?** above the class faces: it shows the message, who wrote it, and each device that played it (×3 for replays). One click on a device turns its sound off; the student sees **🔒 Sound off** and nothing plays until you click it again. A face with a pulsing 🔊 is reading aloud right now.
+
+If you cannot identify the device, use **Mute all student sound** beside that search. It stops TTS and game sounds for everyone and locks sound off for reconnects and late joiners until you press **Restore student sound**. The class-wide setting survives server restarts and remains in effect across games until restored. Restoring preserves individual teacher sound locks and students' own mute choices; old messages do not play in a backlog. Chat stays available.
 
 Speech reuses PinPlay's Render Edge TTS bridge. The service may take a while to wake up on the first request. Its address and optional secret can be overridden with `EDGE_TTS_URL` and `EDGE_TTS_SECRET`; secrets stay server-side. Only messages the player received can be requested as speech, under the existing moderation and privacy rules. See [sound and voice details](docs/audio-voice-plan.md).
 

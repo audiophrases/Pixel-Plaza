@@ -123,6 +123,7 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     if (path === '/api/teacher/sound' && typeof body?.studentKey === 'string' && typeof body?.off === 'boolean') {
         return { kind: 'sound', studentKey: body.studentKey, off: body.off };
     }
+    if (path === '/api/teacher/sound-all' && typeof body?.off === 'boolean') return { kind: 'soundAll', off: body.off };
     return null;
 }
 
@@ -186,6 +187,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
         if (!(await room.spendSpeech(student.studentKey, preview))) return json({ error: 'Wait a moment before playing more sounds.' }, 429);
         const audio = await synthesize(env, message, request.signal);
         if (!audio) return json({ error: 'Speech is temporarily unavailable. You can keep reading.' }, 503);
+        if (await room.soundOff(student.studentKey)) {
+            await audio.body?.cancel();
+            return json({ error: 'Your teacher turned your sound off.' }, 403);
+        }
         // A teacher may retract a message or switch games during synthesis.
         const current = preview ? message : await room.speechMessage(student.studentKey, body.id);
         if (!current || current.text !== message.text || current.voice !== message.voice) {

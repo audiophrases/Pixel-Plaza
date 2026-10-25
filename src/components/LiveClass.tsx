@@ -14,7 +14,7 @@ export type LiveEntry = { id: string; studentKey: string; sender: string; target
 export type LiveStudent = { studentKey: string; name: string; zone: string | null; level?: number; look?: Partial<AvatarConfig> };
 // A clip one student's device read aloud: a chat message (id) or a voice sample (no id). `now` is the server's clock.
 export type LivePlay = { at: number; studentKey: string; id: string | null; senderKey: string; text: string };
-export type LiveSound = { off: string[]; now: number; plays: LivePlay[] };
+export type LiveSound = { allOff?: boolean; off: string[]; now: number; plays: LivePlay[] };
 type Props = {
   gameId: string;
   entries: LiveEntry[];
@@ -87,6 +87,7 @@ export default function LiveClass({ gameId, entries, alerts, online, known, mute
   const [sent, setSent] = useState<string | null>(null); // the student a private message just went to
   const [busy, setBusy] = useState(false);
   const [phrase, setPhrase] = useState(''); // something the teacher heard in the room
+  const [soundBusy, setSoundBusy] = useState(false);
 
   const waiting = entries.filter(entry => entry.status === 'pending');
   const needing = alerts.filter(alert => alert.status !== 'resolved');
@@ -154,8 +155,14 @@ export default function LiveClass({ gameId, entries, alerts, online, known, mute
   const found = looking.length ? heard.filter(line => looking.every(word => plain(line.text).includes(word)))
     : heard.filter(line => line.last > sound.now - LATELY_MS).slice(0, 3);
   const playing = new Set(sound.plays.filter(play => play.at > sound.now - PLAYING_MS).map(play => play.studentKey));
-  const silenced = (studentKey: string) => sound.off.includes(studentKey);
+  const allSoundOff = sound.allOff === true;
+  const silenced = (studentKey: string) => allSoundOff || sound.off.includes(studentKey);
   const silence = (studentKey: string) => void action('sound', { studentKey, off: !silenced(studentKey) });
+  const toggleAllSound = async () => {
+    setSoundBusy(true);
+    try { await action('sound-all', { off: !allSoundOff }); }
+    finally { setSoundBusy(false); }
+  };
 
   return <section className="live" aria-label="The class now">
     <div className="live-column">
@@ -224,14 +231,20 @@ export default function LiveClass({ gameId, entries, alerts, online, known, mute
         <input type="search" className="live-heard-search" value={phrase} onChange={event => setPhrase(event.target.value)}
           placeholder="🔊 Heard something? Type it" aria-label="Find which devices read a phrase aloud" />
       </div>
+      <div className="live-sound-control">
+        <button type="button" className={`btn btn-sm ${allSoundOff ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={allSoundOff} disabled={soundBusy}
+          onClick={() => void toggleAllSound()} title={allSoundOff ? 'Release the class sound lock. Individual locks and student mute choices stay in effect.' : 'Stop TTS and game sounds on all student devices, including late joiners.'}>
+          {allSoundOff ? '🔊 Restore student sound' : '🔇 Mute all student sound'}</button>
+        {allSoundOff && <p role="status">All student sound is off until you restore it.</p>}
+      </div>
       {found.length > 0 && <ul className="live-heard" aria-label="Read aloud">{found.map(line => <li key={line.key}>
         <div className="live-heard-top"><q>{line.text}</q>
           {line.id ? person(line.senderKey, nameOf(line.senderKey)) : <span className="live-muted">🎙 voice test</span>}
           <small>{ago(line.last, sound.now)}</small></div>
         <div className="live-heard-on"><span title="Played aloud on">🔊</span>{line.devices.map(({ studentKey, times }) => {
           const name = who(studentKey, nameOf(studentKey));
-          return <button key={studentKey} type="button" className="live-heard-device" aria-pressed={silenced(studentKey)} onClick={() => silence(studentKey)}
-            title={silenced(studentKey) ? `Turn ${name}’s sound back on` : `Turn ${name}’s sound off`}>
+          return <button key={studentKey} type="button" className="live-heard-device" aria-pressed={silenced(studentKey)} disabled={allSoundOff} onClick={() => silence(studentKey)}
+            title={allSoundOff ? 'Restore class sound before changing individual sound settings' : silenced(studentKey) ? `Turn ${name}’s sound back on` : `Turn ${name}’s sound off`}>
             <Face player={lookOf(studentKey)} name={nameOf(studentKey)} />{name}{times > 1 && <small>×{times}</small>}<span>{silenced(studentKey) ? '🔇' : '🔈'}</span>
           </button>;
         })}</div>
@@ -270,7 +283,7 @@ export default function LiveClass({ gameId, entries, alerts, online, known, mute
         <div className="live-spells">
           <button type="button" onClick={() => void action('mute', { studentKey: chosen.studentKey, muted: !muted.includes(chosen.studentKey) })}>
             {muted.includes(chosen.studentKey) ? '💬 Unmute chat' : '🤐 Mute chat'}</button>
-          <button type="button" onClick={() => silence(chosen.studentKey)} title={silenced(chosen.studentKey) ? 'Let their device read chat aloud again' : 'Their device stops reading chat aloud, until you turn it back on'}>
+          <button type="button" onClick={() => silence(chosen.studentKey)} disabled={allSoundOff} title={allSoundOff ? 'Restore class sound before changing individual sound settings' : silenced(chosen.studentKey) ? 'Let their device read chat aloud again' : 'Their device stops reading chat aloud, until you turn it back on'}>
             {silenced(chosen.studentKey) ? '🔊 Sound on' : '🔇 Sound off'}</button>
           {here && <>
             <button type="button" onClick={() => void action('magic', { power: 'freeze', studentKey: chosen.studentKey })} title="Stops them walking for 15 seconds">❄ Freeze</button>

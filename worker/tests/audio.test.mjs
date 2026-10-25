@@ -101,6 +101,8 @@ test("the teacher's sound-off stops playback, outranks the student's own button 
         assert.deepEqual(fetched, ['loud'], 'turning sound back on does not read what arrived meanwhile');
         sound.receive('after'); await tick();
         assert.deepEqual(fetched, ['loud', 'after']);
+        sound.setMuted(true); sound.setLocked(true); sound.setLocked(false);
+        assert.equal(sound.snapshot.muted, true, 'lifting the teacher lock preserves a student’s own mute choice');
     } finally { sound.dispose(); }
 });
 

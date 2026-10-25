@@ -137,6 +137,20 @@ try {
   assert.deepEqual(actions.at(-1), { path: 'mute', body: { studentKey: 'ben', muted: true } });
   await press([...document.querySelectorAll('.live-spells button')].find(button => button.textContent === '🔇 Sound off'));
   assert.deepEqual(actions.at(-1), { path: 'sound', body: { studentKey: 'ben', off: true } });
+  const soundToggle = () => document.querySelector<HTMLButtonElement>('.live-sound-control button')!;
+  assert.equal(soundToggle().textContent, '🔇 Mute all student sound');
+  await press(soundToggle());
+  assert.deepEqual(actions.at(-1), { path: 'sound-all', body: { off: true } });
+  props = { ...props, sound: { ...props.sound, allOff: true } }; await render();
+  assert.equal(soundToggle().textContent, '🔊 Restore student sound');
+  assert.equal(soundToggle().getAttribute('aria-pressed'), 'true');
+  assert.ok(document.body.textContent?.includes('All student sound is off until you restore it'));
+  assert.ok(tiles().every(tile => tile.querySelector('.live-tile-sound')?.textContent === '🔇'));
+  assert.equal(document.querySelector<HTMLButtonElement>('.live-spells button[title^="Restore class sound"]')?.disabled, true);
+  await press(soundToggle());
+  assert.deepEqual(actions.at(-1), { path: 'sound-all', body: { off: false } });
+  props = { ...props, sound: { ...props.sound, allOff: false } }; await render();
+  assert.equal(tiles().find(tile => tile.textContent?.includes('Cleo'))?.querySelector('.live-tile-sound')?.textContent, '🔇', 'restoring the class preserves individual sound locks');
   await press(items()[2].querySelector('.live-person'));
   assert.equal(selected, 'ben', 'a name in the queue opens that student');
 

@@ -25,7 +25,7 @@ export type PlazaEvent =
   | { t: 'notice'; level: 'info' | 'warning'; text: string; cid?: string; id?: string } // cid: the attempt this answers; id: the chat message it is about
   | { t: 'result'; cid: string; id?: string }
   | { t: 'snap'; x: number; y: number }                                    // the server put you back: your last move was not possible
-  | { t: 'warmup'; warmup: WarmupView | null }                               // your part of the warm-up, or null when it is over
+  | { t: 'warmup'; warmup: WarmupView | null; vocabulary?: string[] }         // your part of the warm-up, or null when it is over
   | { t: 'warmup-answered'; correct: boolean; wait: boolean }
   | { t: 'vision'; radius: number }                                        // how far you see, in map pixels; 0 is everyone
   | { t: 'sound'; off: boolean }                                           // the teacher turned your sound off, or back on

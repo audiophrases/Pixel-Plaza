@@ -43,6 +43,8 @@ Private teacher replies and the student's own private messages to the teacher fo
 
 The app calls PinPlay's existing Render bridge directly, avoiding the public quiz-speech cache. Credentials remain server-side, and speech responses are private/no-store. Optional `EDGE_TTS_URL` and `EDGE_TTS_SECRET` overrides are documented in `.dev.vars.example`. Requests and streamed audio have size and time bounds. Bridge failure leaves chat and gameplay usable.
 
+**Mute all student sound** in the Class panel provides a one-click class-wide lock when the teacher cannot identify the noisy device. It sends the existing sound-lock event to all connected students, stopping current playback and clearing queued audio. The persisted master setting also applies to reconnects, late arrivals and later games until the teacher chooses **Restore student sound**. Individual sound locks and local mute preferences are preserved. Individual sound controls are disabled while the class lock is active. TTS/voice-preview requests are denied while locked, including a final check after synthesis to catch requests already in flight. Chat and mission progress continue normally.
+
 Read the message exactly as delivered, without silently correcting or changing its wording. Speech playback does not affect goal completion, language grading or the existing teacher-assistance and message-audit features.
 
 ## Verification

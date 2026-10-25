@@ -109,6 +109,7 @@ export default function Game() {
   const [sending, setSending] = useState(false);
   const [warmup, setWarmup] = useState<WarmupView | null>(null); // the opening warm-up, while the teacher has it on
   const [warmupFeedback, setWarmupFeedback] = useState<{ correct: boolean; wait: boolean } | null>(null);
+  const warmupVocabulary = useRef<string[]>([]);
   const [alias, setAlias] = useState<{ name: string; kept: boolean } | null>(null); // set when this game gives made-up names
   const [quest, setQuest] = useState<QuestView | null>(null); // this student's part of the campaign, if one is running
   const [answered, setAnswered] = useState<{ objective: string; correct: boolean; wait: boolean } | null>(null);
@@ -392,7 +393,10 @@ export default function Game() {
         }
         return;
       }
-      if (event.t === 'warmup') { setWarmup(event.warmup); setWarmupFeedback(null); return; }
+      if (event.t === 'warmup') {
+        warmupVocabulary.current = event.vocabulary ?? event.warmup?.vocabulary ?? warmupVocabulary.current;
+        setWarmup(event.warmup); setWarmupFeedback(null); return;
+      }
       if (event.t === 'warmup-answered') {
         setWarmupFeedback({ correct: event.correct, wait: event.wait });
         if (event.correct && !event.wait) audio.goal();
@@ -530,7 +534,7 @@ export default function Game() {
       // Every word must be English. Names of people in the Plaza are fine.
       // If the dictionary cannot load, chat carries on rather than stopping.
       // Names of classmates and of the famous people in the "Who am I?" warm-up are fine.
-      const names = [session.student.displayName, ...[...plaza.players.values()].map(player => player.name), ...IDENTITY_NAMES, ...(warmup?.vocabulary ?? [])];
+      const names = [session.student.displayName, ...[...plaza.players.values()].map(player => player.name), ...IDENTITY_NAMES, ...warmupVocabulary.current];
       let check: Checker | null = null;
       try {
         check = await loadChecker();

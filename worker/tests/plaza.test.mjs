@@ -383,6 +383,70 @@ test('chat speech uses persisted sender voices and only synthesizes messages del
     }
 });
 
+test('mute all student sound stops every player, blocks in-flight speech and persists until restored', { timeout: 120000 }, async () => {
+    let calls = 0, entered, release;
+    const bridgeEntered = new Promise(resolve => { entered = resolve; });
+    const bridgeRelease = new Promise(resolve => { release = resolve; });
+    const bridge = http.createServer(async (req, res) => {
+        for await (const chunk of req) { void chunk; }
+        calls++;
+        if (calls === 1) { entered(); await bridgeRelease; }
+        res.writeHead(200, { 'Content-Type': 'audio/mpeg' }); res.end('ID3-muted-test');
+    });
+    await new Promise(resolve => bridge.listen(0, '127.0.0.1', resolve));
+    const pinPlay = await startPinPlay();
+    const pinPlayUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-sound-all-'));
+    const vars = { EDGE_TTS_URL: `http://127.0.0.1:${bridge.address().port}/tts` };
+    let plaza = await startPlaza(pinPlayUrl, persistTo, vars);
+    const sockets = [];
+    try {
+        let session = (await api(plaza.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (op, body) => api(plaza.base, `/api/teacher/${op}`, { session, body });
+        PIN = (await teacher('game', { name: 'Quiet class', randomNames: false })).body.pin;
+        assert.equal((await teacher('status')).body.sound.allOff, false);
+        assert.equal((await api(plaza.base, '/api/teacher/sound-all', { body: { off: true } })).status, 401);
+        assert.equal((await api(plaza.base, '/api/teacher/sound-all', { token: 'signed-a', body: { off: true } })).status, 401);
+        let alex = await enter(plaza.base, 'signed-a', null), sam = await enter(plaza.base, 'signed-b', null); sockets.push(alex, sam);
+        assert.equal((await alex.next(m => m.t === 'sound')).off, false); assert.equal((await sam.next(m => m.t === 'sound')).off, false);
+        await teacher('sound', { studentKey: 'stu_b', off: true }); assert.equal((await sam.next(m => m.t === 'sound')).off, true);
+        const preview = token => fetch(`${plaza.base}/api/plaza/voice-preview`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-student-token': token }, body: JSON.stringify({ voice: 'en-IE-EmilyNeural' }) });
+        const inFlight = preview('signed-a'); await bridgeEntered;
+        assert.equal((await teacher('sound-all', { off: true })).status, 200);
+        assert.equal((await alex.next(m => m.t === 'sound')).off, true); assert.equal((await sam.next(m => m.t === 'sound')).off, true);
+        release(); assert.equal((await inFlight).status, 403, 'mute while synthesis is running prevents returning a voice clip');
+        assert.equal((await preview('signed-a')).status, 403); assert.equal((await preview('signed-b')).status, 403);
+        assert.equal(calls, 1, 'muted requests do not reach TTS');
+        const speech = await api(plaza.base, '/api/plaza/speech', { token: 'signed-a', body: { id: 'any-message' } });
+        assert.equal(speech.status, 403);
+        const state = (await teacher('status')).body;
+        assert.equal(state.sound.allOff, true); assert.deepEqual(state.sound.off, ['stu_b']); assert.deepEqual(state.muted, [], 'sound mute does not mute chat');
+        await teacher('sound', { studentKey: 'stu_a', off: false });
+        assert.equal((await alex.next(m => m.t === 'sound')).off, true, 'an individual sound-on cannot bypass the master lock');
+        const chris = await enter(plaza.base, 'signed-c', null); sockets.push(chris);
+        assert.equal((await chris.next(m => m.t === 'sound')).off, true, 'late arrivals inherit the lock');
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        plaza = await startPlaza(pinPlayUrl, persistTo, vars);
+        session = (await api(plaza.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        alex = await enter(plaza.base, 'signed-a', null); sam = await enter(plaza.base, 'signed-b', null); sockets.push(alex, sam);
+        assert.equal((await teacher('status')).body.sound.allOff, true);
+        assert.equal((await alex.next(m => m.t === 'sound')).off, true); assert.equal((await sam.next(m => m.t === 'sound')).off, true);
+        alex.send({ t: 'chat', text: 'We can still chat.', to: sam.me.id });
+        const notice = await alex.next(m => m.t === 'notice' && /approval/.test(m.text));
+        await teacher('review', { id: notice.id, approve: true });
+        assert.equal((await sam.next(m => m.t === 'chat' && m.id === notice.id)).text, 'We can still chat.');
+        const restored = (await teacher('sound-all', { off: false })).body.sound;
+        assert.equal(restored.allOff, false); assert.deepEqual(restored.off, ['stu_b']);
+        assert.equal((await alex.next(m => m.t === 'sound')).off, false); assert.equal((await sam.next(m => m.t === 'sound')).off, true, 'individual sound lock stays in place');
+        const audio = await preview('signed-a'); assert.equal(audio.status, 200); await audio.arrayBuffer();
+        assert.equal((await preview('signed-b')).status, 403);
+    } finally {
+        release(); for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        await Promise.all([new Promise(resolve => pinPlay.close(resolve)), new Promise(resolve => bridge.close(resolve))]);
+        removeTemp(persistTo);
+    }
+});
+
 test('student assistance: blocked submissions, help requests, private replies and complete history persist', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay();
     const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-assistance-'));
@@ -2486,6 +2550,10 @@ test('warm-up editor saves private content, pins running rounds and keeps custom
         assert.equal((await send(alex, oldAlias, 'everyone', 'old-after-restart')).level, 'warning');
         await teacher('warmup', { op: 'start', type: 'identity' });
         assert.equal((await view(alex, future.title)).title, future.title, 'restarting opts into the new content');
+        await teacher('warmup', { op: 'end' });
+        const ended = await alex.next(m => m.t === 'warmup' && m.warmup === null);
+        assert.ok(ended.vocabulary.includes('Zorvax the sailor'), 'custom proper names remain available to the word checker after the round');
+        assert.equal((await send(alex, 'Zorvax the sailor', sam.me.id, 'after-custom-end')).level, 'info');
         const facts = { ...defaultWarmup('facts'), title: 'Travel facts', rounds: 1, facts: [
             { id: 'compass', mine: 'You have a compass.', find: 'has a compass' }, { id: 'map', mine: 'You have a map.', find: 'has a map' },
         ] };

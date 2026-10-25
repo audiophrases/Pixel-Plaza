@@ -79,6 +79,7 @@ export type TeacherAction =
     | { kind: 'mode'; mode: ChatMode }
     | { kind: 'mute'; studentKey: string; muted: boolean }
     | { kind: 'sound'; studentKey: string; off: boolean } // silences one student's device (no headphones) until turned back on
+    | { kind: 'soundAll'; off: boolean } // a persistent class-wide sound lock, including late arrivals
     | { kind: 'xp'; chatId?: string; report?: { studentKey: string; objective: string } } // the teacher stars a message or a report
     | { kind: 'helpStatus'; id: string; status: HelpStatus; gameId?: string }
     | { kind: 'helpMessage'; studentKey: string; text: string; gameId?: string };
@@ -113,7 +114,7 @@ export type TeacherStatus = {
     muted: string[];
     // Every clip a device read aloud lately, newest first, so a phrase heard in the room leads to the speakers
     // it came from. `id` is the chat message (null for a voice sample); `now` is the server's clock, to age them by.
-    sound: { off: string[]; now: number; plays: { at: number; studentKey: string; id: string | null; senderKey: string; text: string }[] };
+    sound: { allOff: boolean; off: string[]; now: number; plays: { at: number; studentKey: string; id: string | null; senderKey: string; text: string }[] };
     online: { studentKey: string; name: string; x: number; y: number; zone: string | null; level: number; look: Avatar }[]; // look: the avatar, for the teacher to recognise them by
 };
 
@@ -529,6 +530,13 @@ export class PlazaRoom extends DurableObject<Env> {
             else this.sql.exec('DELETE FROM sound_off WHERE student_key = ?', action.studentKey);
             for (const ws of this.ctx.getWebSockets(action.studentKey)) this.sendSound(ws, action.studentKey);
         }
+        if (action.kind === 'soundAll') {
+            this.saveSetting('sound_all_off', action.off ? '1' : '0');
+            for (const ws of this.ctx.getWebSockets()) {
+                const seat = ws.deserializeAttachment() as Seat | null;
+                if (seat && !seat.left && ws.readyState === WebSocket.READY_STATE_OPEN) this.sendSound(ws, seat.studentKey);
+            }
+        }
         // The dashboard polls every 2 seconds: send everything still pending plus
         // recent history, read through the indexes, not the whole log each time.
         const current = this.game(this.activeGame());
@@ -557,6 +565,7 @@ export class PlazaRoom extends DurableObject<Env> {
             moderation: !!this.env.OPENAI_API_KEY,
             muted: this.sql.exec<{ student_key: string }>('SELECT student_key FROM mutes').toArray().map(row => row.student_key),
             sound: {
+                allOff: this.setting('sound_all_off') === '1',
                 off: this.sql.exec<{ student_key: string }>('SELECT student_key FROM sound_off').toArray().map(row => row.student_key),
                 now: Date.now(),
                 plays: current ? this.sql.exec<TeacherStatus['sound']['plays'][number]>(`SELECT ts AS at, student_key AS studentKey, chat_id AS id,
@@ -637,7 +646,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // The teacher turned this student's sound off: their device gets no speech until it is turned back on.
     soundOff(studentKey: string): boolean {
-        return this.sql.exec('SELECT 1 FROM sound_off WHERE student_key = ?', studentKey).toArray().length > 0;
+        return this.setting('sound_all_off') === '1' || this.sql.exec('SELECT 1 FROM sound_off WHERE student_key = ?', studentKey).toArray().length > 0;
     }
 
     // A clip this student's device is about to play, so a teacher who hears a phrase in the room can find
@@ -1521,7 +1530,8 @@ export class PlazaRoom extends DurableObject<Env> {
 
     private sendWarmup(target: WebSocket, game: string, studentKey: string): void {
         if (!this.warmupActive(game) && this.warmupPlayers(game).length === 0) return;
-        try { target.send(JSON.stringify({ t: 'warmup', warmup: this.warmupView(game, studentKey) })); } catch { /* closing */ }
+        try { target.send(JSON.stringify({ t: 'warmup', warmup: this.warmupView(game, studentKey),
+            vocabulary: [...new Set([...warmupVocabulary(this.warmupDefinition(game)), ...warmupVocabulary(this.savedWarmup('identity').definition)])] })); } catch { /* closing */ }
     }
 
     private sendWarmupToAll(game: string): void {
@@ -1786,7 +1796,8 @@ export class PlazaRoom extends DurableObject<Env> {
         // On the teacher's laptop every word must be English, whatever the page did.
         if (typeof value === 'string' && this.env.LAN_URL) {
             const { notEnglish } = await import('./english.ts');
-            const words = notEnglish(value, [...this.seats().map(other => other.name), ...IDENTITY_NAMES, ...(this.warmupActive(seat.game) ? warmupVocabulary(this.warmupDefinition(seat.game)) : [])]);
+            const words = notEnglish(value, [...this.seats().map(other => other.name), ...IDENTITY_NAMES,
+                ...warmupVocabulary(this.warmupDefinition(seat.game)), ...warmupVocabulary(this.savedWarmup('identity').definition)]);
             if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
             if (words.length) {
                 const reason = `Use English words only: ${words.map(item => item.word).join(', ')}.`;

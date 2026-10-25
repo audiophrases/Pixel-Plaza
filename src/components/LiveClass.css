@@ -4,6 +4,9 @@
 .live-column { min-width: 0; padding: 1rem; background: #fff; border: 1px solid var(--line); border-radius: 14px; }
 .live-heading { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin-bottom: .6rem; }
 .live-heading h2 { display: flex; align-items: center; gap: .45rem; margin: 0 auto 0 0; font-size: 1.15rem; }
+.live-sound-control { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .35rem 0 .8rem; }
+.live-sound-control p { margin: 0; font-size: .85rem; font-weight: 600; color: #8c3918; }
+.live-heard-device:disabled, .live-spells button:disabled { opacity: .6; cursor: default; }
 .live-count { min-width: 1.6em; padding: .05rem .5rem; border-radius: 999px; background: #c62828; color: #fff; font-size: .85rem; text-align: center; }
 .live-muted { color: #6b7480; font-size: .85rem; font-weight: 600; }
 .live-clear { margin: .75rem 0; padding: 1.25rem; border-radius: 12px; background: #f1faf3; color: #1e6b3a; font-size: 1.05rem; font-weight: 700; text-align: center; }
