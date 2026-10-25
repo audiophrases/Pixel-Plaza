@@ -13,6 +13,7 @@ import { sha256Hex } from '../rules.ts';
 import { castanyada, castanyadaComplete, castanyadaInvestigations } from '../../shared/campaign.ts';
 import { FACTS } from '../../shared/warmup.ts';
 import { IDENTITIES, identityById } from '../../shared/warmupKinds.ts';
+import { defaultWarmup } from '../../shared/warmupConfig.ts';
 import { missionEnvelope } from '../../shared/missionSchema.ts';
 import { legalMove } from '../../shared/plazaMap.ts';
 import { SIDE_QUEST_SOURCE, sideQuests } from '../../shared/sideQuests.ts';
@@ -2425,6 +2426,82 @@ test('chapter 3: the thief hides the chestnuts, and the class opens the cellar w
         await plaza.stop();
         await new Promise(resolve => pinPlay.close(resolve));
         removeTemp(persistTo);
+    }
+});
+
+test('warm-up editor saves private content, pins running rounds and keeps custom mechanics after restart', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-warmup-editor-'));
+    const vars = { LAN_URL: 'http://127.0.0.1', CLOUD_URL: '' };
+    let plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, vars);
+    const sockets = [], pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        let session = (await api(plaza.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (op, body) => api(plaza.base, `/api/teacher/${op}`, { session, body });
+        const config = (kind, definition, version) => teacher(`warmup-editor?kind=${kind}`, definition ? { definition, version } : undefined);
+        assert.equal((await api(plaza.base, '/api/teacher/warmup-editor?kind=identity')).status, 401);
+        assert.equal((await api(plaza.base, '/api/teacher/warmup-editor?kind=identity', { body: { version: 0, definition: defaultWarmup('identity') } })).status, 401);
+        assert.equal((await config('missing')).status, 400);
+        const definition = { kind: 'identity', title: 'Space identities', instructions: 'Ask yes or no questions about your classmate.', level: 'B1', identities: [
+            { id: 'zorvax', name: 'Zorvax', accept: ['zorb'] }, { id: 'quenfli', name: 'Quenfli', accept: ['quen'] }, { id: 'vellora', name: 'Vellora', accept: ['vell'] },
+        ] };
+        assert.equal((await config('identity')).body.version, 0);
+        assert.equal((await config('identity', definition, 0)).body.version, 1);
+        assert.equal((await config('identity', definition, 0)).status, 409);
+        assert.equal((await config('identity', { ...definition, identities: [] }, 1)).status, 400);
+        assert.equal((await config('identity', { ...definition, instructions: 'x'.repeat(70_000) }, 1)).status, 413);
+        PIN = (await teacher('game', { name: 'Edited warm-ups', randomNames: false })).body.pin;
+        let alex = await enter(plaza.base, 'signed-a', null), sam = await enter(plaza.base, 'signed-b', null); sockets.push(alex, sam);
+        await teacher('warmup', { op: 'start', type: 'identity' });
+        const view = async (who, title) => (await who.next(m => m.t === 'warmup' && m.warmup?.title === title)).warmup;
+        const a = await view(alex, definition.title), b = await view(sam, definition.title);
+        assert.equal(a.level, 'B1'); assert.equal(a.instructions, definition.instructions);
+        assert.ok(a.vocabulary.includes('Zorvax')); assert.ok(a.vocabulary.includes('zorb'));
+        const name = card => card.fact.match(/^You are (.+?)\. Do not say/)[1];
+        const secretA = name(a), oldAlias = definition.identities.find(i => i.name === secretA).accept[0];
+        const future = { ...definition, title: 'Sea identities', identities: definition.identities.map(i => ({ ...i, name: `${i.name} the sailor`, accept: [`sailor ${i.name}`] })) };
+        assert.equal((await config('identity', future, 1)).body.version, 2);
+        assert.equal((await teacher('status')).body.warmup.title, definition.title, 'saving does not rewrite the current round');
+        const send = async (who, text, to, cid) => {
+            await pause(1550); who.send({ t: 'chat', text, to, cid });
+            return who.next(m => m.t === 'notice' && m.cid === cid);
+        };
+        const rejected = await send(alex, `I am ${secretA}.`, sam.me.id, 'custom-reveal');
+        assert.match(rejected.text, /Keep your secret identity hidden/, 'custom names pass the English dictionary and reach the identity rule');
+        const question = await send(sam, `Are you ${secretA}?`, alex.me.id, 'custom-guess');
+        assert.equal(question.level, 'info'); await teacher('review', { id: question.id, approve: true });
+        assert.equal((await alex.next(m => m.t === 'chat' && m.id === question.id)).text, `Are you ${secretA}?`);
+        const yes = await send(alex, 'Yes!', sam.me.id, 'custom-yes'); assert.equal(yes.level, 'info');
+        const chris = await enter(plaza.base, 'signed-c', null); sockets.push(chris);
+        const late = await view(chris, definition.title);
+        assert.ok(![secretA, name(b)].includes(name(late)), 'late arrival uses the remaining original identity, not the edited template');
+        sam.send({ t: 'warmup-answer', text: oldAlias });
+        assert.equal((await sam.next(m => m.t === 'warmup-answered')).correct, true, 'original custom alias is still accepted');
+        for (const socket of sockets) socket.ws.close(); await pause(200); await plaza.stop();
+        plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, vars);
+        session = (await api(plaza.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        alex = await enter(plaza.base, 'signed-a', null); sam = await enter(plaza.base, 'signed-b', null); sockets.push(alex, sam);
+        assert.equal((await view(alex, definition.title)).fact, a.fact);
+        assert.equal((await config('identity')).body.definition.title, future.title, 'saved template also survives restart');
+        assert.equal((await send(alex, oldAlias, 'everyone', 'old-after-restart')).level, 'warning');
+        await teacher('warmup', { op: 'start', type: 'identity' });
+        assert.equal((await view(alex, future.title)).title, future.title, 'restarting opts into the new content');
+        const facts = { ...defaultWarmup('facts'), title: 'Travel facts', rounds: 1, facts: [
+            { id: 'compass', mine: 'You have a compass.', find: 'has a compass' }, { id: 'map', mine: 'You have a map.', find: 'has a map' },
+        ] };
+        assert.equal((await config('facts', facts, 0)).status, 200); await teacher('warmup', { op: 'start', type: 'facts' });
+        const af = await view(alex, facts.title), bf = await view(sam, facts.title);
+        assert.equal(af.of, 1); assert.notEqual(af.fact, bf.fact);
+        alex.send({ t: 'warmup-answer', text: 'Sam' }); assert.equal((await alex.next(m => m.t === 'warmup-answered')).correct, true);
+        const pairs = { ...defaultWarmup('pairs'), title: 'Boat pairs', pairs: [['sail', 'anchor'], ['bow', 'arrow']] };
+        assert.equal((await config('pairs', pairs, 0)).status, 200); await teacher('warmup', { op: 'start', type: 'pairs' });
+        const ap = await view(alex, pairs.title); await view(sam, pairs.title);
+        const c = await enter(plaza.base, 'signed-c', null); sockets.push(c); const cp = await view(c, pairs.title);
+        c.send({ t: 'warmup-answer', text: cp.fact === ap.fact ? 'Sam' : 'Alex' });
+        assert.equal((await c.next(m => m.t === 'warmup-answered')).correct, true, 'late pair always has a present partner');
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
     }
 });
 

@@ -1478,7 +1478,6 @@ export class PlazaRoom extends DurableObject<Env> {
         if (players.some(player => player.student_key === studentKey)) return false;
         const online = new Set(this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey));
         const here = players.filter(player => online.has(player.student_key));
-        const kind = this.warmupKind(game);
         const definition = this.warmupDefinition(game);
         const late = definition.kind === 'identity' ? assignLateIdentity(players.map(player => player.fact), here.map(player => player.student_key), Math.random, definition.identities)
             : definition.kind === 'pairs' ? assignLatePair(here.map(player => player.fact), Math.random, definition.pairs) : assignLateJoiner(here.map(player => player.fact), Math.random, definition.rounds);
