@@ -3192,9 +3192,9 @@
     "questions",
     "guessing game"
    ],
-   "text": "Ask a classmate to choose a secret thing you can buy in a shop. Guess it with only yes/no questions, for example: \"Can you eat it?\" \"Is it bigger than a book?\" You have 10 questions. Then swap. Write 2-3 sentences: what the thing was and which question helped most.",
+   "text": "Ask a classmate to choose a secret thing you can buy in a shop. Guess it with only yes/no questions, for example: \"Can you eat it?\" \"Is it bigger than a book?\" You have 10 questions. Then swap. Write 2-3 sentences: what the thing was and which question helped most. During the round, the clue-giver answers yes or no without naming the object. Guessers may name their guesses; confirm a correct guess with yes.",
    "accept": [],
-   "teacherNote": "Look for correct question forms (Is it...? Can you...? Do you...?). To make it harder, allow 5 questions. To make it easier, allow one wh- question."
+   "teacherNote": "Look for correct question forms (Is it...? Can you...? Do you...?). To make it harder, allow 5 questions. To make it easier, allow one wh- question. Student-chosen secrets are not registered in the app, so these round rules need teacher review; there is no automatic word block for this quest."
   },
   {
    "id": "sq-describe-guess-08",
@@ -3292,9 +3292,9 @@
     "group game",
     "describing"
    ],
-   "text": "Play Taboo with 2-3 classmates in nearby chat. Take turns: secretly choose a word (a food, place, object or job) and two forbidden words, for example PIZZA (cheese, Italy). Tell the group the forbidden words, then describe your word without using them or the word itself. The others guess. Useful phrases: \"It's something you...\", \"It's a kind of...\", \"You need it when...\" Write 3-5 sentences: which word was hardest, which clue worked best, and why.",
+   "text": "Play Taboo with 2-3 classmates in nearby chat. Take turns: secretly choose a word (a food, place, object or job) and two forbidden words, for example PIZZA (cheese, Italy). Tell the group the forbidden words, then describe your word without using them or the word itself. The others guess. Useful phrases: \"It's something you...\", \"It's a kind of...\", \"You need it when...\" Write 3-5 sentences: which word was hardest, which clue worked best, and why. During your describing turn, keep the answer and forbidden words out of your clues. Guessers may name the answer; confirm a correct guess and swap turns.",
    "accept": [],
-   "teacherNote": "You can check the chat log for forbidden words afterwards. Groups that finish early can pick harder words such as abstract nouns."
+   "teacherNote": "You can check the chat log for forbidden words afterwards. Groups that finish early can pick harder words such as abstract nouns. Student-chosen secrets are not registered in the app, so these round rules need teacher review; there is no automatic word block for this quest."
   },
   {
    "id": "sq-describe-guess-12",
@@ -3347,9 +3347,9 @@
     "mingle",
     "opinions"
    ],
-   "text": "Choose a secret job (not one in Pixel Plaza). Stand in the square and invite at least 4 classmates to ask you questions in nearby chat: \"Do you work outside?\" \"Do you need special clothes?\" Follow-up questions are great: \"What do you use at work?\" Answer truthfully and add details. Useful phrases: \"Not really, but...\", \"Sometimes, especially when...\" When someone guesses, ask: \"Would you like this job? Why?\" Write 3-5 sentences: the best questions, who guessed, and their opinion.",
+   "text": "Choose a secret job (not one in Pixel Plaza). Stand in the square and invite at least 4 classmates to ask you questions in nearby chat: \"Do you work outside?\" \"Do you need special clothes?\" Follow-up questions are great: \"What do you use at work?\" Answer truthfully and add details. Useful phrases: \"Not really, but...\", \"Sometimes, especially when...\" When someone guesses, ask: \"Would you like this job? Why?\" Write 3-5 sentences: the best questions, who guessed, and their opinion. Keep the job title secret while giving clues. Other players may name their guesses; confirm a correct guess, then discuss the job.",
    "accept": [],
-   "teacherNote": "Encourage open follow-up questions after the yes/no ones. Fun jobs to suggest: firefighter, vet, astronaut, lifeguard, chef, zookeeper."
+   "teacherNote": "Encourage open follow-up questions after the yes/no ones. Fun jobs to suggest: firefighter, vet, astronaut, lifeguard, chef, zookeeper. Student-chosen secrets are not registered in the app, so these round rules need teacher review; there is no automatic word block for this quest."
   },
   {
    "id": "sq-describe-guess-14",
@@ -3397,9 +3397,9 @@
     "opinions",
     "mingle"
    ],
-   "text": "Imagine you are visiting a famous place in the world: a city, a monument or a natural wonder. Play with at least 4 classmates. Send postcard clues in nearby chat without saying its name: \"It's rainier than here and there's a famous clock tower.\" When someone guesses, ask: \"Would you like to visit it? Why or why not?\" Useful phrases: \"I'd love to go because...\", \"It sounds..., but...\" Write 3-5 sentences: your place, your best clue and two classmates' opinions.",
+   "text": "Imagine you are visiting a famous place in the world: a city, a monument or a natural wonder. Play with at least 4 classmates. Send postcard clues in nearby chat without saying its name: \"It's rainier than here and there's a famous clock tower.\" When someone guesses, ask: \"Would you like to visit it? Why or why not?\" Useful phrases: \"I'd love to go because...\", \"It sounds..., but...\" Write 3-5 sentences: your place, your best clue and two classmates' opinions. Keep the place name out of your clues until someone guesses it. Guessers may name places; confirm the correct guess before discussing it.",
    "accept": [],
-   "teacherNote": "Good places: Paris, New York, Venice, the Sahara, Mount Everest, the Great Wall of China (the example is London). Ask for reasons in the opinions, not just yes or no."
+   "teacherNote": "Good places: Paris, New York, Venice, the Sahara, Mount Everest, the Great Wall of China (the example is London). Ask for reasons in the opinions, not just yes or no. Student-chosen secrets are not registered in the app, so these round rules need teacher review; there is no automatic word block for this quest."
   },
   {
    "id": "sq-describe-guess-16",
@@ -3744,9 +3744,9 @@
     "mingle",
     "town"
    ],
-   "text": "Choose a secret thing in Pixel Plaza, like a bench, a cup of coffee or a duck. Tell four classmates: \"I'm a secret thing. Ask me yes/no questions!\" Useful questions: \"Are you in the park?\", \"Can people eat you?\" Write 2-3 sentences: what you chose, who guessed and how many questions they asked.",
+   "text": "Choose a secret thing in Pixel Plaza, like a bench, a cup of coffee or a duck. Tell four classmates: \"I'm a secret thing. Ask me yes/no questions!\" Useful questions: \"Are you in the park?\", \"Can people eat you?\" Write 2-3 sentences: what you chose, who guessed and how many questions they asked. During the round, the clue-giver answers yes or no without naming the object. Guessers may name their guesses; confirm a correct guess with yes.",
    "accept": [],
-   "teacherNote": "Check question forms (Are you...? Can you...? Is it...?). Students can choose a new secret thing for each classmate to keep the game fresh."
+   "teacherNote": "Check question forms (Are you...? Can you...? Is it...?). Students can choose a new secret thing for each classmate to keep the game fresh. Student-chosen secrets are not registered in the app, so these round rules need teacher review; there is no automatic word block for this quest."
   },
   {
    "id": "sq-secret-agents-10",
@@ -10538,9 +10538,9 @@
     "objects",
     "group"
    ],
-   "text": "Play \"Mystery Word\" with two or three classmates. One player secretly chooses an object from Pixel Plaza, like something in the cafe or the park. The others ask yes/no questions in nearby chat to guess it, with a maximum of 15 questions. Take turns. Useful phrases: \"Is it bigger than ...?\", \"Can you eat it?\", \"Is it used for ...?\" Write 3-5 sentences: which words you guessed, how many questions it took, and which question helped most.",
+   "text": "Play \"Mystery Word\" with two or three classmates. One player secretly chooses an object from Pixel Plaza, like something in the cafe or the park. The others ask yes/no questions in nearby chat to guess it, with a maximum of 15 questions. Take turns. Useful phrases: \"Is it bigger than ...?\", \"Can you eat it?\", \"Is it used for ...?\" Write 3-5 sentences: which words you guessed, how many questions it took, and which question helped most. During each round, the clue-giver answers yes or no without naming the object. Guessers may name their guesses; confirm a correct guess with yes, then swap.",
    "accept": [],
-   "teacherNote": "Look for correctly formed yes/no questions and comparatives in the chat. Make it harder with a 10-question limit or a ban on colour questions."
+   "teacherNote": "Look for correctly formed yes/no questions and comparatives in the chat. Make it harder with a 10-question limit or a ban on colour questions. Student-chosen secrets are not registered in the app, so these round rules need teacher review; there is no automatic word block for this quest."
   },
   {
    "id": "sq-word-games-16",

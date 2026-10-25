@@ -90,8 +90,8 @@ export class StudentAssistance {
             status, reason?.slice(0, TEXT_LIMIT) ?? null, correction?.slice(0, TEXT_LIMIT) ?? null, chatId ?? null, id);
     }
 
-    chatStatus(chatId: string, status: string): void {
-        this.sql.exec('UPDATE assistance_attempts SET status = ? WHERE chat_id = ?', status, chatId);
+    chatStatus(chatId: string, status: string, reason?: string): void {
+        this.sql.exec('UPDATE assistance_attempts SET status = ?, reason = COALESCE(?, reason) WHERE chat_id = ?', status, reason?.slice(0, TEXT_LIMIT) ?? null, chatId);
     }
 
     signal(game: string, studentKey: string, name: string, reason: string, text: string, topic: HelpTopic = 'writing'): HelpAlert | null {

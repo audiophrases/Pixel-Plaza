@@ -1814,8 +1814,8 @@ export class PlazaRoom extends DurableObject<Env> {
 
     private review(id: string, approve: boolean): boolean {
         const entry = this.sql.exec<{ id: string; student_key: string; sender: string; text: string; status: string;
-            target_key: string | null; x: number | null; y: number | null; marks: string | null; game_id: string | null; voice: string | null }>(
-            'SELECT id, student_key, sender, text, status, target_key, x, y, marks, game_id, voice FROM chat WHERE id = ?', id).toArray()[0];
+            target_key: string | null; x: number | null; y: number | null; marks: string | null; game_id: string | null; voice: string | null; note: string | null }>(
+            'SELECT id, student_key, sender, text, status, target_key, x, y, marks, game_id, voice, note FROM chat WHERE id = ?', id).toArray()[0];
         if (!entry) return false;
 
         // Taking down a message that already posted: it disappears from every screen.
@@ -1835,8 +1835,8 @@ export class PlazaRoom extends DurableObject<Env> {
         // assigned identity. Approval and approve-all must enforce the current rule.
         const activityProblem = approve && this.isOpen() ? this.identityChatProblem(entry.game_id, entry.student_key, entry.text) : null;
         if (activityProblem) {
-            this.sql.exec("UPDATE chat SET status = 'blocked', note = ? WHERE id = ?", `Activity rule — Who am I?: ${activityProblem}`, id);
-            this.assistance.chatStatus(id, 'blocked');
+            this.sql.exec("UPDATE chat SET status = 'blocked', note = ? WHERE id = ?", [entry.note, `Activity rule — Who am I?: ${activityProblem}`].filter(Boolean).join('\n'), id);
+            this.assistance.chatStatus(id, 'blocked', activityProblem);
             if (entry.game_id) this.assistance.signal(entry.game_id, entry.student_key, entry.sender, `Activity rule: ${activityProblem}`, entry.text, 'other');
             if (this.interviews.review(id, 'rejected') && entry.game_id) this.sendQuestToAll(entry.game_id);
             this.notify(entry.student_key, 'info', 'Your message was not posted.', id);
