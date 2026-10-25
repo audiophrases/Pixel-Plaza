@@ -1,6 +1,7 @@
 import { COMMONS_LAYOUT } from '../shared/commons';
 import { layoutGuide, sheetGuide, templateTextFiles } from '../shared/artTemplate';
 import type { Theme } from '../shared/theme';
+import { isBackgroundBrief } from '../shared/scenery';
 import { zipFiles } from '../shared/zip';
 
 export function downloadFile(name: string, data: BlobPart, type: string) {
@@ -35,7 +36,7 @@ export async function downloadArtTemplate(theme: Theme, direction: string, backg
   const encoder = new TextEncoder();
   const files: Record<string, Uint8Array> = Object.fromEntries(Object.entries(templateTextFiles(theme, direction)).map(([path, text]) => [path, encoder.encode(text)]));
   files['layout.png'] = await svgPng(layoutGuide(theme), theme.art);
-  if (theme.layout === COMMONS_LAYOUT || theme.scenery) files['art-sheet-guide.png'] = await svgPng(sheetGuide(theme), theme.scenery ? 1536 : 1024, 1024);
+  if (theme.layout === COMMONS_LAYOUT || theme.scenery && !isBackgroundBrief(theme)) files['art-sheet-guide.png'] = await svgPng(sheetGuide(theme), theme.scenery ? 1536 : 1024, 1024);
   const canvas = document.createElement('canvas'); canvas.width = theme.art; canvas.height = theme.art;
   const ctx = canvas.getContext('2d')!;
   ctx.drawImage(await loadPicture(background), 0, 0, theme.art, theme.art);

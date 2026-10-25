@@ -1,6 +1,7 @@
 import { COMMONS_LAYOUT } from './commons.ts';
 import { formatTheme, type Theme } from './theme.ts';
 import { sceneryPrompts } from './sceneryPrompts.ts';
+import { isBackgroundBrief } from './scenery.ts';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]!);
 
@@ -13,6 +14,10 @@ export function layoutGuide(theme: Theme): string {
 ${theme.blocked.map(([x, y, w, h]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#d9a5a1"/>`).join('')}
 ${(theme.blockedShapes ?? []).map(p => shape(p, '#b96358')).join('')}
 ${theme.walkBehind.map(p => shape(p, '#7b9cd488')).join('')}
+${theme.walkBehind.map(p => {
+        const xs = p.shape === 'ellipse' ? [p.rect[0], p.rect[0] + p.rect[2]] : p.points.map(point => point[0]);
+        return `<path d="M${Math.min(...xs)} ${p.sortY}H${Math.max(...xs)}" stroke="#28598d" stroke-width="3"/>`;
+    }).join('')}
 ${(theme.layers ?? []).filter(p => p.sortY !== undefined).map(p => `<rect x="${p.rect[0]}" y="${p.rect[1]}" width="${p.rect[2]}" height="${p.rect[3]}" fill="#80a9db66"/><path d="M${p.rect[0]} ${p.sortY}h${p.rect[2]}" stroke="#28598d" stroke-width="3"/>`).join('')}
 ${theme.zones.map(z => `<rect x="${z.rect[0]}" y="${z.rect[1]}" width="${z.rect[2]}" height="${z.rect[3]}" fill="none" stroke="#478559" stroke-width="2" stroke-dasharray="8 5"/><text x="${z.rect[0] + 10}" y="${z.rect[1] + 26}" font-family="sans-serif" font-size="20" fill="#224c31">${esc(z.name ?? z.id)}</text>`).join('')}
 <g transform="translate(${theme.spawn.x} ${theme.spawn.y}) scale(${theme.art / theme.world})" fill="#325b8b"><circle cy="-82" r="13"/><rect x="-12" y="-65" width="24" height="65" rx="4"/><text x="40" y="0" font-family="sans-serif" font-size="30">start · avatar scale</text></g>
@@ -38,6 +43,8 @@ export function artInstructions(theme: Theme, direction: string): string {
 export function templateTextFiles(theme: Theme, direction: string): Record<string, string> {
     if (theme.scenery) {
         const prompts = sceneryPrompts(theme, direction);
+        if (isBackgroundBrief(theme)) return { 'instructions.md': prompts.instructions, 'prompt.md': prompts.background,
+            'story-context.md': prompts.context, [`${theme.id}.json`]: formatTheme(theme), 'layout.svg': layoutGuide(theme) };
         return { 'instructions.md': prompts.instructions, 'ground-prompt.md': prompts.ground, 'scenery-prompt.md': prompts.objects,
             'story-context.md': prompts.context, [`${theme.id}.json`]: formatTheme(theme), 'layout.svg': layoutGuide(theme), 'art-sheet-guide.svg': sheetGuide(theme) };
     }

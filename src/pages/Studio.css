@@ -23,6 +23,8 @@
 .studio-template p { font-size: .8rem; line-height: 1.5; }
 .studio-template details { margin: .7rem 0; font-size: .8rem; }
 .studio-template summary { cursor: pointer; font-weight: 600; line-height: 1.5; }
+.studio-workflow { padding-left: 1.2rem; font-size: .8rem; line-height: 1.6; }
+.studio-coordinates { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; }
 .studio-eyebrow { font-size: .65rem; font-weight: 800; letter-spacing: .15em; color: #4f725d; }
 .studio-field textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; padding: .5rem; border: 1px solid #c5cad6; border-radius: 6px; }
 .studio-panel code { overflow-wrap: anywhere; }
