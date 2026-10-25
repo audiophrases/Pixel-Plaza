@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import { sha256Hex } from '../rules.ts';
 import { castanyada, castanyadaComplete, castanyadaInvestigations } from '../../shared/campaign.ts';
 import { FACTS } from '../../shared/warmup.ts';
-import { identityById } from '../../shared/warmupKinds.ts';
+import { IDENTITIES, identityById } from '../../shared/warmupKinds.ts';
 import { missionEnvelope } from '../../shared/missionSchema.ts';
 import { legalMove } from '../../shared/plazaMap.ts';
 import { SIDE_QUEST_SOURCE, sideQuests } from '../../shared/sideQuests.ts';
@@ -2425,6 +2425,83 @@ test('chapter 3: the thief hides the chestnuts, and the class opens the cellar w
         await plaza.stop();
         await new Promise(resolve => pinPlay.close(resolve));
         removeTemp(persistTo);
+    }
+});
+
+test('Who am I chat protects the helper, permits guesses and yes/no, and survives restart', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-identity-chat-'));
+    let plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        let session = (await api(plaza.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (op, body) => api(plaza.base, `/api/teacher/${op}`, { session, body });
+        PIN = (await teacher('game', { name: 'Identity rules', randomNames: false })).body.pin;
+        let helper = await enter(plaza.base, 'signed-a', null), guesser = await enter(plaza.base, 'signed-b', null);
+        sockets.push(helper, guesser);
+        const send = async (who, text, to, cid) => {
+            await pause(1550);
+            who.send({ t: 'chat', text, to, cid });
+            return who.next(m => m.t === 'notice' && m.cid === cid, cid);
+        };
+        // Queue names before the round. Which one becomes a secret is intentionally random.
+        const batches = [''];
+        for (const identity of IDENTITIES) {
+            const alias = [...identity.accept].sort((a, b) => a.length - b.length)[0];
+            if (batches.at(-1).length + alias.length + 2 > 180) batches.push('');
+            batches[batches.length - 1] += `${batches.at(-1) ? ', ' : ''}${alias}`;
+        }
+        for (const [i, text] of batches.entries()) assert.equal((await send(helper, text, guesser.me.id, `before-${i}`)).level, 'info');
+        const start = await teacher('warmup', { op: 'start', type: 'identity' }); assert.equal(start.status, 200);
+        const view = async who => (await who.next(m => m.t === 'warmup' && m.warmup?.kind === 'identity')).warmup;
+        const helperCard = await view(helper), guesserCard = await view(guesser);
+        const name = card => card.fact.match(/^You are (.+?)\. Do not say/)[1];
+        const secret = name(helperCard), guesserSecret = name(guesserCard);
+        assert.notEqual(secret, guesserSecret);
+        const identity = IDENTITIES.find(i => i.name === secret);
+        const before = (await teacher('status')).body.entries;
+        const queued = before.find(e => identity.accept.some(alias => e.text.split(', ').includes(alias)));
+        assert.ok(queued);
+        await teacher('approve-all', {});
+        const protectedEntry = (await teacher('status')).body.entries.find(e => e.id === queued.id);
+        assert.equal(protectedEntry.status, 'blocked', 'approve-all rechecks names queued before the activity');
+        assert.match(protectedEntry.note, /Activity rule/);
+        assert.equal(guesser.inbox.some(m => m.t === 'chat' && m.id === queued.id), false);
+        for (const [i, to] of [guesser.me.id, undefined, 'everyone'].entries()) {
+            const rejected = await send(helper, `I am ${secret}.`, to, `reveal-${i}`);
+            assert.equal(rejected.level, 'warning'); assert.match(rejected.text, /Keep your secret identity hidden/);
+        }
+        const blocked = (await teacher('status')).body.entries.find(e => e.text === `I am ${secret}.`);
+        assert.equal(blocked.status, 'blocked'); assert.match(blocked.note, /Who am I/);
+        assert.equal((await teacher('review', { id: blocked.id, approve: true })).status, 400, 'a blocked reveal cannot be approved');
+        const question = `Are you ${secret}?`;
+        const questionNotice = await send(guesser, question, helper.me.id, 'guess'); assert.equal(questionNotice.level, 'info');
+        await teacher('review', { id: questionNotice.id, approve: true });
+        assert.equal((await helper.next(m => m.t === 'chat' && m.id === questionNotice.id)).text, question);
+        const yes = await send(helper, 'Yes!', guesser.me.id, 'confirm'); assert.equal(yes.level, 'info');
+        await teacher('review', { id: yes.id, approve: true });
+        assert.equal((await guesser.next(m => m.t === 'chat' && m.id === yes.id)).text, 'Yes!');
+        guesser.send({ t: 'warmup-answer', text: secret });
+        assert.equal((await guesser.next(m => m.t === 'warmup-answered')).correct, true, 'private final answer is never blocked');
+        const finished = await send(guesser, `I am ${guesserSecret}.`, 'everyone', 'finished-helper');
+        assert.equal(finished.level, 'warning', 'finishing your guessing task does not release your own secret');
+        helper.send({ t: 'chat', text: `I am ${secret}. Please help me.`, to: 'teacher', cid: 'teacher-help' });
+        await helper.next(m => m.t === 'result' && m.cid === 'teacher-help');
+        helper.ws.close(); guesser.ws.close(); await pause(200); await plaza.stop();
+        plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+        session = (await api(plaza.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        helper = await enter(plaza.base, 'signed-a', null); guesser = await enter(plaza.base, 'signed-b', null); sockets.push(helper, guesser);
+        assert.equal((await send(helper, secret, 'everyone', 'after-restart')).level, 'warning');
+        await teacher('warmup', { op: 'end' });
+        const after = await send(helper, secret, guesser.me.id, 'after-end'); assert.equal(after.level, 'info', 'ending the warm-up removes its restriction');
+        await teacher('review', { id: after.id, approve: true });
+        assert.equal((await guesser.next(m => m.t === 'chat' && m.id === after.id)).text, secret);
+        const history = (await teacher('status')).body.entries;
+        assert.ok(history.some(e => e.id === queued.id && e.status === 'blocked'), 'teacher audit survives restart');
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
     }
 });
 
