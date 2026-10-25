@@ -214,7 +214,7 @@ export function parseTheme(value: unknown): Theme {
 
 // The theme as a file: compact, one shape to a line, always in the same order, so two versions can be compared.
 export function formatTheme(theme: Theme): string {
-    const line = (value: unknown) => JSON.stringify(value).replace(/,/g, ', ');
+    const line = (value: unknown) => JSON.stringify(value).replace(/("(?:\\.|[^"\\])*")|,/g, (token, quoted) => quoted ?? (token === ',' ? ', ' : token));
     const lines = (items: unknown[]) => items.length ? `[\n${items.map(item => `  ${line(item)}`).join(',\n')}\n ]` : '[]';
     return [
         '{',

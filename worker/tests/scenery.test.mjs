@@ -57,6 +57,8 @@ test('art kits and mission prompts describe the chosen whole world with stable d
         assert.throws(() => parseTheme({ ...theme, scenery }));
     }
     assert.throws(() => parseTheme({ ...theme, zones: [{ ...theme.zones[0], name: '' }] }));
+    const edited = { ...theme, name: 'Sea, "sun", and stories', scenery: { ...theme.scenery, ground: 'Sand, deck, "escaped\\", punctuation.' } };
+    assert.deepEqual(parseTheme(JSON.parse(formatTheme(edited))), edited, 'export preserves commas and escapes in authored descriptions');
 });
 
 test('the beach assets have a square ground and six independent transparent scenery cells', async () => {

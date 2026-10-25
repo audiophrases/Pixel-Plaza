@@ -1,10 +1,35 @@
-# Seasonal art and the Commons layout
+# Complete scenery and seasonal art
+
+## Change the whole setting
+
+Studio starts on **Summer beach**, a finished example with sand, beach huts, two palms and a rock. Choose **New scenery** to start a **Snowy plaza**, **Summer beach**, **Cruise-ship deck** or **Custom setting** brief. Snow and cruise-deck presets contain prompts and a layout guide; their illustrations still need to be generated. Existing Garden/Autumn Commons and Pixel Plaza remain available.
+
+The simple gameplay geometry is reusable, while every visible surface and object can change. There is no required fountain, grass, pond or bridge. The three large obstacles can be cabins, huts, snowbanks or other solid objects. The two tall foreground pieces can be trees, umbrellas or other appropriate silhouettes. The low oval can be a rock, hot tub or another solid feature. The template has ten collision pieces, two foreground anchors and five places. It keeps the routes generous and avoids tracing new hiding masks.
+
+1. Pick a preset, press **New scenery**, and edit the setting, ground, six object descriptions and visible place names. Add your art direction.
+2. **Download AI Template**. The ZIP contains `ground-prompt.md`, `scenery-prompt.md`, `story-context.md`, visual guides, a reference, instructions and theme JSON. The two art prompts can also be read and copied in Studio.
+3. Give the art AI the ground prompt and layout guide. Generate a square opaque ground image with a clear playable interior. Snow, sand or deck planks can cover the whole interior; water and other impassable terrain belong at the outer edge.
+4. Give it the scenery prompt, three-column/two-row sheet guide, and generated ground as a style reference. Generate six isolated sprites with real transparency. The recommended sheet is 1536 × 1024; normalized crops also support other sizes. Ground must be square; a scenery sheet may be rectangular.
+5. **Open AI ground**, then **Open AI art sheet**. The preview uses both files without changing collision geometry. Walk around the obstacles, behind both tall objects and around the low oval. Inspect silhouettes and bases; the alpha and reachability checks cannot judge whether artwork fits perfectly.
+6. Choose a fresh ID and name, download the theme file and install both images:
+
+   ```powershell
+   npm run theme -- "theme.json" --picture "ground.png" --sheet "scenery.png"
+   ```
+
+7. Restart locally, or build and deploy through the usual workflow. Select the scenery when creating a new game.
+
+In **Mission Studio → Create with an AI prompt → Story scenery**, choose the installed scenery to include its setting and visible place names in the prompt. For an uninstalled draft, paste `story-context.md` into the mission brief. Discovery IDs stay compatible with the current story schema; visible names can change. Existing campaigns retain their authored text and answers. Create or adapt an adventure for the new setting before playing it.
+
+The beach assets' actual generation prompts and dimensions are recorded in `art/scenery-prompts.md`. Their source definition is `shared/scenery.ts`. The ground is independent of the transparent sheet, so a recolor can reuse existing objects or a prop-only variant can reuse existing terrain.
+
+## Original Commons treatments
 
 The original Pixel Plaza is still `plaza` (Season 1). Existing games migrate to that map automatically. New games have a map picker: Pixel Plaza, Garden Commons, Autumn Commons and installed treatments. A game's map id is saved alongside its PIN. Reopening it restores the same map and its own student positions. The renderer, server movement checks, discovery zones and teacher map use that selection.
 
 ## Try it
 
-Open `/studio`. It starts on Garden Commons. Choose Autumn Commons or Pixel Plaza in **Choose a map**. **Walk around it** uses the real foot box and movement speed; **Check paths** verifies the gathering areas and highlights disconnected ground. The original drawing tools remain available.
+Choose Garden Commons, Autumn Commons or Pixel Plaza in **Choose a map**. **Walk around it** uses the real foot box and movement speed; **Check paths** verifies the gathering areas and highlights disconnected ground. The original drawing tools remain available.
 
 The Commons has five places: hotel, café, shop, square and park. It uses ten collision pieces: four straight boundaries, three building footprints, two tree bases and a pond. There are two intentional walk-behind trees. Streets are broad, the square is open, and the park has routes around the pond rather than a narrow bridge. The original map has 159 collision pieces and 34 traced walk-behind shapes.
 
@@ -53,11 +78,13 @@ The map id is persisted; there is no live map-changing control for an existing g
 
 - `npm test`: build, theme geometry, art-sheet transparency, import/installation checks and Worker regression tests. The map integration test covers different collision geometry, invalid ids, switching maps, reconnecting and a Worker restart.
 - `npm run check:studio`: drawing tools, undo/redo, reachability and the walking preview. Counts are relative to existing shapes.
-- Start `npm run dev`, then `npm run check:themes`: real Chrome rendering, walking preview, ZIP/PNG export, a 2K art-sheet import and nonsquare rejection. This optional check needs Chrome/Chromium (or `CHROME_PATH`) and Python 3 for independent ZIP validation.
-- Against an **isolated tester server** with the password `tester`, `node scripts/check-theme-browser.mjs http://127.0.0.1:8795 --tester` also verifies real Phaser movement through the Worker and captures views north and south of both trees. Use this flag only for a throwaway tester server.
+- Start `npm run dev`, then `npm run check:themes`: real Chrome rendering, walking previews, ZIP/PNG export, a 2K art-sheet import, full scenery presets, editable labels, six-cell imports and nonsquare rejection. This optional check needs Chrome/Chromium (or `CHROME_PATH`) and Python 3 for independent ZIP validation.
+- Against an **isolated tester server** with the password `tester`, `node scripts/check-theme-browser.mjs http://127.0.0.1:8797 --tester` also verifies real Phaser movement through the Worker, captures both sides of the foreground pieces and checks the scenery-specific mission prompt. Use this flag only for a throwaway tester server.
 
 Browser screenshots and a flattened autumn reference are in `art/previews/`. The AI sheets are `public/assets/maps/commons-garden.png` and `commons-autumn.png`. Their generation prompts are recorded in `art/commons-prompts.md`.
 
 The ready-made autumn AI kit is `art/templates/commons-autumn-ai-template.zip`. You can use it directly or export a fresh one with your own brief in Studio.
 
-Validation on 25 October 2026: the clean full suite passed all 177 tests. Studio and Mission Studio UI checks passed. Real Chrome checks passed for both seasonal maps, imports (including 2K art and opaque-image rejection), PNG/ZIP output, actual Phaser keyboard movement, both sides of the tree foreground and the teacher map picker. Two original Studio lint warnings remain in unchanged drawing-tool code; the new code introduced no lint warnings. Group comfort and artistic preference still need a human playtest.
+The complete beach kit is `art/templates/scene-beach-ai-template.zip`. It includes separate ground and scenery prompts and `story-context.md`, along with the three-column/two-row guide.
+
+Group comfort and artistic preference still need a human playtest. Automated checks cover geometry, import/export, image alpha, UI behavior and Worker integration.
