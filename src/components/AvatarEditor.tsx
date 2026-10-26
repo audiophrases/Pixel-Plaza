@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { renderAvatarSvg } from '../utils/AvatarRenderer';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
-import { ENGLISH_VOICES, normalizeVoice } from '../../shared/voices';
+import { ENGLISH_VOICES, isEnglishVoice, normalizeVoice, randomVoice } from '../../shared/voices';
 import { previewCharacterVoice, stopVoicePreview, unlockSound } from '../audio';
 import { readStudentSession } from '../studentAuth';
 import './AvatarEditor.css';
@@ -35,7 +35,7 @@ export default function AvatarEditor({ initialConfig, onSave, onCancel }: Avatar
     shirt: 0,
     hat: 0,
     ...initialConfig,
-    voice: normalizeVoice(initialConfig?.voice)
+    voice: isEnglishVoice(initialConfig?.voice) ? initialConfig.voice : randomVoice() // a new character does not start on everyone's voice
   });
 
   const [catalog, setCatalog] = useState<any>(null);

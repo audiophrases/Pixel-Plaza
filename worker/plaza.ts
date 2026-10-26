@@ -18,7 +18,7 @@ import { boardWait, type Campaign } from '../shared/campaign.ts';
 import { SIDE_QUEST_LIBRARY_VERSION, SIDE_QUEST_SOURCE, questFit, questObjective, sideQuestById } from '../shared/sideQuests.ts';
 import { wordDiff } from '../shared/diff.ts';
 import { cleanName, shownNames } from '../shared/names.ts';
-import { normalizeVoice } from '../shared/voices.ts';
+import { isEnglishVoice, normalizeVoice, voiceFor } from '../shared/voices.ts';
 import { fillThiefClue, lookOf, thiefCount } from '../shared/thief.ts';
 import { assignLateJoiner, assignWarmup, factById, type WarmupView } from '../shared/warmup.ts';
 import { IDENTITY_NAMES, assignIdentities, assignLateIdentity, assignLatePair, assignPairs, identityById, isWarmupKind, type WarmupKind } from '../shared/warmupKinds.ts';
@@ -772,6 +772,8 @@ export class PlazaRoom extends DurableObject<Env> {
             x: spot.x, y: spot.y,
             lastChat: 0, movedAt: Date.now()
         };
+        // Never chosen a voice: one of their own, not the same default as everyone else.
+        if (!isEnglishVoice(seat.avatar.voice)) seat.avatar.voice = voiceFor(row.student_key);
         const others = this.seats();
         this.ctx.acceptWebSocket(server, [seat.studentKey]);
         server.serializeAttachment(seat);

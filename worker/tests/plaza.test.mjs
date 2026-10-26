@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { sha256Hex } from '../rules.ts';
+import { voiceFor } from '../../shared/voices.ts';
 import { castanyada, castanyadaComplete, castanyadaInvestigations } from '../../shared/campaign.ts';
 import { FACTS } from '../../shared/warmup.ts';
 import { IDENTITIES, identityById } from '../../shared/warmupKinds.ts';
@@ -276,6 +277,8 @@ test('chat speech uses persisted sender voices and only synthesizes messages del
         const sam = await enter(base, 'signed-b', null); sockets.push(sam);
         const chris = await enter(base, 'signed-c', null); sockets.push(chris);
         assert.equal(alex.me.voice, chosen);
+        // Students who never chose a voice each get their own, not the same default.
+        assert.deepEqual([sam.me.voice, chris.me.voice], [voiceFor('stu_b'), voiceFor('stu_c')]);
         assert.equal((await alex.next(m => m.t === 'support')).history, true, 'restored teacher history is marked quiet');
         chris.send({ t: 'move', x: 100, y: 100 });
         await new Promise(resolve => setTimeout(resolve, 250));

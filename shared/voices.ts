@@ -51,3 +51,14 @@ export function normalizeVoice(value: unknown): string {
     return isEnglishVoice(value) ? value : DEFAULT_VOICE;
 }
 
+// A voice for a student who has not chosen one: picked from who they are, so it is the same in every lesson,
+// and spread over all the voices, so a class does not all sound alike.
+export function voiceFor(studentKey: string): string {
+    let hash = 0;
+    for (const char of studentKey) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+    return ENGLISH_VOICES[hash % ENGLISH_VOICES.length].id;
+}
+
+// Any voice, for a new character on the character screen.
+export const randomVoice = (): string => ENGLISH_VOICES[Math.floor(Math.random() * ENGLISH_VOICES.length)].id;
+
