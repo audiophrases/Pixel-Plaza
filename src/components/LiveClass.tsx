@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { HelpAlert } from '../../shared/support';
 import { loadChecker } from '../spellingData';
 import { IDENTITY_NAMES } from '../../shared/warmupKinds';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
 import { XP } from '../../shared/levels';
 import Face from './Face';
+import Correction from './Correction';
+import { correctionParts, correctionText } from '../../shared/diff';
 import './LiveClass.css';
 
 // The class as it happens, on one screen: everything waiting on the teacher in one queue, oldest first, and the
@@ -97,22 +99,53 @@ export default function LiveClass({ gameId, entries, alerts, online, known, mute
   const lookOf = (studentKey: string) => online.find(student => student.studentKey === studentKey)?.look;
   const nameOf = (studentKey: string) => online.find(student => student.studentKey === studentKey)?.name ?? known.find(student => student.studentKey === studentKey)?.name ?? 'Student';
 
-  // A private reply ready to send: what the student wrote, and a better version when the game has one.
-  const prefill = async (studentKey: string, item: Evidence) => {
-    let fixed = item.reason.match(/Try: “(.*)”$/)?.[1] ?? null;
-    const flagged = plainReason(item.reason).match(/^(?:English word check|Use English words only):/);
-    if (!fixed && flagged) {
-      try {
-        const check = await loadChecker();
-        fixed = check(item.text, [...known.map(student => student.name), ...IDENTITY_NAMES])
-          .reduce((text, mistake) => mistake.suggestions[0] ? text.replace(mistake.word, mistake.suggestions[0]) : text, item.text);
-        if (fixed === item.text) fixed = null;
-      } catch { /* no dictionary: the quote alone */ }
-    }
-    const question = item.reason.match(/^Answer not accepted:\s*(.+)$/)?.[1];
-    const text = question ? `About “${question}”, you wrote “${item.text}”. `
-      : `You wrote “${item.text}”.${fixed ? ` Try: “${fixed}”` : ' '}`;
-    setReplies(current => ({ ...current, [studentKey]: text }));
+  // What the game already showed the student for each attempt in a check-in: the AI's grammar correction, or the
+  // word check's suggestions when it is sure of every word. Those need no teacher; the rest get a Fix button.
+  const [autoFix, setAutoFix] = useState<Record<string, string | null>>({});
+  const evidenceKey = (alert: HelpAlert, item: Evidence) => `${alert.id}:${item.timestamp}`;
+  const checkIns = needing.filter(alert => alert.kind === 'suggested');
+  const signature = checkIns.flatMap(alert => alert.evidence.map(item => evidenceKey(alert, item))).join('|');
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const found: Record<string, string | null> = {};
+      let check: Awaited<ReturnType<typeof loadChecker>> | null = null;
+      for (const alert of checkIns) for (const item of alert.evidence) {
+        const key = evidenceKey(alert, item);
+        const grammar = item.reason.match(/Try: “(.*)”$/)?.[1];
+        if (grammar) { found[key] = grammar; continue; }
+        if (!plainReason(item.reason).match(/^(?:English word check|Use English words only):/)) { found[key] = null; continue; }
+        try {
+          check ??= await loadChecker();
+          const mistakes = check(item.text, [...known.map(student => student.name), ...IDENTITY_NAMES]);
+          found[key] = mistakes.length && mistakes.every(mistake => mistake.sure && mistake.suggestions[0])
+            ? mistakes.reduce((text, mistake) => text.replace(mistake.word, mistake.suggestions[0]), item.text) : null;
+        } catch { found[key] = null; }
+      }
+      if (!cancelled) setAutoFix(found);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
+
+  // The teacher's fix: their message in a box to change, sent as a correction the student sees in colour.
+  const [fixing, setFixing] = useState<{ key: string; alert: HelpAlert; original: string } | null>(null);
+  const [fixText, setFixText] = useState('');
+  const [fixed, setFixed] = useState<Set<string>>(() => new Set());
+  const startFix = (alert: HelpAlert, item: Evidence) => { setFixing({ key: evidenceKey(alert, item), alert, original: item.text }); setFixText(item.text); };
+  const sendFix = async () => {
+    if (!fixing || busy || !fixText.trim() || fixText.trim() === fixing.original.trim()) return;
+    const { alert, key, original } = fixing;
+    setBusy(true);
+    try {
+      if (!await action('help-message', { studentKey: alert.studentKey, text: correctionText(original, fixText), gameId })) return;
+      const done = new Set(fixed).add(key);
+      setFixed(done);
+      setFixing(null);
+      // Every attempt that needed the teacher is fixed: the check-in is done. Otherwise the teacher is on it.
+      const left = alert.evidence.filter(item => autoFix[evidenceKey(alert, item)] == null && !done.has(evidenceKey(alert, item)));
+      await action('help-status', { id: alert.id, status: left.length ? 'acknowledged' : 'resolved', gameId });
+    } finally { setBusy(false); }
   };
 
   const reply = async (studentKey: string, alert?: HelpAlert) => {
@@ -193,10 +226,24 @@ export default function LiveClass({ gameId, entries, alerts, online, known, mute
           <span className="live-scope">{alert.kind === 'requested' ? '🙋 asks for help' : '💡 may need help'}{alert.status === 'acknowledged' && ' · 👀 you’re on it'}</span>
           <small>{ago(alert.timestamp)}</small></div>
         {alert.kind === 'suggested' && alert.evidence.length > 0
-          ? <ul className="live-evidence">{alert.evidence.map((item, index) => <li key={index}>
-              <small>{ago(item.timestamp)}</small> <q>{item.text}</q> <span className="live-why">{why(item.reason)}</span>
-              <button type="button" className="live-fix" onClick={() => void prefill(alert.studentKey, item)} title="Put a correction in the private reply below">Send a fix</button>
-            </li>)}</ul>
+          ? <ul className="live-evidence">{alert.evidence.map(item => {
+              const key = evidenceKey(alert, item);
+              const auto = autoFix[key];
+              return <li key={key}>
+                <small>{ago(item.timestamp)}</small> <q>{item.text}</q> <span className="live-why">{why(item.reason)}</span>
+                {auto ? <span className="live-auto" title="The game already showed the student this">→ {auto}</span>
+                  : fixed.has(key) ? <span className="live-fixed">✓ fix sent</span>
+                  : auto === null && fixing?.key !== key && <button type="button" className="live-fix" onClick={() => startFix(alert, item)} title="Correct it: the student gets it highlighted">✏️ Fix</button>}
+                {fixing?.key === key && <form className="live-fixer" onSubmit={event => { event.preventDefault(); void sendFix(); }}>
+                  <input autoFocus value={fixText} maxLength={400} disabled={busy} aria-label={`Correct ${nameOf(alert.studentKey)}'s message`}
+                    onFocus={event => { const end = event.currentTarget.value.length; event.currentTarget.setSelectionRange(end, end); }}
+                    onChange={event => setFixText(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setFixing(null); }} />
+                  <button className="btn btn-primary btn-sm" disabled={busy || !fixText.trim() || fixText.trim() === item.text.trim()}>Send ↵</button>
+                  <p className="live-fix-preview">{fixText.trim() && fixText.trim() !== item.text.trim()
+                    ? <Correction parts={correctionParts(item.text, fixText)} /> : <em>Change the words, then press Enter. Esc closes.</em>}</p>
+                </form>}
+              </li>;
+            })}</ul>
           : (alert.note || alert.evidence.at(-1)) && <p className="live-text">{alert.note || alert.evidence.at(-1)!.text}</p>}
         {(alert.since ?? 0) > 0 && <p className="live-notes"><span className="live-tag live-tag-ok">✓ Since then: {alert.since} {alert.since === 1 ? 'message posted or answer right' : 'messages posted or answers right'}</span></p>}
         {alert.ai?.tip && <p className="live-notes"><span className="live-tag">🤖 AI hint given: {alert.ai.tip}</span></p>}

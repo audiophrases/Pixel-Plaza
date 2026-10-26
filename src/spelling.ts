@@ -4,7 +4,9 @@ import NSpell from 'nspell';
 // A dictionary cannot tell a typo from another language, so both are stopped:
 // "recieve" and "gracias" are told apart only by how good the suggestions are.
 
-export type Misspelling = { word: string; suggestions: string[] };
+// sure: the first suggestion is very likely what was meant (a near miss, a name, text-speak, a word from home),
+// so the student already has the fix; otherwise a teacher may need to help.
+export type Misspelling = { word: string; suggestions: string[]; sure?: boolean };
 
 // Said out loud and typed everywhere, but not in a dictionary.
 const CHAT_WORDS = new Set(['lol', 'omg', 'ok', 'okay', 'hi', 'hey', 'yeah', 'yep', 'nope', 'wow', 'hmm', 'hm', 'uh', 'um',
@@ -81,7 +83,7 @@ export function createChecker(aff: string, dic: string, alsoAccept?: Dictionary)
       const lower = word.toLowerCase();
       if (found.has(lower) || CHAT_WORDS.has(lower) || LAUGH.test(lower) || known.has(lower)) continue;
       if (lower === 'a' || lower === 'i') continue;
-      if (TEXT_SPEAK[lower]) { found.set(lower, { word: raw, suggestions: [TEXT_SPEAK[lower]] }); continue; }
+      if (TEXT_SPEAK[lower]) { found.set(lower, { word: raw, suggestions: [TEXT_SPEAK[lower]], sure: true }); continue; }
       if (lower.length > 1 && correct(word)) continue;
       // Hunspell is case-sensitive: a word that is only fine in lower case, in capitals.
       if (lower.length > 1 && correct(lower)) continue;
@@ -93,10 +95,17 @@ export function createChecker(aff: string, dic: string, alsoAccept?: Dictionary)
       if (plain !== lower && (correct(plain) || known.has(plain))) continue;
       const home = HOME_WORDS[lower] ?? HOME_WORDS[plain] ?? unstretched(lower).map(short => HOME_WORDS[short]).find(Boolean);
       // A name typed nearly right ("lamaine" for Lamine) is offered the name first.
-      const name = lower.length > 3 ? [...nameWords].map(([key, written]) => ({ written, distance: editDistance(plain, key.normalize('NFD').replace(/\p{M}/gu, '')) }))
-        .filter(item => item.distance <= 2).sort((a, b) => a.distance - b.distance)[0]?.written : undefined;
+      const nameMatch = lower.length > 3 ? [...nameWords].map(([key, written]) => ({ written, distance: editDistance(plain, key.normalize('NFD').replace(/\p{M}/gu, '')) }))
+        .filter(item => item.distance <= 2).sort((a, b) => a.distance - b.distance)[0] : undefined;
+      const name = nameMatch?.written;
       const words = lower.length > 1 ? speller.suggest(lower) : [];
-      found.set(lower, { word: raw, suggestions: home ? [home] : [...new Set(name ? [name, ...words] : words)].slice(0, 3) });
+      const suggestions = home ? [home] : [...new Set(name ? [name, ...words] : words)].slice(0, 3);
+      // Sure only when there is no doubt: a word from home, a name one letter off (two in a long name), or a
+      // dictionary word one letter off with no other word as close ("beatiful"; not "dancying", which could be two).
+      const strip = (text: string) => text.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+      const close = words.filter(candidate => editDistance(plain, strip(candidate)) <= 1);
+      const sureName = !!nameMatch && nameMatch.distance <= (plain.length >= 7 ? 2 : 1);
+      found.set(lower, { word: raw, suggestions, sure: !!home || sureName || (!name && plain.length > 3 && close.length === 1 && close[0] === words[0]) });
     }
     return [...found.values()];
   };

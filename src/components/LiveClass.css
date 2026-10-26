@@ -114,3 +114,11 @@
 .live-fix { margin-left: auto; padding: .1rem .45rem; border: 1px solid var(--line); border-radius: .4rem; background: #fff; font: inherit; font-size: .78rem; cursor: pointer; }
 .live-fix:hover { border-color: #c9ced8; background: #f4f6fa; }
 .live-tag-ok { background: #e6f4ea; color: #1e6b34; }
+
+/* What the game already fixed, and the teacher's own fix: the student's message to change, with a preview. */
+.live-auto { color: #5f6b7a; font-size: .82rem; }
+.live-fixed { margin-left: auto; color: #1e6b34; font-size: .8rem; font-weight: 600; }
+.live-fixer { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: .35rem; margin: .2rem 0 .3rem; }
+.live-fixer input { flex: 1 1 14rem; min-width: 0; padding: .35rem .5rem; border: 2px solid #15803d; border-radius: .4rem; font: inherit; }
+.live-fix-preview { flex-basis: 100%; margin: 0; font-size: .9rem; line-height: 1.6; }
+.live-fix-preview em { color: #8a93a3; font-size: .8rem; }

@@ -379,3 +379,6 @@ button.chat-sender:hover { text-decoration: underline; }
 .chat-input.chat-input-blocked { border-color: #d93025; box-shadow: 0 0 0 2px rgba(217, 48, 37, .18); }
 .spelling-help > strong { color: #b3261e; }
 .spelling-stuck { font-size: .8rem; color: #5f2b22; }
+
+/* A correction from the teacher: on its own line under "Correction:", with room for the colours. */
+.chat-correction { line-height: 1.7; }

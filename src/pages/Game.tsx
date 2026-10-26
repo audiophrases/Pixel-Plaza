@@ -8,7 +8,8 @@ import NamePicker from '../components/NamePicker';
 import HelpRequest from '../components/HelpRequest';
 import { LevelBar, Rewards } from '../components/LevelBar';
 import { DEFAULT_STYLE, emotesFor, levelOf, type Style } from '../../shared/levels';
-import { wordDiff } from '../../shared/diff';
+import { correctedSentence, readCorrection, wordDiff } from '../../shared/diff';
+import Correction from '../components/Correction';
 import { firstName } from '../../shared/names';
 import { ALL, NEAR, TEACHER, TYPING_EVERY_MS, TYPING_SHOWN_MS, conversationOf, inEarshot, opensItself, partnerOf, privateChat, renamed } from '../../shared/chat';
 import PhaserGame from '../components/PhaserGame';
@@ -725,7 +726,7 @@ export default function Game() {
               </div>
               {peek && peek.key !== active && <button type="button" className="chat-peek" onClick={() => talk(peek.key)}>
                 <Face player={playerOf(peek.key)} name={nameOf(peek.key)} icon={peek.key === TEACHER ? '🧑‍🏫' : undefined} />
-                <span><b>{nameOf(peek.key)}:</b> {peek.message.text}</span>
+                <span><b>{nameOf(peek.key)}:</b> {readCorrection(peek.message.text) ? `✏️ ${correctedSentence(readCorrection(peek.message.text)!)}` : peek.message.text}</span>
               </button>}
               {showPeople ? <div className="chat-people" role="menu" aria-label="Chat with">
                 {classmates.map(person => <button key={person.id} type="button" role="menuitem" onClick={() => talk(privateChat(person.name))}>
@@ -749,7 +750,10 @@ export default function Game() {
                     {named && <button type="button" className="chat-sender" style={{ color: shade(msg.sender) }}
                       title={`Chat with ${msg.sender}`} onClick={() => talk(privateChat(msg.sender))}>{msg.sender}</button>}
                     <div className="chat-bubble">
-                      <span className="chat-text"><Marked text={msg.text} marks={msg.marks} className="slip" /></span>
+                      {/* A correction from the teacher shows what was wrong and what is right, in colour. */}
+                      {msg.teacher && readCorrection(msg.text)
+                        ? <span className="chat-text chat-correction"><b>✏️ Correction:</b> <Correction parts={readCorrection(msg.text)!} /></span>
+                        : <span className="chat-text"><Marked text={msg.text} marks={msg.marks} className="slip" /></span>}
                       {!msg.teacher && msg.id && !msg.waiting && !msg.declined && <button type="button" className="chat-listen" disabled={sound.muted || sound.locked || status.state !== 'online'}
                         aria-label={sound.messageId === msg.id ? `Stop reading ${msg.sender}'s message` : `Listen to ${msg.sender}'s message`}
                         onClick={() => sound.messageId === msg.id ? audioRef.current?.stop() : audioRef.current?.replay(msg.id!)}>

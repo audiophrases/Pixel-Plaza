@@ -34,3 +34,15 @@ test('several changes and a swapped word are all found', () => {
     assert.deepEqual(words(original, diff.original), ['have', 'dog']);
     assert.deepEqual(words(corrected, diff.corrected), ['has', 'dogs', 'the']);
 });
+
+test("a teacher's correction travels as readable text and comes back as coloured parts, as in PinPlay", async () => {
+    const { correctionText, readCorrection, correctedSentence } = await import('../../shared/diff.ts');
+    const text = correctionText('I goed to the park', 'I went to the park');
+    assert.equal(text, '✏️ I [-goed-] {+went+} to the park');
+    assert.deepEqual(readCorrection(text), [{ kind: 'same', text: 'I' }, { kind: 'del', text: 'goed' }, { kind: 'ins', text: 'went' }, { kind: 'same', text: 'to the park' }]);
+    assert.equal(correctedSentence(readCorrection(text)), 'I went to the park');
+    // Nonsense is replaced whole; an ordinary teacher message is not a correction.
+    assert.equal(correctionText('adslkadflkjdsaf', 'Where is the box?'), '✏️ [-adslkadflkjdsaf-] {+Where is the box?+}');
+    assert.equal(readCorrection('Well done!'), null);
+    assert.equal(readCorrection(correctionText('same words', 'same words')), null);
+});
