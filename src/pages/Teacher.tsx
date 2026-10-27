@@ -303,7 +303,7 @@ export default function Teacher() {
           }}>{campaign.chapter + 1 < campaign.chapters ? '▶ Next chapter' : '🏁 End campaign'}</button></span>}
       </section>}
       {status.game && <LiveClass gameId={status.game.id} entries={status.entries} alerts={status.support?.alerts ?? []} incidents={status.incidents ?? []} online={status.online.map(s => ({ ...s, zone: placeName(s.zone) }))}
-        known={[...supportStudents.values()]} muted={status.muted} sound={status.sound ?? { off: [], now: Date.now(), plays: [] }} mode={status.mode} moderation={status.moderation} open={status.open}
+        known={[...supportStudents.values()]} muted={status.muted} sound={status.sound ?? { off: [], now: Date.now(), plays: [] }} open={status.open}
         who={who} action={action} selected={selectedStudent} onSelect={setSelectedStudent} />}
       <nav className="teacher-nav" aria-label="Sections">
         {GROUPS.map(group => {
