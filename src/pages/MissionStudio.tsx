@@ -9,6 +9,7 @@ import type { MissionDraft, MissionSummary, MissionSync } from '../../shared/mis
 import MissionEditor, { ClueReview, MissionPreview } from '../components/MissionEditor';
 import MissionField from '../components/MissionField';
 import MissionStoryMap, { MissionIcon } from '../components/MissionVisuals';
+import { MissionLibrary, MissionPlayGuide } from '../components/MissionGuide';
 import { focusMissionIssue, issueLocation, missionIssueText } from '../components/missionEditing';
 import LiveMissionPanel from '../components/LiveMissionPanel';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
@@ -37,6 +38,9 @@ export default function MissionStudio() {
     const [promptThemeId, setPromptThemeId] = useState(() => getTheme(params.get('theme') ?? undefined).id);
     const [token, setToken] = useState(readTeacherSession); const [password, setPassword] = useState('');
     const [library, setLibrary] = useState<MissionSummary[]>([]); const [draft, setDraft] = useState<MissionDraft | null>(null);
+    const [trash, setTrash] = useState<MissionSummary[]>([]);
+    const [showLibrary, setShowLibrary] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<MissionSummary | null>(null);
     const [campaign, setCampaign] = useState<Campaign | null>(null); const [chapterIndex, setChapterIndex] = useState(0);
     const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
     const [newName, setNewName] = useState(''); const [source, setSource] = useState(''); const [creating, setCreating] = useState(false);
@@ -62,12 +66,13 @@ export default function MissionStudio() {
     const call = async <T,>(op: string, body?: object): Promise<T> => {
         const result = await request<T & { sync?: MissionSync }>(token, op, body);
         noteSync(result.sync);
+        if ('trash' in result && Array.isArray(result.trash)) setTrash(result.trash);
         return result;
     };
     useEffect(() => {
         if (!token) return;
         let active = true;
-        request<{ library: MissionSummary[]; sync?: MissionSync }>(token, 'list').then(result => { if (active) { setLibrary(result.library); if (result.sync) setSync(result.sync); } }).catch(cause => { if (active) { setError(cause.message); if (cause.status === 401) { storeTeacherSession(''); setToken(''); } } });
+        request<{ library: MissionSummary[]; trash?: MissionSummary[]; sync?: MissionSync }>(token, 'list').then(result => { if (active) { setLibrary(result.library); setTrash(result.trash ?? []); if (result.sync) setSync(result.sync); } }).catch(cause => { if (active) { setError(cause.message); if (cause.status === 401) { storeTeacherSession(''); setToken(''); } } });
         return () => { active = false; };
     }, [token]);
     useEffect(() => {
@@ -76,7 +81,7 @@ export default function MissionStudio() {
         window.addEventListener('beforeunload', prevent); return () => window.removeEventListener('beforeunload', prevent);
     }, [dirty]);
     useEffect(() => { if (issueTarget) focusMissionIssue(issueTarget.path); }, [issueTarget]);
-    const applyDraft = (next: MissionDraft) => { setDraft(next); setCampaign(next.campaign); setCandidate(null); setPrompt(''); setChapterIndex(0); setSelectedId(null); setView('map'); setCreating(false); };
+    const applyDraft = (next: MissionDraft) => { setDraft(next); setCampaign(next.campaign); setCandidate(null); setPrompt(''); setChapterIndex(0); setSelectedId(null); setView('map'); setCreating(false); setShowLibrary(false); setDeleteTarget(null); };
     const edit = (next: Campaign) => { setCampaign(next); setCandidate(null); setPrompt(''); setNotice(''); };
     const run = async (work: () => Promise<void>) => { setBusy(true); setError(''); try { await work(); } catch (cause) { failed(cause); } finally { setBusy(false); } };
     const mayLeave = () => !dirty || window.confirm('Discard unsaved draft changes? Save or export them first to keep them.');
@@ -94,8 +99,9 @@ export default function MissionStudio() {
         }
         setCandidate({ ...validateMission(missionEnvelope(working)), changes });
     };
-    const openMission = (id: string) => { if (!id || !mayLeave()) return; void run(async () => { const result = await call<{ draft: MissionDraft }>(`get?id=${encodeURIComponent(id)}`); applyDraft(result.draft); setNotice(''); }); };
+    const openMission = (id: string) => { if (!id || !mayLeave()) return; void run(async () => { const result = await call<{ draft: MissionDraft }>(`get?id=${encodeURIComponent(id)}`); if (result.draft.deleted) { const latest = await call<{ library: MissionSummary[] }>('list'); setLibrary(latest.library); setShowLibrary(true); setNotice('This mission is in Trash. Restore it below to edit it.'); return; } applyDraft(result.draft); setNotice(''); }); };
     const selectChapter = (index: number) => { setChapterIndex(index); setSelectedId(null); setCandidate(null); setPrompt(''); };
+    const askDelete = (item: MissionSummary) => { setDeleteTarget(item); window.requestAnimationFrame(() => document.querySelector<HTMLElement>('.mission-delete-confirm')?.focus()); };
     return <main className="mission-page mission-studio-page">
         <header className="mission-header"><div><p className="mission-eyebrow">PIXEL PLAZA · TEACHER WORKSPACE</p><h1>Mission Studio<span className="mission-header-mark" aria-hidden="true"><MissionIcon name="map" /></span></h1><p>Bring your story to life. One discovery at a time.</p>{sync && sync.state !== 'home' && <p className={`mission-sync mission-sync-${sync.state}`} role="status">{syncText(sync)}</p>}</div>
             <Link to="/teacher" onClick={e => { if (!mayLeave()) e.preventDefault(); }}>Teacher controls</Link></header>
@@ -107,7 +113,7 @@ export default function MissionStudio() {
         }); }}><h2>Teacher sign-in</h2><label className="mission-field"><span>Teacher password</span><input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label><button className="mission-button primary" disabled={busy}>Open Mission Studio</button></form>
         : <fieldset className="mission-workspace" disabled={busy} aria-busy={busy}>
             <section className="mission-library mission-card"><div className="mission-library-bar"><label className="mission-field"><span>Your missions</span><select value={campaign?.id ?? ''} onChange={e => openMission(e.target.value)}><option value="" disabled>Choose a mission to edit…</option>{library.map(item => <option key={item.id} value={item.id}>{item.title || 'Untitled mission'}{item.publishedRevision ? ' · Published' : ' · Draft'}</option>)}</select></label>
-                <button className="mission-button" aria-expanded={creating} onClick={() => setCreating(!creating)}>+ New mission</button><button className="mission-button mission-signout" onClick={() => { if (!mayLeave()) return; storeTeacherSession(''); setToken(''); setCampaign(null); setDraft(null); }}>Sign out</button></div>
+                <button className="mission-button" aria-expanded={creating} onClick={() => setCreating(!creating)}>+ New mission</button>{campaign && <button className="mission-button" aria-pressed={showLibrary} onClick={() => setShowLibrary(!showLibrary)}>{showLibrary ? 'Back to editor' : 'Compare missions'}</button>}<button className="mission-button mission-signout" onClick={() => { if (!mayLeave()) return; storeTeacherSession(''); setToken(''); setCampaign(null); setDraft(null); setLibrary([]); setTrash([]); setDeleteTarget(null); }}>Sign out</button></div>
                 {creating && <div className="mission-create"><h2>Create your mission</h2><p className="mission-muted">Give it a name, then start with an example you can change or adapt an existing mission.</p><div className="mission-two-columns"><MissionField label="New mission name" value={newName} maxLength={120} placeholder="For example: The missing festival lights" onChange={setNewName} /><label className="mission-field"><span>Start from</span><select value={source} onChange={e => setSource(e.target.value)}><option value="">Simple starter · one question to adapt</option>{library.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label></div>
                     <div className="mission-toolbar"><button className="mission-button primary" disabled={!newName.trim()} onClick={() => { if (!mayLeave()) return; void run(async () => {
                         const base = newName.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -119,12 +125,19 @@ export default function MissionStudio() {
                     }); }}>Create mission</button><button className="mission-button" onClick={() => setCreating(false)}>Cancel</button></div>
                 </div>}
             </section>
-            <div className="mission-main">{campaign && draft ? <>
+            {deleteTarget && <section className="mission-card mission-delete-confirm" tabIndex={-1} role="alert" aria-label="Confirm mission deletion"><h2>Move “{deleteTarget.title}” to Trash?</h2><p>It will leave the mission library and the choices for new games. Games already using it keep their story and progress. You can restore it from Trash.</p>{dirty && campaign?.id === deleteTarget.id && <p><strong>Unsaved edits will be discarded.</strong> Download a backup first to keep them.</p>}<div className="mission-toolbar"><button type="button" className="mission-button danger" onClick={() => void run(async () => {
+                const result = await call<{ draft: MissionDraft; library: MissionSummary[]; sync?: MissionSync }>('delete', { id: deleteTarget.id, version: draft && campaign?.id === deleteTarget.id ? draft.version : deleteTarget.version });
+                setLibrary(result.library); if (campaign?.id === deleteTarget.id) { setCampaign(null); setDraft(null); setCandidate(null); }
+                setDeleteTarget(null); setShowLibrary(true); setNotice(result.sync?.keptBoth.length ? 'Your version was moved to Trash. A version edited elsewhere was kept in the library.' : 'Moved to Trash. Restore it below whenever you need it.');
+            })}>Move to Trash</button><button type="button" className="mission-button" onClick={() => setDeleteTarget(null)}>Keep mission</button>{campaign?.id === deleteTarget.id && <button type="button" className="mission-button" onClick={() => download(missionJson(campaign), `${campaign.id}.json`)}>Download backup first</button>}</div></section>}
+            {(!campaign || showLibrary) && <><MissionLibrary library={library} onOpen={openMission} onDelete={askDelete} /><details className="mission-card mission-trash"><summary>Trash ({trash.length})</summary><p className="mission-muted">Restore a mission to bring it back to the library and, if published, the choices for new games.</p>{trash.map(item => <div className="mission-trash-row" key={item.id}><strong>{item.title || 'Untitled mission'}</strong><button type="button" className="mission-button" onClick={() => void run(async () => { const result = await call<{ library: MissionSummary[] }>('restore', { id: item.id, version: item.version }); setLibrary(result.library); setNotice(`“${item.title}” restored to the library.`); })}>Restore mission</button></div>)}{!trash.length && <p>Trash is empty.</p>}</details></>}
+            <div className="mission-main" hidden={showLibrary}>{campaign && draft ? <>
                 <div className="mission-savebar"><div><strong>{campaign.title || 'Untitled mission'}</strong><span className={dirty ? 'mission-save-state unsaved' : 'mission-save-state'}>{dirty ? 'Unsaved changes' : 'All changes saved'}</span></div><div className="mission-toolbar">
                     <button className="mission-button primary" disabled={!dirty} onClick={() => void run(async () => { await save(); setNotice('Draft saved. Publish when you are ready to use it in a new game.'); })}>{busy ? 'Working…' : 'Save draft'}</button>
                     <button className="mission-button" onClick={() => setView('review')}>Review &amp; publish{checked?.errors.length ? ` (${checked.errors.length})` : ''}</button></div></div>
                 <nav className="mission-workflow" aria-label="Mission workflow">{([{ id: 'map', icon: 'map', title: 'Story map', description: 'See how it all connects' }, { id: 'setup', icon: 'roles', title: 'Mission setup', description: 'Story & student roles' }, { id: 'build', icon: 'steps', title: 'Build steps', description: 'Shape each student task' }, { id: 'review', icon: 'eye', title: 'Preview & publish', description: 'Try the student experience' }] as const).map(item => <button key={item.id} aria-current={view === item.id ? 'page' : undefined} className={view === item.id ? 'selected' : ''} onClick={() => setView(item.id)}><span><MissionIcon name={item.icon} /></span><div><strong>{item.title}</strong><small>{item.description}</small></div></button>)}</nav>
-                <div className="mission-utility-nav"><button className="mission-button" aria-pressed={view === 'tools'} onClick={() => setView('tools')}>AI help &amp; files</button><button className="mission-button" aria-pressed={view === 'live'} onClick={() => setView('live')}>Add to a running game</button></div>
+                <div className="mission-utility-nav"><button className="mission-button" aria-pressed={view === 'tools'} onClick={() => setView('tools')}>AI help &amp; files</button><button className="mission-button" aria-pressed={view === 'live'} onClick={() => setView('live')}>Add to a running game</button><button className="mission-button danger" onClick={() => askDelete({ id: campaign.id, title: campaign.title, version: draft.version, publishedRevision: draft.publishedRevision, updated: draft.updated })}>Delete mission</button></div>
+                {view === 'map' && campaign.chapters[chapterIndex] && <MissionPlayGuide campaign={campaign} chapter={campaign.chapters[chapterIndex]} canLeave={mayLeave} />}
                 {view === 'map' && <MissionStoryMap campaign={campaign} chapterIndex={chapterIndex} onChapter={selectChapter} onEdit={id => { setSelectedId(id ?? null); setView('build'); setEditorNavigation(n => n + 1); setIssueTarget({ path: id ? `chapters[${chapterIndex}].objectives[${campaign.chapters[chapterIndex].objectives.findIndex(o => o.id === id)}].text` : `chapters[${chapterIndex}].title` }); }} onSetup={() => { setView('setup'); setIssueTarget({ path: 'roles[0].name' }); }} onPreview={() => { setView('review'); window.requestAnimationFrame(() => document.querySelector('.mission-preview')?.scrollIntoView({ block: 'start' })); }} />}
                 <div hidden={view !== 'setup' && view !== 'build'}><MissionEditor key={campaign.id} navigationKey={editorNavigation} view={view === 'setup' ? 'setup' : 'build'} campaign={campaign} theme={getTheme(promptThemeId)} chapterIndex={chapterIndex} selectedId={selectedId} setSelectedId={setSelectedId} setChapterIndex={selectChapter} onChange={edit} /></div>
                 {view === 'review' && <><section className="mission-card mission-validation"><p className="mission-eyebrow">CHECK BEFORE YOU SHARE</p><h2>{checked?.errors.length ? `${checked.errors.length} things to finish` : 'Your mission is ready to publish'}</h2><p className="mission-muted">{campaign.chapters.length} chapters · {campaign.chapters.reduce((n, c) => n + c.objectives.length, 0)} steps · {campaign.roles.length} roles. You can save an unfinished draft at any time.</p>
@@ -167,7 +180,7 @@ export default function MissionStudio() {
                 </details></div>
                 {view === 'setup' && <div className="mission-next"><p>Next, add the tasks your students will complete.</p><button className="mission-button primary" onClick={() => setView('build')}>Build steps →</button></div>}
                 {view === 'build' && <div className="mission-next"><p>Happy with your steps? See the mission as a student.</p><button className="mission-button primary" onClick={() => setView('review')}>Preview &amp; publish →</button></div>}
-            </> : <section className="mission-card mission-empty"><p className="mission-eyebrow">WELCOME TO YOUR TEACHER WORKSPACE</p><h2>What will your class investigate?</h2><p>Start with a ready-made mission and make it yours, or create a new one with a simple example to guide you.</p><button className="mission-button primary" onClick={() => setCreating(true)}>+ Create a mission</button><h3>Choose a mission to edit</h3><nav className="mission-welcome-library" aria-label="Mission library">{library.map(item => <button key={item.id} onClick={() => openMission(item.id)}><strong>{item.title || 'Untitled mission'}</strong><span>{item.publishedRevision ? 'Published · open an editable draft' : 'Draft · keep building'} →</span></button>)}</nav></section>}</div>
+            </> : null}</div>
         </fieldset>}
     </main>;
 }

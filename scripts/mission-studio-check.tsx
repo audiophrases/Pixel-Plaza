@@ -6,6 +6,7 @@ import type { QuestView } from '../shared/campaign';
 import { missionEnvelope, missionId, missionJson, validateMission } from '../shared/missionSchema';
 import type { MissionDraft } from '../shared/missionTypes';
 import type { LiveMissionTarget } from '../shared/missionTypes';
+import { missionOverview } from '../shared/missionOverview';
 
 const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true, url: 'http://localhost/mission-studio' });
 const g = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean };
@@ -14,7 +15,7 @@ Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, co
 dom.window.confirm = () => true;
 let saved: MissionDraft = { campaign: structuredClone(castanyada), version: 1, publishedRevision: 'builtin', updated: 0 };
 const writes: { op: string; body: Record<string, unknown> }[] = [];
-const summary = () => ({ id: saved.campaign.id, title: saved.campaign.title, version: saved.version, publishedRevision: saved.publishedRevision, updated: 0 });
+const summary = () => ({ id: saved.campaign.id, title: saved.campaign.title, version: saved.version, publishedRevision: saved.publishedRevision, updated: 0, overview: missionOverview(saved.campaign) });
 let liveTarget: LiveMissionTarget = { game: { id: 'live-game', name: 'Class 3A' }, campaign: { id: castanyada.id, title: castanyada.title, revision: 'builtin' }, chapter: { id: castanyada.chapters[0].id, title: castanyada.chapters[0].title, index: 0 }, version: 0, epoch: 'session-1', open: true, ended: false, objectiveIds: castanyada.chapters.flatMap(c => c.objectives.map(o => o.id)), additions: [] };
 let liveReleased = 0; let livePreview = false;
 let failSave = false;
@@ -22,7 +23,7 @@ g.fetch = async (url, init) => {
     const route = String(url); const body = init?.body ? JSON.parse(String(init.body)) : {};
     if (route === '/api/teacher/login') return Response.json({ token: 'teacher-test' });
     assert.equal((init?.headers as Record<string, string> | undefined)?.['x-teacher-session'], 'teacher-test');
-    if (route.endsWith('/list')) return Response.json({ library: [summary()] });
+    if (route.endsWith('/list')) return Response.json({ library: saved.deleted ? [] : [summary()], trash: saved.deleted ? [summary()] : [] });
     if (route.endsWith('/live')) return Response.json({ target: liveTarget });
     if (route.endsWith('/live-cancel')) return Response.json({ target: liveTarget });
     if (route.endsWith('/live-preview')) {
@@ -56,8 +57,9 @@ g.fetch = async (url, init) => {
         writes.push({ op: 'save', body }); assert.equal(body.version, saved.version); saved = { ...saved, campaign: body.envelope.campaign, version: saved.version + 1 };
     }
     else if (route.endsWith('/publish')) { writes.push({ op: 'publish', body }); assert.equal(body.version, saved.version); saved = { ...saved, version: saved.version + 1, publishedRevision: 'new-revision' }; }
+    else if (route.endsWith('/delete') || route.endsWith('/restore')) { assert.equal(body.version, saved.version); saved = { ...saved, version: saved.version + 1, deleted: route.endsWith('/delete') }; writes.push({ op: saved.deleted ? 'delete' : 'restore', body }); }
     else throw new Error(`Unexpected request ${route}`);
-    return Response.json({ draft: saved, library: [summary()] });
+    return Response.json({ draft: saved, library: saved.deleted ? [] : [summary()], trash: saved.deleted ? [summary()] : [] });
 };
 
 const { createRoot } = await import('react-dom/client'); const { act } = await import('react');
@@ -95,6 +97,8 @@ assert.equal(document.body.textContent?.includes('Where is the blue box?'), fals
 await edit('Teacher password', 'test');
 await act(async () => { document.querySelector('form')!.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })); });
 await edit('Your missions', castanyada.id);
+assert.ok(document.querySelector('.mission-play-guide')?.textContent?.includes('section inside the student’s Journal'), 'the Studio explains where the board actually is');
+assert.ok(document.querySelector('.mission-board-empty'), 'a chapter with no board quests has an explicit empty preview');
 assert.ok(document.querySelector('.mission-story-map'), 'missions open on the visual story map');
 assert.equal(document.querySelectorAll('.mission-chapter-strip button').length, castanyada.chapters.length);
 assert.equal(document.querySelectorAll('.mission-story-task').length, castanyada.chapters[0].objectives.length, 'the map includes main and optional tasks');
@@ -290,6 +294,15 @@ const openingIssue = [...document.querySelectorAll('.mission-issue-list li')].fi
 await act(async () => { openingIssue.querySelector<HTMLButtonElement>('button')!.click(); });
 assert.ok(document.querySelector<HTMLDetailsElement>('.mission-chapter-card > details')!.open, 'Go to fix unfolds chapter settings');
 assert.equal(document.activeElement, field('Opening story · what do students see first?'));
+await click('Delete mission');
+assert.ok(document.querySelector('.mission-delete-confirm')?.textContent?.includes('Unsaved edits will be discarded'));
+const writesBeforeDeletion = writes.length;
+await click('Keep mission'); assert.equal(writes.length, writesBeforeDeletion, 'canceling deletion never writes');
+await click('Delete mission'); await click('Move to Trash');
+assert.equal(saved.deleted, true); assert.equal(document.querySelectorAll('.mission-library-tile').length, 0);
+assert.ok(document.querySelector('.mission-trash-row'), 'deleted missions can be restored');
+await click('Restore mission'); assert.equal(saved.deleted, false);
+assert.equal(document.querySelectorAll('.mission-library-tile').length, 1);
 await act(async () => { root.unmount(); });
 
 // A branching story must preview its real rules, including optional clue rewards.

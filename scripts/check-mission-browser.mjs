@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { castanyada, castanyadaComplete } from '../worker/tests/fixtures/season-1.mjs';
+import { castanyada, castanyadaComplete, plazaFreePlay } from '../worker/tests/fixtures/season-1.mjs';
+import { missionOverview } from '../shared/missionOverview.ts';
 
 const root = path.join(import.meta.dirname, '..');
 const origin = process.argv[2] ?? 'http://127.0.0.1:5173';
@@ -60,28 +61,36 @@ try {
     await send('Page.enable'); await send('Runtime.enable');
     await send('Page.addScriptToEvaluateOnNewDocument', { source: `
         sessionStorage.setItem('pixel-plaza-teacher-session','browser-test');
-        const fixtures=${JSON.stringify([castanyada, castanyadaComplete])};
+        const fixtures=${JSON.stringify([castanyada, castanyadaComplete, plazaFreePlay])};
+        const descriptions=${JSON.stringify(Object.fromEntries([castanyada, castanyadaComplete, plazaFreePlay].map(c => [c.id, missionOverview(c)])))};
         const drafts=fixtures.map(campaign=>({campaign,version:1,publishedRevision:'builtin',updated:0}));
-        const library=()=>drafts.map(d=>({id:d.campaign.id,title:d.campaign.title,version:d.version,publishedRevision:d.publishedRevision,updated:0}));
+        const library=(deleted=false)=>drafts.filter(d=>!!d.deleted===deleted).map(d=>({id:d.campaign.id,title:d.campaign.title,version:d.version,publishedRevision:d.publishedRevision,updated:0,overview:descriptions[d.campaign.id]}));
         window.__missionWrites=[];
         const original=window.fetch.bind(window);
         window.fetch=async(url,init)=>{
             const route=String(url);if(!route.startsWith('/api/teacher/missions/'))return original(url,init);
             if(init.headers['x-teacher-session']!=='browser-test')throw Error('Missing teacher session');
             const body=init.body?JSON.parse(init.body):{};
-            if(route.endsWith('/list'))return Response.json({library:library()});
+            if(route.endsWith('/list'))return Response.json({library:library(),trash:library(true)});
             if(route.endsWith('/live'))return Response.json({target:null});
             if(route.includes('/get?'))return Response.json({draft:drafts.find(d=>d.campaign.id===new URL(route,location.origin).searchParams.get('id'))});
             if(route.endsWith('/create')){const campaign=structuredClone(drafts.find(d=>d.campaign.id===body.source)?.campaign??fixtures[0]);campaign.id=body.id;const draft={campaign,version:1,publishedRevision:null,updated:0};drafts.push(draft);return Response.json({draft,library:library()})}
             const draft=drafts.find(d=>d.campaign.id===body.id);if(!draft||draft.version!==body.version)throw Error('Stale write');
             if(route.endsWith('/save'))draft.campaign=body.envelope.campaign;
             else if(route.endsWith('/publish'))draft.publishedRevision='published-test';
+            else if(route.endsWith('/delete'))draft.deleted=true;
+            else if(route.endsWith('/restore'))draft.deleted=false;
             else throw Error('Unexpected request: '+route);
-            window.__missionWrites.push(body);draft.version++;return Response.json({draft,library:library()});
+            window.__missionWrites.push(body);draft.version++;return Response.json({draft,library:library(),trash:library(true)});
         };` });
     await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
     await send('Page.navigate', { url: `${origin}/mission-studio` });
     await waitFor(`document.querySelector('.mission-welcome-library button')`);
+    await noOverflow(); await screenshot('desktop-mission-library');
+    await edit('Your missions', plazaFreePlay.id); await waitFor(`document.querySelector('.mission-play-guide')`);
+    assert.equal(await evaluate(`document.querySelector('.mission-play-guide h2').textContent`), 'A session starter. You supply the quests.');
+    assert.equal(await evaluate(`document.querySelector('.mission-play-guide').textContent.includes('Release to students')`), true);
+    await evaluate(`document.querySelector('.mission-play-guide').scrollIntoView({block:'start'})`); await settle(); await screenshot('desktop-free-play-guide');
     await edit('Your missions', castanyadaComplete.id);
     await waitFor(`document.querySelector('.mission-story-map')`);
     await noOverflow(); await screenshot('desktop-story-map');
@@ -135,6 +144,12 @@ try {
     await waitFor(`document.querySelector('.mission-workflow button[aria-current] strong').textContent==='Mission setup'`);
     assert.equal(await evaluate(`[...document.querySelectorAll('label')].find(l=>l.querySelector('span')?.textContent==='Mission title').querySelector('input').value`), 'Our classroom mystery');
     await noOverflow();
+    await click('Delete mission'); await noOverflow(); await screenshot('phone-trash-confirmation');
+    await click('Keep mission');
+    await click('Delete mission'); await click('Move to Trash');
+    await waitFor(`document.querySelector('.mission-trash-row')`);
+    await evaluate(`document.querySelector('.mission-trash').open=true`); await click('Restore mission');
+    assert.equal(await evaluate(`document.querySelectorAll('.mission-trash-row').length`), 0);
     assert.deepEqual(errors, [], 'no uncaught browser exceptions');
     console.log('PASS: real Chrome desktop and phone editing, ordering, removal/undo, saving, publishing and named creation.');
     console.log(`Screenshots: ${qa}`);

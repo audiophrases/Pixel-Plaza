@@ -1,25 +1,26 @@
 import type { Campaign } from '../shared/campaign.ts';
+import { missionOverview } from '../shared/missionOverview.ts';
 import { MISSION_MAX_BYTES, missionEnvelope, missionId, validateMission, type MissionIssue } from '../shared/missionSchema.ts';
 import type { CampaignChoice, MissionCopy, MissionDraft, MissionPushResult, MissionSummary } from '../shared/missionTypes.ts';
 
-export type MissionResult = { library?: MissionSummary[]; draft?: MissionDraft; revision?: string; errors?: MissionIssue[]; warnings?: MissionIssue[] } | { error: string; status: number; errors?: MissionIssue[] };
+export type MissionResult = { library?: MissionSummary[]; trash?: MissionSummary[]; draft?: MissionDraft; revision?: string; errors?: MissionIssue[]; warnings?: MissionIssue[] } | { error: string; status: number; errors?: MissionIssue[] };
 // Missions are offered in the order they were first made, so editing one does not move it. Before missions were data,
 // the first five came with the app; they keep the order teachers met them in: the shortest story first, then its
 // longer and stricter versions, then free play. (Used once, when missions got an order.)
 const FIRST_MISSIONS = ['castanyada', 'castanyada-side-quests', 'castanyada-complete', 'castanyada-investigations', 'plaza-free-play'];
-type DraftRow = { campaign_id: string; content: string; version: number; published_revision: string | null; updated: number; created: number | null; synced: number | null };
+type DraftRow = { campaign_id: string; content: string; version: number; published_revision: string | null; updated: number; created: number | null; synced: number | null; deleted: number };
 
 // A mission sent by the teacher's laptop: the shape it must have, and content Mission Studio itself would accept.
 export function readCopy(value: unknown): MissionCopy | null {
     const v = value as Partial<MissionCopy> | null;
     if (!v || typeof v !== 'object' || typeof v.id !== 'string' || !missionId(v.id) || typeof v.content !== 'string' || v.content.length > MISSION_MAX_BYTES
-        || !Number.isInteger(v.version) || !Number.isInteger(v.updated) || !Number.isInteger(v.created)
+        || !Number.isInteger(v.version) || !Number.isInteger(v.updated) || !Number.isInteger(v.created) || (v.deleted !== undefined && typeof v.deleted !== 'boolean')
         || !(v.publishedRevision === null || (typeof v.publishedRevision === 'string' && v.publishedRevision.length <= 80))) return null;
     const read = (content: string, mode?: 'draft') => { try { return validateMission(missionEnvelope(JSON.parse(content)), mode).campaign; } catch { return null; } };
     if (read(v.content, 'draft')?.id !== v.id) return null;
     const r = v.revision as MissionCopy['revision'] | undefined;
     if (r !== null && (!r || typeof r.content !== 'string' || r.content.length > MISSION_MAX_BYTES || !Number.isInteger(r.published) || read(r.content)?.id !== v.id || !v.publishedRevision)) return null;
-    return { id: v.id, content: v.content, version: v.version!, publishedRevision: v.publishedRevision, updated: v.updated!, created: v.created!, revision: r && { content: r.content, published: r.published } };
+    return { id: v.id, content: v.content, version: v.version!, publishedRevision: v.publishedRevision, updated: v.updated!, created: v.created!, deleted: !!v.deleted, revision: r && { content: r.content, published: r.published } };
 }
 
 // The teacher's missions: an editable draft each, and every version ever published, which games keep using. On the
@@ -33,7 +34,7 @@ export class MissionRepository {
     initialize(): void {
         this.sql.exec(`CREATE TABLE IF NOT EXISTS mission_drafts (
             campaign_id TEXT PRIMARY KEY, content TEXT NOT NULL, version INTEGER NOT NULL,
-            published_revision TEXT, updated INTEGER NOT NULL, created INTEGER, synced INTEGER);
+            published_revision TEXT, updated INTEGER NOT NULL, created INTEGER, synced INTEGER, deleted INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS mission_revisions (
             revision_id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, content TEXT NOT NULL, published INTEGER NOT NULL);`);
         const columns = this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('mission_drafts')").toArray().map(column => column.name);
@@ -45,6 +46,7 @@ export class MissionRepository {
             }
         }
         if (!columns.includes('synced')) this.sql.exec('ALTER TABLE mission_drafts ADD COLUMN synced INTEGER');
+        if (!columns.includes('deleted')) this.sql.exec('ALTER TABLE mission_drafts ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0');
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaigns')").toArray().some(c => c.name === 'revision_id')) {
             this.sql.exec('ALTER TABLE campaigns ADD COLUMN revision_id TEXT');
         }
@@ -57,13 +59,15 @@ export class MissionRepository {
             WHERE revision_id IS NULL AND EXISTS (SELECT 1 FROM mission_revisions r WHERE r.campaign_id = campaigns.campaign_id)`);
     }
 
-    list(): MissionSummary[] {
-        return this.sql.exec<MissionSummary>(`SELECT campaign_id AS id, json_extract(content, '$.title') AS title,
-            version, published_revision AS publishedRevision, updated FROM mission_drafts ORDER BY updated DESC, campaign_id`).toArray();
+    list(deleted = false): MissionSummary[] {
+        return this.sql.exec<DraftRow>('SELECT * FROM mission_drafts WHERE deleted = ? ORDER BY created, campaign_id', deleted ? 1 : 0).toArray().map(row => {
+            const campaign: Campaign = JSON.parse(row.content);
+            return { id: row.campaign_id, title: campaign.title, version: row.version, publishedRevision: row.published_revision, updated: row.updated, overview: missionOverview(campaign) };
+        });
     }
     draft(id: string): MissionDraft | null {
         const row = this.row(id);
-        return row ? { campaign: JSON.parse(row.content), version: row.version, publishedRevision: row.published_revision, updated: row.updated } : null;
+        return row ? { campaign: JSON.parse(row.content), version: row.version, publishedRevision: row.published_revision, updated: row.updated, deleted: !!row.deleted } : null;
     }
     revision(id: string | null): Campaign | undefined {
         if (!id) return undefined;
@@ -77,7 +81,7 @@ export class MissionRepository {
         return campaign;
     }
     published(): CampaignChoice[] {
-        return this.sql.exec<{ revision: string }>('SELECT published_revision AS revision FROM mission_drafts WHERE published_revision IS NOT NULL ORDER BY created, campaign_id').toArray()
+        return this.sql.exec<{ revision: string }>('SELECT published_revision AS revision FROM mission_drafts WHERE published_revision IS NOT NULL AND deleted = 0 ORDER BY created, campaign_id').toArray()
             .flatMap(({ revision }) => {
                 const campaign = this.revision(revision);
                 if (!campaign) return [];
@@ -88,21 +92,22 @@ export class MissionRepository {
             });
     }
     latest(id: string): { campaign: Campaign; revision: string } | null {
-        const revision = this.sql.exec<{ published_revision: string | null }>('SELECT published_revision FROM mission_drafts WHERE campaign_id = ?', id).toArray()[0]?.published_revision;
+        const revision = this.sql.exec<{ published_revision: string | null }>('SELECT published_revision FROM mission_drafts WHERE campaign_id = ? AND deleted = 0', id).toArray()[0]?.published_revision;
         const campaign = this.revision(revision ?? null);
         return campaign && revision ? { campaign, revision } : null;
     }
     execute(op: string, body: unknown): MissionResult {
         const b = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
-        if (op === 'list') return { library: this.list() };
+        if (op === 'list') return { library: this.list(), trash: this.list(true) };
         const id = typeof b.id === 'string' ? b.id : '';
         if (!missionId(id)) return { error: 'Choose a valid campaign ID.', status: 400 };
         const existing = this.draft(id);
         if (op === 'get') return existing ? { draft: existing } : { error: 'Campaign not found.', status: 404 };
         if (op === 'create') {
             if (existing) return { error: 'That campaign ID already exists.', status: 409 };
-            if (this.list().length >= 100) return { error: 'The library limit is 100 campaigns.', status: 400 };
-            const source = typeof b.source === 'string' ? this.draft(b.source)?.campaign : undefined;
+            if (this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM mission_drafts').toArray()[0].n >= 100) return { error: 'The library limit is 100 campaigns, including Trash.', status: 400 };
+            const template = typeof b.source === 'string' ? this.draft(b.source) : undefined;
+            const source = template && !template.deleted ? template.campaign : undefined;
             if (b.source !== undefined && !source) return { error: 'Template not found.', status: 404 };
             const campaign: Campaign = source ? { ...source, id, title: `${source.title.slice(0, 110)} (copy)` } : {
                 id, title: 'New campaign', finale: 'The adventure ends.', roles: [{ id: 'witness', name: 'Witness', card: 'You know something about the mystery.', clue: 'The missing object is at the hotel.' }],
@@ -113,8 +118,13 @@ export class MissionRepository {
             return { draft: this.draft(id)!, library: this.list() };
         }
         if (!existing) return { error: 'Campaign not found.', status: 404 };
-        if (op !== 'save' && op !== 'publish') return { error: 'Unknown Mission Studio action.', status: 400 };
+        if (!['save', 'publish', 'delete', 'restore'].includes(op)) return { error: 'Unknown Mission Studio action.', status: 400 };
         if (!Number.isInteger(b.version) || b.version !== existing.version) return { error: 'This draft changed in another tab. Export your edits, then reopen it before saving.', status: 409 };
+        if (op === 'delete' || op === 'restore') {
+            this.sql.exec('UPDATE mission_drafts SET deleted = ?, version = version + 1, updated = ? WHERE campaign_id = ? AND version = ?', op === 'delete' ? 1 : 0, Date.now(), id, existing.version);
+            return { draft: this.draft(id)!, library: this.list(), trash: this.list(true) };
+        }
+        if (existing.deleted) return { error: 'This mission is in Trash. Restore it before editing or publishing.', status: 409 };
         if (op === 'save') {
             const checked = validateMission(b.envelope, 'draft');
             if (!checked.campaign) return { error: 'Draft has invalid fields.', errors: checked.errors, status: 400 };
@@ -160,7 +170,7 @@ export class MissionRepository {
     private copyOf(row: DraftRow, withRevision = true): MissionCopy {
         const revision = withRevision && row.published_revision
             ? this.sql.exec<{ content: string; published: number }>('SELECT content, published FROM mission_revisions WHERE revision_id = ?', row.published_revision).toArray()[0] ?? null : null;
-        return { id: row.campaign_id, content: row.content, version: row.version, publishedRevision: row.published_revision, updated: row.updated, created: row.created ?? 0, revision };
+        return { id: row.campaign_id, content: row.content, version: row.version, publishedRevision: row.published_revision, updated: row.updated, created: row.created ?? 0, deleted: !!row.deleted, revision };
     }
     private keepRevision(copy: MissionCopy): string | null {
         if (!copy.publishedRevision || !copy.revision) return null;
@@ -179,13 +189,13 @@ export class MissionRepository {
         const here = this.row(copy.id);
         const revisionHere = here?.published_revision
             ? this.sql.exec<{ content: string }>('SELECT content FROM mission_revisions WHERE revision_id = ?', here.published_revision).toArray()[0]?.content : undefined;
-        if (here && here.content === copy.content && revisionHere === copy.revision?.content) return { outcome: 'saved', version: here.version, publishedRevision: here.published_revision };
+        if (here && here.content === copy.content && revisionHere === copy.revision?.content && !!here.deleted === !!copy.deleted) return { outcome: 'saved', version: here.version, publishedRevision: here.published_revision };
         if (!here || (base === null ? here.updated === 0 : base === here.version)) {
             const published = this.keepRevision(copy);
             const version = here ? Math.max(copy.version, here.version + 1) : copy.version;
-            this.sql.exec(`INSERT INTO mission_drafts (campaign_id, content, version, published_revision, updated, created) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT (campaign_id) DO UPDATE SET content = excluded.content, version = excluded.version, published_revision = excluded.published_revision, updated = excluded.updated`,
-                copy.id, copy.content, version, published, copy.updated, copy.created);
+            this.sql.exec(`INSERT INTO mission_drafts (campaign_id, content, version, published_revision, updated, created, deleted) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (campaign_id) DO UPDATE SET content = excluded.content, version = excluded.version, published_revision = excluded.published_revision, updated = excluded.updated, deleted = excluded.deleted`,
+                copy.id, copy.content, version, published, copy.updated, copy.created, copy.deleted ? 1 : 0);
             this.pinOldGames();
             return { outcome: 'saved', version, publishedRevision: published };
         }
@@ -194,8 +204,8 @@ export class MissionRepository {
         const campaign: Campaign = { ...JSON.parse(copy.content), id };
         campaign.title = `${campaign.title.slice(0, 110)} (laptop)`;
         const content = JSON.stringify(campaign);
-        this.sql.exec('INSERT INTO mission_drafts (campaign_id, content, version, updated, created) VALUES (?, ?, 1, ?, ?)', id, content, Date.now(), Date.now());
-        return { outcome: 'kept-both', version: here.version, publishedRevision: here.published_revision, copy: { id, content } };
+        this.sql.exec('INSERT INTO mission_drafts (campaign_id, content, version, updated, created, deleted) VALUES (?, ?, 1, ?, ?, ?)', id, content, Date.now(), Date.now(), copy.deleted ? 1 : 0);
+        return { outcome: 'kept-both', version: here.version, publishedRevision: here.published_revision, copy: { id, content, deleted: !!copy.deleted } };
     }
 
     // Online: what a laptop is missing. `have` is the version of each mission it holds, `revisions` the published
@@ -222,8 +232,8 @@ export class MissionRepository {
         if (result.outcome === 'kept-both' && result.copy) {
             // The server kept its own version under this name; this laptop's lives on as the copy, and the server's
             // version arrives with the next download.
-            this.sql.exec('UPDATE mission_drafts SET campaign_id = ?, content = ?, version = 1, synced = 1, published_revision = NULL, updated = ?, created = ? WHERE campaign_id = ? AND version = ?',
-                result.copy.id, result.copy.content, Date.now(), Date.now(), sent.id, sent.version);
+            this.sql.exec('UPDATE mission_drafts SET campaign_id = ?, content = ?, version = 1, synced = 1, published_revision = NULL, updated = ?, created = ?, deleted = ? WHERE campaign_id = ? AND version = ?',
+                result.copy.id, result.copy.content, Date.now(), Date.now(), result.copy.deleted ? 1 : 0, sent.id, sent.version);
             return;
         }
         if (result.publishedRevision && result.publishedRevision !== sent.publishedRevision && sent.revision) {
@@ -248,10 +258,10 @@ export class MissionRepository {
                 this.sql.exec('INSERT OR IGNORE INTO mission_revisions (revision_id, campaign_id, content, published) VALUES (?, ?, ?, ?)',
                     copy.publishedRevision, copy.id, copy.revision.content, copy.revision.published);
             }
-            this.sql.exec(`INSERT INTO mission_drafts (campaign_id, content, version, published_revision, updated, created, synced) VALUES (?, ?, ?, ?, ?, ?, ?)
+            this.sql.exec(`INSERT INTO mission_drafts (campaign_id, content, version, published_revision, updated, created, synced, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (campaign_id) DO UPDATE SET content = excluded.content, version = excluded.version, published_revision = excluded.published_revision,
-                updated = excluded.updated, created = excluded.created, synced = excluded.synced`,
-                copy.id, copy.content, copy.version, copy.publishedRevision, copy.updated, copy.created, copy.version);
+                updated = excluded.updated, created = excluded.created, synced = excluded.synced, deleted = excluded.deleted`,
+                copy.id, copy.content, copy.version, copy.publishedRevision, copy.updated, copy.created, copy.version, copy.deleted ? 1 : 0);
         }
         this.pinOldGames();
     }

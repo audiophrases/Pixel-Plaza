@@ -349,13 +349,13 @@ export class PlazaRoom extends DurableObject<Env> {
             return { ...this.missionStudio(token, op, body), sync };
         }
         const result = this.missionStudio(token, op, body);
-        if ('error' in result || !['create', 'save', 'publish'].includes(op) || !('draft' in result) || !result.draft) return result;
+        if ('error' in result || !['create', 'save', 'publish', 'delete', 'restore'].includes(op) || !('draft' in result) || !result.draft) return result;
         const sync = await this.syncMissions();
         // The upload may have renumbered the draft, or kept it as a copy when it had changed online too: the page
         // gets what is here now, and goes on with the teacher's own version.
         const id = result.draft.campaign.id;
         const draft = this.missions.draft(sync.keptBoth.find(item => item.id === id)?.copy ?? id) ?? result.draft;
-        return { ...result, draft, library: this.missions.list(), sync };
+        return { ...result, draft, library: this.missions.list(), trash: this.missions.list(true), sync };
     }
 
     missionStudio(token: string, op: string, body: unknown): MissionResult | LiveMissionResult {

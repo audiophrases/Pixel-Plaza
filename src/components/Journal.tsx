@@ -121,8 +121,9 @@ export default function Journal({ quest, feedback, onAnswer, onAccept, onTurn }:
       </section>}
 
       {bonus.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} closed={quest.status === 'campaign_complete'} quest={quest} onTurn={onTurn} />)}
-      {!!quest.board?.length && <section className="journal-block journal-board"><h3>Quest board</h3><p>Choose your next mystery. Each quest is yours to do once.</p>
-        {quest.board.map(item => <article key={item.id} className="journal-board-card">
+      {(quest.status !== 'campaign_complete' || !!quest.board?.length) && <section className="journal-block journal-board"><h3>Quest board</h3><p>Optional activities you can choose here in your Journal. Each quest is yours to do once.</p>
+        {!quest.board?.length && <p className="journal-board-card">No optional quests are available right now. Your teacher can add activities. You can continue any tasks above while you wait.</p>}
+        {(quest.board ?? []).map(item => <article key={item.id} className="journal-board-card">
           {item.state === 'active' || item.state === 'done' ? <>
             {item.partner && <p className="journal-partner">Your partner: <strong>{item.partner.name}</strong>{!item.partner.online && ' · away from the plaza'}
               {!item.partner.online && item.state === 'active' && quest.status !== 'campaign_complete' && <button className="journal-choice" onClick={() => onAccept?.(item.id, true)}>Find another partner</button>}</p>}

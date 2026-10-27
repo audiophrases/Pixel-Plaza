@@ -1028,6 +1028,20 @@ test('Mission Studio: authorization, draft conflicts, published privacy and revi
         assert.equal(resumed.campaign.title, 'Winter original');
         assert.ok(resumed.objectives.find(o => o.id === 'where').done);
         assert.equal((await mission('get?id=winter')).body.draft.version, invalidDraft.version);
+        assert.equal((await api(base, '/api/teacher/missions/delete', { body: { id: 'winter', version: invalidDraft.version } })).status, 401);
+        assert.equal((await mission('delete', { id: 'winter', version: invalidDraft.version - 1 })).status, 409);
+        const removed = (await mission('delete', { id: 'winter', version: invalidDraft.version })).body;
+        assert.equal(removed.draft.deleted, true);
+        assert.ok(!removed.library.some(c => c.id === 'winter')); assert.ok(removed.trash.some(c => c.id === 'winter'));
+        const afterDelete = (await teacher('status')).body;
+        assert.ok(!afterDelete.campaigns.some(c => c.id === 'winter'), 'deleted missions cannot start new games');
+        assert.equal(afterDelete.campaign.title, 'Winter original');
+        assert.ok(afterDelete.campaign.players[0].done.includes('where'), 'deletion preserves running progress');
+        await plaza.stop(); plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); base = plaza.base;
+        assert.ok((await mission('list')).body.trash.some(c => c.id === 'winter'), 'Trash survives a restart');
+        assert.equal((await teacher('status')).body.campaign.title, 'Winter original', 'pinned game survives deletion and restart');
+        assert.equal((await mission('restore', { id: 'winter', version: removed.draft.version })).body.draft.deleted, false);
+        assert.ok((await teacher('status')).body.campaigns.some(c => c.id === 'winter'));
     } finally {
         for (const socket of sockets) socket.ws.close(); await plaza.stop();
         await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);

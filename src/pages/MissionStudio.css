@@ -354,3 +354,67 @@
 @media (prefers-reduced-motion: reduce) {
     .mission-studio-page *, .mission-studio-page *::before, .mission-studio-page *::after { scroll-behavior: auto !important; transition: none !important; }
 }
+/* Explain the lesson before exposing its authoring pieces. */
+.mission-play-guide { background: #fff; border: 1px solid #cbded1; border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; }
+.mission-play-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.mission-play-heading h2 { color: #264b3d; font-size: 1.5rem; line-height: 1.3; margin-bottom: .6rem; }
+.mission-play-heading p:not(.mission-eyebrow) { color: #52685a; font-size: .9rem; line-height: 1.7; max-width: 750px; }
+.mission-kind { display: inline-block; border-radius: 7px; background: #e9f3ec; color: #34634a; font-size: .72rem; font-weight: 650; padding: .45rem .65rem; line-height: 1.5; }
+.mission-kind.needs-quests { background: #fff2ce; color: #805c1a; }
+.mission-play-heading > .mission-kind { flex-shrink: 0; max-width: 230px; }
+.mission-studio-page .mission-play-path { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .8rem; list-style: none; padding: 0; margin: 1.3rem 0; }
+.mission-play-path li { margin: 0; background: #f0f5f1; border: 1px solid #dce6df; border-radius: 11px; padding: 1rem; min-width: 0; }
+.mission-play-path li > span { display: grid; place-items: center; background: #2a684e; color: white; width: 27px; height: 27px; border-radius: 50%; font-size: .8rem; font-weight: 700; margin-bottom: .7rem; }
+.mission-play-path strong { display: block; font-size: .88rem; color: #30543f; }
+.mission-play-path p { font-size: .8rem; line-height: 1.7; color: #516658; margin-top: .5rem; }
+.mission-board-explainer { display: grid; grid-template-columns: minmax(0,1.3fr) minmax(0,1fr); gap: 1.5rem; padding: 1.3rem; background: #fbfaf2; border: 1px solid #e6e1c9; border-radius: 12px; margin-bottom: 1rem; }
+.mission-board-explainer h3 { font-size: 1rem; color: #5b5c36; margin: 0 0 .7rem; }
+.mission-board-explainer p { font-size: .85rem; line-height: 1.7; margin: .5rem 0; }
+.mission-board-example { min-width: 0; background: #fff; border: 1px solid #dcdcc8; border-radius: 10px; padding: 1rem; }
+.mission-board-example > small { display: block; color: #697051; font-size: .64rem; line-height: 1.6; }
+.mission-board-example h4 { margin: .6rem 0; }
+.mission-board-example > p:not(.mission-board-empty) { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.mission-example-button { display: inline-block; margin: .4rem 0 .7rem; background: #eaf1e3; border: 1px solid #b8ccaa; color: #3d5e2f; padding: .5rem .8rem; border-radius: 7px; font-size: .8rem; }
+.mission-board-empty { border: 1px dashed #c5cdb9; border-radius: 8px; padding: 1rem; color: #5f6d54; font-size: .85rem; line-height: 1.8; background: #f8faf3; }
+.mission-preparation { background: #fff6df; border: 1px solid #e9d5a4; border-radius: 10px; padding: .9rem 1rem; margin: 1rem 0; font-size: .83rem; color: #74551a; line-height: 1.7; }
+.mission-preparation p { margin-top: .5rem; }
+.mission-play-guide > .mission-toolbar { margin-top: 1rem; }
+.mission-play-guide a { text-decoration: none; }
+.mission-library-legend { display: flex; gap: 1rem; flex-wrap: wrap; background: #f0f5f1; border-radius: 10px; padding: .9rem; margin: 1.2rem 0; }
+.mission-library-legend > span { font-size: .76rem; color: #506b57; }
+.mission-mission-cards { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; }
+.mission-library-tile { display: flex; flex-direction: column; border: 1px solid #d6e2d9; border-radius: 12px; padding: 1.3rem; background: #fff; min-width: 0; }
+.mission-library-tile-top { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
+.mission-library-tile-top small { font-size: .7rem; color: #627167; }
+.mission-library-tile h3 { font-size: 1.15rem; margin: 1rem 0 .6rem; color: #274b38; overflow-wrap: anywhere; }
+.mission-library-tile > p { font-size: .85rem; color: #54675a; }
+.mission-included-counts { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .5rem; background: #f3f6f2; padding: .9rem; border-radius: 8px; margin: 1rem 0; }
+.mission-included-counts > span { display: block; font-size: .68rem; color: #576e5c; line-height: 1.6; }
+.mission-included-counts strong { display: block; font-size: 1.35rem; color: #315d40; font-weight: 600; }
+.mission-library-tile > .mission-preparation { color: #74551a; }
+.mission-library-tile > .mission-toolbar { margin-top: auto; padding-top: 1rem; }
+.mission-library-tile .mission-button { padding: .6rem .85rem; font-size: .8rem; border-radius: 8px; background: #fff; }
+.mission-library-tile .mission-button.primary { background: #1d796b; color: white; }
+.mission-library-tile .mission-button.danger { color: #a83434; }
+.mission-overlap { background: #f5f2fa; border: 1px solid #e0d8ee; padding: .8rem; border-radius: 8px; margin-top: 1rem; }
+.mission-overlap summary { color: #67577b; font-size: .8rem; }
+.mission-overlap p { font-size: .78rem; line-height: 1.7; margin: .7rem 0; }
+.mission-delete-confirm { border-color: #e4bdae; background: #fff7f2; scroll-margin-top: 1rem; }
+.mission-delete-confirm p { font-size: .9rem; margin-bottom: 1rem; }
+.mission-trash-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .9rem 0; border-top: 1px solid #dbe5dc; font-size: .9rem; }
+.mission-copy-label { display: block; font-size: .6rem; color: #657661; letter-spacing: .04em; margin: .4rem 0; }
+@media (max-width: 1000px) {
+    .mission-play-path { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+    .mission-play-heading { flex-direction: column; }
+}
+@media (max-width: 720px) {
+    .mission-play-guide { padding: 1rem; }
+    .mission-play-heading h2 { font-size: 1.2rem; }
+    .mission-play-path { grid-template-columns: minmax(0,1fr) !important; }
+    .mission-play-path li { display: flex; align-items: flex-start; gap: .7rem; }
+    .mission-play-path li > span { flex: 0 0 27px; margin: 0; }
+    .mission-board-explainer, .mission-mission-cards { grid-template-columns: minmax(0,1fr); gap: 1rem; }
+    .mission-board-explainer { padding: 1rem; }
+    .mission-included-counts { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .mission-trash-row { flex-wrap: wrap; }
+}
