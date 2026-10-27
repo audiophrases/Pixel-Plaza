@@ -13,7 +13,7 @@ type AlertRow = {
     id: string; game_id: string; student_key: string; name: string; topic: HelpTopic;
     kind: 'requested' | 'suggested'; status: HelpStatus; note: string; ts: number; updated: number; resolved_signal: number;
 };
-type SignalRow = { reason: string; text: string; timestamp: number };
+type SignalRow = { reason: string; text: string; timestamp: number; count: number };
 type Cursor = { timestamp: number; id: string; game: string; studentKey: string | null };
 
 // The audit is independent of bounded chat history. It records submitted text before
@@ -255,8 +255,9 @@ export class StudentAssistance {
     }
 
     private alert(row: AlertRow, name?: string): HelpAlert {
-        const evidence = this.sql.exec<SignalRow>(`SELECT reason, text, ts AS timestamp FROM assistance_signals
-            WHERE game_id = ? AND student_key = ? AND ts >= ? AND id > ? ORDER BY ts DESC, id DESC LIMIT 3`,
+        // The same text tried again is one line with a count; the latest try's reason and time stand for it.
+        const evidence = this.sql.exec<SignalRow>(`SELECT reason, text, MAX(ts) AS timestamp, COUNT(*) AS count FROM assistance_signals
+            WHERE game_id = ? AND student_key = ? AND ts >= ? AND id > ? GROUP BY text ORDER BY MAX(ts) DESC, MAX(id) DESC LIMIT 3`,
             row.game_id, row.student_key, row.ts - SIGNAL_WINDOW, this.resolvedSignal(row.game_id, row.student_key)).toArray().reverse();
         const latestHelp = this.sql.exec<{ status: string; reason: string | null }>(`SELECT status, reason FROM assistance_attempts
             WHERE game_id = ? AND student_key = ? AND source = 'help' ORDER BY ts DESC, rowid DESC LIMIT 1`,

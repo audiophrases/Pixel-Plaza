@@ -535,7 +535,7 @@ export default function Game() {
       // Every word must be English. Names of people in the Plaza are fine.
       // If the dictionary cannot load, chat carries on rather than stopping.
       // Names of classmates and of the famous people in the "Who am I?" warm-up are fine.
-      const names = [session.student.displayName, ...[...plaza.players.values()].map(player => player.name), ...IDENTITY_NAMES, ...warmupVocabulary.current];
+      const names = [session.student.displayName, ...[...plaza.players.values()].map(player => player.name), ...plaza.classNames, ...IDENTITY_NAMES, ...warmupVocabulary.current];
       let check: Checker | null = null;
       try {
         check = await loadChecker();

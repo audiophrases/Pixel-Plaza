@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AttemptPage, HelpAlert, HelpTopic, MessageAttempt, TeacherSupport as Support } from '../../shared/support';
 import './TeacherSupport.css';
+import { groupRepeats, tidy } from '../../shared/tidy';
 
 type Student = { studentKey: string; name: string };
 type Props = {
@@ -255,13 +256,15 @@ export default function TeacherSupport({ gameId, token, support, students, who, 
       </div>
       {historyError && <p className="teacher-error" role="alert">{historyError}</p>}
       {!attempts.length && <p role="status">{loading ? 'Loading messages…' : 'No submitted messages yet.'}</p>}
-      <ol className="teacher-attempts">{attempts.map(attempt => <li key={attempt.id} className={`teacher-attempt teacher-attempt-${attempt.source}`}>
+      {/* The same submission repeated (spam, or trying again) is one entry with a count. */}
+      <ol className="teacher-attempts">{groupRepeats(attempts, (a, b) => a.studentKey === b.studentKey && a.source === b.source && a.status === b.status && a.text.trim() === b.text.trim())
+        .map(({ item: attempt, count }) => <li key={attempt.id} className={`teacher-attempt teacher-attempt-${attempt.source}`}>
         <div><strong>{attempt.source === 'teacher' ? 'Teacher' : who(attempt.studentKey, attempt.sender)}</strong>
           {attempt.target && <> → {attempt.source === 'teacher' ? teacherRecipient(attempt) : attempt.target}</>}
           <small>{time(attempt.timestamp)} · {sources[attempt.source]} · {statuses[attempt.status] ?? attempt.status.replaceAll('_', ' ').replaceAll('-', ' ')}</small>
         </div>
         {attempt.objective && <p className="teacher-attempt-context">Task: {attempt.objective}</p>}
-        <p className="teacher-attempt-text">{attempt.text || <em>Empty submission</em>}</p>
+        <p className="teacher-attempt-text">{attempt.text ? tidy(attempt.text) : <em>Empty submission</em>}{count > 1 && <strong className="teacher-attempt-times"> ×{count}</strong>}</p>
         {attempt.finalText && attempt.finalText !== attempt.text && <p className="teacher-attempt-text"><strong>Revised submission:</strong> {attempt.finalText}</p>}
         {attempt.reason && <p className="teacher-attempt-reason">Reason: {attempt.reason}</p>}
         {attempt.correction && <p className="teacher-note">Language hint: {attempt.correction}</p>}

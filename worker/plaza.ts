@@ -6,6 +6,7 @@ import { languageHelp } from './aiHelp.ts';
 import { moderate, type Moderation } from './moderation.ts';
 import { SafetyIncidents, type Incident } from './incidents.ts';
 import { harmFrom, slurIn, type Harm } from '../shared/safety.ts';
+import { isGlitch } from '../shared/tidy.ts';
 import { PARTICIPATION, Participation, participationDecision } from './participation.ts';
 import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
 import { MissionRepository, type MissionResult } from './missions.ts';
@@ -791,7 +792,9 @@ export class PlazaRoom extends DurableObject<Env> {
         const others = this.seats();
         this.ctx.acceptWebSocket(server, [seat.studentKey]);
         server.serializeAttachment(seat);
-        server.send(JSON.stringify({ t: 'welcome', id: seat.id, gameId: seat.game, themeId, players: [...others, seat].map(publicSeat) }));
+        // Every classmate in this game, here or not, so naming one who is absent is still English.
+        server.send(JSON.stringify({ t: 'welcome', id: seat.id, gameId: seat.game, themeId, players: [...others, seat].map(publicSeat),
+            names: [...this.rosterNames(seat.game).values()] }));
         this.broadcast({ t: 'join', player: publicSeat(seat) }, server);
         if (replaced.length === 0) this.systemChat(`${seat.name} has joined the Plaza.`, server);
         this.sendQuest(server, seat.game, seat.studentKey, true);
@@ -836,7 +839,7 @@ export class PlazaRoom extends DurableObject<Env> {
                     // incident, not as a language problem to help with.
                     const harm = await this.harmOf(attempt.text);
                     if (harm) this.flagHarm(seat, harm, attempt.text, id);
-                    else this.assistance.signal(seat.game, seat.studentKey, seat.name, `Word check: ${reason}`, attempt.text);
+                    else if (!isGlitch(attempt.text)) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Word check: ${reason}`, attempt.text); // glitch text is spam, not a language problem
                 }
             }
             ws.send(JSON.stringify({ t: 'attempt-recorded', id: data.id, kind: 'attempt-outcome' }));
@@ -1574,7 +1577,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!view || !me || me.step >= me.targets.length) { this.attemptStatus(audit, 'invalid', 'The warm-up is not available.'); return; }
         const reply = (correct: boolean, wait = false) => {
             this.attemptStatus(audit, correct ? 'correct' : wait ? 'waiting' : 'incorrect', correct ? undefined : wait ? 'Wait before trying again.' : 'The warm-up answer was not accepted.');
-            if (!correct && !wait) this.assistance.signal(seat.game, seat.studentKey, seat.name, 'The warm-up answer was not accepted.', typed, 'instructions');
+            // A wrong guess is how a guessing game goes, not a sign the student needs help.
             ws.send(JSON.stringify({ t: 'warmup-answered', correct, wait }));
         };
         const now = Date.now();
@@ -1849,7 +1852,7 @@ export class PlazaRoom extends DurableObject<Env> {
         // On the teacher's laptop every word must be English, whatever the page did.
         if (typeof value === 'string' && this.env.LAN_URL && !slurIn(value)) {
             const { notEnglish } = await import('./english.ts');
-            const words = notEnglish(value, [...this.seats().map(other => other.name), ...IDENTITY_NAMES,
+            const words = notEnglish(value, [...this.rosterNames(seat.game).values(), ...IDENTITY_NAMES,
                 ...warmupVocabulary(this.warmupDefinition(seat.game)), ...warmupVocabulary(this.savedWarmup('identity').definition)]);
             if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
             if (words.length) {
@@ -1909,7 +1912,8 @@ export class PlazaRoom extends DurableObject<Env> {
             entry.target_key, target?.name ?? null, entry.x, entry.y, flag, note, seat.game, entry.marks, entry.voice);
         if (audit) this.attemptStatus(audit, problem ? 'blocked' : posts ? 'approved' : 'pending', problem ?? note ?? flag ?? undefined, entry.id);
         if (harm) this.flagHarm(seat, harm, String(value), audit);
-        else if (problem) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Message filter: ${problem}`, String(value), 'other');
+        // The warm-up's own rule ("keep your identity hidden") is explained to the student; it is not a language problem.
+        else if (problem && problem !== activityProblem) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Message filter: ${problem}`, String(value), 'other');
         this.sql.exec(`DELETE FROM chat WHERE game_id IS ? AND id NOT IN (SELECT id FROM chat WHERE game_id IS ? ORDER BY ts DESC LIMIT ?)
             AND id NOT IN (SELECT question_id FROM interviews UNION SELECT answer_id FROM interviews WHERE answer_id IS NOT NULL)`,
             seat.game, seat.game, CHAT_KEEP);

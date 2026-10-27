@@ -45,3 +45,6 @@
   .teacher-help-alert-heading { display: block; }
   .teacher-help-alert-heading span { display: block; margin-top: .3rem; }
 }
+
+/* The same thing repeated: one line, with how many times. */
+.teacher-attempt-times { color: #4c5360; font-size: .85rem; }

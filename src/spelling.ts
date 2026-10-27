@@ -1,5 +1,6 @@
 import NSpell from 'nspell';
 import { slurIn } from '../shared/safety.ts';
+import { PROPER_NOUNS } from '../shared/properNouns.ts';
 
 // Checks that every word in a message is English, with a way to fix each one.
 // A dictionary cannot tell a typo from another language, so both are stopped:
@@ -71,7 +72,9 @@ export function createChecker(aff: string, dic: string, alsoAccept?: Dictionary)
   const other = alsoAccept && NSpell(alsoAccept.aff, alsoAccept.dic);
   const correct = (word: string) => speller.correct(word) || !!other?.correct(word);
   return (text, names = []) => {
-    const known = new Set(names.flatMap(name => name.toLowerCase().split(/[^\p{L}]+/u)).filter(Boolean));
+    // Classmates' names, with and without accents: "alvaro" is Àlvaro.
+    const bare = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '');
+    const known = new Set(names.flatMap(name => [name.toLowerCase(), bare(name.toLowerCase())]).flatMap(name => name.split(/[^\p{L}]+/u)).filter(Boolean));
     // Name words as written ("Lamine", not "lamine"), to suggest for a misspelt name.
     const nameWords = new Map<string, string>();
     for (const part of names.flatMap(name => name.split(/[^\p{L}]+/u)).filter(part => part.length > 3)) {
@@ -84,7 +87,9 @@ export function createChecker(aff: string, dic: string, alsoAccept?: Dictionary)
       const lower = word.toLowerCase();
       // A slur is never all right and never gets a suggestion: "nigg" must not be offered "nigh".
       if (!found.has(lower) && slurIn(word)) { found.set(lower, { word: raw, suggestions: [], banned: true }); continue; }
-      if (found.has(lower) || CHAT_WORDS.has(lower) || LAUGH.test(lower) || known.has(lower)) continue;
+      if (found.has(lower) || CHAT_WORDS.has(lower) || LAUGH.test(lower) || known.has(lower) || known.has(bare(lower))) continue;
+      // Places, apps and games typed in lower case ("ohio", "minecraft").
+      if (PROPER_NOUNS.has(bare(lower))) continue;
       if (lower === 'a' || lower === 'i') continue;
       if (TEXT_SPEAK[lower]) { found.set(lower, { word: raw, suggestions: [TEXT_SPEAK[lower]], sure: true }); continue; }
       if (lower.length > 1 && correct(word)) continue;

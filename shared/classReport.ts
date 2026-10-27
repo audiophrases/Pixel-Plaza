@@ -1,4 +1,5 @@
 import type { AttemptSource } from './support.ts';
+import { tidy } from './tidy.ts';
 
 // A prompt the teacher copies into an AI chat (ChatGPT, Claude, Gemini...) to get a report on a lesson: who is
 // doing well, who needs help and who is not doing much, with quoted evidence. The server gathers the log;
@@ -46,7 +47,7 @@ export function buildReportPrompt(data: ClassReportData, options: ReportOptions)
         .sort((a, b) => b[0].length - a[0].length) : [];
     const hide = (text: string) => aliases.reduce((result, [name, replacement]) =>
         result.replace(new RegExp(`(?<![\\p{L}])${escape(name)}(?![\\p{L}])`, 'giu'), replacement), text);
-    const quote = (text: string) => JSON.stringify(hide(text.trim()));
+    const quote = (text: string) => JSON.stringify(hide(tidy(text).trim()));
     const time = (ts: number) => new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: options.timeZone });
     const day = new Date(data.from || data.to).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: options.timeZone });
 

@@ -3182,3 +3182,27 @@ test('safety: harm gets no grammar hint, is caught even when the word check stop
         removeTemp(persistTo);
     }
 });
+
+test('a student is told every classmate in the game, here or not, so naming an absent one is English', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        PIN = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body.pin;
+        const sam = await enter(base, 'signed-b', null); sockets.push(sam);
+        sam.ws.close();
+        await new Promise(resolve => setTimeout(resolve, 300));
+        const alex = await enter(base, 'signed-a', null); sockets.push(alex);
+        assert.ok(!alex.welcome.players.some(player => player.name === 'Sam'), 'Sam has left');
+        assert.ok(alex.welcome.names.includes('Sam'), 'but is still a classmate in this game');
+        assert.ok(alex.welcome.names.includes('Alex'));
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});

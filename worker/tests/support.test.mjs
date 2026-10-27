@@ -267,3 +267,10 @@ test('a suggested check-in quotes the attempts, counts successes since, and clea
     succeed(); succeed();
     assert.equal(support.alerts('game', {})[0]?.kind, 'requested');
 });
+
+test('the same text tried again is one line in a check-in, with a count', t => {
+    const { support, db } = repository(); t.after(() => db.close());
+    for (const text of ['alvaro come back', 'alvaro come back', 'free israel', 'alvaro come back']) support.signal('game', 'ben', 'Ben', `Word check: English word check: ${text.split(' ')[0]}`, text);
+    const [alert] = support.alerts('game', {});
+    assert.deepEqual(alert.evidence.map(item => [item.text, item.count]), [['free israel', 1], ['alvaro come back', 3]]);
+});

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { HelpAlert } from '../../shared/support';
 import { HARM_LABEL, type Incident } from '../../shared/safety';
+import { groupRepeats, tidy } from '../../shared/tidy';
 import { loadChecker } from '../spellingData';
 import { IDENTITY_NAMES } from '../../shared/warmupKinds';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
@@ -218,7 +219,7 @@ export default function LiveClass({ gameId, entries, alerts, incidents, online, 
         <div className="live-item-top">{person(incident.studentKey, incident.name)}
           <span className="live-scope live-harm">🚨 {HARM_LABEL[incident.harm]}{incident.count > 1 && ` ×${incident.count}`}</span>
           <small>{ago(incident.lastTs)}</small></div>
-        <ul className="live-incident-texts">{incident.texts.map((text, index) => <li key={index}><q>{text}</q></li>)}</ul>
+        <ul className="live-incident-texts">{incident.texts.map((text, index) => <li key={index}><q>{tidy(text)}</q></li>)}</ul>
         {incident.harm === 'self-harm' && <p className="live-notes"><span className="live-tag live-tag-warn">Check on this student in person.</span></p>}
         {replyBox(incident.studentKey)}
         <div className="live-actions">
@@ -229,7 +230,7 @@ export default function LiveClass({ gameId, entries, alerts, incidents, online, 
       </li>)}</ol>}
       <ol className="live-todo">{todo.map(({ entry, alert }, index) => entry ? <li key={entry.id} className={`live-item live-chat${index === 0 ? ' live-first' : ''}`}>
         <div className="live-item-top">{person(entry.studentKey, entry.sender)}<span className="live-scope">→ {entry.note?.startsWith('Investigation:') ? '🔎 witness' : scope(entry)}</span><small>{ago(entry.timestamp)}</small></div>
-        <p className="live-text">{entry.text}</p>
+        <p className="live-text">{tidy(entry.text)}</p>
         {(entry.flag || entry.note) && <p className="live-notes">
           {entry.flag && <span className="live-tag live-tag-warn">⚠ not checked: {entry.flag}</span>}
           {entry.note && !entry.note.startsWith('Investigation:') && <span className="live-tag">💡 {entry.note}</span>}
@@ -247,7 +248,7 @@ export default function LiveClass({ gameId, entries, alerts, incidents, online, 
               const key = evidenceKey(alert, item);
               const auto = autoFix[key];
               return <li key={key}>
-                <small>{ago(item.timestamp)}</small> <q>{item.text}</q> <span className="live-why">{why(item.reason)}</span>
+                <small>{ago(item.timestamp)}</small> <q>{tidy(item.text)}</q>{(item.count ?? 1) > 1 && <span className="live-times">×{item.count}</span>} <span className="live-why">{why(item.reason)}</span>
                 {auto ? <span className="live-auto" title="The game already showed the student this">→ {auto}</span>
                   : fixed.has(key) ? <span className="live-fixed">✓ fix sent</span>
                   : auto === null && fixing?.key !== key && <button type="button" className="live-fix" onClick={() => startFix(alert, item)} title="Correct it: the student gets it highlighted">✏️ Fix</button>}
@@ -261,7 +262,7 @@ export default function LiveClass({ gameId, entries, alerts, incidents, online, 
                 </form>}
               </li>;
             })}</ul>
-          : (alert.note || alert.evidence.at(-1)) && <p className="live-text">{alert.note || alert.evidence.at(-1)!.text}</p>}
+          : (alert.note || alert.evidence.at(-1)) && <p className="live-text">{tidy(alert.note || alert.evidence.at(-1)!.text)}</p>}
         {(alert.since ?? 0) > 0 && <p className="live-notes"><span className="live-tag live-tag-ok">✓ Since then: {alert.since} {alert.since === 1 ? 'message posted or answer right' : 'messages posted or answers right'}</span></p>}
         {alert.ai?.tip && <p className="live-notes"><span className="live-tag">🤖 AI hint given: {alert.ai.tip}</span></p>}
         {replyBox(alert.studentKey, alert)}
@@ -273,12 +274,13 @@ export default function LiveClass({ gameId, entries, alerts, incidents, online, 
 
       {recent.length > 0 && <>
         <h3 className="live-subheading">Chat</h3>
-        <ol className="live-recent">{recent.map(entry => {
+        {/* The same message sent again and again is one line with a count. */}
+        <ol className="live-recent">{groupRepeats(recent, (a, b) => a.studentKey === b.studentKey && a.text.trim() === b.text.trim() && a.status === b.status).map(({ item: entry, count }) => {
           const [icon, label] = outcome[entry.status] ?? ['·', entry.status];
           return <li key={entry.id} className={`live-line live-line-${entry.status}`}>
             <button type="button" className="live-line-who" onClick={() => onSelect(entry.studentKey)}>{who(entry.studentKey, entry.sender)}</button>
             <span className="live-line-scope">{scope(entry)}</span>
-            <span className="live-line-text">{entry.text}</span>
+            <span className="live-line-text">{tidy(entry.text)}{count > 1 && <span className="live-times">×{count}</span>}</span>
             <span className="live-line-end">
               <span title={label}>{icon}</span>
               {entry.status === 'approved' && (entry.starred ? <span title="Starred">⭐</span>

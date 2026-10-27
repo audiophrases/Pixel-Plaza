@@ -84,3 +84,11 @@ test('famous names from "Who am I?" are fine, and a misspelt name is offered the
     assert.equal(new Set(check('Einstien', IDENTITY_NAMES)[0].suggestions).size, check('Einstien', IDENTITY_NAMES)[0].suggestions.length, 'no repeats');
     assert.deepEqual(words('hola', IDENTITY_NAMES), ['hola'], 'other languages are still stopped');
 });
+
+test('classmates with or without accents, absent ones too, and places typed in lower case are English; Spanish is not', () => {
+    const classmates = ['Àlvaro', 'Rubén', 'Andrei', 'Alexandra T'];
+    assert.deepEqual(words('alvaro come back, ruben, andrei and alexandra', classmates), []);
+    assert.deepEqual(words('in ohio, barcelona and miami, I play minecraft and roblox on youtube'), []);
+    // Spanish words that are also English names with a capital ("Como", "Luna") still stop.
+    assert.deepEqual(words('que como tu ella luna verde'), ['que', 'como', 'tu', 'ella', 'luna', 'verde']);
+});

@@ -60,6 +60,7 @@ export class PlazaConnection {
   selfId = '';
   themeId = DEFAULT_THEME;
   vision = 0; // how far this student sees, from the server; 0 shows everyone
+  classNames: string[] = []; // every classmate in this game, online or not, for the English word check
   xp = 0; // this student's experience, kept for good
   status: PlazaStatus = { state: 'connecting' };
   private pin: string;
@@ -282,6 +283,7 @@ export class PlazaConnection {
       this.themeId = message.themeId ?? DEFAULT_THEME;
       this.selfId = message.id;
       this.players = new Map((message.players as PlazaPlayer[]).map(player => [player.id, player]));
+      if (Array.isArray(message.names)) this.classNames = message.names.filter((name: unknown): name is string => typeof name === 'string');
       this.fails = 0;
       if (typeof message.gameId === 'string') this.currentGameId = message.gameId;
       this.syncStoredAttempts();
