@@ -19,4 +19,10 @@ export type StudentSupport = {
     request: { id: string; topic: HelpTopic; status: HelpStatus } | null;
     messages: { id: string; text: string; timestamp: number }[];
 };
+// One student's conversations, for the teacher: what they wrote (sent, waiting, stopped), what classmates wrote to
+// them privately, and their private exchange with the teacher. `thread` is 'nearby', 'everyone', 'teacher' or
+// 'p:<classmate key>'; `mine` is true for the student's own lines.
+export type ConversationLine = { id: string; at: number; thread: string; mine: boolean; text: string; status: string; reason: string | null };
+export type Conversations = { studentKey: string; lines: ConversationLine[]; names: Record<string, string> };
+
 export type AttemptPage = { attempts: MessageAttempt[]; next: string | null };

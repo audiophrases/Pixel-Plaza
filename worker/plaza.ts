@@ -13,7 +13,7 @@ import { MissionRepository, type MissionResult } from './missions.ts';
 import { QuestBoard, type BoardContext } from './questBoard.ts';
 import { Interviews } from './interviews.ts';
 import { StudentAssistance } from './support.ts';
-import type { AttemptPage, AttemptSource, HelpStatus, HelpTopic, TeacherSupport } from '../shared/support.ts';
+import type { AttemptPage, AttemptSource, Conversations, ConversationLine, HelpStatus, HelpTopic, TeacherSupport } from '../shared/support.ts';
 import type { ConversationView, Objective, InterviewView } from '../shared/campaign.ts';
 import { LiveMissions, type LiveMissionResult } from './liveMissions.ts';
 import type { CampaignChoice, LiveMissionTarget } from '../shared/missionTypes.ts';
@@ -594,6 +594,33 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     // ---------- The plaza socket ----------
+
+    conversations(token: string, studentKey: string): Conversations | { error: string; status: number } {
+        if (!token || !this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray().length) return { error: 'Please sign in again.', status: 401 };
+        const game = this.activeGame();
+        if (!game) return { studentKey, lines: [], names: {} };
+        const names = this.rosterNames(game);
+        const keyOf = new Map([...names].map(([key, name]) => [name, key]));
+        // Whether a posted message went to everyone: it keeps no place on the map.
+        const toEveryone = new Set(this.sql.exec<{ id: string }>('SELECT id FROM chat WHERE game_id = ? AND student_key = ? AND target_key IS NULL AND x IS NULL', game, studentKey).toArray().map(row => row.id));
+        const lines: ConversationLine[] = [];
+        // What the student wrote, sent or not, and the teacher's private messages to them.
+        for (const row of this.sql.exec<{ id: string; ts: number; source: string; status: string; text: string; target: string | null; reason: string | null; chat_id: string | null }>(
+            `SELECT id, ts, source, status, text, target, reason, chat_id FROM assistance_attempts WHERE game_id = ? AND student_key = ?
+             AND source IN ('chat', 'interview', 'help', 'teacher') ORDER BY ts DESC, id DESC LIMIT 300`, game, studentKey).toArray()) {
+            const teacher = row.source === 'teacher' || row.source === 'help' || row.target === 'Teacher';
+            const thread = teacher ? 'teacher' : row.target ? `p:${keyOf.get(row.target) ?? row.target}` : row.chat_id && toEveryone.has(row.chat_id) ? 'everyone' : 'nearby';
+            lines.push({ id: row.id, at: row.ts, thread, mine: row.source !== 'teacher', text: row.text, status: row.status, reason: row.reason });
+        }
+        // What classmates wrote to them privately, posted or waiting.
+        for (const row of this.sql.exec<{ id: string; ts: number; student_key: string; text: string; status: string }>(
+            `SELECT id, ts, student_key, text, status FROM chat WHERE game_id = ? AND target_key = ? AND status IN ('approved', 'pending') ORDER BY ts DESC LIMIT 200`,
+            game, studentKey).toArray()) {
+            lines.push({ id: row.id, at: row.ts, thread: `p:${row.student_key}`, mine: false, text: row.text, status: row.status, reason: null });
+        }
+        lines.sort((a, b) => a.at - b.at);
+        return { studentKey, lines, names: Object.fromEntries(names) };
+    }
 
     teacherAttempts(token: string, studentKey?: string, cursor?: string | null, gameId?: string): AttemptPage | { error: string; status: number } {
         if (!token || !this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray().length) return { error: 'Please sign in again.', status: 401 };
