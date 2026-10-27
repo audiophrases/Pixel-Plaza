@@ -543,7 +543,9 @@ export default function Game() {
         setSpelling(problems);
         if (problems.length) {
           setBlockedRun(run => run + 1);
-          plaza.recordAttemptOutcome(attemptId, 'language-blocked', `English word check: ${problems.map(problem => problem.word).join(', ')}`);
+          plaza.recordAttemptOutcome(attemptId, 'language-blocked', problems.some(problem => problem.banned)
+            ? `Not allowed: ${problems.filter(problem => problem.banned).map(problem => problem.word).join(', ')}`
+            : `English word check: ${problems.map(problem => problem.word).join(', ')}`);
           return;
         }
       } catch { /* offline dictionary: the teacher still reviews the message */ }
@@ -784,7 +786,10 @@ export default function Game() {
                 ))}
               </div>}
 
-              {spelling.length > 0 && <div className="spelling-help" role="alert">
+              {spelling.some(item => item.banned) ? <div className="spelling-help" role="alert">
+                {/* A slur: said plainly, without repeating the word or offering another. */}
+                <strong>✋ Not sent: that word is not allowed in the Plaza. Your teacher can see what was written.</strong>
+              </div> : spelling.length > 0 && <div className="spelling-help" role="alert">
                 <strong>✋ Not sent: {spelling.map(item => `“${item.word}”`).join(', ')} {spelling.length === 1 ? 'is' : 'are'} not English. Change it, then press Send.</strong>
                 {blockedRun >= 3 && <span className="spelling-stuck">Stuck? Tap <b>Help</b> at the top right.</span>}
                 {spelling.map(item => <div key={item.word} className="spelling-word">

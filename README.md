@@ -175,6 +175,12 @@ Each game is created with **Random names** on (the default) or off:
 
 The choice is made when the game is created and applies to that game only.
 
+## Safety incidents
+
+Slurs about who people are (race, origin, sexuality, gender, disability), in English, Spanish and Catalan, are stopped however they are spelt (`n1gga`, `n i g g a`, stand-ins such as `nigh`), never get a spelling suggestion, and the student is told only that the word is not allowed. The list is in `shared/safety.ts`. With an OpenAI key, threats, sexual content, bullying and self-harm are caught too, including in messages the English word check had already stopped, and no grammar hint is ever made from them.
+
+Each one is a **🚨 incident** at the top of *To do*, grouped per student and kind with a count and their latest words, with a higher double beep and 🚨 on the student's face. Nothing happens to the student unless you act: reply privately, **🤐** mute their chat, or **✓** mark it seen. Self-harm also says to check on the student in person.
+
 ## AI moderation (optional)
 
 With an OpenAI API key, every message, nearby, to everyone or whisper, is checked by OpenAI's moderation endpoint (`omni-moderation-latest`, free to use) after the word filter and before it reaches the teacher.

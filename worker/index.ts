@@ -116,6 +116,7 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     if (path === '/api/teacher/xp' && (typeof body?.chatId === 'string' || (typeof body?.report?.studentKey === 'string' && typeof body?.report?.objective === 'string'))) {
         return { kind: 'xp', ...(typeof body.chatId === 'string' ? { chatId: body.chatId } : { report: { studentKey: body.report.studentKey, objective: body.report.objective } }) };
     }
+    if (path === '/api/teacher/incident' && typeof body?.id === 'string') return { kind: 'incident', id: body.id };
     if (path === '/api/teacher/mode' && (body?.mode === 'approve' || body?.mode === 'review')) return { kind: 'mode', mode: body.mode };
     if (path === '/api/teacher/mute' && typeof body?.studentKey === 'string' && typeof body?.muted === 'boolean') {
         return { kind: 'mute', studentKey: body.studentKey, muted: body.muted };

@@ -1,4 +1,5 @@
 import NSpell from 'nspell';
+import { slurIn } from '../shared/safety.ts';
 
 // Checks that every word in a message is English, with a way to fix each one.
 // A dictionary cannot tell a typo from another language, so both are stopped:
@@ -6,7 +7,7 @@ import NSpell from 'nspell';
 
 // sure: the first suggestion is very likely what was meant (a near miss, a name, text-speak, a word from home),
 // so the student already has the fix; otherwise a teacher may need to help.
-export type Misspelling = { word: string; suggestions: string[]; sure?: boolean };
+export type Misspelling = { word: string; suggestions: string[]; sure?: boolean; banned?: boolean };
 
 // Said out loud and typed everywhere, but not in a dictionary.
 const CHAT_WORDS = new Set(['lol', 'omg', 'ok', 'okay', 'hi', 'hey', 'yeah', 'yep', 'nope', 'wow', 'hmm', 'hm', 'uh', 'um',
@@ -81,6 +82,8 @@ export function createChecker(aff: string, dic: string, alsoAccept?: Dictionary)
     for (const [raw] of text.matchAll(WORD)) {
       const word = raw.replace(/’/g, "'");
       const lower = word.toLowerCase();
+      // A slur is never all right and never gets a suggestion: "nigg" must not be offered "nigh".
+      if (!found.has(lower) && slurIn(word)) { found.set(lower, { word: raw, suggestions: [], banned: true }); continue; }
       if (found.has(lower) || CHAT_WORDS.has(lower) || LAUGH.test(lower) || known.has(lower)) continue;
       if (lower === 'a' || lower === 'i') continue;
       if (TEXT_SPEAK[lower]) { found.set(lower, { word: raw, suggestions: [TEXT_SPEAK[lower]], sure: true }); continue; }
@@ -107,6 +110,9 @@ export function createChecker(aff: string, dic: string, alsoAccept?: Dictionary)
       const sureName = !!nameMatch && nameMatch.distance <= (plain.length >= 7 ? 2 : 1);
       found.set(lower, { word: raw, suggestions, sure: !!home || sureName || (!name && plain.length > 3 && close.length === 1 && close[0] === words[0]) });
     }
+    // One spelt out across words ("n i g g a") or with signs inside ("n.i.g.g.a").
+    const hidden = slurIn(text);
+    if (hidden && ![...found.values()].some(item => item.banned)) found.set(`#${hidden}`, { word: hidden, suggestions: [], banned: true });
     return [...found.values()];
   };
 }

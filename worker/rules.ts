@@ -3,6 +3,7 @@
 
 import { MAP_SIZE, SPAWN, isBlocked } from '../shared/plazaMap.ts';
 import { isEnglishVoice } from '../shared/voices.ts';
+import { slurIn } from '../shared/safety.ts';
 
 export { MAP_SIZE, SPAWN, isBlocked };
 // The emotes everyone has; levels add more (shared/levels.ts).
@@ -37,7 +38,8 @@ export function clampPosition(x: unknown, y: unknown, size = MAP_SIZE): { x: num
     return { x: Math.round(x), y: Math.round(y) };
 }
 
-const blockedWords = new Set(['fuck', 'shit', 'bitch', 'cunt', 'nigger', 'faggot']);
+// Swearing; slurs are in shared/safety.ts, which also catches them misspelt.
+const blockedWords = new Set(['fuck', 'shit', 'bitch', 'cunt']);
 const blockedPhrases = [/\bnobody likes you\b/i, /\bkill yourself\b/i, /\byou are stupid\b/i];
 
 export function chatProblem(value: unknown): string | null {
@@ -48,7 +50,7 @@ export function chatProblem(value: unknown): string | null {
         return 'Control characters are not allowed.';
     }
     const words = text.toLowerCase().match(/[\p{L}]+/gu) || [];
-    if (words.some(word => blockedWords.has(word)) || blockedPhrases.some(pattern => pattern.test(text))) {
+    if (words.some(word => blockedWords.has(word)) || blockedPhrases.some(pattern => pattern.test(text)) || slurIn(text)) {
         return 'That message cannot be sent. Please rewrite it.';
     }
     return null;

@@ -1,3 +1,4 @@
+import type { Incident } from '../../shared/safety';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { joinLink } from '../studentAuth';
@@ -33,6 +34,7 @@ type LiveStudent = { studentKey: string; name: string; x: number; y: number; zon
 type Status = {
   campaign: CampaignInfo | null; campaigns: CampaignChoice[];
   warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
+  incidents?: Incident[];
   open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number; themeId?: string } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; sound?: LiveSound; online: LiveStudent[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
   support: Support;
@@ -155,12 +157,36 @@ export default function Teacher() {
   const helpBefore = useRef<Set<string>>(new Set());
   const openHelp = status?.support?.alerts.filter(alert => alert.status === 'open') ?? [];
   const helpSignature = openHelp.map(alert => alert.id).join(',');
+  // An incident, or another attempt in one, beeps higher and twice: it is not like a message waiting.
+  const incidentSignature = (status?.incidents ?? []).map(incident => `${incident.id}:${incident.count}`).join(',');
+  const incidentsBefore = useRef('');
+  useEffect(() => {
+    const before = new Map(incidentsBefore.current.split(',').filter(Boolean).map(item => item.split(':') as [string, string]));
+    const now = incidentSignature.split(',').filter(Boolean).map(item => item.split(':') as [string, string]);
+    if (now.some(([id, count]) => Number(count) > Number(before.get(id) ?? 0))) {
+      try {
+        const audio = new AudioContext();
+        for (const at of [0, 0.18]) {
+          const tone = audio.createOscillator();
+          const volume = audio.createGain();
+          tone.frequency.value = 990;
+          volume.gain.value = 0.06;
+          tone.connect(volume).connect(audio.destination);
+          tone.start(audio.currentTime + at);
+          tone.stop(audio.currentTime + at + 0.12);
+        }
+        window.setTimeout(() => void audio.close(), 600);
+      } catch { /* sound is optional */ }
+    }
+    incidentsBefore.current = incidentSignature;
+  }, [incidentSignature]);
 
   // A soft beep and the tab title tell the teacher something is waiting, even from another window.
   useEffect(() => {
     const helpIds = helpSignature ? helpSignature.split(',') : [];
-    const count = waiting.length + helpIds.length;
-    document.title = count ? `(${count}) Teacher controls${helpIds.length ? ' · help needed' : ''}` : 'Teacher controls';
+    const incidentCount = incidentSignature ? incidentSignature.split(',').length : 0;
+    const count = waiting.length + helpIds.length + incidentCount;
+    document.title = count ? `(${count}) ${incidentCount ? '🚨 ' : ''}Teacher controls${helpIds.length ? ' · help needed' : ''}` : 'Teacher controls';
     if (waiting.length > waitingBefore.current || helpIds.some(id => !helpBefore.current.has(id))) {
       try {
         const audio = new AudioContext();
@@ -176,7 +202,7 @@ export default function Teacher() {
     }
     waitingBefore.current = waiting.length;
     helpBefore.current = new Set(helpIds);
-  }, [waiting.length, helpSignature]);
+  }, [waiting.length, helpSignature, incidentSignature]);
 
   const action = async (path: string, body: object) => {
     try {
@@ -276,7 +302,7 @@ export default function Teacher() {
             if (window.confirm(next)) void action('campaign', { op: 'next' });
           }}>{campaign.chapter + 1 < campaign.chapters ? '▶ Next chapter' : '🏁 End campaign'}</button></span>}
       </section>}
-      {status.game && <LiveClass gameId={status.game.id} entries={status.entries} alerts={status.support?.alerts ?? []} online={status.online.map(s => ({ ...s, zone: placeName(s.zone) }))}
+      {status.game && <LiveClass gameId={status.game.id} entries={status.entries} alerts={status.support?.alerts ?? []} incidents={status.incidents ?? []} online={status.online.map(s => ({ ...s, zone: placeName(s.zone) }))}
         known={[...supportStudents.values()]} muted={status.muted} sound={status.sound ?? { off: [], now: Date.now(), plays: [] }} mode={status.mode} moderation={status.moderation} open={status.open}
         who={who} action={action} selected={selectedStudent} onSelect={setSelectedStudent} />}
       <nav className="teacher-nav" aria-label="Sections">

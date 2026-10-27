@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { HelpAlert } from '../../shared/support';
+import { HARM_LABEL, type Incident } from '../../shared/safety';
 import { loadChecker } from '../spellingData';
 import { IDENTITY_NAMES } from '../../shared/warmupKinds';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
@@ -21,6 +22,7 @@ type Props = {
   gameId: string;
   entries: LiveEntry[];
   alerts: HelpAlert[];
+  incidents: Incident[]; // harmful things students tried to send: first in To do
   online: LiveStudent[];
   known: { studentKey: string; name: string }[]; // everyone seen in this game, online or not
   muted: string[];
@@ -84,7 +86,7 @@ function heardAloud(plays: LivePlay[]): Heard[] {
   return [...heard.values()];
 }
 
-export default function LiveClass({ gameId, entries, alerts, online, known, muted, sound, mode, moderation, open, who, action, selected, onSelect }: Props) {
+export default function LiveClass({ gameId, entries, alerts, incidents, online, known, muted, sound, mode, moderation, open, who, action, selected, onSelect }: Props) {
   const [replies, setReplies] = useState<Record<string, string>>({}); // drafts, by student
   const [sent, setSent] = useState<string | null>(null); // the student a private message just went to
   const [busy, setBusy] = useState(false);
@@ -173,7 +175,8 @@ export default function LiveClass({ gameId, entries, alerts, online, known, mute
   // Students: whoever needs the teacher first, then everyone else by name.
   const helpFor = (studentKey: string) => needing.find(alert => alert.studentKey === studentKey);
   const waitingFrom = (studentKey: string) => waiting.filter(entry => entry.studentKey === studentKey).length;
-  const urgency = (studentKey: string) => (helpFor(studentKey)?.status === 'open' ? 2 : helpFor(studentKey) ? 1 : 0) + (waitingFrom(studentKey) ? 0.5 : 0);
+  const incidentOf = (studentKey: string) => incidents.find(incident => incident.studentKey === studentKey);
+  const urgency = (studentKey: string) => (incidentOf(studentKey) ? 3 : 0) + (helpFor(studentKey)?.status === 'open' ? 2 : helpFor(studentKey) ? 1 : 0) + (waitingFrom(studentKey) ? 0.5 : 0);
   const tiles: LiveStudent[] = [...online, ...needing.filter(alert => !online.some(student => student.studentKey === alert.studentKey))
     .map(alert => ({ studentKey: alert.studentKey, name: alert.name, zone: null }))];
   tiles.sort((a, b) => urgency(b.studentKey) - urgency(a.studentKey) || who(a.studentKey, a.name).localeCompare(who(b.studentKey, b.name)));
@@ -200,7 +203,7 @@ export default function LiveClass({ gameId, entries, alerts, online, known, mute
   return <section className="live" aria-label="The class now">
     <div className="live-column">
       <div className="live-heading">
-        <h2>To do {todo.length > 0 && <span className="live-count">{todo.length}</span>}</h2>
+        <h2>To do {todo.length + incidents.length > 0 && <span className="live-count">{todo.length + incidents.length}</span>}</h2>
         {waiting.length > 1 && <button className="btn btn-primary btn-sm" onClick={() => void action('approve-all', {})} title="Post every waiting message">✓ Approve all {waiting.length}</button>}
         {/* Too many to approve? Posting first and reviewing after is one click away. */}
         <div className="live-mode" role="group" aria-label="How chat is moderated">
@@ -209,7 +212,21 @@ export default function LiveClass({ gameId, entries, alerts, online, known, mute
             title={moderation ? 'Messages OpenAI clears post at once; you review them below' : 'Needs an OpenAI key'}>⚡ Post, then review</button>
         </div>
       </div>
-      {todo.length === 0 && <p className="live-clear">{open ? '✓ All caught up' : 'The class is closed.'}</p>}
+      {todo.length + incidents.length === 0 && <p className="live-clear">{open ? '✓ All caught up' : 'The class is closed.'}</p>}
+      {/* Harm first: what was tried, how often, by whom. Nothing happens to the student unless the teacher acts. */}
+      {incidents.length > 0 && <ol className="live-todo live-incidents">{incidents.map(incident => <li key={incident.id} className="live-item live-incident">
+        <div className="live-item-top">{person(incident.studentKey, incident.name)}
+          <span className="live-scope live-harm">🚨 {HARM_LABEL[incident.harm]}{incident.count > 1 && ` ×${incident.count}`}</span>
+          <small>{ago(incident.lastTs)}</small></div>
+        <ul className="live-incident-texts">{incident.texts.map((text, index) => <li key={index}><q>{text}</q></li>)}</ul>
+        {incident.harm === 'self-harm' && <p className="live-notes"><span className="live-tag live-tag-warn">Check on this student in person.</span></p>}
+        {replyBox(incident.studentKey)}
+        <div className="live-actions">
+          <button className="live-soft" onClick={() => void action('mute', { studentKey: incident.studentKey, muted: !muted.includes(incident.studentKey) })}
+            title={muted.includes(incident.studentKey) ? 'Let them chat again' : 'Stop their chat until you unmute it'}>{muted.includes(incident.studentKey) ? '💬' : '🤐'}</button>
+          <button className="live-yes" onClick={() => void action('incident', { id: incident.id })} title="Seen: take it off the list" aria-label="Seen">✓</button>
+        </div>
+      </li>)}</ol>}
       <ol className="live-todo">{todo.map(({ entry, alert }, index) => entry ? <li key={entry.id} className={`live-item live-chat${index === 0 ? ' live-first' : ''}`}>
         <div className="live-item-top">{person(entry.studentKey, entry.sender)}<span className="live-scope">→ {entry.note?.startsWith('Investigation:') ? '🔎 witness' : scope(entry)}</span><small>{ago(entry.timestamp)}</small></div>
         <p className="live-text">{entry.text}</p>
@@ -307,7 +324,8 @@ export default function LiveClass({ gameId, entries, alerts, online, known, mute
           onClick={() => onSelect(selected === student.studentKey ? null : student.studentKey)} title={`${who(student.studentKey, student.name)}${student.zone ? ` · ${student.zone}` : ''}`}>
           <Face player={student.look} name={student.name} />
           <span className="live-tile-name">{student.name}</span>
-          {help && <span className="live-tile-flag" title={help.kind === 'requested' ? 'Asks for help' : 'May need help'}>{help.kind === 'requested' ? '🙋' : '💡'}</span>}
+          {incidentOf(student.studentKey) ? <span className="live-tile-flag" title={`🚨 ${HARM_LABEL[incidentOf(student.studentKey)!.harm]}`}>🚨</span>
+            : help && <span className="live-tile-flag" title={help.kind === 'requested' ? 'Asks for help' : 'May need help'}>{help.kind === 'requested' ? '🙋' : '💡'}</span>}
           {count > 0 && <span className="live-tile-count" title={`${count} waiting for you`}>{count}</span>}
           {muted.includes(student.studentKey) && <span className="live-tile-muted" title="Chat muted">🤐</span>}
           {silenced(student.studentKey) ? <span className="live-tile-sound" title="Sound off">🔇</span>

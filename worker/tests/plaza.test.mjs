@@ -3101,3 +3101,84 @@ test('teacher guides are private and follow published previews, pinned games, li
         await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
     }
 });
+
+test('safety: harm gets no grammar hint, is caught even when the word check stopped it, and is flagged to the teacher once per attempt', { timeout: 120000 }, async () => {
+    const grammarAsked = [];
+    const openai = http.createServer((req, res) => {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+            res.setHeader('content-type', 'application/json');
+            if (req.url !== '/v1/moderations') { grammarAsked.push(body); res.statusCode = 500; return res.end('{}'); }
+            const { input } = JSON.parse(body);
+            const threat = /dox/.test(input);
+            const sexual = /suck/.test(input);
+            res.end(JSON.stringify({ results: [{ flagged: threat || sexual,
+                categories: { harassment: threat, 'harassment/threatening': threat, sexual } }] }));
+        });
+    });
+    await new Promise(resolve => openai.listen(0, '127.0.0.1', resolve));
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo,
+        { OPENAI_API_KEY: 'test-key', OPENAI_BASE_URL: `http://127.0.0.1:${openai.address().port}` });
+    let alex;
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        PIN = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body.pin;
+        const status = async () => (await api(base, '/api/teacher/status', { session })).body;
+        const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+        alex = await enter(base, 'signed-a', null);
+
+        // A sexual message in good-enough English: no hint (the AI would only polish it), and the teacher is told.
+        alex.send({ t: 'check', id: 'h1', text: 'i suck dicks for good grade', attemptId: 'try-1' });
+        assert.equal((await alex.next(m => m.t === 'checked' && m.id === 'h1', 'no hint')).ok, true);
+        assert.equal(grammarAsked.filter(body => body.includes('suck')).length, 0, 'the grammar AI never saw it');
+        let incident = (await status()).incidents.find(item => item.studentKey === 'stu_a');
+        assert.deepEqual([incident.harm, incident.count, incident.texts], ['sexual', 1, ['i suck dicks for good grade']]);
+        // Sending the same attempt after the check is blocked, and still counts once.
+        await pause(1600);
+        alex.send({ t: 'chat', text: 'i suck dicks for good grade', cid: 'c1', attemptId: 'try-1' });
+        assert.match((await alex.next(m => m.t === 'notice' && m.cid === 'c1', 'blocked')).text, /rewrite/);
+        assert.equal((await status()).incidents.find(item => item.harm === 'sexual').count, 1);
+
+        // An ordinary sentence still gets its grammar check.
+        alex.send({ t: 'check', id: 'h2', text: 'she go to school every day', attemptId: 'try-2' });
+        await alex.next(m => m.t === 'checked' && m.id === 'h2', 'checked');
+        assert.ok(grammarAsked.some(body => body.includes('she go to school')), 'clean text is still checked for grammar');
+
+        // Stopped by the word check in the browser ("dox" is not a dictionary word): the server still sees the threat.
+        alex.send({ t: 'attempt', id: 'try-3', text: 'tell me or i will dox you', source: 'chat' });
+        alex.send({ t: 'attempt-outcome', id: 'try-3', status: 'language-blocked', reason: 'English word check: dox' });
+        await alex.next(m => m.t === 'attempt-recorded' && m.id === 'try-3' && m.kind === 'attempt-outcome', 'recorded');
+        // And a slur stopped in the browser is hate speech, never a language check-in.
+        for (const [id, text] of [['try-4', 'secret name nigga'], ['try-5', 'nigg'], ['try-6', 'nigge']]) {
+            alex.send({ t: 'attempt', id, text, source: 'chat' });
+            alex.send({ t: 'attempt-outcome', id, status: 'language-blocked', reason: `Not allowed: ${text}` });
+            await alex.next(m => m.t === 'attempt-recorded' && m.id === id && m.kind === 'attempt-outcome', 'recorded');
+        }
+        let now = await status();
+        assert.equal(now.incidents.find(item => item.harm === 'threat').texts[0], 'tell me or i will dox you');
+        const hate = now.incidents.find(item => item.harm === 'hate');
+        assert.deepEqual([hate.count, hate.texts], [3, ['nigge', 'nigg', 'secret name nigga']]);
+        assert.equal(now.support.alerts.length, 0, 'three slurs are not "may need help"');
+        // Sent anyway, a stand-in is blocked as well.
+        await pause(1600);
+        alex.send({ t: 'chat', text: 'HEllo juan nigh', cid: 'c2' });
+        assert.match((await alex.next(m => m.t === 'notice' && m.cid === 'c2', 'blocked')).text, /rewrite/);
+        assert.equal((await status()).incidents.find(item => item.harm === 'hate').count, 4);
+
+        // Seen: off the list.
+        assert.equal((await api(base, '/api/teacher/incident', { session, body: { id: hate.id } })).status, 200);
+        now = await status();
+        assert.equal(now.incidents.some(item => item.harm === 'hate'), false);
+        assert.equal((await api(base, '/api/teacher/incident', { session, body: { id: hate.id } })).status, 400);
+    } finally {
+        alex?.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => openai.close(resolve));
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});

@@ -1,9 +1,11 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './index.ts';
 import type { PinPlayStudent } from './pinplay.ts';
-import { checkGrammar } from './grammar.ts';
+import { MIN_WORDS, checkGrammar } from './grammar.ts';
 import { languageHelp } from './aiHelp.ts';
-import { moderate } from './moderation.ts';
+import { moderate, type Moderation } from './moderation.ts';
+import { SafetyIncidents, type Incident } from './incidents.ts';
+import { harmFrom, slurIn, type Harm } from '../shared/safety.ts';
 import { PARTICIPATION, Participation, participationDecision } from './participation.ts';
 import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
 import { MissionRepository, type MissionResult } from './missions.ts';
@@ -78,6 +80,7 @@ export type TeacherAction =
     | { kind: 'approveAll' }
     | { kind: 'mode'; mode: ChatMode }
     | { kind: 'mute'; studentKey: string; muted: boolean }
+    | { kind: 'incident'; id: string } // the teacher has seen a safety incident
     | { kind: 'sound'; studentKey: string; off: boolean } // silences one student's device (no headphones) until turned back on
     | { kind: 'soundAll'; off: boolean } // a persistent class-wide sound lock, including late arrivals
     | { kind: 'xp'; chatId?: string; report?: { studentKey: string; objective: string } } // the teacher stars a message or a report
@@ -99,6 +102,7 @@ export type CampaignStatus = {
 
 export type TeacherStatus = {
     support: TeacherSupport;
+    incidents: Incident[]; // harmful things students tried to send, open until the teacher has seen them
     warmup: { active: boolean; kind: WarmupKind; title?: string; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
     campaign: CampaignStatus | null; // the open game's campaign, once started
     campaigns: CampaignChoice[]; // those that can be started, in the order to offer them
@@ -129,6 +133,9 @@ export class PlazaRoom extends DurableObject<Env> {
     private questBoard: QuestBoard;
     private interviews: Interviews;
     private assistance: StudentAssistance;
+    private incidents: SafetyIncidents;
+    // OpenAI's verdict on a message, for a couple of minutes: the hint and the sending check ask about the same words.
+    private moderations = new Map<string, { verdict: Moderation; at: number }>();
     private participation: Participation;
     private interviewSends = new Set<string>();
     private liveMissions: LiveMissions;
@@ -229,6 +236,8 @@ export class PlazaRoom extends DurableObject<Env> {
         this.interviews.initialize();
         this.assistance = new StudentAssistance(this.sql);
         this.assistance.initialize();
+        this.incidents = new SafetyIncidents(this.sql);
+        this.incidents.initialize();
         this.participation = new Participation(this.sql);
         this.participation.initialize();
         this.liveMissions = new LiveMissions(this.sql);
@@ -521,6 +530,10 @@ export class PlazaRoom extends DurableObject<Env> {
                 socket.serializeAttachment(seat);
             }
         }
+        if (action.kind === 'incident') {
+            const game = this.activeGame();
+            if (!game || !this.incidents.seen(game, action.id)) return { error: 'That incident is no longer open.', status: 400 };
+        }
         if (action.kind === 'mute') {
             if (action.muted) this.sql.exec('INSERT OR IGNORE INTO mutes (student_key) VALUES (?)', action.studentKey);
             else this.sql.exec('DELETE FROM mutes WHERE student_key = ?', action.studentKey);
@@ -541,6 +554,7 @@ export class PlazaRoom extends DurableObject<Env> {
         // recent history, read through the indexes, not the whole log each time.
         const current = this.game(this.activeGame());
         return {
+            incidents: current ? this.incidents.open(current.id, this.rosterNames(current.id)) : [],
             support: { alerts: current ? this.assistance.alerts(current.id, this.rosterNames(current.id)) : [],
                 ai: this.assistance.aiCount(this.helpSession()),
                 students: current ? [...this.rosterNames(current.id)].map(([studentKey, name]) => ({ studentKey, name })) : [] },
@@ -817,7 +831,13 @@ export class PlazaRoom extends DurableObject<Env> {
                 && ['language-blocked', 'not-sent'].includes(data.status) && typeof data.reason === 'string') {
                 const reason = data.reason.slice(0, 500);
                 this.attemptStatus(id, data.status, reason);
-                if (data.status === 'language-blocked') this.assistance.signal(seat.game, seat.studentKey, seat.name, `Word check: ${reason}`, attempt.text);
+                if (data.status === 'language-blocked') {
+                    // Stopped by the word check, so no other check saw it: anything harmful in it goes to the teacher as an
+                    // incident, not as a language problem to help with.
+                    const harm = await this.harmOf(attempt.text);
+                    if (harm) this.flagHarm(seat, harm, attempt.text, id);
+                    else this.assistance.signal(seat.game, seat.studentKey, seat.name, `Word check: ${reason}`, attempt.text);
+                }
             }
             ws.send(JSON.stringify({ t: 'attempt-recorded', id: data.id, kind: 'attempt-outcome' }));
         } else if (data?.t === 'help-request') {
@@ -1381,6 +1401,7 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         this.assistance.clear(game);
         this.participation.clear(game);
+        this.incidents.forget(game);
         for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'warmups', 'warmup_players', 'speech_plays']) {
             this.sql.exec(`DELETE FROM ${table} WHERE game_id = ?`, game);
         }
@@ -1748,7 +1769,11 @@ export class PlazaRoom extends DurableObject<Env> {
         if (typeof text === 'string' && now - (seat.lastCheck ?? 0) >= CHECK_GAP_MS && this.isOpen()) {
             seat.lastCheck = now;
             ws.serializeAttachment(seat);
-            answer = await checkGrammar(text, this.env);
+            // Never a hint for something harmful: the AI would rewrite it into better English. It is reported instead.
+            // A short message gets no hint anyway, and is checked when it is sent.
+            const harm = slurIn(text) ? 'hate' : text.trim().split(/\s+/).length >= MIN_WORDS ? await this.harmOf(text) : null;
+            if (harm) this.flagHarm(seat, harm, text, audit);
+            else answer = await checkGrammar(text, this.env);
         }
         if (audit) {
             const existing = this.assistance.get(audit);
@@ -1758,6 +1783,32 @@ export class PlazaRoom extends DurableObject<Env> {
             }
         }
         try { ws.send(JSON.stringify({ t: 'checked', id, ...answer })); } catch { /* closing */ }
+    }
+
+    // ---------- Safety ----------
+
+    private async moderated(text: string): Promise<Moderation> {
+        const key = text.trim();
+        const known = this.moderations.get(key);
+        if (known && Date.now() - known.at < 120_000) return known.verdict;
+        const verdict = await moderate(key, this.env);
+        if (verdict.result === 'clean' || verdict.result === 'flagged') {
+            this.moderations.set(key, { verdict, at: Date.now() });
+            if (this.moderations.size > 300) this.moderations.delete(this.moderations.keys().next().value!);
+        }
+        return verdict;
+    }
+
+    // The harm in a message, if any: a slur from the list, or what OpenAI's moderation found.
+    private async harmOf(text: string): Promise<Harm | null> {
+        if (slurIn(text)) return 'hate';
+        const verdict = await this.moderated(text);
+        return verdict.result === 'flagged' ? harmFrom(verdict.categories) : null;
+    }
+
+    // Tells the teacher, once per attempt. Nothing else happens to the student.
+    private flagHarm(seat: Seat, harm: Harm, text: string, attempt: string | null | undefined): void {
+        this.incidents.record(seat.game, seat.studentKey, seat.name, harm, text, attempt);
     }
 
     // `cid` is the page's own id for this message: every answer carries it back, so a message that
@@ -1796,7 +1847,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (this.isRandom(seat.game) && !this.alias(seat.game, seat.studentKey).kept) { refused('Choose your name first.'); return reply('warning', 'Choose your name first.'); }
 
         // On the teacher's laptop every word must be English, whatever the page did.
-        if (typeof value === 'string' && this.env.LAN_URL) {
+        if (typeof value === 'string' && this.env.LAN_URL && !slurIn(value)) {
             const { notEnglish } = await import('./english.ts');
             const words = notEnglish(value, [...this.seats().map(other => other.name), ...IDENTITY_NAMES,
                 ...warmupVocabulary(this.warmupDefinition(seat.game)), ...warmupVocabulary(this.savedWarmup('identity').definition)]);
@@ -1827,10 +1878,11 @@ export class PlazaRoom extends DurableObject<Env> {
         let problem = chatProblem(value) ?? activityProblem;
         let flag: string | null = null;
         let cleared = false; // OpenAI looked at it and found nothing
+        let harm: Harm | null = typeof value === 'string' && slurIn(value) ? 'hate' : null;
         if (!problem) {
-            const verdict = await moderate(value.trim(), this.env);
+            const verdict = await this.moderated(value);
             cleared = verdict.result === 'clean';
-            if (verdict.result === 'flagged') { problem = 'That message cannot be sent. Please rewrite it.'; flag = verdict.categories.join(', '); }
+            if (verdict.result === 'flagged') { problem = 'That message cannot be sent. Please rewrite it.'; flag = verdict.categories.join(', '); harm = harmFrom(verdict.categories); }
             else if (verdict.result === 'unchecked') flag = 'moderation unavailable';
             // The class may have closed or the student been muted while OpenAI answered.
             if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
@@ -1856,7 +1908,8 @@ export class PlazaRoom extends DurableObject<Env> {
             entry.id, entry.student_key, entry.sender, entry.text, now, problem ? 'blocked' : posts ? 'approved' : 'pending',
             entry.target_key, target?.name ?? null, entry.x, entry.y, flag, note, seat.game, entry.marks, entry.voice);
         if (audit) this.attemptStatus(audit, problem ? 'blocked' : posts ? 'approved' : 'pending', problem ?? note ?? flag ?? undefined, entry.id);
-        if (problem) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Message filter: ${problem}`, String(value), 'other');
+        if (harm) this.flagHarm(seat, harm, String(value), audit);
+        else if (problem) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Message filter: ${problem}`, String(value), 'other');
         this.sql.exec(`DELETE FROM chat WHERE game_id IS ? AND id NOT IN (SELECT id FROM chat WHERE game_id IS ? ORDER BY ts DESC LIMIT ?)
             AND id NOT IN (SELECT question_id FROM interviews UNION SELECT answer_id FROM interviews WHERE answer_id IS NOT NULL)`,
             seat.game, seat.game, CHAT_KEEP);
