@@ -120,6 +120,13 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
         return { kind: 'xp', ...(typeof body.chatId === 'string' ? { chatId: body.chatId } : { report: { studentKey: body.report.studentKey, objective: body.report.objective } }) };
     }
     if (path === '/api/teacher/incident' && typeof body?.id === 'string') return { kind: 'incident', id: body.id };
+    if (path === '/api/teacher/block' && Array.isArray(body?.words) && body.words.length <= 50 && body.words.every((word: unknown) => typeof word === 'string')) {
+        return { kind: 'block', words: body.words };
+    }
+    if (path === '/api/teacher/unblock' && typeof body?.key === 'string' && body.key.length <= 200) return { kind: 'unblock', key: body.key };
+    if (path === '/api/teacher/let-through' && typeof body?.key === 'string' && body.key.length <= 200 && typeof body?.words === 'string') {
+        return { kind: 'letThrough', key: body.key, words: body.words };
+    }
     if (path === '/api/teacher/mode' && (body?.mode === 'approve' || body?.mode === 'review')) return { kind: 'mode', mode: body.mode };
     if (path === '/api/teacher/mute' && typeof body?.studentKey === 'string' && typeof body?.muted === 'boolean') {
         return { kind: 'mute', studentKey: body.studentKey, muted: body.muted };

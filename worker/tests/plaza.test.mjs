@@ -3352,3 +3352,81 @@ test('missions live online: the laptop sends every change at once, fetches what 
         await new Promise(resolve => pinPlay.close(resolve)); for (const dir of dirs) removeTemp(dir);
     }
 });
+
+test('blocked words: what the class keeps writing is offered for blocking, then stopped however it is spelt, for one lesson', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-blocked-'));
+    // On the class laptop, where every word must be English and blocked words are looked for first.
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, { LAN_URL: 'http://192.168.1.20:8787' });
+    let alex, sam, chris;
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const BLOCKED = 'Not sent: your teacher blocked that for this lesson.';
+    try {
+        const base = plaza.base;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, ...(body ? { body } : {}) });
+        assert.equal((await teacher('block', { words: ['free sam'] })).status, 400, 'blocked words belong to a lesson: the class must be open');
+        PIN = (await teacher('class', { open: true })).body.pin;
+        alex = await enter(base, 'signed-a', null); sam = await enter(base, 'signed-b', null); chris = await enter(base, 'signed-c', null);
+        const say = (student, cid, text, to = 'everyone') => { student.send({ t: 'chat', cid, text, ...(to ? { to } : {}) }); return student.next(m => m.cid === cid, cid); };
+        const wave = async (cid, texts) => {
+            for (const [index, student] of [alex, sam, chris].entries()) assert.match((await say(student, `${cid}-${index}`, texts[index])).text, /approval/);
+            await teacher('approve-all', {});
+        };
+
+        // The whole class writes the same thing to everyone: the teacher is offered to block it.
+        await wave('wave', ['free sam', 'FREE SAM!!', 'free saaam']);
+        let blocked = (await teacher('status')).body.blocked;
+        assert.deepEqual(blocked.repeats.map(repeat => [repeat.words, repeat.students.length]), [['free sam', 3]]);
+
+        // Blocking it takes what already said it off every screen, and tells each student once.
+        blocked = (await teacher('block', { words: [blocked.repeats[0].words] })).body.blocked;
+        assert.deepEqual(blocked.repeats, []);
+        assert.deepEqual(blocked.words.map(word => [word.words, word.removed, word.stopped]), [['free sam', 3, 0]]);
+        for (const student of [alex, sam, chris]) assert.equal((await student.next(m => m.t === 'notice' && /removed/.test(m.text), 'told')).text, 'Your teacher removed one of your messages.');
+        for (let taken = 0; taken < 3; taken++) await chris.next(m => m.t === 'retract', 'off every screen');
+
+        // However it is disguised, it is not sent: the box empties, nobody else sees it, and the teacher sees who tried.
+        await pause(1600);
+        const disguised = await say(alex, 'try-1', 'fr33 s4m!!');
+        assert.deepEqual([disguised.t, disguised.level, disguised.text, disguised.id], ['notice', 'info', BLOCKED, undefined]);
+        await pause(1600);
+        assert.equal((await say(alex, 'try-2', '#freesamforever', null)).text, BLOCKED, 'inside a longer word: blocked, rather than told it is not English');
+        assert.equal((await say(sam, 'try-3', 'f r e e  s a m', alex.me.id)).text, BLOCKED, 'in a private message too');
+        await pause(300);
+        assert.equal([...alex.inbox, ...sam.inbox, ...chris.inbox].some(m => m.t === 'chat' && ['fr33 s4m!!', '#freesamforever', 'f r e e  s a m'].includes(m.text)), false);
+        let status = (await teacher('status')).body;
+        assert.deepEqual(status.blocked.words[0].by, [{ studentKey: 'stu_a', name: 'Alex', count: 2 }, { studentKey: 'stu_b', name: 'Sam', count: 1 }]);
+        assert.equal(status.entries.filter(entry => entry.status === 'blocked' && entry.note === 'Blocked for this lesson: “free sam”').length, 3, 'kept in the chat log');
+        assert.equal(status.support.alerts.length, 0, 'tries are counted under the word, not as students who may be stuck');
+        await pause(1600);
+        assert.ok((await say(alex, 'to-teacher', 'free sam please', 'teacher')).id, 'a message to the teacher always gets there');
+
+        // A message still waiting for the teacher is not posted once it says a newly blocked word; unblocked, it can be said.
+        const waiting = await say(chris, 'cake', 'I like cake', null);
+        assert.match(waiting.text, /approval/);
+        blocked = (await teacher('block', { words: ['cake'] })).body.blocked;
+        assert.equal((await chris.next(m => m.t === 'notice' && m.id === waiting.id, 'not posted')).text, 'Your message was not posted.');
+        assert.deepEqual(blocked.words.map(word => [word.words, word.removed]), [['free sam', 3], ['cake', 1]]);
+        await teacher('unblock', { key: 'cake' });
+        await pause(1600);
+        assert.match((await say(chris, 'cake-2', 'cake please', null)).text, /approval/);
+
+        // Something else the class repeats that the teacher is happy with: left alone, it is not offered again.
+        await pause(1600);
+        await wave('pizza', ['pizza party', 'pizza party!', 'Pizza party']);
+        const pizza = (await teacher('status')).body.blocked.repeats.find(repeat => repeat.words === 'pizza party');
+        assert.ok(pizza, 'offered');
+        assert.deepEqual((await teacher('let-through', { key: pizza.key, words: pizza.words })).body.blocked.repeats, []);
+
+        // The next lesson starts with nothing blocked, and the last lesson's words are one click away.
+        await teacher('class', { open: false });
+        blocked = (await teacher('class', { open: true })).body.blocked;
+        assert.deepEqual([blocked.words, blocked.before, blocked.repeats], [[], ['free sam'], []]);
+        assert.deepEqual((await teacher('block', { words: blocked.before })).body.blocked.words.map(word => word.words), ['free sam']);
+    } finally {
+        for (const socket of [alex, sam, chris]) socket?.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});

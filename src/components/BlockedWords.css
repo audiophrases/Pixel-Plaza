@@ -1,0 +1,9 @@
+/* Blocked words: each one with what it took down and stopped, and who kept trying. */
+.blocked-words .blocked-term { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; min-width: 0; }
+.blocked-words .blocked-term > small { color: #5f6b7a; }
+.blocked-who { display: inline-flex; align-items: center; gap: .2rem; padding: .05rem .5rem; border: 1px solid var(--line); border-radius: 999px; background: #fff;
+  color: var(--text-dark); font: inherit; font-size: .82rem; cursor: pointer; }
+.blocked-who:hover { border-color: #c9ced8; background: #f4f6fa; }
+.blocked-who small { color: #a33b00; font-weight: 700; }
+.blocked-before { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.blocked-before q { padding: 0 .4rem; border-radius: .4rem; background: #eef0f4; }

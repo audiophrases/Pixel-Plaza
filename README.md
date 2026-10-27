@@ -199,6 +199,15 @@ Slurs about who people are (race, origin, sexuality, gender, disability), in Eng
 
 Each one is a **🚨 incident** at the top of **Needs you**, grouped per student and kind with a count and their latest words, with a higher double beep and 🚨 on the student's face. Nothing happens to the student unless you act: reply privately, **🤐** mute their chat, or **✓** mark it seen. Self-harm also says to check on the student in person.
 
+## Blocked words
+
+When the class turns to something off task, such as everyone writing *free andrei*, block it for the lesson. Type words or phrases in the **🚫 Blocked words** tab, with commas between several (`free andrei, free a`).
+
+- **For one lesson.** The class must be open; the list ends when you close it. The next lesson shows the last lesson's words with **Block again**.
+- **However it is written.** One entry covers capitals, accents, numbers and signs for letters (`fr33 4ndr3i`, `@ndrei`), letters held longer (`andreiii`), spaced or dotted letters (`a n d r e i`, `a.n.d.r.e.i`), a word split in two (`an drei`), look-alike letters from other alphabets and fancy fonts, and endings such as *-s*, *-ed*, *-ing* (`losers`). A phrase is caught when its words come together in that order: *free a* blocks `free a` and `freea`, and also *free a lot*, but not *free apples*. On the teacher's laptop it is also found inside longer words (`#freeandrei`) and one letter off (`andrey`), but never in a real English word or a classmate's name (*closer* is not *loser*, *Andreu* is not *Andrei*).
+- **What happens.** Every message to classmates is checked: nearby, to everyone and private. The student's box empties and they read *Not sent: your teacher blocked that for this lesson*; nobody else sees it. Messages to you are never blocked. Messages that already said it this lesson come down: the ones waiting for you are not posted, and posted ones leave every screen (each student is told once how many of theirs). The tab shows, for each entry, how many messages it took down and stopped, and who kept trying; a name opens that student. Tries are not added to **Needs you**.
+- **Repeats offered.** When at least a fifth of the students here (three at least) write the same word or words to everyone within five minutes, **Needs you** shows it, with who and what they wrote: **🚫** blocks it and **✓** leaves it alone for the lesson. Everyday words and the words of the running story or warm-up are never offered.
+
 ## AI moderation (optional)
 
 With an OpenAI API key, every message, nearby, to everyone or whisper, is checked by OpenAI's moderation endpoint (`omni-moderation-latest`, free to use) after the word filter and before it reaches the teacher.

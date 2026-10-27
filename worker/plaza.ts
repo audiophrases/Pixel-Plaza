@@ -6,6 +6,8 @@ import { languageHelp } from './aiHelp.ts';
 import { moderate, type Moderation } from './moderation.ts';
 import { SafetyIncidents, type Incident } from './incidents.ts';
 import { harmFrom, slurIn, type Harm } from '../shared/safety.ts';
+import { BlockedWords } from './blockedWords.ts';
+import { blockedIn, repeated, taskWordSet, type BlockedStatus, type Term } from '../shared/blockedWords.ts';
 import { isGlitch } from '../shared/tidy.ts';
 import { PARTICIPATION, Participation, participationDecision } from './participation.ts';
 import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
@@ -55,6 +57,9 @@ const CHAT_HISTORY = 120; // messages of this lesson a returning page gets back
 const PLAYS_KEEP_MS = 60 * 60 * 1000; // what each device read aloud, kept for an hour
 const PLAYS_SHOWN_MS = 15 * 60 * 1000; // and shown to the teacher for the last 15 minutes
 const PLAYS_SHOWN = 300;
+const REPEAT_WINDOW_MS = 5 * 60 * 1000; // what the whole plaza wrote lately, to find what everyone is repeating
+const REPEAT_SHARE = 0.2; // of the students here (three at least) writing the same thing to everyone
+const BLOCKED_NOTICE = 'Not sent: your teacher blocked that for this lesson.';
 
 // Why an exchange with the online server stopped, as the laptop reports it.
 class SyncStopped extends Error {
@@ -90,6 +95,9 @@ export type TeacherAction =
     | { kind: 'mode'; mode: ChatMode }
     | { kind: 'mute'; studentKey: string; muted: boolean }
     | { kind: 'incident'; id: string } // the teacher has seen a safety incident
+    | { kind: 'block'; words: string[] } // words or phrases no message may say this lesson; what already says them comes down
+    | { kind: 'unblock'; key: string }
+    | { kind: 'letThrough'; key: string; words: string } // a repeat the teacher leaves alone: not offered again this lesson
     | { kind: 'sound'; studentKey: string; off: boolean } // silences one student's device (no headphones) until turned back on
     | { kind: 'soundAll'; off: boolean } // a persistent class-wide sound lock, including late arrivals
     | { kind: 'xp'; chatId?: string; report?: { studentKey: string; objective: string } } // the teacher stars a message or a report
@@ -112,6 +120,7 @@ export type CampaignStatus = {
 export type TeacherStatus = {
     support: TeacherSupport;
     incidents: Incident[]; // harmful things students tried to send, open until the teacher has seen them
+    blocked: BlockedStatus; // words blocked for this lesson, and what the whole plaza is repeating
     warmup: { active: boolean; kind: WarmupKind; title?: string; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
     campaign: CampaignStatus | null; // the open game's campaign, once started
     campaigns: CampaignChoice[]; // those that can be started, in the order to offer them
@@ -146,6 +155,8 @@ export class PlazaRoom extends DurableObject<Env> {
     private interviews: Interviews;
     private assistance: StudentAssistance;
     private incidents: SafetyIncidents;
+    private blockedWords: BlockedWords;
+    private taskWords: { game: string; at: number; words: Set<string> } | null = null; // the open story's words, for a minute
     // OpenAI's verdict on a message, for a couple of minutes: the hint and the sending check ask about the same words.
     private moderations = new Map<string, { verdict: Moderation; at: number }>();
     private participation: Participation;
@@ -252,6 +263,8 @@ export class PlazaRoom extends DurableObject<Env> {
         this.assistance.initialize();
         this.incidents = new SafetyIncidents(this.sql);
         this.incidents.initialize();
+        this.blockedWords = new BlockedWords(this.sql);
+        this.blockedWords.initialize();
         this.participation = new Participation(this.sql);
         this.participation.initialize();
         this.liveMissions = new LiveMissions(this.sql);
@@ -467,7 +480,7 @@ export class PlazaRoom extends DurableObject<Env> {
         return { error: 'Unknown live mission action.', status: 400 };
     }
 
-    teacher(token: string, action: TeacherAction): TeacherStatus | { error: string; status: number } {
+    async teacher(token: string, action: TeacherAction): Promise<TeacherStatus | { error: string; status: number }> {
         const session = this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray();
         if (!token || session.length === 0) return { error: 'Please sign in again.', status: 401 };
         if (action.kind === 'helpStatus' || action.kind === 'helpMessage') {
@@ -568,6 +581,18 @@ export class PlazaRoom extends DurableObject<Env> {
             const game = this.activeGame();
             if (!game || !this.incidents.seen(game, action.id)) return { error: 'That incident is no longer open.', status: 400 };
         }
+        if (action.kind === 'block' || action.kind === 'unblock' || action.kind === 'letThrough') {
+            const accepted = action.kind === 'block' ? await this.englishAccepts(this.activeGame()) : undefined;
+            const game = this.activeGame();
+            if (!game || !this.isOpen()) return { error: 'Open the class first: blocked words last for one lesson.', status: 400 };
+            if (action.kind === 'block') {
+                const blocked = this.blockedWords.block(game, this.helpSession(), action.words);
+                if (typeof blocked === 'string') return { error: blocked, status: 400 };
+                this.takeDownBlocked(game, blocked, accepted);
+            }
+            if (action.kind === 'unblock' && !this.blockedWords.unblock(game, this.helpSession(), action.key)) return { error: 'That is not blocked.', status: 400 };
+            if (action.kind === 'letThrough') this.blockedWords.letThrough(game, this.helpSession(), action.key, action.words);
+        }
         if (action.kind === 'mute') {
             if (action.muted) this.sql.exec('INSERT OR IGNORE INTO mutes (student_key) VALUES (?)', action.studentKey);
             else this.sql.exec('DELETE FROM mutes WHERE student_key = ?', action.studentKey);
@@ -586,9 +611,11 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         // The dashboard polls every 2 seconds: send everything still pending plus
         // recent history, read through the indexes, not the whole log each time.
+        const blocked = await this.blockedStatus(this.activeGame());
         const current = this.game(this.activeGame());
         return {
             incidents: current ? this.incidents.open(current.id, this.rosterNames(current.id)) : [],
+            blocked,
             support: { alerts: current ? this.assistance.alerts(current.id, this.rosterNames(current.id)) : [],
                 ai: this.assistance.aiCount(this.helpSession()),
                 students: current ? [...this.rosterNames(current.id)].map(([studentKey, name]) => ({ studentKey, name })) : [] },
@@ -1567,6 +1594,7 @@ export class PlazaRoom extends DurableObject<Env> {
         this.assistance.clear(game);
         this.participation.clear(game);
         this.incidents.forget(game);
+        this.blockedWords.forget(game);
         for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'warmups', 'warmup_players', 'speech_plays']) {
             this.sql.exec(`DELETE FROM ${table} WHERE game_id = ?`, game);
         }
@@ -1938,7 +1966,8 @@ export class PlazaRoom extends DurableObject<Env> {
             // A short message gets no hint anyway, and is checked when it is sent.
             const harm = slurIn(text) ? 'hate' : text.trim().split(/\s+/).length >= MIN_WORDS ? await this.harmOf(text) : null;
             if (harm) this.flagHarm(seat, harm, text, audit);
-            else answer = await checkGrammar(text, this.env);
+            // Nor for a word the teacher blocked: it will not be sent.
+            else if (!await this.blockedTerm(seat.game, text)) answer = await checkGrammar(text, this.env);
         }
         if (audit) {
             const existing = this.assistance.get(audit);
@@ -1976,6 +2005,89 @@ export class PlazaRoom extends DurableObject<Env> {
         this.incidents.record(seat.game, seat.studentKey, seat.name, harm, text, attempt);
     }
 
+    // ---------- Blocked words ----------
+    // Words and phrases the teacher blocks for one lesson, until the class closes: no student message may say them,
+    // what already said them comes down, and what the whole plaza suddenly repeats is offered for blocking.
+
+    // Names and other words the English check takes besides the dictionary's.
+    private englishNames(game: string): string[] {
+        return [...this.rosterNames(game).values(), ...IDENTITY_NAMES, ...warmupVocabulary(this.warmupDefinition(game)), ...warmupVocabulary(this.savedWarmup('identity').definition)];
+    }
+
+    // On the teacher's laptop, whether the English check takes a word. A blocked word is then also found inside
+    // longer words and one letter off, which are not English anyway, but never in an English word or a name.
+    private async englishAccepts(game: string | null): Promise<((word: string) => boolean) | undefined> {
+        if (!this.env.LAN_URL || !game) return undefined;
+        const { notEnglish } = await import('./english.ts');
+        const names = this.englishNames(game);
+        return word => !notEnglish(word, names).length || !notEnglish(word[0].toUpperCase() + word.slice(1), names).length;
+    }
+
+    // The word or phrase blocked for this lesson that a message says, if any.
+    private async blockedTerm(game: string, text: string): Promise<Term | null> {
+        const terms = this.blockedWords.terms(game, this.helpSession());
+        return terms.length ? blockedIn(text, terms, await this.englishAccepts(game)) : null;
+    }
+
+    private lessonStart(game: string): number {
+        return this.sql.exec<{ last_opened: number }>('SELECT last_opened FROM games WHERE id = ?', game).toArray()[0]?.last_opened ?? 0;
+    }
+
+    // Blocking takes down this lesson's messages that already say it: those waiting are not posted, those posted
+    // come off every screen, and each student hears once how many of theirs came down.
+    private takeDownBlocked(game: string, terms: Term[], accepted?: (word: string) => boolean): void {
+        if (!terms.length) return;
+        const lesson = this.helpSession();
+        const perTerm = new Map<string, number>();
+        const perStudent = new Map<string, number>();
+        for (const row of this.sql.exec<{ id: string; student_key: string; text: string; status: string }>(
+            "SELECT id, student_key, text, status FROM chat WHERE game_id = ? AND ts >= ? AND status IN ('approved', 'pending') ORDER BY ts", game, this.lessonStart(game)).toArray()) {
+            const term = blockedIn(row.text, terms, accepted);
+            if (!term) continue;
+            perTerm.set(term.key, (perTerm.get(term.key) ?? 0) + 1);
+            if (row.status === 'pending') { this.review(row.id, false); continue; }
+            this.retract(row.id);
+            perStudent.set(row.student_key, (perStudent.get(row.student_key) ?? 0) + 1);
+        }
+        for (const [key, count] of perTerm) this.blockedWords.removed(game, lesson, key, count);
+        for (const [student, count] of perStudent) {
+            this.notify(student, 'warning', count === 1 ? 'Your teacher removed one of your messages.' : `Your teacher removed ${count} of your messages.`);
+        }
+    }
+
+    // The task's own words: the game's story, and its warm-up while one runs. Everyone using them is the lesson working.
+    private storyWords(game: string): Set<string> {
+        if (this.taskWords?.game === game && Date.now() - this.taskWords.at < 60_000) return this.taskWords.words;
+        const texts = (value: unknown): string[] => typeof value === 'string' ? [value]
+            : Array.isArray(value) ? value.flatMap(texts) : value && typeof value === 'object' ? Object.values(value).flatMap(texts) : [];
+        const words = taskWordSet([...texts(this.gameCampaign(game)), ...(this.warmupActive(game) ? texts(this.warmupDefinition(game)) : [])]);
+        this.taskWords = { game, at: Date.now(), words };
+        return words;
+    }
+
+    // For the teacher page: what is blocked this lesson and what it stopped, the last lesson's to block again, and,
+    // while the class is open, what many students are all writing to everyone that no blocked word covers yet.
+    private async blockedStatus(game: string | null): Promise<BlockedStatus> {
+        if (!game) return { words: [], before: [], repeats: [] };
+        const lesson = this.helpSession();
+        const terms = this.blockedWords.terms(game, lesson);
+        const accepted = terms.length ? await this.englishAccepts(game) : undefined;
+        const names = this.rosterNames(game);
+        const nameOf = (studentKey: string) => names.get(studentKey) ?? 'Student';
+        const words = this.blockedWords.view(game, lesson).map(word => ({ ...word, by: word.by.map(item => ({ ...item, name: nameOf(item.studentKey) })) }));
+        const before = this.blockedWords.before(game, lesson);
+        if (!this.isOpen() || this.activeGame() !== game) return { words, before, repeats: [] };
+        const said = this.sql.exec<{ student_key: string; text: string }>(`SELECT student_key, text FROM chat
+            WHERE game_id = ? AND ts >= ? AND target_key IS NULL AND x IS NULL ORDER BY ts DESC LIMIT 300`,
+            game, Math.max(this.lessonStart(game), Date.now() - REPEAT_WINDOW_MS)).toArray()
+            .filter(row => !blockedIn(row.text, terms, accepted)).map(row => ({ studentKey: row.student_key, text: row.text }));
+        const least = Math.max(3, Math.ceil(this.seats().filter(seat => seat.game === game).length * REPEAT_SHARE));
+        const letThrough = this.blockedWords.letThroughKeys(game, lesson);
+        const repeats = said.length < least ? [] : repeated(said, least, this.storyWords(game), key => letThrough.has(key))
+            .map(repeat => ({ ...repeat, students: repeat.students.map(studentKey => ({ studentKey, name: nameOf(studentKey) })) }));
+        return { words, before, repeats };
+    }
+
     // `cid` is the page's own id for this message: every answer carries it back, so a message that
     // did not go through can be given back to its writer, draft intact.
     private async chat(ws: WebSocket, seat: Seat, value: unknown, to: unknown, note: string | null, cid?: string, better?: string | null, valid?: () => boolean, attemptId?: string, linkedAudit?: string): Promise<{ id: string; status: string } | void> {
@@ -2011,11 +2123,14 @@ export class PlazaRoom extends DurableObject<Env> {
         if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
         if (this.isRandom(seat.game) && !this.alias(seat.game, seat.studentKey).kept) { refused('Choose your name first.'); return reply('warning', 'Choose your name first.'); }
 
+        // A word the teacher blocked for this lesson is looked for first, however disguised, so "fr33 4ndr3i" is told
+        // as blocked rather than as misspelt.
+        let term = typeof value === 'string' ? await this.blockedTerm(seat.game, value) : null;
+        if (term && unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
         // On the teacher's laptop every word must be English, whatever the page did.
-        if (typeof value === 'string' && this.env.LAN_URL && !slurIn(value)) {
+        if (typeof value === 'string' && this.env.LAN_URL && !slurIn(value) && !term) {
             const { notEnglish } = await import('./english.ts');
-            const words = notEnglish(value, [...this.rosterNames(seat.game).values(), ...IDENTITY_NAMES,
-                ...warmupVocabulary(this.warmupDefinition(seat.game)), ...warmupVocabulary(this.savedWarmup('identity').definition)]);
+            const words = notEnglish(value, this.englishNames(seat.game));
             if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
             if (words.length) {
                 const reason = `Use English words only: ${words.map(item => item.word).join(', ')}.`;
@@ -2040,7 +2155,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
         // Blocked messages are kept too, so the teacher sees what was attempted.
         let activityProblem = this.identityChatProblem(seat.game, seat.studentKey, value);
-        let problem = chatProblem(value) ?? activityProblem;
+        let problem = term ? BLOCKED_NOTICE : chatProblem(value) ?? activityProblem;
         let flag: string | null = null;
         let cleared = false; // OpenAI looked at it and found nothing
         let harm: Harm | null = typeof value === 'string' && slurIn(value) ? 'hate' : null;
@@ -2049,13 +2164,18 @@ export class PlazaRoom extends DurableObject<Env> {
             cleared = verdict.result === 'clean';
             if (verdict.result === 'flagged') { problem = 'That message cannot be sent. Please rewrite it.'; flag = verdict.categories.join(', '); harm = harmFrom(verdict.categories); }
             else if (verdict.result === 'unchecked') flag = 'moderation unavailable';
+            // The teacher may have blocked a word it says while OpenAI looked at it.
+            term = await this.blockedTerm(seat.game, value);
+            if (term) problem = BLOCKED_NOTICE;
             // The class may have closed or the student been muted while OpenAI answered.
             if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
         }
+        const blockedReason = term && `Blocked for this lesson: “${term.words}”`;
+        if (blockedReason) note = [note, blockedReason].filter(Boolean).join('\n');
         // Assignments can change while moderation is in flight. Check durable state
         // again before either automatic delivery or the teacher's queue.
         activityProblem = this.identityChatProblem(seat.game, seat.studentKey, value);
-        if (activityProblem) {
+        if (activityProblem && !term) {
             problem = activityProblem;
             note = [note, `Activity rule — Who am I?: ${activityProblem}`].filter(Boolean).join('\n');
         }
@@ -2072,10 +2192,12 @@ export class PlazaRoom extends DurableObject<Env> {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             entry.id, entry.student_key, entry.sender, entry.text, now, problem ? 'blocked' : posts ? 'approved' : 'pending',
             entry.target_key, target?.name ?? null, entry.x, entry.y, flag, note, seat.game, entry.marks, entry.voice);
-        if (audit) this.attemptStatus(audit, problem ? 'blocked' : posts ? 'approved' : 'pending', problem ?? note ?? flag ?? undefined, entry.id);
+        if (audit) this.attemptStatus(audit, problem ? 'blocked' : posts ? 'approved' : 'pending', blockedReason || (problem ?? note ?? flag ?? undefined), entry.id);
+        if (term) this.blockedWords.tried(seat.game, this.helpSession(), term.key, seat.studentKey);
         if (harm) this.flagHarm(seat, harm, String(value), audit);
         // The warm-up's own rule ("keep your identity hidden") is explained to the student; it is not a language problem.
-        else if (problem && problem !== activityProblem) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Message filter: ${problem}`, String(value), 'other');
+        // A blocked word is counted under that word for the teacher, not as a student who may be stuck.
+        else if (problem && problem !== activityProblem && !term) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Message filter: ${problem}`, String(value), 'other');
         this.sql.exec(`DELETE FROM chat WHERE game_id IS ? AND id NOT IN (SELECT id FROM chat WHERE game_id IS ? ORDER BY ts DESC LIMIT ?)
             AND id NOT IN (SELECT question_id FROM interviews UNION SELECT answer_id FROM interviews WHERE answer_id IS NOT NULL)`,
             seat.game, seat.game, CHAT_KEEP);
@@ -2086,7 +2208,8 @@ export class PlazaRoom extends DurableObject<Env> {
             if (cid) ws.send(JSON.stringify({ t: 'result', cid, id: entry.id })); // posted at once: nothing else to say
         }
         // A message waiting for the teacher is named, so the page can show it waiting in its conversation.
-        else if (problem) reply('warning', problem);
+        // A blocked word empties the box: the student is told, not handed the words back to try another spelling.
+        else if (problem) reply(term ? 'info' : 'warning', problem);
         else reply('info', 'Sent to your teacher for approval.', entry.id);
         return { id: entry.id, status: problem ? 'blocked' : posts ? 'approved' : 'pending' };
     }
@@ -2097,14 +2220,8 @@ export class PlazaRoom extends DurableObject<Env> {
             'SELECT id, student_key, sender, text, status, target_key, x, y, marks, game_id, voice, note FROM chat WHERE id = ?', id).toArray()[0];
         if (!entry) return false;
 
-        // Taking down a message that already posted: it disappears from every screen.
         if (entry.status === 'approved' && !approve) {
-            this.sql.exec("UPDATE chat SET status = 'removed' WHERE id = ?", id);
-            this.assistance.chatStatus(id, 'removed');
-            if (this.interviews.review(id, 'removed')) {
-                const game = this.activeGame(); if (game) this.sendQuestToAll(game);
-            }
-            this.broadcast({ t: 'retract', id });
+            this.retract(id);
             this.notify(entry.student_key, 'warning', 'Your teacher removed one of your messages.', id);
             return true;
         }
@@ -2137,6 +2254,16 @@ export class PlazaRoom extends DurableObject<Env> {
         this.notify(entry.student_key, delivered ? 'info' : 'warning',
             delivered ? 'Your message was approved.' : 'Your message was approved, but that student has left the Plaza.', id);
         return true;
+    }
+
+    // Taking down a message that already posted: it disappears from every screen.
+    private retract(id: string): void {
+        this.sql.exec("UPDATE chat SET status = 'removed' WHERE id = ?", id);
+        this.assistance.chatStatus(id, 'removed');
+        if (this.interviews.review(id, 'removed')) {
+            const game = this.activeGame(); if (game) this.sendQuestToAll(game);
+        }
+        this.broadcast({ t: 'retract', id });
     }
 
     // A whisper goes to its two students, a message for everyone to the whole plaza,

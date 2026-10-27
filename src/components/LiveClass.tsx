@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { HelpAlert } from '../../shared/support';
 import { HARM_LABEL, type Incident } from '../../shared/safety';
+import type { BlockedStatus } from '../../shared/blockedWords';
 import { tidy } from '../../shared/tidy';
 import { loadChecker } from '../spellingData';
 import { IDENTITY_NAMES } from '../../shared/warmupKinds';
@@ -24,6 +25,7 @@ type Props = {
   entries: LiveEntry[];
   alerts: HelpAlert[];
   incidents: Incident[]; // harmful things students tried to send: first in To do
+  repeats: BlockedStatus['repeats']; // what many students are all writing to everyone, to block or leave
   online: LiveStudent[];
   known: { studentKey: string; name: string }[]; // everyone seen in this game, online or not
   muted: string[];
@@ -72,7 +74,7 @@ function heardAloud(plays: LivePlay[]): Heard[] {
   return [...heard.values()];
 }
 
-export default function LiveClass({ gameId, entries, alerts, incidents, online, known, muted, sound, open, who, action, selected, onSelect }: Props) {
+export default function LiveClass({ gameId, entries, alerts, incidents, repeats, online, known, muted, sound, open, who, action, selected, onSelect }: Props) {
   const [replies, setReplies] = useState<Record<string, string>>({}); // drafts, by student
   const [sent, setSent] = useState<string | null>(null); // the student a private message just went to
   const [busy, setBusy] = useState(false);
@@ -82,10 +84,11 @@ export default function LiveClass({ gameId, entries, alerts, incidents, online, 
 
   const waiting = entries.filter(entry => entry.status === 'pending').sort((a, b) => a.timestamp - b.timestamp);
   const needing = alerts.filter(alert => alert.status !== 'resolved');
-  // Most urgent first: harm, a student asking, a message waiting (oldest first), then a student who may be stuck.
+  // Most urgent first: harm, what the whole plaza is repeating, a student asking, a message waiting (oldest first),
+  // then a student who may be stuck.
   const asking = needing.filter(alert => alert.kind === 'requested').sort((a, b) => a.timestamp - b.timestamp);
   const stuck = needing.filter(alert => alert.kind === 'suggested').sort((a, b) => a.timestamp - b.timestamp);
-  const total = incidents.length + asking.length + waiting.length + stuck.length;
+  const total = incidents.length + repeats.length + asking.length + waiting.length + stuck.length;
   const lookOf = (studentKey: string) => online.find(student => student.studentKey === studentKey)?.look;
   const nameOf = (studentKey: string) => online.find(student => student.studentKey === studentKey)?.name ?? known.find(student => student.studentKey === studentKey)?.name ?? 'Student';
 
@@ -257,6 +260,28 @@ export default function LiveClass({ gameId, entries, alerts, incidents, online, 
             {replyBox(incident.studentKey)}
           </div>}
         </li>)}
+        {/* Many students writing the same thing to everyone: block it for the lesson (what already says it comes down), or leave it. */}
+        {repeats.map(repeat => {
+          const id = `repeat:${repeat.key}`;
+          return <li key={id} className={`live-item live-repeat${expanded === id ? ' live-open' : ''}`}>
+            <div className="live-row" role="button" tabIndex={0} aria-expanded={expanded === id} onClick={() => toggle(id)}
+              onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(id); } }}>
+              <span className="live-scope live-repeat-who">🔁 {repeat.students.length} students to everyone</span>
+              <span className="live-snippet"><q>{repeat.words}</q></span>
+              <span className="live-row-buttons" onClick={event => event.stopPropagation()}>
+                <button className="live-no" onClick={() => void action('block', { words: [repeat.words] })}
+                  title={`Block “${repeat.words}” for this lesson and take down what already says it`} aria-label="Block">🚫</button>
+                <button className="live-yes" onClick={() => void action('let-through', { key: repeat.key, words: repeat.words })}
+                  title="Leave it: not offered again this lesson" aria-label="Leave it">✓</button>
+              </span>
+              <span className="live-caret" aria-hidden="true">{expanded === id ? '▾' : '▸'}</span>
+            </div>
+            {expanded === id && <div className="live-details">
+              <p className="live-notes">{repeat.students.map(student => <span key={student.studentKey}>{person(student.studentKey, student.name)}</span>)}</p>
+              <ul className="live-incident-texts">{repeat.examples.map((text, index) => <li key={index}><q>{tidy(text)}</q></li>)}</ul>
+            </div>}
+          </li>;
+        })}
         {asking.map(helpItem)}
         {waiting.map((entry, index) => <li key={entry.id} className={`live-item live-chat${index === 0 ? ' live-first' : ''}`}>
           <div className="live-row">

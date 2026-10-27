@@ -1,9 +1,9 @@
 import { JSDOM } from 'jsdom';
 import assert from 'node:assert/strict';
 
-// The teacher's live view: Needs you, most urgent first (harm, a student asking, messages waiting oldest first, a
-// student who may be stuck), one line each with its quickest answer and the rest a click away; and the class as
-// faces that put whoever needs the teacher first.
+// The teacher's live view: Needs you, most urgent first (harm, what the whole plaza is repeating, a student asking,
+// messages waiting oldest first, a student who may be stuck), one line each with its quickest answer and the rest a
+// click away; and the class as faces that put whoever needs the teacher first.
 const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true, url: 'http://localhost/teacher' });
 const global = globalThis as any;
 Object.assign(global, { window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true });
@@ -26,7 +26,7 @@ const stuck = { id: 'help-ben', studentKey: 'ben', name: 'Ben', topic: 'writing'
   evidence: [{ reason: 'Answer not accepted: What is in the basket?', text: 'There is chesnuts in the basket', timestamp: now - 70_000, count: 2 }] };
 const incident = { id: 'harm-cleo', studentKey: 'cleo', name: 'Cleo', harm: 'threat' as const, texts: ['I will find you after school'], count: 2, firstTs: now - 200_000, lastTs: now - 100_000 };
 let props: any = {
-  gameId: 'game-a', alerts: [help, stuck], incidents: [incident], muted: ['cleo'], open: true,
+  gameId: 'game-a', alerts: [help, stuck], incidents: [incident], repeats: [], muted: ['cleo'], open: true,
   // Ana's device read Ben's message twice, a moment ago, and Cleo once; Ben's read Cleo's ten minutes ago. Cleo's sound is off.
   sound: { off: ['cleo'], now, plays: [
     { at: now - 3_000, studentKey: 'ana', id: 'c5', senderKey: 'ben', text: 'I love you!!' },
@@ -191,14 +191,29 @@ try {
   props = { ...props, sound: { ...props.sound, allOff: false } }; await render();
   assert.equal(tile('Cleo').querySelector('.live-tile-sound')?.textContent, '🔇', 'restoring the class preserves individual sound locks');
 
+  // Many students writing the same thing to everyone: right after harm, one click blocks it for the lesson or leaves it.
+  props = { ...props, repeats: [{ key: 'fre andrei', words: 'free andrei', examples: ['free andrei', 'FREE ANDREI!!'],
+    students: [{ studentKey: 'ana', name: 'Ana' }, { studentKey: 'ben', name: 'Ben' }, { studentKey: 'cleo', name: 'Cleo' }] }] };
+  await render();
+  assert.match(items()[1].textContent!, /🔁 3 students to everyone.*free andrei/);
+  assert.equal(document.querySelector('.live-count')?.textContent, '6');
+  await press(items()[1].querySelector('[aria-label="Block"]'));
+  assert.deepEqual(actions.at(-1), { path: 'block', body: { words: ['free andrei'] } });
+  await press(items()[1].querySelector('[aria-label="Leave it"]'));
+  assert.deepEqual(actions.at(-1), { path: 'let-through', body: { key: 'fre andrei', words: 'free andrei' } });
+  assert.equal(items()[1].querySelector('.live-details'), null, 'answering it does not open it');
+  await open(items()[1]);
+  assert.deepEqual([...items()[1].querySelectorAll('.live-details .live-person strong')].map(name => name.textContent), ['Ana', 'Ben', 'Cleo'], 'who is writing it');
+  assert.match(items()[1].querySelector('.live-details')!.textContent!, /FREE ANDREI!!/);
+
   // Nothing needs the teacher.
-  props = { ...props, entries: [], alerts: [], incidents: [] };
+  props = { ...props, entries: [], alerts: [], incidents: [], repeats: [] };
   await render();
   assert.equal(document.querySelector('.live-clear')?.textContent, '✓ All caught up');
   props = { ...props, open: false };
   await render();
   assert.equal(document.querySelector('.live-clear')?.textContent, 'The class is closed.');
-  console.log('Live class UI checks pass: Needs you in order of urgency, one line each with its quickest answer, one open at a time, replies that count as helping, a fix that finishes a check-in, faces in order of need that open a student, a phrase heard in the room traced to the devices that played it, and the class sound switch.');
+  console.log('Live class UI checks pass: Needs you in order of urgency, one line each with its quickest answer, one open at a time, replies that count as helping, a fix that finishes a check-in, faces in order of need that open a student, a phrase heard in the room traced to the devices that played it, the class sound switch, and what the plaza repeats offered for blocking.');
 } finally {
   await act(async () => root.unmount());
   dom.window.close();

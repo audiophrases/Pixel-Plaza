@@ -1,4 +1,5 @@
 import type { Incident } from '../../shared/safety';
+import type { BlockedStatus } from '../../shared/blockedWords';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { joinLink } from '../studentAuth';
@@ -17,6 +18,7 @@ import TeacherSupport from '../components/TeacherSupport';
 import ClassReport from '../components/ClassReport';
 import LiveClass, { type LiveSound } from '../components/LiveClass';
 import ChatLog, { type ChatFilter } from '../components/ChatLog';
+import BlockedWords from '../components/BlockedWords';
 import StudentDrawer from '../components/StudentDrawer';
 import CommandPalette, { type Command, type PaletteStudent } from '../components/CommandPalette';
 import Face from '../components/Face';
@@ -39,6 +41,7 @@ type Status = {
   campaign: CampaignInfo | null; campaigns: CampaignChoice[];
   warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
   incidents?: Incident[];
+  blocked?: BlockedStatus;
   open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number; themeId?: string } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; sound?: LiveSound; online: LiveStudent[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
   support: Support;
@@ -201,10 +204,11 @@ export default function Teacher() {
   }, [incidentSignature]);
 
   // A soft beep and the tab title tell the teacher something is waiting, even from another window.
+  const repeatCount = status?.blocked?.repeats.length ?? 0;
   useEffect(() => {
     const helpIds = helpSignature ? helpSignature.split(',') : [];
     const incidentCount = incidentSignature ? incidentSignature.split(',').length : 0;
-    const count = waiting.length + helpIds.length + incidentCount;
+    const count = waiting.length + helpIds.length + incidentCount + repeatCount;
     document.title = count ? `(${count}) ${incidentCount ? '🚨 ' : ''}Teacher controls${helpIds.length ? ' · help needed' : ''}` : 'Teacher controls';
     if (waiting.length > waitingBefore.current || helpIds.some(id => !helpBefore.current.has(id))) {
       try {
@@ -221,7 +225,7 @@ export default function Teacher() {
     }
     waitingBefore.current = waiting.length;
     helpBefore.current = new Set(helpIds);
-  }, [waiting.length, helpSignature, incidentSignature]);
+  }, [waiting.length, helpSignature, incidentSignature, repeatCount]);
 
   const action = async (path: string, body: object) => {
     try {
@@ -290,6 +294,7 @@ export default function Teacher() {
   const tabs: TabInfo[] = !status ? [] : [
     ...(status.game ? [
       { id: 'chat' as const, icon: '💬', title: 'Chat log' },
+      { id: 'blocked' as const, icon: '🚫', title: 'Blocked words', label: status.blocked?.words.length ? `${status.blocked.words.length}` : undefined },
       { id: 'map' as const, icon: '🗺', title: 'Map & spells', label: `${status.online.length} online` },
       { id: 'warmup' as const, icon: '🧩', title: 'Warm-up', label: status.warmup?.active ? 'running' : undefined },
       { id: 'campaign' as const, icon: '📖', title: 'Campaign', label: campaign ? `chapter ${campaign.chapter + 1} of ${campaign.chapters}` : undefined },
@@ -319,6 +324,8 @@ export default function Teacher() {
     ] : []),
     ...(status.game ? CHAT_VIEWS.map(([filter, icon, label]) => ({ id: `chat:${filter}`, icon, label, hint: 'Chat log', keywords: 'chat log messages see read group what they say',
       run: () => { setChatFilter(filter); openTab('chat'); } })) : []),
+    ...(status.blocked?.repeats ?? []).map(repeat => ({ id: `block:${repeat.key}`, icon: '🚫', label: `Block “${repeat.words}” for this lesson`,
+      hint: `${repeat.students.length} students`, keywords: 'block ban stop word phrase repeat everyone', run: () => action('block', { words: [repeat.words] }) })),
     ...(status.moderation || status.mode === 'review' ? [{ id: 'mode', icon: status.mode === 'approve' ? '⚡' : '✋',
       label: status.mode === 'approve' ? 'Post chat after OpenAI checks it, and review afterwards' : 'Approve every message first', keywords: 'moderation mode review approve check',
       run: () => action('mode', { mode: status.mode === 'approve' ? 'review' : 'approve' }) }] : []),
@@ -427,7 +434,8 @@ export default function Teacher() {
           <button className="btn btn-secondary btn-sm" onClick={() => { if (window.confirm(`${nextStep(campaign)}?`)) void action('campaign', { op: 'next' }); }}>
             {campaign.chapter + 1 < campaign.chapters ? '▶ Next chapter' : '🏁 End campaign'}</button></span>}
       </section>}
-      {status.game && <LiveClass gameId={status.game.id} entries={status.entries} alerts={status.support?.alerts ?? []} incidents={status.incidents ?? []} online={status.online.map(s => ({ ...s, zone: placeName(s.zone) }))}
+      {status.game && <LiveClass gameId={status.game.id} entries={status.entries} alerts={status.support?.alerts ?? []} incidents={status.incidents ?? []}
+        repeats={status.blocked?.repeats ?? []} online={status.online.map(s => ({ ...s, zone: placeName(s.zone) }))}
         known={[...supportStudents.values()]} muted={status.muted} sound={status.sound ?? { off: [], now: Date.now(), plays: [] }} open={status.open}
         who={who} action={action} selected={selectedStudent} onSelect={setSelectedStudent} />}
 
@@ -439,6 +447,8 @@ export default function Teacher() {
       </nav>
       {shown && <section id="teacher-panel" className="teacher-panel" role="tabpanel" aria-labelledby={`tab-${shown}`}>
         {shown === 'chat' && <ChatLog entries={status.entries} filter={chatFilter} onFilter={setChatFilter} who={who} action={action} onSelect={setSelectedStudent} />}
+
+        {shown === 'blocked' && status.blocked && <BlockedWords blocked={status.blocked} open={status.open} who={who} action={action} onSelect={setSelectedStudent} />}
 
         {shown === 'map' && status.game && <>
           <div className="teacher-actions">
@@ -648,7 +658,7 @@ export default function Teacher() {
   </main>;
 }
 
-type TabId = 'chat' | 'map' | 'warmup' | 'campaign' | 'history' | 'games' | 'vision' | 'laptop' | 'report';
+type TabId = 'chat' | 'blocked' | 'map' | 'warmup' | 'campaign' | 'history' | 'games' | 'vision' | 'laptop' | 'report';
 // label: a word or number of how it stands, beside the title.
 type TabInfo = { id: TabId; icon: string; title: string; label?: string };
 const TAB_KEY = 'pixelplaza.teacher.tab.v1';

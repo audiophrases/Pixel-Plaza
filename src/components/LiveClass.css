@@ -109,5 +109,9 @@
 .live-incident-texts { list-style: none; margin: .3rem 0; padding: 0; display: grid; gap: .2rem; font-size: .9rem; }
 .live-incident-texts q { font-weight: 600; }
 
+/* What many students are all writing to everyone, offered for blocking. */
+.live-repeat { border-left-color: #8e24aa; background: #fbf6fd; }
+.live-repeat-who { color: #6a1b9a; font-weight: 700; }
+
 /* The same thing repeated: one line, with how many times. */
 .live-times { margin-left: .35rem; padding: 0 .35rem; border-radius: .4rem; background: #eef0f4; color: #4c5360; font-size: .75rem; font-weight: 700; }
