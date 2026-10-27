@@ -8,6 +8,7 @@ import { buildMissionPrompt } from '../../shared/missionPrompt';
 import type { MissionDraft, MissionSummary, MissionSync } from '../../shared/missionTypes';
 import MissionEditor, { ClueReview, MissionPreview } from '../components/MissionEditor';
 import MissionField from '../components/MissionField';
+import MissionStoryMap, { MissionIcon } from '../components/MissionVisuals';
 import { focusMissionIssue, issueLocation, missionIssueText } from '../components/missionEditing';
 import LiveMissionPanel from '../components/LiveMissionPanel';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
@@ -39,10 +40,11 @@ export default function MissionStudio() {
     const [campaign, setCampaign] = useState<Campaign | null>(null); const [chapterIndex, setChapterIndex] = useState(0);
     const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
     const [newName, setNewName] = useState(''); const [source, setSource] = useState(''); const [creating, setCreating] = useState(false);
-    const [view, setView] = useState<'setup' | 'build' | 'review' | 'tools' | 'live'>('build');
+    const [view, setView] = useState<'map' | 'setup' | 'build' | 'review' | 'tools' | 'live'>('map');
     const [sync, setSync] = useState<MissionSync | null>(null);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [issueTarget, setIssueTarget] = useState<{ path: string } | null>(null);
+    const [editorNavigation, setEditorNavigation] = useState(0);
     const [importText, setImportText] = useState(''); const [importMode, setImportMode] = useState<'append' | 'replace' | 'extend'>('extend'); const [candidate, setCandidate] = useState<MissionImport | null>(null);
     const [brief, setBrief] = useState(''); const [level, setLevel] = useState('A2'); const [promptMode, setPromptMode] = useState<'create' | 'extend' | 'quests'>('quests'); const [prompt, setPrompt] = useState('');
     const dirty = !!campaign && !!draft && JSON.stringify(campaign) !== JSON.stringify(draft.campaign);
@@ -74,7 +76,7 @@ export default function MissionStudio() {
         window.addEventListener('beforeunload', prevent); return () => window.removeEventListener('beforeunload', prevent);
     }, [dirty]);
     useEffect(() => { if (issueTarget) focusMissionIssue(issueTarget.path); }, [issueTarget]);
-    const applyDraft = (next: MissionDraft) => { setDraft(next); setCampaign(next.campaign); setCandidate(null); setPrompt(''); setChapterIndex(0); setSelectedId(null); setView('build'); setCreating(false); };
+    const applyDraft = (next: MissionDraft) => { setDraft(next); setCampaign(next.campaign); setCandidate(null); setPrompt(''); setChapterIndex(0); setSelectedId(null); setView('map'); setCreating(false); };
     const edit = (next: Campaign) => { setCampaign(next); setCandidate(null); setPrompt(''); setNotice(''); };
     const run = async (work: () => Promise<void>) => { setBusy(true); setError(''); try { await work(); } catch (cause) { failed(cause); } finally { setBusy(false); } };
     const mayLeave = () => !dirty || window.confirm('Discard unsaved draft changes? Save or export them first to keep them.');
@@ -95,7 +97,7 @@ export default function MissionStudio() {
     const openMission = (id: string) => { if (!id || !mayLeave()) return; void run(async () => { const result = await call<{ draft: MissionDraft }>(`get?id=${encodeURIComponent(id)}`); applyDraft(result.draft); setNotice(''); }); };
     const selectChapter = (index: number) => { setChapterIndex(index); setSelectedId(null); setCandidate(null); setPrompt(''); };
     return <main className="mission-page mission-studio-page">
-        <header className="mission-header"><div><p className="mission-eyebrow">PIXEL PLAZA · TEACHER WORKSPACE</p><h1>Mission Studio</h1><p>A great lesson starts with a few simple steps.</p>{sync && sync.state !== 'home' && <p className={`mission-sync mission-sync-${sync.state}`} role="status">{syncText(sync)}</p>}</div>
+        <header className="mission-header"><div><p className="mission-eyebrow">PIXEL PLAZA · TEACHER WORKSPACE</p><h1>Mission Studio<span className="mission-header-mark" aria-hidden="true"><MissionIcon name="map" /></span></h1><p>Bring your story to life. One discovery at a time.</p>{sync && sync.state !== 'home' && <p className={`mission-sync mission-sync-${sync.state}`} role="status">{syncText(sync)}</p>}</div>
             <Link to="/teacher" onClick={e => { if (!mayLeave()) e.preventDefault(); }}>Teacher controls</Link></header>
         {(error || notice) && <div className="mission-feedback"><div className={error ? 'mission-error' : 'mission-notice'} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button type="button" className="mission-button" aria-label="Dismiss message" onClick={() => { setError(''); setNotice(''); }}>×</button></div></div>}
         {!token ? <form className="mission-card mission-login" onSubmit={e => { e.preventDefault(); void run(async () => {
@@ -118,14 +120,15 @@ export default function MissionStudio() {
                 </div>}
             </section>
             <div className="mission-main">{campaign && draft ? <>
-                <div className="mission-savebar"><div><strong>{campaign.title || 'Untitled mission'}</strong><span>{dirty ? 'Unsaved changes' : 'All changes saved'}</span></div><div className="mission-toolbar">
+                <div className="mission-savebar"><div><strong>{campaign.title || 'Untitled mission'}</strong><span className={dirty ? 'mission-save-state unsaved' : 'mission-save-state'}>{dirty ? 'Unsaved changes' : 'All changes saved'}</span></div><div className="mission-toolbar">
                     <button className="mission-button primary" disabled={!dirty} onClick={() => void run(async () => { await save(); setNotice('Draft saved. Publish when you are ready to use it in a new game.'); })}>{busy ? 'Working…' : 'Save draft'}</button>
                     <button className="mission-button" onClick={() => setView('review')}>Review &amp; publish{checked?.errors.length ? ` (${checked.errors.length})` : ''}</button></div></div>
-                <nav className="mission-workflow" aria-label="Mission workflow">{([{ id: 'setup', title: 'Mission setup', description: 'Title & student roles' }, { id: 'build', title: 'Build steps', description: 'Chapters, tasks & answers' }, { id: 'review', title: 'Preview & publish', description: 'Check the student experience' }] as const).map((item, i) => <button key={item.id} aria-current={view === item.id ? 'step' : undefined} className={view === item.id ? 'selected' : ''} onClick={() => setView(item.id)}><span>{i + 1}</span><div><strong>{item.title}</strong><small>{item.description}</small></div></button>)}</nav>
+                <nav className="mission-workflow" aria-label="Mission workflow">{([{ id: 'map', icon: 'map', title: 'Story map', description: 'See how it all connects' }, { id: 'setup', icon: 'roles', title: 'Mission setup', description: 'Story & student roles' }, { id: 'build', icon: 'steps', title: 'Build steps', description: 'Shape each student task' }, { id: 'review', icon: 'eye', title: 'Preview & publish', description: 'Try the student experience' }] as const).map(item => <button key={item.id} aria-current={view === item.id ? 'page' : undefined} className={view === item.id ? 'selected' : ''} onClick={() => setView(item.id)}><span><MissionIcon name={item.icon} /></span><div><strong>{item.title}</strong><small>{item.description}</small></div></button>)}</nav>
                 <div className="mission-utility-nav"><button className="mission-button" aria-pressed={view === 'tools'} onClick={() => setView('tools')}>AI help &amp; files</button><button className="mission-button" aria-pressed={view === 'live'} onClick={() => setView('live')}>Add to a running game</button></div>
-                <div hidden={view !== 'setup' && view !== 'build'}><MissionEditor key={campaign.id} view={view === 'setup' ? 'setup' : 'build'} campaign={campaign} theme={getTheme(promptThemeId)} chapterIndex={chapterIndex} selectedId={selectedId} setSelectedId={setSelectedId} setChapterIndex={selectChapter} onChange={edit} /></div>
+                {view === 'map' && <MissionStoryMap campaign={campaign} chapterIndex={chapterIndex} onChapter={selectChapter} onEdit={id => { setSelectedId(id ?? null); setView('build'); setEditorNavigation(n => n + 1); setIssueTarget({ path: id ? `chapters[${chapterIndex}].objectives[${campaign.chapters[chapterIndex].objectives.findIndex(o => o.id === id)}].text` : `chapters[${chapterIndex}].title` }); }} onSetup={() => { setView('setup'); setIssueTarget({ path: 'roles[0].name' }); }} onPreview={() => { setView('review'); window.requestAnimationFrame(() => document.querySelector('.mission-preview')?.scrollIntoView({ block: 'start' })); }} />}
+                <div hidden={view !== 'setup' && view !== 'build'}><MissionEditor key={campaign.id} navigationKey={editorNavigation} view={view === 'setup' ? 'setup' : 'build'} campaign={campaign} theme={getTheme(promptThemeId)} chapterIndex={chapterIndex} selectedId={selectedId} setSelectedId={setSelectedId} setChapterIndex={selectChapter} onChange={edit} /></div>
                 {view === 'review' && <><section className="mission-card mission-validation"><p className="mission-eyebrow">CHECK BEFORE YOU SHARE</p><h2>{checked?.errors.length ? `${checked.errors.length} things to finish` : 'Your mission is ready to publish'}</h2><p className="mission-muted">{campaign.chapters.length} chapters · {campaign.chapters.reduce((n, c) => n + c.objectives.length, 0)} steps · {campaign.roles.length} roles. You can save an unfinished draft at any time.</p>
-                    {!!checked?.errors.length && <ul className="mission-issue-list">{checked.errors.map((item, i) => { const location = issueLocation(campaign, item); return <li key={i}><div><strong>{location.label}</strong><p>{missionIssueText(item)}</p></div><button className="mission-button" onClick={() => { if (location.chapterIndex >= 0) { selectChapter(location.chapterIndex); setSelectedId(location.stepId ?? null); setView('build'); } else setView('setup'); setIssueTarget({ path: item.path }); }}>Go to fix</button></li>; })}</ul>}
+                    {!!checked?.errors.length && <ul className="mission-issue-list">{checked.errors.map((item, i) => { const location = issueLocation(campaign, item); return <li key={i}><div><strong>{location.label}</strong><p>{missionIssueText(item)}</p></div><button className="mission-button" onClick={() => { if (location.chapterIndex >= 0) { selectChapter(location.chapterIndex); setSelectedId(location.stepId ?? null); setView('build'); setEditorNavigation(n => n + 1); } else setView('setup'); setIssueTarget({ path: item.path }); }}>Go to fix</button></li>; })}</ul>}
                     {!!checked?.warnings.length && <details className="mission-details"><summary>Teaching tips to review ({checked.warnings.length})</summary><ul>{checked.warnings.map((item, i) => <li key={i}>{item.message}</li>)}</ul></details>}
                     <div className="mission-publish"><p>Publishing makes this version available for <strong>new games</strong>. Games already in progress keep their story and student progress.</p><button className="mission-button primary" disabled={!!checked?.errors.length} onClick={() => void run(async () => {
                         const saved = dirty ? await save() : draft;

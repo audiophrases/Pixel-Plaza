@@ -37,7 +37,7 @@
 @media (max-width: 900px) { .mission-workspace { grid-template-columns: 1fr; }.mission-library { position: static; }.mission-page { padding: 1rem; }.mission-two-columns { grid-template-columns: 1fr; }.mission-header { align-items: flex-start; flex-direction: column; gap: 1rem; }.mission-savebar { position: static; } }
 
 /* Mission Studio keeps one task in view. Other studios share the base styles above. */
-.mission-studio-page { max-width: 1360px; padding-top: 1.5rem; }
+.mission-studio-page { width: 100%; min-width: 0; max-width: 1480px; padding-top: 1.5rem; }
 .mission-studio-page .mission-header { margin-bottom: 1rem; }
 .mission-studio-page .mission-header h1 { font-size: 2.1rem; line-height: 1.2; margin: .2rem 0 .4rem; }
 .mission-studio-page .mission-header p:not(.mission-eyebrow) { font-size: .9rem; }
@@ -55,7 +55,7 @@
 .mission-create { border-top: 1px solid #dae3e5; margin-top: 1rem; padding: 1.4rem 0 .8rem; }
 .mission-studio-page .mission-savebar { background: #f7faf9f5; backdrop-filter: blur(10px); box-shadow: 0 3px 12px #26344108; }
 .mission-studio-page .mission-savebar strong { font-size: 1.1rem; overflow-wrap: anywhere; }
-.mission-workflow { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); border: 1px solid #d4e0dd; border-radius: 14px; overflow: hidden; background: #fff; }
+.mission-workflow { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); border: 1px solid #d4e0dd; border-radius: 14px; overflow: hidden; background: #fff; }
 .mission-workflow button { display: flex; align-items: center; text-align: left; gap: .8rem; padding: 1rem 1.2rem; border: 0; border-right: 1px solid #e3eae7; background: #fff; color: #596b74; font: inherit; cursor: pointer; }
 .mission-workflow button:last-child { border-right: 0; }
 .mission-workflow button > span { border: 1px solid #c5d6d1; border-radius: 50%; width: 2rem; height: 2rem; display: grid; place-items: center; flex-shrink: 0; font-weight: 700; }
@@ -122,6 +122,175 @@
 .mission-welcome-library button { text-align: left; border: 1px solid #d4e1dc; border-radius: 10px; padding: 1.2rem; font: inherit; background: #f8fbf9; color: #263e34; cursor: pointer; }
 .mission-welcome-library button span { display: block; margin-top: .6rem; font-size: .75rem; color: #596b74; }
 .mission-empty > p { max-width: 650px; margin-bottom: 1.2rem; }
+/* Visual authoring: the story, its cast, and the actual rules that connect tasks. */
+.mission-studio-page { --mission-ink: #23483d; --mission-soft: #edf5ef; }
+.mission-icon { width: 21px; height: 21px; vertical-align: middle; flex-shrink: 0; }
+.mission-studio-page h2 > .mission-icon, .mission-studio-page h3 > .mission-icon, .mission-studio-page h4 > .mission-icon { margin-right: .3rem; }
+.mission-studio-page .mission-button:has(> .mission-icon) { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; }
+.mission-header-mark { display: inline-grid; place-items: center; width: 35px; height: 35px; background: #e2efe7; color: #28715a; border-radius: 10px; margin-left: .7rem; vertical-align: middle; transform: rotate(-6deg); }
+.mission-save-state::before { content: ''; display: inline-block; width: 7px; height: 7px; background: #36856c; border-radius: 50%; margin-right: .4rem; }
+.mission-save-state.unsaved::before { background: #b27a19; }
+.mission-workflow button > span { border: 0; border-radius: 10px; width: 2.5rem; height: 2.5rem; background: #f0f4f2; }
+.mission-workflow strong { font-size: .9rem; }
+.mission-studio-page .mission-utility-nav { margin: .35rem 0 .7rem; }
+.mission-studio-page .mission-utility-nav .mission-button { min-height: 34px; }
+.mission-map-intro { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .5rem .2rem 1.3rem; }
+.mission-map-intro h2 { font-size: clamp(1.5rem, 2.5vw, 2rem); color: #23483d; font-weight: 650; letter-spacing: -.035em; }
+.mission-map-intro p:not(.mission-eyebrow) { font-size: .9rem; color: #596b74; margin-top: .4rem; }
+.mission-chapter-strip { display: flex; gap: .65rem; overflow-x: auto; padding: .2rem .2rem .9rem; margin-bottom: .5rem; scroll-snap-type: x proximity; }
+.mission-chapter-strip button { flex: 1 0 215px; max-width: 320px; display: flex; align-items: flex-start; gap: .8rem; padding: 1rem; text-align: left; font: inherit; color: #52635b; background: #fff; border: 1px solid #d9e1dd; border-radius: 12px; cursor: pointer; scroll-snap-align: start; }
+.mission-chapter-strip button:hover { border-color: #619281; }
+.mission-chapter-strip button.selected { background: #214f40; border-color: #214f40; color: white; box-shadow: 0 4px 10px #254c3920; }
+.mission-chapter-number { font-size: 1.3rem; font-weight: 500; opacity: .75; line-height: 1.25; }
+.mission-chapter-strip button > span:last-child { min-width: 0; }
+.mission-chapter-strip small { display: block; font-size: .61rem; font-weight: 600; letter-spacing: .1em; margin: .15rem 0 .5rem; }
+.mission-chapter-strip strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 600; font-size: .9rem; line-height: 1.4; overflow-wrap: anywhere; }
+.mission-chapter-strip button > span > span { display: block; font-size: .72rem; margin-top: .55rem; }
+.mission-map-canvas { display: grid; grid-template-columns: 270px minmax(0,1fr); align-items: start; gap: 1.5rem; border: 1px solid #d7e2da; border-radius: 18px; padding: 1.5rem; background: #f0f4f0; background-image: radial-gradient(#b4c5b34d .7px, transparent .7px); background-size: 14px 14px; }
+.mission-map-heading { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.mission-map-heading h2 { font-size: 1.3rem; line-height: 1.4; color: #23483d; overflow-wrap: anywhere; }
+.mission-map-heading .mission-button { flex-shrink: 0; }
+.mission-map-opening, .mission-map-ending { display: flex; gap: 1rem; background: #fff; border: 1px solid #d6e1d8; border-radius: 12px; padding: 1.2rem; }
+.mission-map-opening { grid-column: 1 / -1; }
+.mission-map-opening h3, .mission-map-ending h3 { font-size: .92rem; margin: 0 0 .45rem; }
+.mission-map-opening p, .mission-map-ending p { font-size: .85rem; line-height: 1.7; color: #53635b; white-space: pre-line; overflow-wrap: anywhere; }
+.mission-map-marker { flex: 0 0 32px; height: 32px; display: grid; place-items: center; color: #376f56; background: #e5f0e3; border-radius: 50%; }
+.mission-map-ending { margin-top: 1.2rem; background: #e6f0e5; border-style: dashed; }
+.mission-map-ending small { display: block; color: #45634b; font-size: .73rem; margin-top: .7rem; }
+.mission-cast-section, .mission-map-route { min-width: 0; }
+.mission-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; margin: 0 0 1rem; }
+.mission-section-heading h3 { font-size: 1rem; font-weight: 650; margin: 0 0 .45rem; color: #324e3e; }
+.mission-section-heading p { font-size: .78rem; color: #5a6d60; line-height: 1.6; }
+.mission-cast-section .mission-section-heading { flex-wrap: wrap; }
+.mission-cast-section .mission-section-heading .mission-button { font-size: .73rem; min-height: 32px; padding: .35rem .6rem; }
+.role-tone-0 { --role-ink: #79551f; --role-soft: #fbf3dc; --role-line: #e7d8ab; }
+.role-tone-1 { --role-ink: #46679b; --role-soft: #eef3fd; --role-line: #cbd9ef; }
+.role-tone-2 { --role-ink: #8b5151; --role-soft: #fff0ed; --role-line: #eed0c9; }
+.role-tone-3 { --role-ink: #646096; --role-soft: #f2effb; --role-line: #dad2ee; }
+.role-tone-4 { --role-ink: #36705f; --role-soft: #eaf5ec; --role-line: #c8e0cc; }
+.role-tone-5 { --role-ink: #7b567b; --role-soft: #faeef6; --role-line: #e9cfe1; }
+.mission-avatar { width: 35px; height: 35px; flex-shrink: 0; display: inline-grid; place-items: center; border: 1px solid var(--role-line); border-radius: 11px; background: var(--role-soft); color: var(--role-ink); font-size: .76rem; font-weight: 750; }
+.mission-role-filters { display: flex; flex-wrap: wrap; gap: .4rem; margin: .9rem 0; }
+.mission-role-filters button { display: flex; align-items: center; gap: .4rem; border: 1px solid #d7e0da; background: #fff; color: #465d50; border-radius: 20px; padding: .3rem .65rem; font: inherit; font-size: .76rem; min-height: 36px; cursor: pointer; }
+.mission-role-filters button[aria-pressed=true] { border-color: #426e57; background: #e2eee5; box-shadow: inset 0 0 0 1px #426e57; color: #264e36; }
+.mission-role-filters .mission-avatar { width: 23px; height: 23px; border-radius: 50%; font-size: .55rem; }
+.mission-clue-cards { display: grid; gap: .7rem; }
+.mission-clue-card { border: 1px solid var(--role-line); border-radius: 11px; background: var(--role-soft); padding: 1rem; min-width: 0; }
+.mission-clue-card > div { display: flex; align-items: center; gap: .65rem; }
+.mission-clue-card strong { display: block; font-size: .86rem; color: var(--role-ink); overflow-wrap: anywhere; }
+.mission-clue-card small { display: block; color: var(--role-ink); font-size: .57rem; letter-spacing: .06em; margin-top: .25rem; }
+.mission-clue-card p { color: #4a514b; font-size: .8rem; line-height: 1.65; margin: .7rem 0 0; white-space: pre-line; overflow-wrap: anywhere; }
+.mission-mystery-note { display: flex; gap: .6rem; color: #665976; font-size: .75rem; line-height: 1.6; margin: .8rem 0; }
+.mission-mystery-note > span { flex: 0 0 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; color: #6c5088; background: #e9e2ef; font-weight: 700; }
+.mission-story-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 1rem; }
+.mission-story-task { --task-ink: #39755d; --task-soft: #e9f3eb; display: flex; flex-direction: column; min-width: 0; background: #fff; border: 1px solid #d4e0d7; border-top: 3px solid var(--task-ink); border-radius: 11px; box-shadow: 0 3px 8px #344f3805; }
+.task-report { --task-ink: #826539; --task-soft: #fbf2df; }
+.task-role, .task-interview { --task-ink: #4e7198; --task-soft: #eaf1fa; }
+.task-thief, .task-exchange { --task-ink: #7e6295; --task-soft: #f1ebf7; }
+.mission-connections { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; color: #526a5a; font-size: .7rem; line-height: 1.5; }
+.mission-story-task > .mission-connections { padding: .7rem .85rem; border-bottom: 1px solid #edf1ee; background: #fafcf9; border-radius: 8px 8px 0 0; min-height: 45px; }
+.mission-connection-label { font-weight: 600; }
+.mission-connection-link { display: inline-flex; align-items: center; gap: .35rem; }
+.mission-connection-link button, .mission-connection-link > span { background: #eaf0ec; border: 1px solid #c9d8cd; border-radius: 5px; padding: .22rem .4rem; font: inherit; color: #385f48; }
+.mission-connection-link button { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.mission-connection-link button:hover { background: #d9eadc; }
+.mission-condition { font-size: .66rem; border-left: 1px solid #ccd8cf; padding-left: .35rem; }
+.mission-story-task-open { display: flex; align-items: flex-start; gap: .65rem; text-align: left; padding: 1rem .85rem .7rem; font: inherit; background: transparent; border: 0; color: #2c3f33; width: 100%; cursor: pointer; }
+.mission-story-task-open:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+.mission-story-task-icon { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; background: var(--task-soft); color: var(--task-ink); border-radius: 8px; font-size: .85rem; font-weight: 700; }
+.mission-story-task-open > span:nth-child(2) { flex: 1; min-width: 0; }
+.mission-story-task-open small { display: block; color: var(--task-ink); font-size: .64rem; margin: .15rem 0 .4rem; }
+.mission-story-task-open strong { font-size: .87rem; font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; display: block; }
+.mission-task-edit { font-size: 1.1rem; color: #7e8c81; }
+.mission-task-meta { display: flex; gap: .4rem; flex-wrap: wrap; padding: 0 .85rem .85rem; margin-top: auto; }
+.mission-task-meta span { font-size: .64rem; color: #5d6a61; background: #f0f3f0; border-radius: 4px; padding: .2rem .4rem; overflow-wrap: anywhere; }
+.mission-task-rewards { display: flex; flex-wrap: wrap; gap: .4rem; border-top: 1px dashed #dbe5d9; padding: .7rem .85rem; background: #fafbf7; border-radius: 0 0 10px 10px; }
+.mission-task-rewards > span { flex-basis: 100%; font-size: .66rem; color: #66714b; }
+.mission-task-rewards > span .mission-icon { width: 15px; height: 15px; }
+.mission-task-rewards > div { display: flex; align-items: flex-start; gap: .35rem; font-size: .7rem; line-height: 1.6; color: #56604e; min-width: 0; overflow-wrap: anywhere; }
+.mission-task-rewards .mission-avatar { width: 24px; height: 24px; font-size: .57rem; border-radius: 7px; }
+.mission-optional-route { border-top: 1px dashed #b7c7bc; margin-top: 1.5rem; padding-top: 1.3rem; }
+.mission-optional-route .mission-story-task { border-top-style: dashed; }
+.mission-world-clues { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.2rem; }
+.mission-world-clues details { min-width: 0; padding: .9rem; border: 1px solid #d7e1d6; background: #ffffffa8; border-radius: 10px; }
+.mission-world-clues summary { font-size: .78rem; color: #4f694f; }
+.mission-world-clues p { border-top: 1px solid #d7e1d6; padding-top: .6rem; margin-top: .6rem; font-size: .8rem; line-height: 1.6; overflow-wrap: anywhere; }
+.mission-map-empty { font-size: .85rem; color: #5d6b62; padding: 1rem; border: 1px dashed #becfbe; border-radius: 10px; }
+.mission-role-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1rem; margin-top: 1.2rem; align-items: start; }
+.mission-role-grid .mission-role { padding: 1rem; border: 1px solid var(--role-line); border-top: 4px solid var(--role-ink); border-radius: 12px; background: #fff; min-width: 0; }
+.mission-role-grid summary { list-style: none; }
+.mission-role-grid summary::-webkit-details-marker { display: none; }
+.mission-role-card-heading { display: flex; align-items: center; gap: .7rem; }
+.mission-role-card-heading > span:nth-child(2) { flex: 1; min-width: 0; }
+.mission-role-card-heading strong { font-size: 1rem; overflow-wrap: anywhere; display: block; }
+.mission-role-card-heading small { display: block; font-size: .69rem; font-weight: 400; color: #6b736d; margin-top: .25rem; }
+.mission-role-expand { color: var(--role-ink); }
+.mission-role[open] .mission-role-expand { transform: rotate(45deg); }
+.mission-role-excerpt { display: -webkit-box; -webkit-line-clamp: 7; -webkit-box-orient: vertical; overflow: hidden; font-size: .8rem; font-weight: 400; line-height: 1.7; margin-top: .7rem; color: #526157; overflow-wrap: anywhere; }
+.mission-role-excerpt > span { display: block; font-size: .6rem; color: var(--role-ink); letter-spacing: .08em; font-weight: 700; margin: .7rem 0 .25rem; }
+.mission-role-edit-label { display: block; font-size: .72rem; color: var(--role-ink); margin-top: .8rem; }
+.mission-role[open] .mission-role-excerpt, .mission-role[open] .mission-role-edit-label { display: none; }
+.mission-step-kind { color: var(--task-ink,#39755d); font-size: .65rem; display: block; margin-bottom: .3rem; }
+.mission-step-number { background: var(--task-soft,#e4ece8); color: var(--task-ink,#39755d); }
+.mission-form-section-title { display: flex; gap: .6rem; align-items: center; margin: 1.5rem 0 .3rem; border-top: 1px solid #e1e8e3; padding-top: 1.1rem; }
+.mission-form-section-title > span { width: 24px; height: 24px; display: grid; place-items: center; background: #edf3ef; color: #4a6b55; border-radius: 7px; font-size: .73rem; }
+.mission-form-section-title h3 { font-size: .95rem; margin: 0; }
+.mission-form-section-title small { font-weight: 400; font-size: .7rem; margin-left: .4rem; }
+.mission-change-type { border-bottom: 0; padding-bottom: 0; }
+.mission-change-type summary { font-size: .85rem; }
+.mission-inline-type { background: #edf3ef; color: #3c6953; border-radius: 5px; padding: .2rem .4rem; }
+.mission-reward-editor summary { font-size: .85rem; }
+.mission-reward-editor .mission-count { display: inline-block; margin-left: .5rem; }
+.mission-reward-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .8rem; margin-top: 1rem; }
+.mission-reward-card { border: 1px solid var(--role-line); background: var(--role-soft); border-radius: 10px; padding: .8rem; min-width: 0; }
+.mission-reward-card > div { display: flex; align-items: center; gap: .5rem; }
+.mission-reward-card > div > small { font-size: .6rem; color: var(--role-ink); }
+.mission-studio-page .mission-reward-card .mission-field { margin: .5rem 0 0; }
+.mission-reward-card textarea { font-size: .8rem; }
+.mission-student-glance { margin-top: 1rem; border-bottom: 0; }
+.mission-step-glance { padding: 1rem; margin-top: .8rem; background: #f4f6f0; border-radius: 10px; }
+.mission-step-glance > div { display: flex; align-items: flex-start; gap: .7rem; padding: .5rem 0; }
+.mission-step-glance small { display: block; color: #61754e; font-size: .65rem; letter-spacing: .05em; }
+.mission-step-glance p { font-size: .87rem; margin-top: .3rem; overflow-wrap: anywhere; }
+.mission-step-glance .mission-evidence-note { font-size: .73rem; color: #697568; }
+.mission-studio-page .mission-clue-timeline { list-style: none; padding: 0; margin: 1.3rem 0 .4rem; }
+.mission-clue-timeline li { display: flex; align-items: flex-start; position: relative; gap: 1rem; padding-bottom: 1.2rem; margin: 0; }
+.mission-clue-timeline li:not(:last-child)::before { content: ''; position: absolute; left: 17px; top: 30px; bottom: 0; border-left: 2px solid #d7e4d8; }
+.mission-timeline-dot { display: grid; place-items: center; flex: 0 0 36px; height: 36px; border-radius: 50%; background: #eaf2e7; color: #4d7145; font-size: .85rem; font-weight: 700; z-index: 1; }
+.mission-clue-timeline li > div { flex: 1; min-width: 0; border: 1px solid #dfe7db; border-radius: 12px; padding: 1rem; background: #fbfcf8; }
+.mission-clue-timeline small { font-size: .66rem; color: #5b7350; letter-spacing: .04em; }
+.mission-clue-timeline h3 { font-size: .86rem; margin: .5rem 0; overflow-wrap: anywhere; }
+.mission-clue-timeline p { font-size: .86rem; margin: .5rem 0 0; white-space: pre-line; overflow-wrap: anywhere; }
+.mission-preview-layout { display: grid; grid-template-columns: 250px minmax(0,1fr); gap: 1.5rem; margin-top: 1.3rem; align-items: start; }
+.mission-preview { scroll-margin-top: 100px; }
+.mission-preview-controls { background: #f2f6f4; border: 1px solid #dee7df; border-radius: 12px; padding: 1rem; }
+.mission-preview-controls > .mission-avatar { width: 48px; height: 48px; font-size: 1rem; border-radius: 14px; }
+.mission-preview-controls h3 { font-size: 1rem; margin-top: .7rem; }
+.mission-preview-controls > label:not(.mission-field) { font-size: .82rem; }
+.mission-preview-controls .mission-muted { margin-top: 1rem; line-height: 1.6; }
+.mission-preview .mission-journal { margin: 0; border: 1px solid #e2e2ca; background: #fbfbf1; padding: 1.5rem; box-shadow: 0 4px 0 #efefe4; }
+.mission-preview .mission-journal h3 { margin-top: .5rem; font-size: 1.25rem; }
+.mission-preview .mission-journal p { font-size: .9rem; white-space: pre-line; overflow-wrap: anywhere; }
+.mission-preview .mission-journal h4 { margin-top: 1.3rem; }
+.mission-studio-page .mission-preview-clues, .mission-studio-page .mission-preview-tasks { list-style: none; padding: 0; }
+.mission-preview-clues li { background: #fffdf3; border: 1px solid #e8dfb6; border-left: 3px solid #c9ab54; border-radius: 7px; padding: .8rem 1rem; font-size: .85rem; line-height: 1.65; white-space: pre-line; overflow-wrap: anywhere; }
+.mission-preview-tasks li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; background: #fff; padding: .9rem; border: 1px solid #e3e4d4; border-radius: 9px; font-size: .85rem; line-height: 1.6; }
+.mission-preview-tasks li > span { overflow-wrap: anywhere; min-width: 0; }
+.mission-preview-tasks small { display: block; font-size: .6rem; color: #71795d; margin-bottom: .3rem; }
+.mission-preview-tasks button { flex-shrink: 0; font-size: .73rem; }
+.mission-preview-tasks li.complete { background: #eef5e9; border-color: #cfdfc4; }
+.mission-preview-upcoming { padding: 1.2rem; margin-top: 1rem; background: #f3f5f3; border: 1px dashed #ccd6cc; border-radius: 10px; color: #657261; }
+.mission-preview-upcoming h4 { font-size: .85rem; margin-bottom: .7rem; }
+.mission-preview-upcoming > div { padding: .6rem 0; border-top: 1px solid #e1e7de; font-size: .8rem; line-height: 1.6; overflow-wrap: anywhere; }
+.mission-preview-upcoming .mission-connections { margin-top: .4rem; }
+@media (max-width: 1150px) {
+    .mission-map-canvas { grid-template-columns: 225px minmax(0,1fr); padding: 1.2rem; gap: 1.2rem; }
+    .mission-story-grid { grid-template-columns: 1fr; }
+    .mission-role-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .mission-workflow button { gap: .6rem; padding: .8rem; }
+    .mission-workflow small { font-size: .67rem; }
+    .mission-workflow strong { font-size: .8rem; }
+}
 @media (max-width: 1000px) {
     .mission-builder { grid-template-columns: minmax(220px,.8fr) minmax(0,1.5fr); }
     .mission-workflow button { padding: .8rem; gap: .6rem; }
@@ -148,4 +317,40 @@
     .mission-summary-note { display: block; margin: .3rem 0 0; }
     .mission-issue-list li { align-items: flex-start; flex-direction: column; }
     .mission-studio-page .mission-empty { padding: 1.5rem; }
+}
+@media (max-width: 720px) {
+    .mission-studio-page { padding: 1rem .8rem; }
+    .mission-workflow { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .mission-workflow button { flex-direction: row; align-items: center; padding: .8rem; border-bottom: 1px solid #e3eae7; gap: .6rem; }
+    .mission-workflow button:nth-child(2) { border-right: 0; }
+    .mission-workflow button:nth-last-child(-n+2) { border-bottom: 0; }
+    .mission-workflow button > span { width: 2rem; height: 2rem; }
+    .mission-workflow strong { font-size: .78rem; }
+    .mission-map-intro { flex-wrap: wrap; }
+    .mission-map-intro .mission-button { font-size: .75rem; min-height: 36px; }
+    .mission-chapter-strip button { flex-basis: 220px; }
+    .mission-map-canvas { grid-template-columns: minmax(0,1fr); padding: 1rem; gap: 1.2rem; }
+    .mission-map-heading { flex-wrap: wrap; }
+    .mission-map-heading h2 { font-size: 1.15rem; }
+    .mission-map-opening, .mission-map-ending { gap: .6rem; padding: .9rem; }
+    .mission-map-opening .mission-map-marker, .mission-map-ending .mission-map-marker { flex-basis: 26px; height: 26px; }
+    .mission-section-heading h3 { line-height: 1.6; }
+    .mission-cast-section .mission-section-heading { flex-wrap: nowrap; }
+    .mission-cast-section .mission-section-heading .mission-button { flex-shrink: 0; }
+    .mission-clue-cards { display: flex; overflow-x: auto; scroll-snap-type: x proximity; gap: .6rem; padding-bottom: .5rem; }
+    .mission-clue-card { flex: 0 0 88%; scroll-snap-align: start; }
+    .mission-clue-card:only-child { flex-basis: 100%; }
+    .mission-world-clues { grid-template-columns: minmax(0,1fr); gap: .6rem; }
+    .mission-role-grid, .mission-reward-grid { grid-template-columns: minmax(0,1fr); }
+    .mission-preview-layout { grid-template-columns: minmax(0,1fr); gap: 1rem; }
+    .mission-preview-tasks li { flex-direction: column; align-items: flex-start; gap: .6rem; }
+    .mission-preview .mission-journal { padding: 1rem; }
+    .mission-form-section-title h3 { font-size: .85rem; }
+    .mission-clue-timeline li { gap: .6rem; }
+    .mission-clue-timeline li > div { padding: .8rem; }
+    .mission-clue-timeline .mission-timeline-dot { flex-basis: 28px; height: 28px; font-size: .75rem; }
+    .mission-clue-timeline li:not(:last-child)::before { left: 13px; top: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .mission-studio-page *, .mission-studio-page *::before, .mission-studio-page *::after { scroll-behavior: auto !important; transition: none !important; }
 }

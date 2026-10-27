@@ -95,6 +95,25 @@ assert.equal(document.body.textContent?.includes('Where is the blue box?'), fals
 await edit('Teacher password', 'test');
 await act(async () => { document.querySelector('form')!.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })); });
 await edit('Your missions', castanyada.id);
+assert.ok(document.querySelector('.mission-story-map'), 'missions open on the visual story map');
+assert.equal(document.querySelectorAll('.mission-chapter-strip button').length, castanyada.chapters.length);
+assert.equal(document.querySelectorAll('.mission-story-task').length, castanyada.chapters[0].objectives.length, 'the map includes main and optional tasks');
+const secondRole = castanyada.roles[1];
+await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('.mission-role-filters button')].find(b => b.textContent?.endsWith(secondRole.name))!.click(); });
+assert.equal(document.querySelectorAll('.mission-clue-card').length, 1, 'follow one role without hiding the story');
+assert.ok(document.querySelector('.mission-clue-card')?.textContent?.includes(castanyada.chapters[0].roleClues?.[secondRole.id] ?? secondRole.clue));
+assert.equal(document.querySelectorAll('.mission-story-task').length, castanyada.chapters[0].objectives.length);
+await act(async () => { document.querySelectorAll<HTMLButtonElement>('.mission-story-task-open')[1].click(); });
+assert.equal(field('What should students do?').value, castanyada.chapters[0].objectives[1].text, 'a map task opens the corresponding editor');
+await act(async () => { document.querySelector<HTMLButtonElement>('.mission-step-panel .mission-connection-link button')!.click(); });
+assert.equal(field('What should students do?').value, castanyada.chapters[0].objectives[0].text, 'a dependency link opens its actual prerequisite');
+await click('+ Add step');
+await workflow('Story map');
+await act(async () => { document.querySelector<HTMLButtonElement>('.mission-story-task-open')!.click(); });
+assert.equal(field('What should students do?').value, castanyada.chapters[0].objectives[0].text, 'map navigation closes a pending type picker, even for the same task');
+await workflow('Story map'); await click('Edit this chapter');
+assert.ok(document.querySelector<HTMLDetailsElement>('.mission-chapter-card > details')!.open, 'chapter shortcut unfolds story settings');
+assert.equal(document.activeElement, field('Chapter title'));
 assert.equal([...document.querySelectorAll('.mission-step-panel label > span')].filter(el => el.textContent === 'What should students do?').length, 1, 'only one step is edited at a time');
 assert.equal(field('What should students do?').value, castanyada.chapters[0].objectives[0].text);
 assert.equal(field('Your mission brief').closest('[hidden]')?.hasAttribute('hidden'), true, 'AI tools are outside the main editing flow');
@@ -107,7 +126,17 @@ await click('Save draft');
 assert.equal(saved.campaign.title, 'Teacher edited adventure');
 assert.equal(writes[0].op, 'save');
 await workflow('Preview & publish');
-assert.ok(document.querySelector('table'), 'clue timing table rendered during review');
+assert.ok(document.querySelector('.mission-clue-timeline'), 'clue timing is shown as a role timeline');
+const previewFirst = document.querySelector<HTMLButtonElement>('[aria-label="Complete preview step 1"]')!;
+assert.ok(previewFirst);
+assert.equal(document.querySelector('[aria-label="Complete preview step 2"]'), null, 'dependent preview tasks start locked');
+await act(async () => { previewFirst.click(); });
+assert.ok(document.querySelector('[aria-label="Complete preview step 2"]'), 'completing a task unlocks the next one');
+await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="Complete preview step 2"]')!.click(); });
+await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="Undo preview step 1"]')!.click(); });
+assert.equal(document.querySelector('[aria-label="Undo preview step 2"]'), null, 'undo clears dependent completions');
+assert.equal(document.querySelector('[aria-label="Complete preview step 2"]'), null, 'undo locks the dependent task again');
+assert.equal(writes.length, 1, 'exploring the map and preview never writes a draft');
 assert.equal(button('Publish for new games').disabled, false);
 await click('Publish for new games');
 assert.equal(writes[1].op, 'publish');
@@ -262,6 +291,33 @@ await act(async () => { openingIssue.querySelector<HTMLButtonElement>('button')!
 assert.ok(document.querySelector<HTMLDetailsElement>('.mission-chapter-card > details')!.open, 'Go to fix unfolds chapter settings');
 assert.equal(document.activeElement, field('Opening story · what do students see first?'));
 await act(async () => { root.unmount(); });
+
+// A branching story must preview its real rules, including optional clue rewards.
+const { MissionPreview } = await import('../src/components/MissionEditor');
+const previewRoot = createRoot(document.getElementById('root')!);
+const branchingChapter = { ...castanyada.chapters[0], thieves: undefined, objectives: [
+    { id: 'a', text: 'First lead', accept: ['a'] },
+    { id: 'b', text: 'Second lead', accept: ['b'] },
+    { id: 'either', text: 'Follow either lead', accept: ['c'], requires: { mode: 'any' as const, objectives: ['a', 'b'] } },
+    { id: 'both', text: 'Compare both leads', accept: ['d'], requires: { mode: 'all' as const, objectives: ['a', 'b'] } },
+    { id: 'board', text: 'Optional discovery', accept: ['e'], optional: true, board: { afterMain: true, minPlayers: 2 }, rewards: { [castanyada.roles[0].id]: 'The optional discovery clue.' } },
+] };
+await act(async () => { previewRoot.render(<MissionPreview campaign={castanyada} chapter={branchingChapter} />); });
+const previewAction = (action: 'Complete' | 'Undo', step: number) => document.querySelector<HTMLButtonElement>(`[aria-label="${action} preview step ${step}"]`);
+await act(async () => { previewAction('Complete', 1)!.click(); });
+assert.ok(previewAction('Complete', 3), 'any prerequisite opens after one lead');
+assert.equal(previewAction('Complete', 4), null, 'all prerequisites wait for both leads');
+assert.equal(previewAction('Complete', 5)!.disabled, true, 'board quests respect the main-story gate');
+for (const step of [2, 3, 4, 5]) await act(async () => { previewAction('Complete', step)!.click(); });
+assert.ok(document.querySelector('.mission-preview-clues')!.textContent!.includes('The optional discovery clue.'), 'completing a board quest earns its private clue');
+await act(async () => { previewAction('Undo', 1)!.click(); });
+assert.ok(previewAction('Undo', 3), 'an any-rule completion remains when its other prerequisite is complete');
+assert.equal(previewAction('Undo', 4), null, 'an all-rule completion is undone when a required lead is undone');
+assert.equal(previewAction('Complete', 5)!.disabled, true, 'undoing the main story locks a dependent board quest');
+assert.ok(!document.querySelector('.mission-preview-clues')!.textContent!.includes('The optional discovery clue.'), 'undo removes the board reward too');
+await click('Reset preview');
+assert.equal(previewAction('Undo', 2), null);
+await act(async () => { previewRoot.unmount(); });
 
 const { default: Journal } = await import('../src/components/Journal');
 const journalRoot = createRoot(document.getElementById('root')!);

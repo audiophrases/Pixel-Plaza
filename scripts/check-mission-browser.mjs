@@ -52,7 +52,11 @@ try {
     const stage = async label => { await evaluate(`[...document.querySelectorAll('.mission-workflow button')].find(b=>b.querySelector('strong').textContent===${JSON.stringify(label)}).click()`); await waitFor(`document.querySelector('.mission-workflow button[aria-current] strong')?.textContent===${JSON.stringify(label)}`); };
     const edit = async (label, value) => { await evaluate(`(()=>{const l=[...document.querySelectorAll('label')].find(l=>l.checkVisibility()&&l.querySelector('span')?.textContent===${JSON.stringify(label)});const el=l?.querySelector('input,textarea,select');if(!el||!el.checkVisibility())throw Error('Unavailable field: '+${JSON.stringify(label)});Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el),'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event(el.tagName==='SELECT'?'change':'input',{bubbles:true}))})()`); await settle(); };
     const screenshot = async name => { const { data } = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(qa, `${name}.png`), Buffer.from(data, 'base64')); };
-    const noOverflow = async () => assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true, 'page fits the viewport');
+    const noOverflow = async () => {
+        assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true, 'page fits the viewport');
+        const clipped = await evaluate(`[...document.querySelectorAll('main,.mission-library,.mission-savebar,.mission-workflow,.mission-map-canvas,.mission-builder,.mission-role-grid,.mission-preview')].filter(el=>el.checkVisibility()).filter(el=>el.getBoundingClientRect().right>innerWidth+1||el.getBoundingClientRect().left < -1).map(el=>el.className)`);
+        assert.deepEqual(clipped, [], 'visible workspace panels fit even when body overflow is hidden');
+    };
     await send('Page.enable'); await send('Runtime.enable');
     await send('Page.addScriptToEvaluateOnNewDocument', { source: `
         sessionStorage.setItem('pixel-plaza-teacher-session','browser-test');
@@ -79,6 +83,13 @@ try {
     await send('Page.navigate', { url: `${origin}/mission-studio` });
     await waitFor(`document.querySelector('.mission-welcome-library button')`);
     await edit('Your missions', castanyadaComplete.id);
+    await waitFor(`document.querySelector('.mission-story-map')`);
+    await noOverflow(); await screenshot('desktop-story-map');
+    await evaluate(`document.querySelector('.mission-map-canvas').scrollIntoView({block:'start'})`); await settle(); await screenshot('desktop-story-detail');
+    await evaluate(`document.querySelectorAll('.mission-chapter-strip button')[1].click()`); await settle();
+    assert.equal(await evaluate(`document.querySelector('.mission-map-heading h2').textContent`), castanyadaComplete.chapters[1].title);
+    await evaluate(`document.querySelector('.mission-chapter-strip button').click()`); await settle();
+    await evaluate(`document.querySelector('.mission-story-task-open').click()`); await settle();
     await waitFor(`document.querySelectorAll('.mission-step-list li').length > 0`);
     await noOverflow();
     assert.equal(await evaluate(`document.querySelectorAll('.mission-step-panel textarea').length < 15`), true);
@@ -93,10 +104,26 @@ try {
     await click('Remove step'); await click('Yes, remove step'); await click('Undo');
     await click('Save draft');
     await stage('Preview & publish');
+    await evaluate(`document.querySelector('.mission-preview').scrollIntoView({block:'start'})`); await settle(); await noOverflow(); await screenshot('desktop-preview');
+    await evaluate(`document.querySelector('[aria-label="Complete preview step 1"]').click()`); await settle();
+    assert.equal(await evaluate(`Boolean(document.querySelector('[aria-label="Undo preview step 1"]'))`), true);
     assert.equal(await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='Publish for new games').disabled`), false);
     await click('Publish for new games');
     await stage('Build steps');
     await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await stage('Story map'); await evaluate('window.scrollTo(0,0)'); await noOverflow(); await screenshot('phone-story-map');
+    await evaluate(`document.querySelector('[aria-label="Dismiss message"]')?.click()`); await settle();
+    await evaluate(`document.querySelectorAll('.mission-role-filters button')[1].click()`); await settle();
+    assert.equal(await evaluate(`document.querySelectorAll('.mission-clue-card').length`), 1);
+    await evaluate(`document.querySelector('.mission-map-canvas').scrollIntoView({block:'start'})`); await settle(); await noOverflow(); await screenshot('phone-story-detail');
+    await stage('Mission setup'); await evaluate(`document.querySelector('.mission-role-grid').scrollIntoView({block:'start'})`); await settle(); await noOverflow(); await screenshot('phone-roles');
+    await stage('Preview & publish'); await evaluate(`document.querySelector('.mission-preview').scrollIntoView({block:'start'})`); await settle(); await noOverflow(); await screenshot('phone-preview');
+    for (const width of [320, 768]) {
+        await send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 600 });
+        for (const name of ['Story map', 'Mission setup', 'Build steps', 'Preview & publish']) { await stage(name); await noOverflow(); }
+    }
+    await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await stage('Build steps');
     await evaluate('window.scrollTo(0,0)'); await noOverflow(); await screenshot('phone-overview');
     await evaluate(`document.querySelector('.mission-step-list button').click()`);
     await waitFor(`document.activeElement?.classList.contains('mission-step-panel')`);
