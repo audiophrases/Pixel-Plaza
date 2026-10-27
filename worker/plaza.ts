@@ -5,7 +5,7 @@ import { MIN_WORDS, checkGrammar } from './grammar.ts';
 import { languageHelp } from './aiHelp.ts';
 import { moderate, type Moderation } from './moderation.ts';
 import { SafetyIncidents, type Incident } from './incidents.ts';
-import { harmFrom, slurIn, type Harm } from '../shared/safety.ts';
+import { harmFrom, localHarm, type Harm } from '../shared/safety.ts';
 import { BlockedWords } from './blockedWords.ts';
 import { blockedIn, repeated, taskWordSet, type BlockedStatus, type Term } from '../shared/blockedWords.ts';
 import { isGlitch } from '../shared/tidy.ts';
@@ -60,6 +60,7 @@ const PLAYS_SHOWN = 300;
 const REPEAT_WINDOW_MS = 5 * 60 * 1000; // what the whole plaza wrote lately, to find what everyone is repeating
 const REPEAT_SHARE = 0.2; // of the students here (three at least) writing the same thing to everyone
 const BLOCKED_NOTICE = 'Not sent: your teacher blocked that for this lesson.';
+const SAFETY_RETRY = 'Safety check unavailable. Your message was not sent. Please try again in a moment.';
 
 // Why an exchange with the online server stopped, as the laptop reports it.
 class SyncStopped extends Error {
@@ -1954,25 +1955,41 @@ export class PlazaRoom extends DurableObject<Env> {
         this.refreshBoard(seat.game);
     }
 
-    // A hint before sending, never a block: whatever goes wrong, the answer is "fine".
+    // A hint before sending. Only a positive safety clearance may reach the
+    // grammar model; skipped help is not permission to post the message.
     private async grammar(ws: WebSocket, seat: Seat, id: unknown, text: unknown, attemptId?: string): Promise<void> {
         const audit = typeof text === 'string' ? this.beginAttempt(seat, text, 'chat', attemptId) : null;
         const now = Date.now();
         let answer: Awaited<ReturnType<typeof checkGrammar>> = { ok: true };
+        let safetyReason: string | undefined;
         if (typeof text === 'string' && now - (seat.lastCheck ?? 0) >= CHECK_GAP_MS && this.isOpen()) {
             seat.lastCheck = now;
             ws.serializeAttachment(seat);
             // Never a hint for something harmful: the AI would rewrite it into better English. It is reported instead.
             // A short message gets no hint anyway, and is checked when it is sent.
-            const harm = slurIn(text) ? 'hate' : text.trim().split(/\s+/).length >= MIN_WORDS ? await this.harmOf(text) : null;
-            if (harm) this.flagHarm(seat, harm, text, audit);
-            // Nor for a word the teacher blocked: it will not be sent.
-            else if (!await this.blockedTerm(seat.game, text)) answer = await checkGrammar(text, this.env);
+            const harm = localHarm(text);
+            if (harm) {
+                this.flagHarm(seat, harm, text, audit);
+                safetyReason = `Safety filter: ${harm}; grammar skipped.`;
+            } else if (chatProblem(text) || await this.blockedTerm(seat.game, text)) {
+                safetyReason = 'Message filter: grammar skipped.';
+            } else if (text.trim().split(/\s+/).length >= MIN_WORDS && text.length <= 200) {
+                const verdict = await this.moderated(text);
+                if (verdict.result === 'flagged') {
+                    this.flagHarm(seat, harmFrom(verdict.categories), text, audit);
+                    safetyReason = `Safety filter: ${verdict.categories.join(', ')}; grammar skipped.`;
+                } else if (verdict.result === 'clean') {
+                    answer = await checkGrammar(text, this.env);
+                    safetyReason = 'Safety check: clean; no grammar hint.';
+                } else {
+                    safetyReason = `Safety check unavailable (${verdict.result === 'unchecked' ? verdict.reason : 'not configured'}); grammar skipped.`;
+                }
+            }
         }
         if (audit) {
             const existing = this.assistance.get(audit);
             if (existing && ['submitted', 'language-checked', 'hint-offered'].includes(existing.status)) {
-                this.assistance.update(audit, answer.ok ? 'language-checked' : 'hint-offered', answer.ok ? undefined : answer.why, answer.ok ? existing.correction : answer.corrected);
+                this.assistance.update(audit, answer.ok ? 'language-checked' : 'hint-offered', answer.ok ? safetyReason : `Safety check: clean. ${answer.why}`, answer.ok ? existing.correction : answer.corrected);
                 if (!answer.ok && !existing.correction) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Grammar hint: ${answer.why} Try: “${answer.corrected}”`, String(text));
             }
         }
@@ -1993,9 +2010,11 @@ export class PlazaRoom extends DurableObject<Env> {
         return verdict;
     }
 
-    // The harm in a message, if any: a slur from the list, or what OpenAI's moderation found.
+    // Local classroom rules or the harm OpenAI positively identified. This
+    // incident helper does not grant safety clearance for grammar or delivery.
     private async harmOf(text: string): Promise<Harm | null> {
-        if (slurIn(text)) return 'hate';
+        const harm = localHarm(text);
+        if (harm) return harm;
         const verdict = await this.moderated(text);
         return verdict.result === 'flagged' ? harmFrom(verdict.categories) : null;
     }
@@ -2128,7 +2147,7 @@ export class PlazaRoom extends DurableObject<Env> {
         let term = typeof value === 'string' ? await this.blockedTerm(seat.game, value) : null;
         if (term && unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
         // On the teacher's laptop every word must be English, whatever the page did.
-        if (typeof value === 'string' && this.env.LAN_URL && !slurIn(value) && !term) {
+        if (typeof value === 'string' && this.env.LAN_URL && !localHarm(value) && !term) {
             const { notEnglish } = await import('./english.ts');
             const words = notEnglish(value, this.englishNames(seat.game));
             if (unavailable()) { refused('Chat is unavailable right now.', 'unavailable'); return reply('warning', 'Chat is unavailable right now.'); }
@@ -2157,13 +2176,14 @@ export class PlazaRoom extends DurableObject<Env> {
         let activityProblem = this.identityChatProblem(seat.game, seat.studentKey, value);
         let problem = term ? BLOCKED_NOTICE : chatProblem(value) ?? activityProblem;
         let flag: string | null = null;
+        let safetyFailure = 'not configured';
         let cleared = false; // OpenAI looked at it and found nothing
-        let harm: Harm | null = typeof value === 'string' && slurIn(value) ? 'hate' : null;
+        let harm: Harm | null = localHarm(value);
         if (!problem) {
             const verdict = await this.moderated(value);
             cleared = verdict.result === 'clean';
             if (verdict.result === 'flagged') { problem = 'That message cannot be sent. Please rewrite it.'; flag = verdict.categories.join(', '); harm = harmFrom(verdict.categories); }
-            else if (verdict.result === 'unchecked') flag = 'moderation unavailable';
+            else if (verdict.result === 'unchecked') { flag = 'moderation unavailable'; safetyFailure = verdict.reason; }
             // The teacher may have blocked a word it says while OpenAI looked at it.
             term = await this.blockedTerm(seat.game, value);
             if (term) problem = BLOCKED_NOTICE;
@@ -2178,6 +2198,12 @@ export class PlazaRoom extends DurableObject<Env> {
         if (activityProblem && !term) {
             problem = activityProblem;
             note = [note, `Activity rule — Who am I?: ${activityProblem}`].filter(Boolean).join('\n');
+        }
+        // Automatic mode must not turn an outage into an approval queue. Keep
+        // the audited attempt, return the draft to its writer and ask for retry.
+        if (!problem && !cleared && !valid && this.mode() === 'review') {
+            refused(`${SAFETY_RETRY} (${safetyFailure})`, 'not-sent');
+            return reply('warning', SAFETY_RETRY);
         }
         // Review mode posts what OpenAI cleared, nearby, for everyone or whisper. A witness exchange (the only caller
         // that passes `valid`) always waits: the teacher's approval is part of that activity.

@@ -39,6 +39,21 @@ export function slurIn(text: string): string | null {
     return words(text).find(word => SLURS.some(pattern => pattern.test(word))) ?? null;
 }
 
+// A small classroom backstop, independent of the remote classifier. Explicit
+// sexual terms are stopped outright; ambiguous body words need a sexual action
+// in the same message, so names, animals and ordinary health language still work.
+const EXPLICIT_SEXUAL = /^(?:blowjobs?|handjobs?|porn(?:o|os|ography|ographic)?|masturbat(?:e|es|ed|ing|ion)|wank(?:s|er|ers|ed|ing)?|cum(?:s|ming|shot|shots)?)$/;
+const SEXUAL_BODY = /^(?:dicks?|cocks?|puss(?:y|ies)|penis(?:es)?|vaginas?|genitals?)$/;
+const SEXUAL_ACTION = /^(?:suck(?:s|ed|ing)?|lick(?:s|ed|ing)?|fuck(?:s|ed|ing)?|rid(?:e|es|ing)|stro(?:ke|kes|king))$/;
+
+export function localHarm(text: string): Harm | null {
+    if (slurIn(text)) return 'hate';
+    const tokens = words(text);
+    if (tokens.some(word => EXPLICIT_SEXUAL.test(word))
+        || (tokens.some(word => SEXUAL_BODY.test(word)) && tokens.some(word => SEXUAL_ACTION.test(word)))) return 'sexual';
+    return null;
+}
+
 // A harmful thing a student tried to send, as the teacher sees it: grouped per student and kind, with a count.
 export type Incident = { id: string; studentKey: string; name: string; harm: Harm; texts: string[]; count: number; firstTs: number; lastTs: number };
 

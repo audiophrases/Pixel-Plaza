@@ -195,7 +195,9 @@ The choice is made when the game is created and applies to that game only.
 
 ## Safety incidents
 
-Slurs about who people are (race, origin, sexuality, gender, disability), in English, Spanish and Catalan, are stopped however they are spelt (`n1gga`, `n i g g a`, stand-ins such as `nigh`), never get a spelling suggestion, and the student is told only that the word is not allowed. The list is in `shared/safety.ts`. With an OpenAI key, threats, sexual content, bullying and self-harm are caught too, including in messages the English word check had already stopped, and no grammar hint is ever made from them.
+The local filter catches listed slurs about race, origin, sexuality, gender and disability in English, Spanish and Catalan, including disguises such as `n1gga`, `n i g g a` and `nigh`. It also blocks explicit sexual terms and sexual-action/body-word combinations without relying on an AI verdict. The rules are in `shared/safety.ts`. With an OpenAI key, moderation additionally checks for threats, sexual content, bullying and self-harm, including attempts the English word check stopped. Grammar help requires a positive clean safety verdict; blocked or unchecked text is never sent to the grammar model. These checks reduce risk but cannot guarantee that every harmful message is identified.
+
+In **Post, then review**, a failed or timed-out safety check leaves the message unsent and asks the student to retry; it does not add it to your approval queue. The attempt and failure reason remain in the student's history. **Approve first** continues to queue messages for teacher review. Private messages to the teacher remain available for asking for help.
 
 Each one is a **🚨 incident** at the top of **Needs you**, grouped per student and kind with a count and their latest words, with a higher double beep and 🚨 on the student's face. Nothing happens to the student unless you act: reply privately, **🤐** mute their chat, or **✓** mark it seen. Self-harm also says to check on the student in person.
 

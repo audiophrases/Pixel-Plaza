@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { harmFrom, slurIn } from '../../shared/safety.ts';
+import { harmFrom, localHarm, slurIn } from '../../shared/safety.ts';
 import { SafetyIncidents } from '../incidents.ts';
 
 test('slurs are caught however they are spelt, and ordinary words are not', () => {
@@ -22,6 +22,19 @@ test("OpenAI's categories are read as the most serious harm", () => {
     assert.equal(harmFrom(['hate']), 'hate');
     assert.equal(harmFrom(['harassment']), 'harassment');
     assert.equal(harmFrom(['violence/graphic']), 'violence');
+});
+
+test('the local classroom filter catches explicit sexual phrases without blocking ordinary names or health language', () => {
+    for (const text of ['i suck dick like a proffesional', 'i suck proffessors dick for good grade',
+        'suck d1ck', 's*u*c*k d.i.c.k', 's u c k my d i c k', 'porn', 'bl0wjob']) {
+        assert.equal(localHarm(text), 'sexual', text);
+    }
+    for (const text of ['I suck at this game', 'Dick is my uncle', 'Charles Dickens wrote books',
+        'The peacock is blue', 'The cock crows in the morning', 'I am learning about human anatomy',
+        'My arm hurts', 'I ride my bike', 'I like popcorn', 'The dog licks its paw']) {
+        assert.equal(localHarm(text), null, text);
+    }
+    assert.equal(localHarm('n1gga'), 'hate');
 });
 
 function incidents() {

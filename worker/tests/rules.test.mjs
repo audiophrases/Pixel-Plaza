@@ -5,6 +5,7 @@ import { SPAWN, chatProblem, clampPosition, isBlocked, laptopOrigin, plazaName, 
 test('chat validation blocks invalid content and caps length', () => {
     assert.match(chatProblem('nobody likes you'), /rewrite/);
     assert.match(chatProblem('shit'), /rewrite/);
+    assert.match(chatProblem('suck d1ck'), /rewrite/);
     assert.match(chatProblem('x'.repeat(201)), /1–200/);
     assert.equal(chatProblem('Hello class!'), null);
 });

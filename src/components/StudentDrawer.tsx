@@ -30,7 +30,7 @@ type Props = {
 const MARK: Record<string, [string, string]> = {
   approved: ['✓', 'Posted'], delivered: ['✓', 'Delivered'], 'teacher-inbox': ['✓', 'Sent to you'], sent: ['✓', 'Sent'], pending: ['🕓', 'Waiting for you'],
   blocked: ['⛔', 'Blocked'], rejected: ['✕', 'Not posted'], removed: ['🗑', 'Taken down'], 'language-blocked': ['✋', 'Stopped by the word check'],
-  'hint-offered': ['💬', 'Grammar hint shown, not sent'], 'language-checked': ['…', 'Checked, not sent'], submitted: ['…', 'Not sent'], 'not-sent': ['…', 'Not sent'],
+  'hint-offered': ['💬', 'Grammar hint generated, not sent'], 'language-checked': ['…', 'Checked, not sent'], submitted: ['…', 'Not sent'], 'not-sent': ['…', 'Not sent'],
   'rate-limited': ['⏱', 'Too fast, not sent'], requested: ['🙋', 'Asked for help'], 'ai-help': ['🤖', 'AI tip given'], 'help-requested': ['🙋', 'Asked for help'],
 };
 

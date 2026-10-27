@@ -1453,11 +1453,14 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
         assert.deepEqual([whispered.whisper, whispered.to], [true, 'Sam']);
         assert.equal((await entries()).find(e => e.text === 'Psst, a whisper').status, 'approved');
 
-        // ...but not what OpenAI could not check.
+        // An outage returns the draft for retry instead of creating an approval queue.
         await pause(1600);
-        assert.match((await send('outage again')).text, /approval/);
+        assert.match((await send('outage again')).text, /not sent.*try again/i);
         const waiting = (await entries()).filter(e => e.status === 'pending').map(e => e.text).sort();
-        assert.deepEqual(waiting, ['outage again']);
+        assert.deepEqual(waiting, []);
+        assert.equal((await entries()).some(e => e.text === 'outage again'), false);
+        const attempts = (await api(base, '/api/teacher/attempts?studentKey=stu_a', { session })).body.attempts;
+        assert.ok(attempts.some(a => a.text === 'outage again' && a.status === 'not-sent' && /HTTP 500/.test(a.reason)));
 
         // The teacher can take a posted message down; it leaves every screen.
         await api(base, '/api/teacher/review', { session, body: { id: live.id, approve: false } });
@@ -3107,6 +3110,92 @@ test('teacher guides are private and follow published previews, pinned games, li
         assert.equal((await teacher('campaign-guide')).status, 404);
     } finally {
         for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
+test('automatic chat safety: local blocks survive missed API flags, outages ask for retry, and normal chat posts without approval', { timeout: 120000 }, async () => {
+    const calls = []; let recovered = false;
+    const openai = http.createServer(async (req, res) => {
+        let raw = ''; for await (const chunk of req) raw += chunk;
+        const body = JSON.parse(raw); calls.push({ url: req.url, body });
+        res.setHeader('content-type', 'application/json');
+        if (req.url === '/v1/moderations') {
+            if (body.input.includes('outage') && !recovered) { res.statusCode = 500; return res.end('{}'); }
+            // Deliberately misses all harmful content: the local rule must still stop it.
+            return res.end(JSON.stringify({ results: [{ flagged: false, categories: {} }] }));
+        }
+        if (req.url === '/v1/decisions') return res.end(JSON.stringify({ answers: [] })); // participation scoring
+        const text = JSON.parse(body.messages[1].content).message;
+        res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+            ok: false, corrected: text.replace('She go ', 'She goes '), why: 'Use goes with she.',
+        }) } }] }));
+    });
+    await new Promise(resolve => openai.listen(0, '127.0.0.1', resolve));
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-auto-safety-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo,
+        { OPENAI_API_KEY: 'test-key', OPENAI_BASE_URL: `http://127.0.0.1:${openai.address().port}`, OPENAI_GRAMMAR_GATE: '0' });
+    let alex, sam;
+    try {
+        const { base } = plaza;
+        const session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+        PIN = (await teacher('class', { open: true })).body.pin;
+        assert.equal((await teacher('status')).body.mode, 'review');
+        alex = await enter(base, 'signed-a', null); sam = await enter(base, 'signed-b', null);
+        const pause = () => new Promise(resolve => setTimeout(resolve, 1600));
+        const attempt = async (id, text, to) => {
+            alex.send({ t: 'attempt', id, text, source: 'chat', to });
+            await alex.next(m => m.t === 'attempt-recorded' && m.id === id);
+            alex.send({ t: 'check', id, text, attemptId: id });
+            return alex.next(m => m.t === 'checked' && m.id === id);
+        };
+        const bad = 'i suck proffessors dick for good grade';
+        for (const [index, to] of [undefined, 'everyone', sam.me.id].entries()) {
+            await pause();
+            const id = `local-block-${index}`;
+            const before = calls.length;
+            assert.equal((await attempt(id, bad, to)).ok, true, 'no grammar suggestion');
+            assert.equal(calls.length, before, 'local blocking needs neither classifier nor grammar API');
+            alex.send({ t: 'chat', cid: id, text: bad, to, attemptId: id });
+            assert.match((await alex.next(m => m.t === 'notice' && m.cid === id)).text, /rewrite/);
+            const status = (await teacher('status')).body;
+            assert.equal(status.entries.filter(e => e.text === bad).every(e => e.status === 'blocked'), true);
+            assert.equal(sam.inbox.some(m => m.t === 'chat' && m.text === bad), false, 'no classmate receives it');
+            assert.equal(status.incidents.find(i => i.harm === 'sexual').count, index + 1, 'check and send count one incident per attempt');
+        }
+        await pause();
+        const outage = 'She go to school during outage';
+        const before = calls.filter(call => call.url === '/v1/chat/completions').length;
+        assert.equal((await attempt('outage-check', outage)).ok, true, 'no hint without a safety clearance');
+        assert.equal(calls.filter(call => call.url === '/v1/chat/completions').length, before);
+        alex.send({ t: 'chat', cid: 'outage-send', text: outage, attemptId: 'outage-check', to: sam.me.id });
+        const refusal = await alex.next(m => m.t === 'notice' && m.cid === 'outage-send');
+        assert.equal(refusal.level, 'warning'); assert.match(refusal.text, /not sent.*try again/i);
+        let status = (await teacher('status')).body;
+        assert.equal(status.entries.some(e => e.status === 'pending' || e.text === outage), false, 'no approval queue is created');
+        assert.equal(sam.inbox.some(m => m.t === 'chat' && m.text === outage), false);
+        const audit = (await teacher('attempts?studentKey=stu_a')).body.attempts.find(a => a.text === outage);
+        assert.equal(audit.status, 'not-sent'); assert.match(audit.reason, /HTTP 500/);
+
+        // The student can retry the same draft after recovery without any teacher action.
+        recovered = true; await pause();
+        alex.send({ t: 'chat', cid: 'retry', text: outage, to: sam.me.id });
+        assert.equal((await sam.next(m => m.t === 'chat' && m.text === outage)).text, outage);
+        await alex.next(m => m.t === 'result' && m.cid === 'retry');
+
+        await pause();
+        const ordinary = 'She go to the park today';
+        assert.equal((await attempt('ordinary-check', ordinary)).corrected, 'She goes to the park today');
+        alex.send({ t: 'chat', cid: 'ordinary-send', text: ordinary, attemptId: 'ordinary-check' });
+        await alex.next(m => m.t === 'result' && m.cid === 'ordinary-send');
+        status = (await teacher('status')).body;
+        assert.equal(status.entries.find(e => e.text === ordinary).status, 'approved');
+        assert.equal(status.entries.some(e => e.status === 'pending'), false);
+    } finally {
+        alex?.ws.close(); sam?.ws.close(); await plaza.stop();
+        await new Promise(resolve => openai.close(resolve));
         await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
     }
 });

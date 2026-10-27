@@ -3,7 +3,7 @@
 
 import { MAP_SIZE, SPAWN, isBlocked } from '../shared/plazaMap.ts';
 import { isEnglishVoice } from '../shared/voices.ts';
-import { slurIn } from '../shared/safety.ts';
+import { localHarm } from '../shared/safety.ts';
 
 export { MAP_SIZE, SPAWN, isBlocked };
 // The emotes everyone has; levels add more (shared/levels.ts).
@@ -50,7 +50,7 @@ export function chatProblem(value: unknown): string | null {
         return 'Control characters are not allowed.';
     }
     const words = text.toLowerCase().match(/[\p{L}]+/gu) || [];
-    if (words.some(word => blockedWords.has(word)) || blockedPhrases.some(pattern => pattern.test(text)) || slurIn(text)) {
+    if (words.some(word => blockedWords.has(word)) || blockedPhrases.some(pattern => pattern.test(text)) || localHarm(text)) {
         return 'That message cannot be sent. Please rewrite it.';
     }
     return null;
