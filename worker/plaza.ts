@@ -593,8 +593,8 @@ export class PlazaRoom extends DurableObject<Env> {
         };
     }
 
-    // ---------- The plaza socket ----------
-
+    // One student's conversations for the teacher's drawer: a thread for each person or place they wrote to, what they
+    // wrote (sent or not), what classmates whispered to them, and the teacher's private messages.
     conversations(token: string, studentKey: string): Conversations | { error: string; status: number } {
         if (!token || !this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray().length) return { error: 'Please sign in again.', status: 401 };
         const game = this.activeGame();
@@ -609,7 +609,8 @@ export class PlazaRoom extends DurableObject<Env> {
             `SELECT id, ts, source, status, text, target, reason, chat_id FROM assistance_attempts WHERE game_id = ? AND student_key = ?
              AND source IN ('chat', 'interview', 'help', 'teacher') ORDER BY ts DESC, id DESC LIMIT 300`, game, studentKey).toArray()) {
             const teacher = row.source === 'teacher' || row.source === 'help' || row.target === 'Teacher';
-            const thread = teacher ? 'teacher' : row.target ? `p:${keyOf.get(row.target) ?? row.target}` : row.chat_id && toEveryone.has(row.chat_id) ? 'everyone' : 'nearby';
+            const everyone = row.target === 'Everyone' || (!row.target && !!row.chat_id && toEveryone.has(row.chat_id));
+            const thread = teacher ? 'teacher' : everyone ? 'everyone' : row.target ? `p:${keyOf.get(row.target) ?? row.target}` : 'nearby';
             lines.push({ id: row.id, at: row.ts, thread, mine: row.source !== 'teacher', text: row.text, status: row.status, reason: row.reason });
         }
         // What classmates wrote to them privately, posted or waiting.
@@ -621,6 +622,8 @@ export class PlazaRoom extends DurableObject<Env> {
         lines.sort((a, b) => a.at - b.at);
         return { studentKey, lines, names: Object.fromEntries(names) };
     }
+
+    // ---------- The plaza socket ----------
 
     teacherAttempts(token: string, studentKey?: string, cursor?: string | null, gameId?: string): AttemptPage | { error: string; status: number } {
         if (!token || !this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray().length) return { error: 'Please sign in again.', status: 401 };

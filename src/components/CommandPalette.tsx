@@ -71,8 +71,15 @@ export default function CommandPalette({ open, onClose, commands, students, forS
       const recent = readRecent().map(id => commands.find(command => command.id === id)).filter((command): command is Command => !!command);
       return [...recent, ...commands.filter(command => !recent.includes(command))].slice(0, 12);
     }
-    // A student's name first: everything that can be done with them.
-    const people = named(words.join(' ')).slice(0, 3).flatMap(student => forStudent(student, fill));
+    // A student's name first: everything that can be done with them. A name among other words ("mute ana") gives
+    // only what the other words describe.
+    let people = named(words.join(' ')).slice(0, 3).flatMap(student => forStudent(student, fill));
+    const name = people.length || words.length < 2 ? -1 : words.findIndex(word => named(word).length > 0);
+    if (name >= 0) {
+      const rest = words.filter((_, index) => index !== name);
+      people = named(words[name]).slice(0, 3).flatMap(student => forStudent(student, fill))
+        .filter(command => rest.every(word => fold(`${command.label} ${command.keywords ?? ''}`).includes(word)));
+    }
     const matches = commands.filter(command => words.every(word => fold(`${command.label} ${command.keywords ?? ''}`).includes(word)));
     return [...people, ...matches].slice(0, 40);
     // eslint-disable-next-line react-hooks/exhaustive-deps

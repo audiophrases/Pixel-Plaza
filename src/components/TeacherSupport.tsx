@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AttemptPage, HelpAlert, HelpTopic, MessageAttempt, TeacherSupport as Support } from '../../shared/support';
+import type { AttemptPage, MessageAttempt, TeacherSupport as Support } from '../../shared/support';
 import './TeacherSupport.css';
 import { groupRepeats, tidy } from '../../shared/tidy';
 
@@ -10,15 +10,10 @@ type Props = {
   support: Support;
   students: Student[];
   who: (studentKey: string, name: string) => string;
-  action: (path: string, body: object) => Promise<boolean>;
   failed: (cause: unknown) => void;
-  embedded?: boolean; // inside a card that already has the heading and count
+  onStudent: (studentKey: string) => void; // opens that student beside the class
 };
 
-const topics: Record<HelpTopic, string> = {
-  writing: 'Expressing an idea', instructions: 'Game instructions',
-  'classmate-message': 'Understanding a classmate', other: 'Something else'
-};
 const sources: Record<MessageAttempt['source'], string> = {
   chat: 'Chat', interview: 'Witness exchange', answer: 'Journal answer',
   warmup: 'Warm-up', teacher: 'Private teacher message', help: 'Help request'
@@ -45,30 +40,17 @@ function mergeAttempts(current: MessageAttempt[], incoming: MessageAttempt[]) {
   return [...merged.values()].sort((a, b) => b.timestamp - a.timestamp || b.id.localeCompare(a.id));
 }
 
-export default function TeacherSupport({ gameId, token, support, students, who, action, failed, embedded = false }: Props) {
-  const [recipient, setRecipient] = useState('');
-  const [message, setMessage] = useState('');
-  const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState('');
-  const [changing, setChanging] = useState<string | null>(null);
-  const [showResolved, setShowResolved] = useState(false);
+// Everything students submitted in this game, blocked and unsent attempts too, and the teacher's private replies:
+// for everyone or one student, newest first, older pages on request. What needs the teacher now is in Needs you.
+// The page keys it by game, so another game starts over with every student.
+export default function TeacherSupport({ gameId, token, support, students, who, failed, onStudent }: Props) {
   const [historyStudent, setHistoryStudent] = useState('');
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [attempts, setAttempts] = useState<MessageAttempt[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
   const context = useRef<{ controller: AbortController; loadedOlder: boolean; loadingOlder: boolean; refreshing: boolean } | null>(null);
   const refreshHistory = useRef<(() => Promise<void>) | null>(null);
-
-  useEffect(() => {
-    setRecipient('');
-    setMessage('');
-    setSent('');
-    setHistoryStudent('');
-    setShowResolved(false);
-    setHistoryOpen(false);
-  }, [gameId]);
 
   // Each game/student gets its own request context. Old responses cannot replace a new selection.
   const readHistory = useCallback(async (cursor: string | null, signal: AbortSignal): Promise<AttemptPage> => {
@@ -145,133 +127,41 @@ export default function TeacherSupport({ gameId, token, support, students, who, 
     }
   };
 
-  const selectStudent = (studentKey: string) => {
-    if (studentKey !== recipient) setMessage('');
-    setRecipient(studentKey);
-    setHistoryStudent(studentKey);
-    setHistoryOpen(true);
-    setSent('');
-    document.getElementById('teacher-help-message')?.focus();
-  };
-
-  const updateAlert = async (alert: HelpAlert, status: 'acknowledged' | 'resolved') => {
-    setChanging(alert.id);
-    try { await action('help-status', { id: alert.id, status, gameId }); }
-    finally { setChanging(null); }
-  };
-
-  const sendMessage = async () => {
-    if (!recipient || !message.trim() || sending) return;
-    setSending(true);
-    setSent('');
-    try {
-      if (await action('help-message', { studentKey: recipient, text: message, gameId })) {
-        setMessage('');
-        setSent('Private message sent.');
-        void refreshHistory.current?.();
-      }
-    } finally { setSending(false); }
-  };
-
-  const active = support.alerts.filter(alert => alert.status !== 'resolved');
-  const alerts = showResolved ? support.alerts : active;
   const teacherRecipient = (attempt: MessageAttempt) => who(attempt.studentKey,
     students.find(student => student.studentKey === attempt.studentKey)?.name
     ?? support.alerts.find(alert => alert.studentKey === attempt.studentKey)?.name ?? 'Student');
 
-  return <section className={`teacher-support${embedded ? ' teacher-support-embedded' : ''}`} aria-labelledby={embedded ? undefined : 'teacher-support-heading'}>
-    <div className="teacher-support-heading">
-      {!embedded && <h2 id="teacher-support-heading">Student help {active.length > 0 && <span className="teacher-help-count">{active.length} to follow up</span>}</h2>}
-      <a href="#teacher-help-history" onClick={() => setHistoryOpen(true)}>Message history</a>
-    </div>
-    <p>Students can ask for help. Three related language blocks, grammar hints or incorrect answers within five minutes suggest a check-in. You decide what support they need.</p>
+  return <section className="teacher-support" aria-label="Message history">
+    <p>Everything students submitted, including attempts that were blocked or not sent, and your private replies.</p>
     {support.ai && <p className="teacher-ai-count">AI help requests used: <strong>{support.ai.used} / {support.ai.students}</strong> students in this session.</p>}
-    {active.length === 0 && <p>No students waiting for help.</p>}
-    {support.alerts.some(alert => alert.status === 'resolved') && <label className="teacher-help-toggle">
-      <input type="checkbox" checked={showResolved} onChange={event => setShowResolved(event.target.checked)} /> Show completed check-ins
-    </label>}
-    <div className="teacher-help-alerts">{alerts.map(alert => <article key={alert.id} className={`teacher-help-alert teacher-help-${alert.status}`}>
-      <div className="teacher-help-alert-heading">
-        <strong>{who(alert.studentKey, alert.name)}</strong>
-        <span>{alert.kind === 'requested' ? 'Asked for help' : 'Suggested check-in'} · {alert.status === 'acknowledged' ? 'Helping' : alert.status === 'resolved' ? 'Completed' : 'Waiting'}</span>
-      </div>
-      <p><strong>{topics[alert.topic]}</strong>{alert.note && <> · {alert.note}</>}</p>
-      {alert.ai && <div className="teacher-note"><strong>{alert.ai.pending ? 'AI hint in progress…' : 'AI feedback'}</strong>
-        {alert.ai.tip && <p>{alert.ai.tip}</p>}
-        <small>You can intervene or let the student continue.</small>
-      </div>}
-      <small>{time(alert.timestamp)}</small>
-      {alert.evidence.length > 0 && <details>
-        <summary>What prompted this check-in ({alert.evidence.length})</summary>
-        <ul>{alert.evidence.map((evidence, index) => <li key={`${evidence.timestamp}-${index}`}>
-          <span>{evidence.reason}</span> <small>{time(evidence.timestamp)}</small>
-          <blockquote>{evidence.text}</blockquote>
-        </li>)}</ul>
-      </details>}
-      <div className="teacher-actions">
-        <button type="button" disabled={sending} onClick={() => selectStudent(alert.studentKey)}>View messages &amp; help</button>
-        {alert.status === 'open' && <button type="button" disabled={changing !== null} onClick={() => void updateAlert(alert, 'acknowledged')}>I’m helping</button>}
-        {alert.status !== 'resolved' && <button type="button" disabled={changing !== null} onClick={() => void updateAlert(alert, 'resolved')}>Help completed / helped in person</button>}
-      </div>
-    </article>)}</div>
-
-    <form className="teacher-help-compose" onSubmit={event => { event.preventDefault(); void sendMessage(); }}>
-      <h3>Send private help</h3>
-      <p>Help a student express an idea or understand instructions and messages. Only that student sees your reply.</p>
-      <label htmlFor="teacher-help-recipient">Student</label>
-      <select id="teacher-help-recipient" value={recipient} disabled={sending} required onChange={event => {
-        if (event.target.value !== recipient) setMessage('');
-        setRecipient(event.target.value);
-        setHistoryStudent(event.target.value);
-        if (event.target.value) setHistoryOpen(true);
-        setSent('');
-      }}>
-        <option value="">Choose a student</option>
+    <div className="teacher-help-history-controls">
+      <label htmlFor="teacher-history-student">Show</label>
+      <select id="teacher-history-student" value={historyStudent} onChange={event => setHistoryStudent(event.target.value)}>
+        <option value="">All students</option>
         {students.map(student => <option key={student.studentKey} value={student.studentKey}>{who(student.studentKey, student.name)}</option>)}
       </select>
-      <label htmlFor="teacher-help-message">Your message</label>
-      <textarea id="teacher-help-message" value={message} disabled={sending} maxLength={1000} required rows={3}
-        placeholder="Tell me your idea. We can work out how to say it together."
-        onChange={event => { setMessage(event.target.value); setSent(''); }} />
-      <div className="teacher-help-send">
-        <button className="btn btn-primary" disabled={sending || !recipient || !message.trim()}>{sending ? 'Sending…' : 'Send private message'}</button>
-        <span role="status">{sent}</span>
+      <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => {
+        setLoading(true);
+        void refreshHistory.current?.();
+      }}>Refresh messages</button>
+    </div>
+    {historyError && <p className="teacher-error" role="alert">{historyError}</p>}
+    {!attempts.length && <p role="status">{loading ? 'Loading messages…' : 'No submitted messages yet.'}</p>}
+    {/* The same submission repeated (spam, or trying again) is one entry with a count. */}
+    <ol className="teacher-attempts">{groupRepeats(attempts, (a, b) => a.studentKey === b.studentKey && a.source === b.source && a.status === b.status && a.text.trim() === b.text.trim())
+      .map(({ item: attempt, count }) => <li key={attempt.id} className={`teacher-attempt teacher-attempt-${attempt.source}`}>
+      <div><strong>{attempt.source === 'teacher' ? 'Teacher' : who(attempt.studentKey, attempt.sender)}</strong>
+        {attempt.target && <> → {attempt.source === 'teacher' ? teacherRecipient(attempt) : attempt.target}</>}
+        <small>{time(attempt.timestamp)} · {sources[attempt.source]} · {statuses[attempt.status] ?? attempt.status.replaceAll('_', ' ').replaceAll('-', ' ')}</small>
       </div>
-    </form>
-
-    <details id="teacher-help-history" className="teacher-help-history" open={historyOpen}
-      onToggle={event => setHistoryOpen(event.currentTarget.open)}>
-      <summary>Submitted message history</summary>
-      <p>Review submitted chat, witness exchanges and answers, including attempts that were blocked or not sent. Private teacher replies are recorded here too.</p>
-      <div className="teacher-help-history-controls">
-        <label htmlFor="teacher-history-student">Show</label>
-        <select id="teacher-history-student" value={historyStudent} onChange={event => setHistoryStudent(event.target.value)}>
-          <option value="">All students</option>
-          {students.map(student => <option key={student.studentKey} value={student.studentKey}>{who(student.studentKey, student.name)}</option>)}
-        </select>
-        <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => {
-          setLoading(true);
-          void refreshHistory.current?.();
-        }}>Refresh messages</button>
-      </div>
-      {historyError && <p className="teacher-error" role="alert">{historyError}</p>}
-      {!attempts.length && <p role="status">{loading ? 'Loading messages…' : 'No submitted messages yet.'}</p>}
-      {/* The same submission repeated (spam, or trying again) is one entry with a count. */}
-      <ol className="teacher-attempts">{groupRepeats(attempts, (a, b) => a.studentKey === b.studentKey && a.source === b.source && a.status === b.status && a.text.trim() === b.text.trim())
-        .map(({ item: attempt, count }) => <li key={attempt.id} className={`teacher-attempt teacher-attempt-${attempt.source}`}>
-        <div><strong>{attempt.source === 'teacher' ? 'Teacher' : who(attempt.studentKey, attempt.sender)}</strong>
-          {attempt.target && <> → {attempt.source === 'teacher' ? teacherRecipient(attempt) : attempt.target}</>}
-          <small>{time(attempt.timestamp)} · {sources[attempt.source]} · {statuses[attempt.status] ?? attempt.status.replaceAll('_', ' ').replaceAll('-', ' ')}</small>
-        </div>
-        {attempt.objective && <p className="teacher-attempt-context">Task: {attempt.objective}</p>}
-        <p className="teacher-attempt-text">{attempt.text ? tidy(attempt.text) : <em>Empty submission</em>}{count > 1 && <strong className="teacher-attempt-times"> ×{count}</strong>}</p>
-        {attempt.finalText && attempt.finalText !== attempt.text && <p className="teacher-attempt-text"><strong>Revised submission:</strong> {attempt.finalText}</p>}
-        {attempt.reason && <p className="teacher-attempt-reason">Reason: {attempt.reason}</p>}
-        {attempt.correction && <p className="teacher-note">Language hint: {attempt.correction}</p>}
-        {attempt.source !== 'teacher' && <button type="button" disabled={sending} onClick={() => selectStudent(attempt.studentKey)}>Help this student</button>}
-      </li>)}</ol>
-      {next && <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => void loadOlder()}>{loading ? 'Loading…' : 'Load older messages'}</button>}
-      {attempts.length > 0 && !next && !loading && <p className="teacher-history-end">All submitted messages for this selection are shown.</p>}
-    </details>
+      {attempt.objective && <p className="teacher-attempt-context">Task: {attempt.objective}</p>}
+      <p className="teacher-attempt-text">{attempt.text ? tidy(attempt.text) : <em>Empty submission</em>}{count > 1 && <strong className="teacher-attempt-times"> ×{count}</strong>}</p>
+      {attempt.finalText && attempt.finalText !== attempt.text && <p className="teacher-attempt-text"><strong>Revised submission:</strong> {attempt.finalText}</p>}
+      {attempt.reason && <p className="teacher-attempt-reason">Reason: {attempt.reason}</p>}
+      {attempt.correction && <p className="teacher-note">Language hint: {attempt.correction}</p>}
+      {attempt.source !== 'teacher' && <button type="button" onClick={() => onStudent(attempt.studentKey)}>Open this student</button>}
+    </li>)}</ol>
+    {next && <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => void loadOlder()}>{loading ? 'Loading…' : 'Load older messages'}</button>}
+    {attempts.length > 0 && !next && !loading && <p className="teacher-history-end">All submitted messages for this selection are shown.</p>}
   </section>;
 }

@@ -8,6 +8,7 @@ import type { AvatarConfig } from '../utils/AvatarRenderer';
 import Face from './Face';
 import Correction from './Correction';
 import { correctionParts, correctionText } from '../../shared/diff';
+import { ago, scope } from './liveFormat';
 import './LiveClass.css';
 
 // The class as it happens, on one screen: everything that needs the teacher in one list, most urgent first, and the
@@ -32,18 +33,6 @@ type Props = {
   action: (path: string, body: object) => Promise<boolean>;
   selected: string | null;
   onSelect: (studentKey: string | null) => void;
-};
-
-// "now", "3m", "1h": how long something has waited, at a glance.
-export function ago(timestamp: number, now = Date.now()): string {
-  const seconds = Math.max(0, (now - timestamp) / 1000);
-  return seconds < 45 ? 'now' : seconds < 3600 ? `${Math.round(seconds / 60)}m` : `${Math.round(seconds / 3600)}h`;
-}
-
-// Who a message was for, as the students' chat shows it.
-export const scope = (entry: LiveEntry) => entry.target ? `🔒 ${entry.target}` : entry.everyone ? '📢 everyone' : '👥 nearby';
-export const outcome: Record<string, [string, string]> = {
-  approved: ['✓', 'Posted'], rejected: ['✕', 'Not posted'], removed: ['🗑', 'Removed'], blocked: ['⛔', 'Blocked'], pending: ['🕓', 'Waiting for you'],
 };
 
 type Evidence = HelpAlert['evidence'][number];
@@ -91,7 +80,7 @@ export default function LiveClass({ gameId, entries, alerts, incidents, online, 
   const [soundBusy, setSoundBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null); // the one item opened to its details
 
-  const waiting = entries.filter(entry => entry.status === 'pending');
+  const waiting = entries.filter(entry => entry.status === 'pending').sort((a, b) => a.timestamp - b.timestamp);
   const needing = alerts.filter(alert => alert.status !== 'resolved');
   // Most urgent first: harm, a student asking, a message waiting (oldest first), then a student who may be stuck.
   const asking = needing.filter(alert => alert.kind === 'requested').sort((a, b) => a.timestamp - b.timestamp);
@@ -291,11 +280,13 @@ export default function LiveClass({ gameId, entries, alerts, incidents, online, 
       <div className="live-heading"><h2>Class <span className="live-muted">{online.length} here</span></h2>
         <input type="search" className="live-heard-search" value={phrase} onChange={event => setPhrase(event.target.value)}
           placeholder="🔊 Heard something? Type it" aria-label="Find which devices read a phrase aloud" />
+      </div>
+      <div className="live-sound-control">
         <button type="button" className={`btn btn-sm ${allSoundOff ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={allSoundOff} disabled={soundBusy}
           onClick={() => void toggleAllSound()} title={allSoundOff ? 'Release the class sound lock. Individual locks and student mute choices stay in effect.' : 'Stop TTS and game sounds on all student devices, including late joiners.'}>
-          {allSoundOff ? '🔊 Restore sound' : '🔇 Mute all'}</button>
+          {allSoundOff ? '🔊 Restore student sound' : '🔇 Mute all student sound'}</button>
+        {allSoundOff && <p role="status">All student sound is off until you restore it.</p>}
       </div>
-      {allSoundOff && <p className="live-muted" role="status">All student sound is off until you restore it.</p>}
       {found.length > 0 && <ul className="live-heard" aria-label="Read aloud">{found.map(line => <li key={line.key}>
         <div className="live-heard-top"><q>{line.text}</q>
           {line.id ? person(line.senderKey, nameOf(line.senderKey)) : <span className="live-muted">🎙 voice test</span>}
@@ -315,7 +306,7 @@ export default function LiveClass({ gameId, entries, alerts, incidents, online, 
         const count = waitingFrom(student.studentKey);
         const away = !online.some(item => item.studentKey === student.studentKey);
         return <button key={student.studentKey} type="button" aria-pressed={selected === student.studentKey}
-          className={`live-tile${help?.status === 'open' ? ' live-tile-help' : ''}${away ? ' live-tile-away' : ''}`}
+          className={`live-tile${help?.status === 'open' || incidentOf(student.studentKey) ? ' live-tile-help' : ''}${away ? ' live-tile-away' : ''}`}
           onClick={() => onSelect(selected === student.studentKey ? null : student.studentKey)} title={`${who(student.studentKey, student.name)}${student.zone ? ` · ${student.zone}` : ''}`}>
           <Face player={student.look} name={student.name} />
           <span className="live-tile-name">{student.name}</span>

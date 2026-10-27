@@ -1,6 +1,6 @@
 import type { Incident } from '../../shared/safety';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { joinLink } from '../studentAuth';
 import { WARMUP_KINDS } from '../../shared/warmupKinds';
 import type { WarmupKind } from '../../shared/warmupKinds';
@@ -16,6 +16,10 @@ import { XP } from '../../shared/levels';
 import TeacherSupport from '../components/TeacherSupport';
 import ClassReport from '../components/ClassReport';
 import LiveClass, { type LiveSound } from '../components/LiveClass';
+import ChatLog, { type ChatFilter } from '../components/ChatLog';
+import StudentDrawer from '../components/StudentDrawer';
+import CommandPalette, { type Command, type PaletteStudent } from '../components/CommandPalette';
+import Face from '../components/Face';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; everyone?: boolean; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred?: boolean };
@@ -49,10 +53,16 @@ async function call<T>(path: string, init: RequestInit): Promise<T> {
 
 // How far a student sees, in map pixels: a few steps, from the whole map to a small circle
 const VISION_CHOICES: [number, string][] = [[0, 'Everyone'], [650, 'Wide'], [450, 'Medium'], [300, 'Small']];
+// The other teacher pages, in the ⋯ menu and in Ctrl+K.
+const PAGES: [string, string][] = [['/quest-library', 'Side quest library'], ['/warmup-studio', 'Warm-up editor'], ['/mission-studio', 'Mission Studio'], ['/studio', 'Theme studio'], ['/', 'Student entrance']];
+// The chat log's views, as Ctrl+K offers them: what the class is saying, at a glance.
+const CHAT_VIEWS: [ChatFilter, string, string][] = [['everyone', '📢', 'Everyone chat'], ['nearby', '👥', 'Nearby chat'], ['private', '🔒', 'Private messages'], ['blocked', '⛔', 'Blocked messages'], ['all', '💬', 'All chat']];
 
 export default function Teacher() {
+  const navigate = useNavigate();
   const [movingStudent, setMovingStudent] = useState(false);
   const [password, setPassword] = useState('');
+  // The student open in the drawer beside the class, and the one the map's spells work on.
   const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
   // The password is checked once; the session token carries the rest.
   const [token, setToken] = useState(readTeacherSession);
@@ -70,8 +80,13 @@ export default function Teacher() {
   const [copied, setCopied] = useState(''); // the PIN whose link was just copied
   const [vision, setVision] = useState(450); // how far students see in a new game, in map pixels
   const [randomNames, setRandomNames] = useState(true); // students get made-up names, and the teacher sees who they are
-  const [openCards, setOpenCards] = useState(readOpenCards); // which cards the teacher left open or closed
-  useEffect(() => { try { localStorage.setItem(CARDS_KEY, JSON.stringify(openCards)); } catch { /* remembered for this visit only */ } }, [openCards]);
+  // Everything beyond the class now is a tab, one open at a time or none; the last one is remembered on this computer.
+  const [tab, setTab] = useState<TabId | null>(readTab);
+  useEffect(() => { try { if (tab) localStorage.setItem(TAB_KEY, tab); else localStorage.removeItem(TAB_KEY); } catch { /* remembered for this visit only */ } }, [tab]);
+  const [chatFilter, setChatFilter] = useState<ChatFilter>('all');
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menu = useRef<HTMLDivElement>(null);
 
   const request = useCallback((path: string, body?: object) => call<Status>(path, {
     method: body ? 'POST' : 'GET',
@@ -109,6 +124,7 @@ export default function Teacher() {
       storeTeacherSession(session);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Sign-in failed.'); }
   };
+  const signOut = () => { storeTeacherSession(''); setStatus(null); setToken(''); setMenuOpen(false); setPaletteOpen(false); setSelectedStudent(null); };
 
   // tester.bat opens /teacher?autologin=tester; its throwaway server's password is "tester".
   useEffect(() => {
@@ -141,7 +157,10 @@ export default function Teacher() {
       setCopied(pin);
       setCopyNote('');
       window.setTimeout(() => setCopied(''), 2500);
-    } else setCopyNote('Your browser would not copy it. Select the link above and press Ctrl+C.');
+    } else {
+      setCopyNote('Your browser would not copy it. Select the link above and press Ctrl+C.');
+      setTab('games'); // where the link is, to copy by hand
+    }
   };
 
   // The plaza may show made-up names; the teacher always sees the real one beside them.
@@ -151,7 +170,7 @@ export default function Teacher() {
   };
 
   // Oldest waiting message first, like a queue.
-  const waiting = status ? status.entries.filter(entry => entry.status === 'pending').reverse() : [];
+  const waiting = status ? status.entries.filter(entry => entry.status === 'pending').sort((a, b) => a.timestamp - b.timestamp) : [];
   const oldest = waiting[0];
   const waitingBefore = useRef(0);
   const helpBefore = useRef<Set<string>>(new Set());
@@ -224,6 +243,7 @@ export default function Teacher() {
     for (const alert of status.support?.alerts ?? []) if (!supportStudents.has(alert.studentKey)) supportStudents.set(alert.studentKey, alert);
     for (const entry of status.entries) if (!supportStudents.has(entry.studentKey)) supportStudents.set(entry.studentKey, { studentKey: entry.studentKey, name: entry.sender });
   }
+  const isOnline = (studentKey: string) => !!status?.online.some(student => student.studentKey === studentKey);
 
   // A approves and R rejects the oldest waiting message.
   useEffect(() => {
@@ -237,346 +257,415 @@ export default function Teacher() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  // Every section is a card that folds away. The bar at the top lists them with a count each: red for something
-  // waiting on the teacher, grey for information. A card's open or closed state is remembered on this computer.
-  const choose = (id: CardId) => {
-    setOpenCards(previous => ({ ...previous, [id]: true }));
-    window.requestAnimationFrame(() => document.getElementById(`card-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-  };
-  const toggle = (id: CardId, open: boolean) => setOpenCards(previous => previous[id] === open ? previous : { ...previous, [id]: open });
+  // Ctrl+K (or / when nothing is being typed) opens the search box; Ctrl+K again closes it.
+  useEffect(() => {
+    if (!token) return;
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPaletteOpen(open => !open);
+      } else if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !(event.target as HTMLElement | null)?.closest('input, textarea, select')) {
+        event.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [token]);
+  const closePalette = useCallback(() => setPaletteOpen(false), []);
+  const closeDrawer = useCallback(() => setSelectedStudent(null), []);
+
+  // The ⋯ menu closes with a click anywhere else, or Esc.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClick = (event: MouseEvent) => { if (!menu.current?.contains(event.target as Node)) setMenuOpen(false); };
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenuOpen(false); };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onClick); document.removeEventListener('keydown', onKey); };
+  }, [menuOpen]);
+
+  // One row of tabs for everything that is not the class now. A word or number beside a title says how it stands.
   const campaign = status?.campaign ?? null;
-  const cards: CardInfo[] = !status ? [] : [
+  const tabs: TabInfo[] = !status ? [] : [
     ...(status.game ? [
-      { id: 'live' as const, title: 'Map and spells', label: `${status.online.length} online` },
-      { id: 'help' as const, title: 'Message history' }, // what waits shows in To do
-      { id: 'campaign' as const, title: 'Campaign', label: campaign ? `chapter ${campaign.chapter + 1} of ${campaign.chapters}` : 'not started' },
-      { id: 'warmup' as const, title: 'Warm-up', label: status.warmup?.active ? 'running' : undefined },
-      { id: 'vision' as const, title: 'Vision', label: VISION_CHOICES.find(([radius]) => radius === status.game?.vision)?.[1] },
+      { id: 'chat' as const, icon: '💬', title: 'Chat log' },
+      { id: 'map' as const, icon: '🗺', title: 'Map & spells', label: `${status.online.length} online` },
+      { id: 'warmup' as const, icon: '🧩', title: 'Warm-up', label: status.warmup?.active ? 'running' : undefined },
+      { id: 'campaign' as const, icon: '📖', title: 'Campaign', label: campaign ? `chapter ${campaign.chapter + 1} of ${campaign.chapters}` : undefined },
+      { id: 'history' as const, icon: '🗂', title: 'Message history' },
     ] : []),
-    { id: 'games', title: 'Games', label: `${status.games.length}` },
-    { id: 'mode', title: 'How chat is moderated', label: status.mode === 'review' ? 'review after' : 'approve first' },
-    ...(status.laptop ? [{ id: 'laptop' as const, title: 'Playing on this laptop' }] : []),
-    ...(status.game ? [{ id: 'report' as const, title: 'Class report' }] : []),
+    { id: 'games', icon: '🎮', title: 'Games', label: `${status.games.length}` },
+    ...(status.game ? [{ id: 'vision' as const, icon: '👁', title: 'Vision', label: VISION_CHOICES.find(([radius]) => radius === status.game?.vision)?.[1] }] : []),
+    ...(status.laptop ? [{ id: 'laptop' as const, icon: '💻', title: 'This laptop' }] : []),
+    ...(status.game ? [{ id: 'report' as const, icon: '📝', title: 'Class report' }] : []),
   ];
-  const closeAll = () => setOpenCards(Object.fromEntries(cards.map(info => [info.id, false])));
-  const card = (id: CardId, children: ReactNode) => {
-    const info = cards.find(item => item.id === id);
-    return info && <Card info={info} open={openCards[id] ?? DEFAULT_OPEN.includes(id)} onToggle={open => toggle(id, open)}>{children}</Card>;
+  // With no game yet, making one is the only thing to do.
+  const shown: TabId | null = tabs.some(info => info.id === tab) ? tab : status && !status.game ? 'games' : null;
+  const openTab = (id: TabId, target = '.teacher-tabs') => {
+    setTab(id);
+    window.requestAnimationFrame(() => document.querySelector(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
+  const showGuide = () => openTab('campaign', '#teacher-panel .mission-guide');
+  const selectedOnline = selectedStudent !== null && isOnline(selectedStudent);
+  const allSoundOff = status?.sound?.allOff === true;
+
+  // Ctrl+K: everything the page can do, in the order it is offered with nothing typed (after the recent ones).
+  const commands: Command[] = !status ? [] : [
+    ...(waiting.length > 1 ? [{ id: 'approve-all', icon: '✓', label: `Approve all ${waiting.length} waiting messages`, keywords: 'post queue pending', run: () => action('approve-all', {}) }] : []),
+    ...(oldest ? [
+      { id: 'approve', icon: '✓', label: `Post ${oldest.sender}: “${oldest.text}”`, hint: 'A', keywords: 'approve oldest waiting', run: () => action('review', { id: oldest.id, approve: true }) },
+      { id: 'reject', icon: '✕', label: `Do not post ${oldest.sender}: “${oldest.text}”`, hint: 'R', keywords: 'reject oldest waiting', run: () => action('review', { id: oldest.id, approve: false }) },
+    ] : []),
+    ...(status.game ? CHAT_VIEWS.map(([filter, icon, label]) => ({ id: `chat:${filter}`, icon, label, hint: 'Chat log', keywords: 'chat log messages see read group what they say',
+      run: () => { setChatFilter(filter); openTab('chat'); } })) : []),
+    ...(status.moderation || status.mode === 'review' ? [{ id: 'mode', icon: status.mode === 'approve' ? '⚡' : '✋',
+      label: status.mode === 'approve' ? 'Post chat after OpenAI checks it, and review afterwards' : 'Approve every message first', keywords: 'moderation mode review approve check',
+      run: () => action('mode', { mode: status.mode === 'approve' ? 'review' : 'approve' }) }] : []),
+    ...(status.game ? [{ id: 'class', icon: status.open ? '🔒' : '🔓', label: status.open ? 'Close the class' : 'Open the class', keywords: 'class lesson open close start stop',
+      run: () => action('class', { open: !status.open }) }] : []),
+    ...(status.pin ? [{ id: 'link', icon: '🔗', label: 'Copy the join link', hint: `PIN ${status.pin}`, keywords: 'pin join link copy', run: () => copyLink(status.pin!) }] : []),
+    ...(status.warmup?.active ? [{ id: 'warmup:end', icon: '🧩', label: 'End the warm-up', keywords: 'warm-up warmup stop finish', run: () => action('warmup', { op: 'end' }) }] : []),
+    ...(campaign && campaign.status !== 'campaign_complete' ? [
+      ...(campaign.reveals.next ? [{ id: 'news', icon: '📰', label: `Next news: ${campaign.reveals.next}`, keywords: 'campaign reveal story', run: () => action('campaign', { op: 'reveal' }) }] : []),
+      { id: 'chapter', icon: campaign.chapter + 1 < campaign.chapters ? '▶' : '🏁', label: nextStep(campaign), keywords: 'campaign chapter next end',
+        run: () => { if (window.confirm(`${nextStep(campaign)}?`)) void action('campaign', { op: 'next' }); } },
+      { id: 'guide', icon: '📖', label: 'Teacher guide: goals, steps and answers', keywords: 'campaign guide answers solutions', run: showGuide },
+    ] : []),
+    { id: 'sound', icon: allSoundOff ? '🔊' : '🔇', label: allSoundOff ? 'Restore sound on every device' : 'Mute all sound on every device', keywords: 'sound mute quiet audio voice read aloud',
+      run: () => action('sound-all', { off: !allSoundOff }) },
+    ...(status.game && status.open ? WARMUP_KINDS.map(kind => ({ id: `warmup:${kind.id}`, icon: '🧩', label: `Start the warm-up: ${kind.label}`, keywords: 'warm-up warmup begin activity',
+      run: () => action('warmup', { op: 'start', type: kind.id }) })) : []),
+    ...(status.game ? [
+      { id: 'rain', icon: '🌧', label: 'Make it rain (15s)', keywords: 'magic spell weather', run: () => action('magic', { power: 'rain' }) },
+      ...VISION_CHOICES.filter(([radius]) => radius !== status.game?.vision).map(([radius, label]) => ({ id: `vision:${radius}`, icon: '👁', label: `Vision: ${label}`,
+        keywords: 'see far fog radius', run: () => action('vision', { radius }) })),
+    ] : []),
+    ...tabs.map(info => ({ id: `tab:${info.id}`, icon: info.icon, label: info.title, hint: 'tab', keywords: 'open show go section', run: () => openTab(info.id) })),
+    ...PAGES.map(([to, label]) => ({ id: `page:${to}`, icon: '↗', label, hint: 'page', keywords: 'open go editor studio', run: () => navigate(to) })),
+    { id: 'sign-out', icon: '🚪', label: 'Sign out', keywords: 'log out exit', run: signOut },
+  ];
+  // Everyone the teacher can find by name, shown or real; who is here first.
+  const paletteStudents: PaletteStudent[] = [...supportStudents.values()]
+    .map(student => ({ studentKey: student.studentKey, name: student.name, real: status?.realNames?.[student.studentKey], online: isOnline(student.studentKey) }))
+    .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
+  // What can be done with one student: their drawer, a message, chat and sound, and spells while they are here.
+  const forStudent = (student: PaletteStudent, fill: (text: string) => void): Command[] => {
+    const key = student.studentKey;
+    const name = who(key, student.name);
+    const mutedNow = !!status?.muted.includes(key);
+    const soundOff = !!status?.sound?.off.includes(key);
+    return [
+      { id: `open:${key}`, icon: '👤', label: `${name}: messages and actions`, keywords: 'open chat history conversations see', run: () => setSelectedStudent(key) },
+      { id: `write:${key}`, icon: '✉️', label: `Message ${name}…`, keywords: 'write send private help', stay: true, run: () => fill(`${student.name}: `) },
+      { id: `mute:${key}`, icon: mutedNow ? '💬' : '🤐', label: mutedNow ? `Let ${name} chat again` : `Mute ${name}’s chat`, keywords: 'mute unmute silence chat',
+        run: () => action('mute', { studentKey: key, muted: !mutedNow }) },
+      ...(allSoundOff ? [] : [{ id: `sound:${key}`, icon: soundOff ? '🔊' : '🔇', label: soundOff ? `Sound back on for ${name}` : `Sound off for ${name}`, keywords: 'sound audio voice read aloud',
+        run: () => action('sound', { studentKey: key, off: !soundOff }) }]),
+      ...(student.online ? [
+        { id: `find:${key}`, icon: '📍', label: `Find ${name} on the map`, keywords: 'map where', run: () => { setSelectedStudent(key); openTab('map'); } },
+        { id: `freeze:${key}`, icon: '❄', label: `Freeze ${name} (15s)`, keywords: 'spell magic stop', run: () => action('magic', { power: 'freeze', studentKey: key }) },
+        { id: `thaw:${key}`, icon: '🔥', label: `Thaw ${name}`, keywords: 'spell magic', run: () => action('magic', { power: 'thaw', studentKey: key }) },
+        { id: `lightning:${key}`, icon: '⚡', label: `Lightning on ${name}`, keywords: 'spell magic tumble', run: () => action('magic', { power: 'lightning', studentKey: key }) },
+      ] : []),
+    ];
   };
 
-  return <main className="teacher-page">
-    <header className="teacher-header">
-      <h1>Teacher controls</h1>
-      <span><Link to="/quest-library">Side quest library</Link> · <Link to="/warmup-studio">Warm-up editor</Link> · <Link to="/mission-studio">Mission Studio</Link> · <Link to="/studio">Theme studio</Link> · <Link to="/">Student entrance</Link></span>
-    </header>
-    {!token || !status ? <form className="teacher-signin" onSubmit={event => { event.preventDefault(); void signIn(); }}>
-      <label htmlFor="teacher-password">Teacher password (the same as PinPlay)</label>
-      <input id="teacher-password" type="password" autoComplete="current-password" value={password}
-        onChange={event => setPassword(event.target.value)} required />
-      <button className="btn btn-primary">Open controls</button>
-    </form> : <>
-      <section className="teacher-controls">
-        <strong className="teacher-class"><span className={`teacher-dot${status.open ? ' teacher-dot-open' : ''}`} aria-hidden="true" />
-          {status.game ? `${status.game.name} · ${status.open ? 'open' : 'closed'}` : 'No game yet'}</strong>
-        {status.pin && <span className="teacher-pin">PIN <strong>{status.pin}</strong></span>}
-        {status.pin && <button className="btn btn-secondary btn-sm" onClick={() => void copyLink(status.pin!)} title={linkFor(status.pin)}>
-          {copied === status.pin ? 'Link copied ✓' : 'Copy join link'}</button>}
+  // The student in the drawer: here now, or known in this game.
+  const drawerStudent = (() => {
+    if (!status || !selectedStudent) return null;
+    const live = status.online.find(student => student.studentKey === selectedStudent);
+    const known = live ?? supportStudents.get(selectedStudent);
+    return known ? { studentKey: selectedStudent, name: known.name, zone: live ? placeName(live.zone) : null, level: live?.level, look: live?.look } : null;
+  })();
+
+  return <main className={`teacher-page${drawerStudent ? ' teacher-with-drawer' : ''}`}>
+    {!token || !status ? <>
+      <header className="teacher-header">
+        <h1>Teacher controls</h1>
+        <span>{PAGES.map(([to, label], index) => <span key={to}>{index > 0 && ' · '}<Link to={to}>{label}</Link></span>)}</span>
+      </header>
+      <form className="teacher-signin" onSubmit={event => { event.preventDefault(); void signIn(); }}>
+        <label htmlFor="teacher-password">Teacher password (the same as PinPlay)</label>
+        <input id="teacher-password" type="password" autoComplete="current-password" value={password}
+          onChange={event => setPassword(event.target.value)} required />
+        <button className="btn btn-primary">Open controls</button>
+      </form>
+    </> : <>
+      {/* Always in reach: the class, its PIN, open or closed, how chat is checked, the search box and the other pages. */}
+      <header className="teacher-bar">
+        <h1 className="teacher-class"><span className={`teacher-dot${status.open ? ' teacher-dot-open' : ''}`} aria-hidden="true" />
+          {status.game ? <>{status.game.name} <small>{status.open ? 'open' : 'closed'}</small></> : 'No game yet'}</h1>
+        {status.pin && <button type="button" className="teacher-pin" onClick={() => void copyLink(status.pin!)} title={`Copy the join link: ${linkFor(status.pin)}`}>
+          PIN <strong>{status.pin}</strong> <span>{copied === status.pin ? 'Link copied ✓' : 'Copy link'}</span></button>}
         {status.game && <button className="btn btn-primary btn-sm" onClick={() => void action('class', { open: !status.open })}>
-          {status.open ? 'Close class' : 'Open class'}
-        </button>}
-        <button className="btn btn-secondary btn-sm" onClick={() => { storeTeacherSession(''); setStatus(null); setToken(''); }}>Sign out</button>
-      </section>
+          {status.open ? 'Close class' : 'Open class'}</button>}
+        {status.game && <div className="teacher-review" role="group" aria-label="How chat is checked">
+          <button type="button" aria-pressed={status.mode === 'approve'} onClick={() => void action('mode', { mode: 'approve' })} title="Every message waits for you">✋ Approve first</button>
+          <button type="button" aria-pressed={status.mode === 'review'} disabled={!status.moderation} onClick={() => void action('mode', { mode: 'review' })}
+            title={status.moderation
+              ? 'Only messages OpenAI clears post at once: nearby, to everyone or a whisper. Witness exchanges, flagged messages and anything it could not check still wait for you.'
+              : 'Needs an OPENAI_API_KEY (see the README)'}>⚡ Post, then review</button>
+        </div>}
+        <button type="button" className="teacher-search" onClick={() => setPaletteOpen(true)} title="Find a student or an action, or write “name: message”">
+          <span>🔍 Search or do…</span><kbd>Ctrl K</kbd></button>
+        <div className="teacher-more" ref={menu}>
+          <button type="button" aria-haspopup="true" aria-expanded={menuOpen} aria-label="More" title="Other pages and sign out" onClick={() => setMenuOpen(open => !open)}>⋯</button>
+          {menuOpen && <ul className="teacher-menu">
+            {PAGES.map(([to, label]) => <li key={to}><Link to={to} onClick={() => setMenuOpen(false)}>{label}</Link></li>)}
+            <li><button type="button" onClick={signOut}>Sign out</button></li>
+          </ul>}
+        </div>
+      </header>
       {/* What is running, with its next step, so nobody has to scroll for it. */}
       {status.game && (status.warmup?.active || (campaign && campaign.status !== 'campaign_complete')) && <section className="teacher-now">
         {status.warmup?.active && <span className="teacher-now-item">🧩 Warm-up · {status.warmup.team.done} of {status.warmup.team.total} found
           <button className="btn btn-secondary btn-sm" onClick={() => void action('warmup', { op: 'end' })}>End</button></span>}
         {campaign && campaign.status !== 'campaign_complete' && <span className="teacher-now-item">📖 {campaign.title} · chapter {campaign.chapter + 1} of {campaign.chapters}
-          <button className="btn btn-secondary btn-sm" onClick={() => {
-            choose('campaign');
-            const guide = document.querySelector<HTMLDetailsElement>('#card-campaign .mission-guide');
-            if (guide) guide.open = true;
-          }}>Teacher guide</button>
+          <button className="btn btn-secondary btn-sm" onClick={showGuide}>Teacher guide</button>
           {campaign.reveals.next && <button className="btn btn-secondary btn-sm" title={campaign.reveals.next} onClick={() => void action('campaign', { op: 'reveal' })}>📰 Next news</button>}
-          <button className="btn btn-secondary btn-sm" onClick={() => {
-            const next = campaign.chapter + 1 < campaign.chapters ? `Start chapter ${campaign.chapter + 2}: ${campaign.chapterTitles?.[campaign.chapter + 1] ?? ''}?` : 'End the campaign?';
-            if (window.confirm(next)) void action('campaign', { op: 'next' });
-          }}>{campaign.chapter + 1 < campaign.chapters ? '▶ Next chapter' : '🏁 End campaign'}</button></span>}
+          <button className="btn btn-secondary btn-sm" onClick={() => { if (window.confirm(`${nextStep(campaign)}?`)) void action('campaign', { op: 'next' }); }}>
+            {campaign.chapter + 1 < campaign.chapters ? '▶ Next chapter' : '🏁 End campaign'}</button></span>}
       </section>}
       {status.game && <LiveClass gameId={status.game.id} entries={status.entries} alerts={status.support?.alerts ?? []} incidents={status.incidents ?? []} online={status.online.map(s => ({ ...s, zone: placeName(s.zone) }))}
         known={[...supportStudents.values()]} muted={status.muted} sound={status.sound ?? { off: [], now: Date.now(), plays: [] }} open={status.open}
         who={who} action={action} selected={selectedStudent} onSelect={setSelectedStudent} />}
-      <nav className="teacher-nav" aria-label="Sections">
-        {GROUPS.map(group => {
-          const items = group.cards.flatMap(id => cards.filter(info => info.id === id));
-          return items.length > 0 && <div key={group.title} className="teacher-nav-group">
-            <span>{group.title}</span>
-            {items.map(info => <button key={info.id} type="button" className={`teacher-nav-chip${info.alert && info.badge ? ' teacher-nav-alert' : ''}`}
-              onClick={() => choose(info.id)}>
-              {info.title}<Badge info={info} />
-            </button>)}
-          </div>;
-        })}
-        <button type="button" className="teacher-nav-close" onClick={closeAll}>Close all</button>
+
+      <nav className="teacher-tabs" role="tablist" aria-label="More for this class">
+        {tabs.map(info => <button key={info.id} id={`tab-${info.id}`} type="button" role="tab" aria-selected={shown === info.id} aria-controls="teacher-panel"
+          onClick={() => setTab(shown === info.id ? null : info.id)}>
+          <span aria-hidden="true">{info.icon}</span>{info.title}{info.label && <span className="teacher-badge">{info.label}</span>}
+        </button>)}
       </nav>
+      {shown && <section id="teacher-panel" className="teacher-panel" role="tabpanel" aria-labelledby={`tab-${shown}`}>
+        {shown === 'chat' && <ChatLog entries={status.entries} filter={chatFilter} onFilter={setChatFilter} who={who} action={action} onSelect={setSelectedStudent} />}
 
-      <h2 className="teacher-group">More during class</h2>
-      {status.game && card('live', <>
-        <p>{status.open ? 'Updates every 2 seconds. Select a student to find them on the map.' : 'The class is closed.'}</p>
-        <div className="teacher-actions" style={{ marginBottom: '1rem' }}>
-          <button className="btn btn-sm" onClick={() => void action('magic', { power: 'rain' })}>Make it rain (15s)</button>
-          <button className="btn btn-sm" disabled={!status.online.some(s => s.studentKey === selectedStudent)} onClick={() => setMovingStudent(!movingStudent)} aria-pressed={movingStudent}>{movingStudent ? 'Cancel move' : 'Move selected student'}</button>
-          {(['freeze', 'thaw', 'lightning'] as const).map(power => <button key={power} className="btn btn-sm" disabled={!status.online.some(s => s.studentKey === selectedStudent)} onClick={() => void action('magic', { power, studentKey: selectedStudent })}>{power === 'freeze' ? 'Freeze (15s)' : power === 'thaw' ? 'Thaw' : 'Lightning (revive in 4s)'}</button>)}
-        </div>
-        <p role="status">{movingStudent ? 'Click an open path on the map to teleport the selected student.' : 'Select a student to cast a spell. Lightning is a playful tumble: they get up after 4 seconds.'}</p>
-        <div className="teacher-map" style={{ cursor: movingStudent ? 'crosshair' : undefined }} aria-label="Live student locations in the plaza" onClick={event => {
-          if (!movingStudent || !selectedStudent) return;
-          const bounds = event.currentTarget.getBoundingClientRect();
-          void action('magic', { power: 'teleport', studentKey: selectedStudent, x: (event.clientX - bounds.left) / bounds.width * MAP_SIZE, y: (event.clientY - bounds.top) / bounds.height * MAP_SIZE });
-          setMovingStudent(false);
-        }}>
-          <ThemePicture theme={plazaMap} />
-          {status.online.map((student, index) => <button key={student.studentKey} type="button"
-            className={`teacher-map-marker${selectedStudent === student.studentKey ? ' selected' : ''}`}
-            style={{ left: `${student.x / MAP_SIZE * 100}%`, top: `${student.y / MAP_SIZE * 100}%` }}
-            onClick={event => { event.stopPropagation(); setSelectedStudent(student.studentKey); }}
-            aria-pressed={selectedStudent === student.studentKey}
-            aria-label={`${who(student.studentKey, student.name)}: ${placeName(student.zone)}`}
-            title={`${who(student.studentKey, student.name)} · ${placeName(student.zone)}`}>
-            {index + 1}
-            {selectedStudent === student.studentKey && <span className="teacher-map-label">{who(student.studentKey, student.name)}</span>}
-          </button>)}
-        </div>
-        {status.online.length ? <ul className="teacher-map-roster">{status.online.map((student, index) => <li key={student.studentKey}>
-          <button type="button" aria-pressed={selectedStudent === student.studentKey}
-            onClick={event => { event.stopPropagation(); setSelectedStudent(student.studentKey); }}>
-            <strong>{index + 1}. {who(student.studentKey, student.name)}</strong> · {placeName(student.zone)}{student.level !== undefined && <> · Lv {student.level}</>}
-          </button>
-        </li>)}</ul> : <p>No students in the plaza right now.</p>}
-      </>)}
-
-      {status.game && card('help', <TeacherSupport key={status.game.id} gameId={status.game.id} token={token} embedded
-        support={status.support ?? { alerts: [], students: [] }}
-        students={[...supportStudents.values()].sort((a, b) => who(a.studentKey, a.name).localeCompare(who(b.studentKey, b.name)))}
-        who={who} action={action} failed={failed} />)}
-
-      {status.game && <h2 className="teacher-group">Activities</h2>}
-      {status.game && card('warmup', <>
-        <p>{WARMUP_KINDS.find(kind => kind.id === warmupKind)?.blurb} Good for the first few minutes.</p>
-        <div className="teacher-newgame">
-          <select value={warmupKind} onChange={event => setWarmupKind(event.target.value as WarmupKind)} aria-label="Which warm-up">
-            {WARMUP_KINDS.map(kind => <option key={kind.id} value={kind.id}>{kind.label}</option>)}
-          </select>
-          <button className="btn btn-primary" disabled={!status.open} onClick={() => void action('warmup', { op: 'start', type: warmupKind })}>
-            {status.warmup?.active ? 'Start again' : 'Start the warm-up'}</button>
-          {status.warmup?.active && <button className="btn btn-secondary" onClick={() => void action('warmup', { op: 'end' })}>End the warm-up</button>}
-          <Link to={`/warmup-studio?kind=${warmupKind}`}>Edit warm-up</Link>
-        </div>
-        {status.warmup && <>
-          {status.warmup.active && status.warmup.kind === 'identity' && <p className="teacher-muted">Helpers’ secret names are blocked in student chat. Guesses and yes/no replies are allowed. Private messages to you remain available.</p>}
-          <p>{status.warmup.active ? 'In progress' : 'Finished'}: {status.warmup.team.done} of {status.warmup.team.total} found.</p>
-          <ul>{status.warmup.players.map(player => <li key={player.studentKey}>
-            <span><strong>{who(player.studentKey, player.name)}</strong> · {player.fact} · found {player.found} of {player.of}</span>
-          </li>)}</ul>
-        </>}
-      </>)}
-
-      {status.game && card('campaign', !campaign ? <>
-        <p>Start a story for <strong>{status.game.name}</strong>. Each student gets a role at random and keeps it for the whole campaign. Closing the game saves it, and reopening picks the story up again.</p>
-        <ul className="teacher-campaign-choices">{status.campaigns.map(choice => <li key={choice.id}>
-          <div>
-            <strong>{choice.title}</strong>
-            <small>{choice.chapters.length} {choice.chapters.length === 1 ? 'chapter' : 'chapters'} · {features(choice)}</small>
-            <ol className="teacher-chapter-line">{chapterPreview(choice.chapters).map(([number, title]) => <li key={title}>{number > 0 && <span>{number}.</span>}{title}</li>)}</ol>
+        {shown === 'map' && status.game && <>
+          <div className="teacher-actions">
+            <button className="btn btn-sm" onClick={() => void action('magic', { power: 'rain' })}>🌧 Make it rain (15s)</button>
+            <button className="btn btn-sm" disabled={!selectedOnline} onClick={() => setMovingStudent(!movingStudent)} aria-pressed={movingStudent}>{movingStudent ? 'Cancel move' : 'Move selected student'}</button>
+            {(['freeze', 'thaw', 'lightning'] as const).map(power => <button key={power} className="btn btn-sm" disabled={!selectedOnline} onClick={() => void action('magic', { power, studentKey: selectedStudent })}>{power === 'freeze' ? 'Freeze (15s)' : power === 'thaw' ? 'Thaw' : 'Lightning (revive in 4s)'}</button>)}
           </div>
-          <button className="btn btn-primary btn-sm" onClick={() => void action('campaign', { op: 'start', campaign: choice.id })}>Start</button>
-          <TeacherMissionGuide token={token} campaignId={choice.id} refreshKey={choice.revision} />
-        </li>)}</ul>
-        <p className="teacher-muted">Change these chapters or write your own campaign in <Link to="/mission-studio">Mission Studio</Link>.</p>
-      </> : <>
-        <p><strong>{campaign.title}</strong> · {{ active: 'in progress', chapter_complete: 'ready for the next chapter: students can keep working', campaign_complete: 'finished' }[campaign.status]}</p>
-        <ol className="teacher-chapter-steps">{(campaign.chapterTitles ?? []).map((title, index) => {
-          const state = campaign.status === 'campaign_complete' || index < campaign.chapter ? 'done' : index === campaign.chapter ? 'now' : 'next';
-          return <li key={index} className={`teacher-step-${state}`} aria-current={state === 'now' ? 'step' : undefined}>
-            <span className="teacher-step-number">{state === 'done' ? '✓' : index + 1}</span>
-            <span>{title}</span>
-            {state === 'now' && <small>now</small>}
-          </li>;
-        })}</ol>
-        <TeacherMissionGuide key={`${status.game.id}:${campaign.id}`} token={token} gameId={status.game.id}
-          currentChapter={campaign.chapter} refreshKey={campaign.guideVersion} />
-        {campaign.status !== 'campaign_complete' && <div className="teacher-newgame">
-          {campaign.reveals.next && <button className="btn btn-secondary" title={campaign.reveals.next}
-            onClick={() => void action('campaign', { op: 'reveal' })}>Reveal the next news ({campaign.reveals.shown} of {campaign.reveals.total} shown)</button>}
-          <button className="btn btn-primary" onClick={() => void action('campaign', { op: 'next' })}>
-            {campaign.chapter + 1 < campaign.chapters ? `Start chapter ${campaign.chapter + 2}: ${campaign.chapterTitles?.[campaign.chapter + 1] ?? ''}` : 'End the campaign'}
-          </button>
-        </div>}
-        {campaign.status !== 'campaign_complete' && campaign.reveals.next && <p>Next news: <em>{campaign.reveals.next}</em></p>}
-        {campaign.players.length > 0 && <><h3>Students</h3><ul>
-          {campaign.players.map(player => <li key={player.studentKey}>
-            <span><strong>{who(player.studentKey, player.name)}</strong> · {player.role}{player.thief ? ' · THIEF' : ''} · {player.clues} place clue{player.clues === 1 ? '' : 's'} · {player.done.length ? `answered ${player.done.length}` : 'not answered yet'}</span>
-          </li>)}
-        </ul></>}
-        {!!campaign.board?.length && <><h3>Quest board</h3><p>Release prepared quests when the class needs another mystery.</p><ul>{campaign.board.map(quest => <li key={quest.id}><span>{quest.text} · {quest.accepted} accepted · {quest.completed} completed</span>
-          {quest.teacherReleased && !quest.released && campaign.status !== 'campaign_complete' && <button className="btn btn-secondary btn-sm" onClick={() => void action('quest-release', { objective: quest.id })}>Release quest</button>}
-          {quest.teacherReleased && quest.released && <small>Released</small>}</li>)}</ul></>}
-        {campaign.reports.length > 0 && <>
-          <h3>What students wrote</h3>
-          <ul>{campaign.reports.map(report => <li key={report.studentKey + report.objective}>
-            <span><strong>{who(report.studentKey, campaign.players.find(player => player.studentKey === report.studentKey)?.name ?? 'Student')}</strong>{report.partner ? ` · partner: ${report.partner}` : ''}: {report.text}</span>
-            <StarButton starred={report.starred} onStar={() => void action('xp', { report: { studentKey: report.studentKey, objective: report.objective } })} />
-          </li>)}</ul>
-        </>}
-        {!!campaign.interviews?.length && <details className="teacher-interviews"><summary>Witness exchanges ({campaign.interviews.length})</summary>
-          <p>Review questions and replies in the chat queue. These records verify participation; you assess the language and reasoning.</p>
-          {campaign.interviews.map(interview => <article key={interview.id} className="teacher-entry">
-            <strong>{who(interview.studentKey, campaign.players.find(p => p.studentKey === interview.studentKey)?.name ?? 'Student')} → {who(interview.witnessKey, interview.name)}</strong>
-            <p>{interview.task}</p>
-            <p>Question ({interview.questionStatus}): {interview.question}</p>
-            {interview.shared && <p>Investigator evidence: {interview.shared}</p>}
-            {interview.answer && <p>Reply ({interview.answerStatus}): {interview.answer}</p>}
-            {interview.evidence && <p>Witness evidence: {interview.evidence}</p>}
-            <div className="teacher-actions">
-              {interview.questionStatus === 'pending' && <>
-                <button className="btn btn-sm btn-primary" onClick={() => void action('review', { id: interview.questionId, approve: true })}>Approve question</button>
-                <button className="btn btn-sm" onClick={() => void action('review', { id: interview.questionId, approve: false })}>Reject question</button>
-              </>}
-              {interview.answerStatus === 'pending' && <>
-                <button className="btn btn-sm btn-primary" onClick={() => void action('review', { id: interview.answerId, approve: true })}>Approve reply</button>
-                <button className="btn btn-sm" onClick={() => void action('review', { id: interview.answerId, approve: false })}>Reject reply</button>
-              </>}
-              {interview.questionStatus === 'approved' && <button className="btn btn-sm" onClick={() => void action('review', { id: interview.questionId, approve: false })}>Remove question</button>}
-              {interview.answerStatus === 'approved' && <button className="btn btn-sm" onClick={() => void action('review', { id: interview.answerId, approve: false })}>Remove reply</button>}
-            </div>
-          </article>)}
-        </details>}
-        <p className="teacher-muted">Students finished early, or a short session between chapters? <Link to="/quest-library">Add side quests from the library</Link>: story quests for this chapter or generic ones for any game.
-          Change chapters in <Link to="/mission-studio">Mission Studio</Link>.</p>
-        <button className="btn btn-secondary btn-sm teacher-danger" onClick={() => {
-          if (window.confirm('Erase the campaign for this game, including every role and clue?')) void action('campaign', { op: 'reset', confirm: true });
-        }}>Erase campaign</button>
-      </>)}
-
-      <h2 className="teacher-group">Setup</h2>
-      {card('games', <>
-        {status.pin && <label className="teacher-linkbox">The join link for {status.game?.name ?? 'the open game'}
-          <input readOnly value={linkFor(status.pin)} onFocus={event => event.currentTarget.select()} onClick={event => event.currentTarget.select()} />
-        </label>}
-        {copyNote && <p className="teacher-flag">{copyNote}</p>}
-        <p>Each game keeps its own PIN, chat and where everyone stood. Close one and reopen it any later lesson; one game is open at a time.</p>
-        <form className="teacher-newgame" onSubmit={event => {
-          event.preventDefault();
-          if (!newGameName.trim()) return;
-          void action('game', { name: newGameName, randomNames, vision, themeId: newThemeId });
-          setNewGameName('');
-        }}>
-          <input aria-label="Name for a new game" placeholder="New game, e.g. 3A Castanyada" maxLength={40}
-            value={newGameName} onChange={event => setNewGameName(event.target.value)} />
-          <button className="btn btn-primary" disabled={!newGameName.trim()}>New game</button>
-          <div className="teacher-map-choice">
-            <label>Map for this game <select aria-label="Map for a new game" value={newThemeId} onChange={event => setNewThemeId(event.target.value)}>
-              {Object.values(themes).map(theme => <option key={theme.id} value={theme.id}>{theme.name}{theme.id === 'plaza' ? ' · Season 1' : ''}</option>)}
-            </select></label>
-            <ThemePicture theme={getTheme(newThemeId)} />
-            <small>The map stays with this saved game. <Link to={`/studio?theme=${newThemeId}`}>Try it in Studio</Link></small>
+          <p role="status" className="teacher-muted">{movingStudent ? 'Click an open path on the map to teleport the selected student.'
+            : selectedOnline ? `Spells work on ${who(selectedStudent!, drawerStudent?.name ?? '')}. Lightning is a playful tumble: they get up after 4 seconds.`
+            : status.online.length ? 'Click a student on the map, or a face above, to cast a spell on them.' : 'No students in the plaza right now.'}</p>
+          <div className="teacher-map" style={{ cursor: movingStudent ? 'crosshair' : undefined }} aria-label="Live student locations in the plaza" onClick={event => {
+            if (!movingStudent || !selectedStudent) return;
+            const bounds = event.currentTarget.getBoundingClientRect();
+            void action('magic', { power: 'teleport', studentKey: selectedStudent, x: (event.clientX - bounds.left) / bounds.width * MAP_SIZE, y: (event.clientY - bounds.top) / bounds.height * MAP_SIZE });
+            setMovingStudent(false);
+          }}>
+            <ThemePicture theme={plazaMap} />
+            {status.online.map(student => <button key={student.studentKey} type="button"
+              className={`teacher-map-marker${selectedStudent === student.studentKey ? ' selected' : ''}`}
+              style={{ left: `${student.x / MAP_SIZE * 100}%`, top: `${student.y / MAP_SIZE * 100}%` }}
+              onClick={event => { event.stopPropagation(); setSelectedStudent(student.studentKey); }}
+              aria-pressed={selectedStudent === student.studentKey}
+              aria-label={`${who(student.studentKey, student.name)}: ${placeName(student.zone)}`}
+              title={`${who(student.studentKey, student.name)} · ${placeName(student.zone)}`}>
+              <Face player={student.look} name={student.name} />
+              {selectedStudent === student.studentKey && <span className="teacher-map-label">{who(student.studentKey, student.name)}</span>}
+            </button>)}
           </div>
-          <label className="teacher-toggle">
-            Vision:
-            <select value={vision} onChange={event => setVision(Number(event.target.value))} aria-label="How far students see">
-              {VISION_CHOICES.map(([radius, label]) => <option key={radius} value={radius}>{label}</option>)}
+        </>}
+
+        {shown === 'warmup' && <>
+          <p>{WARMUP_KINDS.find(kind => kind.id === warmupKind)?.blurb} Good for the first few minutes.</p>
+          <div className="teacher-newgame">
+            <select value={warmupKind} onChange={event => setWarmupKind(event.target.value as WarmupKind)} aria-label="Which warm-up">
+              {WARMUP_KINDS.map(kind => <option key={kind.id} value={kind.id}>{kind.label}</option>)}
             </select>
-            Students see only the area around them, and classmates farther away are hidden. You can change it any time.
-          </label>
-          <label className="teacher-toggle">
-            <input type="checkbox" checked={randomNames} onChange={event => setRandomNames(event.target.checked)} />
-            Random names: students pick a made-up name and you see who is who. Off: first names, with a surname letter when two match.
-          </label>
-        </form>
-        {status.games.length > 0 && <ul>
-          {status.games.map(game => <li key={game.id}>
-            <span><strong>{game.name}</strong> · PIN {game.pin} · {getTheme(game.themeId).name} · {game.randomNames ? 'random names' : 'real first names'} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
-            <span className="teacher-actions">
-              <button className="btn btn-secondary btn-sm" onClick={() => void copyLink(game.pin)} title={linkFor(game.pin)}>{copied === game.pin ? 'Link copied' : 'Copy join link'}</button>
-              {!game.open && <button className="btn btn-secondary btn-sm" onClick={() => void action('class', { open: true, game: game.id })}>
-                {status.open ? 'Switch to this game' : 'Open'}
-              </button>}
-              <button className="btn btn-secondary btn-sm teacher-danger" onClick={() => {
-                if (window.confirm(`Delete "${game.name}"?\n\nThis erases its chat, full submission history, help requests, where everyone stood, their made-up names and its story. The join link stops working. This cannot be undone.`)) {
-                  void action('game/delete', { game: game.id, confirm: true });
-                }
-              }}>Delete</button>
-            </span>
-          </li>)}
-        </ul>}
-      </>)}
+            <button className="btn btn-primary" disabled={!status.open} onClick={() => void action('warmup', { op: 'start', type: warmupKind })}>
+              {status.warmup?.active ? 'Start again' : 'Start the warm-up'}</button>
+            {status.warmup?.active && <button className="btn btn-secondary" onClick={() => void action('warmup', { op: 'end' })}>End the warm-up</button>}
+            <Link to={`/warmup-studio?kind=${warmupKind}`}>Edit warm-up</Link>
+          </div>
+          {status.warmup && <>
+            {status.warmup.active && status.warmup.kind === 'identity' && <p className="teacher-muted">Helpers’ secret names are blocked in student chat. Guesses and yes/no replies are allowed. Private messages to you remain available.</p>}
+            <p>{status.warmup.active ? 'In progress' : 'Finished'}: {status.warmup.team.done} of {status.warmup.team.total} found.</p>
+            <ul>{status.warmup.players.map(player => <li key={player.studentKey}>
+              <span><strong>{who(player.studentKey, player.name)}</strong> · {player.fact} · found {player.found} of {player.of}</span>
+            </li>)}</ul>
+          </>}
+        </>}
 
-      {status.game && card('vision', <>
-        <p>How far students see around themselves in <strong>{status.game.name}</strong>. Applies at once.</p>
-        <div className="teacher-newgame">
-          {VISION_CHOICES.map(([radius, label]) => <button key={radius} className={`btn ${status.game?.vision === radius ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => void action('vision', { radius })}>{label}</button>)}
-        </div>
-      </>)}
+        {shown === 'campaign' && status.game && (!campaign ? <>
+          <p>Start a story for <strong>{status.game.name}</strong>. Each student gets a role at random and keeps it for the whole campaign. Closing the game saves it, and reopening picks the story up again.</p>
+          <ul className="teacher-campaign-choices">{status.campaigns.map(choice => <li key={choice.id}>
+            <div>
+              <strong>{choice.title}</strong>
+              <small>{choice.chapters.length} {choice.chapters.length === 1 ? 'chapter' : 'chapters'} · {features(choice)}</small>
+              <ol className="teacher-chapter-line">{chapterPreview(choice.chapters).map(([number, title]) => <li key={title}>{number > 0 && <span>{number}.</span>}{title}</li>)}</ol>
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={() => void action('campaign', { op: 'start', campaign: choice.id })}>Start</button>
+            <TeacherMissionGuide token={token} campaignId={choice.id} refreshKey={choice.revision} />
+          </li>)}</ul>
+          <p className="teacher-muted">Change these chapters or write your own campaign in <Link to="/mission-studio">Mission Studio</Link>.</p>
+        </> : <>
+          <p><strong>{campaign.title}</strong> · {{ active: 'in progress', chapter_complete: 'ready for the next chapter: students can keep working', campaign_complete: 'finished' }[campaign.status]}</p>
+          <ol className="teacher-chapter-steps">{(campaign.chapterTitles ?? []).map((title, index) => {
+            const state = campaign.status === 'campaign_complete' || index < campaign.chapter ? 'done' : index === campaign.chapter ? 'now' : 'next';
+            return <li key={index} className={`teacher-step-${state}`} aria-current={state === 'now' ? 'step' : undefined}>
+              <span className="teacher-step-number">{state === 'done' ? '✓' : index + 1}</span>
+              <span>{title}</span>
+              {state === 'now' && <small>now</small>}
+            </li>;
+          })}</ol>
+          <TeacherMissionGuide key={`${status.game.id}:${campaign.id}`} token={token} gameId={status.game.id}
+            currentChapter={campaign.chapter} refreshKey={campaign.guideVersion} />
+          {campaign.status !== 'campaign_complete' && <div className="teacher-newgame">
+            {campaign.reveals.next && <button className="btn btn-secondary" title={campaign.reveals.next}
+              onClick={() => void action('campaign', { op: 'reveal' })}>Reveal the next news ({campaign.reveals.shown} of {campaign.reveals.total} shown)</button>}
+            <button className="btn btn-primary" onClick={() => void action('campaign', { op: 'next' })}>{nextStep(campaign)}</button>
+          </div>}
+          {campaign.status !== 'campaign_complete' && campaign.reveals.next && <p>Next news: <em>{campaign.reveals.next}</em></p>}
+          {campaign.players.length > 0 && <><h3>Students</h3><ul>
+            {campaign.players.map(player => <li key={player.studentKey}>
+              <span><strong>{who(player.studentKey, player.name)}</strong> · {player.role}{player.thief ? ' · THIEF' : ''} · {player.clues} place clue{player.clues === 1 ? '' : 's'} · {player.done.length ? `answered ${player.done.length}` : 'not answered yet'}</span>
+            </li>)}
+          </ul></>}
+          {!!campaign.board?.length && <><h3>Quest board</h3><p>Release prepared quests when the class needs another mystery.</p><ul>{campaign.board.map(quest => <li key={quest.id}><span>{quest.text} · {quest.accepted} accepted · {quest.completed} completed</span>
+            {quest.teacherReleased && !quest.released && campaign.status !== 'campaign_complete' && <button className="btn btn-secondary btn-sm" onClick={() => void action('quest-release', { objective: quest.id })}>Release quest</button>}
+            {quest.teacherReleased && quest.released && <small>Released</small>}</li>)}</ul></>}
+          {campaign.reports.length > 0 && <>
+            <h3>What students wrote</h3>
+            <ul>{campaign.reports.map(report => <li key={report.studentKey + report.objective}>
+              <span><strong>{who(report.studentKey, campaign.players.find(player => player.studentKey === report.studentKey)?.name ?? 'Student')}</strong>{report.partner ? ` · partner: ${report.partner}` : ''}: {report.text}</span>
+              <StarButton starred={report.starred} onStar={() => void action('xp', { report: { studentKey: report.studentKey, objective: report.objective } })} />
+            </li>)}</ul>
+          </>}
+          {!!campaign.interviews?.length && <details className="teacher-interviews"><summary>Witness exchanges ({campaign.interviews.length})</summary>
+            <p>Review questions and replies in Needs you. These records verify participation; you assess the language and reasoning.</p>
+            {campaign.interviews.map(interview => <article key={interview.id} className="teacher-entry">
+              <strong>{who(interview.studentKey, campaign.players.find(p => p.studentKey === interview.studentKey)?.name ?? 'Student')} → {who(interview.witnessKey, interview.name)}</strong>
+              <p>{interview.task}</p>
+              <p>Question ({interview.questionStatus}): {interview.question}</p>
+              {interview.shared && <p>Investigator evidence: {interview.shared}</p>}
+              {interview.answer && <p>Reply ({interview.answerStatus}): {interview.answer}</p>}
+              {interview.evidence && <p>Witness evidence: {interview.evidence}</p>}
+              <div className="teacher-actions">
+                {interview.questionStatus === 'pending' && <>
+                  <button className="btn btn-sm btn-primary" onClick={() => void action('review', { id: interview.questionId, approve: true })}>Approve question</button>
+                  <button className="btn btn-sm" onClick={() => void action('review', { id: interview.questionId, approve: false })}>Reject question</button>
+                </>}
+                {interview.answerStatus === 'pending' && <>
+                  <button className="btn btn-sm btn-primary" onClick={() => void action('review', { id: interview.answerId, approve: true })}>Approve reply</button>
+                  <button className="btn btn-sm" onClick={() => void action('review', { id: interview.answerId, approve: false })}>Reject reply</button>
+                </>}
+                {interview.questionStatus === 'approved' && <button className="btn btn-sm" onClick={() => void action('review', { id: interview.questionId, approve: false })}>Remove question</button>}
+                {interview.answerStatus === 'approved' && <button className="btn btn-sm" onClick={() => void action('review', { id: interview.answerId, approve: false })}>Remove reply</button>}
+              </div>
+            </article>)}
+          </details>}
+          <p className="teacher-muted">Students finished early, or a short session between chapters? <Link to="/quest-library">Add side quests from the library</Link>: story quests for this chapter or generic ones for any game.
+            Change chapters in <Link to="/mission-studio">Mission Studio</Link>.</p>
+          <button className="btn btn-secondary btn-sm teacher-danger" onClick={() => {
+            if (window.confirm('Erase the campaign for this game, including every role and clue?')) void action('campaign', { op: 'reset', confirm: true });
+          }}>Erase campaign</button>
+        </>)}
 
-      {card('mode', <>
-        <label><input type="radio" name="mode" checked={status.mode === 'approve'} onChange={() => void action('mode', { mode: 'approve' })} />
-          Approve every message first</label>
-        <label><input type="radio" name="mode" checked={status.mode === 'review'} disabled={!status.moderation}
-          onChange={() => void action('mode', { mode: 'review' })} />
-          Post chat after OpenAI checks it, and review afterwards</label>
-        <p>{status.moderation
-          ? 'In the second mode only messages OpenAI cleared post at once: nearby, to everyone or a whisper. Witness exchanges, flagged messages and anything it could not check still wait for you.'
-          : 'The second mode needs an OPENAI_API_KEY (see the README), so it is off.'}</p>
-      </>)}
+        {shown === 'history' && status.game && <TeacherSupport key={status.game.id} gameId={status.game.id} token={token}
+          support={status.support ?? { alerts: [], students: [] }}
+          students={[...supportStudents.values()].sort((a, b) => who(a.studentKey, a.name).localeCompare(who(b.studentKey, b.name)))}
+          who={who} failed={failed} onStudent={setSelectedStudent} />}
 
-      {status.laptop && card('laptop', <>
-        <p>Students go to <strong>{status.laptop.signInUrl}</strong> and sign in with Google. They are then sent
-          here, to <strong>{status.laptop.url}</strong>, while the class is open.</p>
-      </>)}
+        {shown === 'games' && <>
+          {status.pin && <label className="teacher-linkbox">The join link for {status.game?.name ?? 'the open game'}
+            <input readOnly value={linkFor(status.pin)} onFocus={event => event.currentTarget.select()} onClick={event => event.currentTarget.select()} />
+          </label>}
+          {copyNote && <p className="teacher-flag">{copyNote}</p>}
+          <p>Each game keeps its own PIN, chat and where everyone stood. Close one and reopen it any later lesson; one game is open at a time.</p>
+          <form className="teacher-newgame" onSubmit={event => {
+            event.preventDefault();
+            if (!newGameName.trim()) return;
+            void action('game', { name: newGameName, randomNames, vision, themeId: newThemeId });
+            setNewGameName('');
+          }}>
+            <input aria-label="Name for a new game" placeholder="New game, e.g. 3A Castanyada" maxLength={40}
+              value={newGameName} onChange={event => setNewGameName(event.target.value)} />
+            <button className="btn btn-primary" disabled={!newGameName.trim()}>New game</button>
+            <div className="teacher-map-choice">
+              <label>Map for this game <select aria-label="Map for a new game" value={newThemeId} onChange={event => setNewThemeId(event.target.value)}>
+                {Object.values(themes).map(theme => <option key={theme.id} value={theme.id}>{theme.name}{theme.id === 'plaza' ? ' · Season 1' : ''}</option>)}
+              </select></label>
+              <ThemePicture theme={getTheme(newThemeId)} />
+              <small>The map stays with this saved game. <Link to={`/studio?theme=${newThemeId}`}>Try it in Studio</Link></small>
+            </div>
+            <label className="teacher-toggle">
+              Vision:
+              <select value={vision} onChange={event => setVision(Number(event.target.value))} aria-label="How far students see">
+                {VISION_CHOICES.map(([radius, label]) => <option key={radius} value={radius}>{label}</option>)}
+              </select>
+              Students see only the area around them, and classmates farther away are hidden. You can change it any time.
+            </label>
+            <label className="teacher-toggle">
+              <input type="checkbox" checked={randomNames} onChange={event => setRandomNames(event.target.checked)} />
+              Random names: students pick a made-up name and you see who is who. Off: first names, with a surname letter when two match.
+            </label>
+          </form>
+          {status.games.length > 0 && <ul>
+            {status.games.map(game => <li key={game.id}>
+              <span><strong>{game.name}</strong> · PIN {game.pin} · {getTheme(game.themeId).name} · {game.randomNames ? 'random names' : 'real first names'} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
+              <span className="teacher-actions">
+                <button className="btn btn-secondary btn-sm" onClick={() => void copyLink(game.pin)} title={linkFor(game.pin)}>{copied === game.pin ? 'Link copied' : 'Copy join link'}</button>
+                {!game.open && <button className="btn btn-secondary btn-sm" onClick={() => void action('class', { open: true, game: game.id })}>
+                  {status.open ? 'Switch to this game' : 'Open'}
+                </button>}
+                <button className="btn btn-secondary btn-sm teacher-danger" onClick={() => {
+                  if (window.confirm(`Delete "${game.name}"?\n\nThis erases its chat, full submission history, help requests, where everyone stood, their made-up names and its story. The join link stops working. This cannot be undone.`)) {
+                    void action('game/delete', { game: game.id, confirm: true });
+                  }
+                }}>Delete</button>
+              </span>
+            </li>)}
+          </ul>}
+        </>}
 
-      {status.game && <h2 className="teacher-group">After class</h2>}
-      {status.game && card('report', <ClassReport token={token} copy={copyText} />)}
+        {shown === 'vision' && status.game && <>
+          <p>How far students see around themselves in <strong>{status.game.name}</strong>. Applies at once.</p>
+          <div className="teacher-newgame">
+            {VISION_CHOICES.map(([radius, label]) => <button key={radius} className={`btn ${status.game?.vision === radius ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => void action('vision', { radius })}>{label}</button>)}
+          </div>
+        </>}
+
+        {shown === 'laptop' && status.laptop && <p>Students go to <strong>{status.laptop.signInUrl}</strong> and sign in with Google. They are then sent
+          here, to <strong>{status.laptop.url}</strong>, while the class is open.</p>}
+
+        {shown === 'report' && <ClassReport token={token} copy={copyText} />}
+      </section>}
 
       {notice && <p role="alert" className="teacher-error">{notice}</p>}
+
+      {status.game && drawerStudent && <StudentDrawer key={drawerStudent.studentKey} token={token} gameId={status.game.id} student={drawerStudent}
+        online={isOnline(drawerStudent.studentKey)} muted={status.muted.includes(drawerStudent.studentKey)}
+        soundOff={allSoundOff || !!status.sound?.off.includes(drawerStudent.studentKey)} allSoundOff={allSoundOff}
+        who={who} action={action} failed={failed} onClose={closeDrawer} onOpen={setSelectedStudent} />}
+      <CommandPalette open={paletteOpen} onClose={closePalette} commands={commands} students={paletteStudents} forStudent={forStudent}
+        send={(student, text) => action('help-message', { studentKey: student.studentKey, text, gameId: status.game?.id })} />
     </>}
     {error && <p role="alert" className="teacher-error">{error}</p>}
   </main>;
 }
 
-type CardId = 'help' | 'live' | 'campaign' | 'warmup' | 'vision' | 'games' | 'mode' | 'laptop' | 'report';
-// badge: a number to show; alert: that number is something waiting on the teacher; label: a word of status instead.
-type CardInfo = { id: CardId; title: string; badge?: number; alert?: boolean; label?: string };
-// Every card starts closed; the counts in the bar say where to look. (A new key, so cards left open before close once.)
-const DEFAULT_OPEN: CardId[] = [];
-const CARDS_KEY = 'pixelplaza.teacher.cards.v2';
-// The page in four parts, in the order a lesson uses them.
-const GROUPS: { title: string; cards: CardId[] }[] = [
-  { title: 'During class', cards: ['live', 'help'] },
-  { title: 'Activities', cards: ['warmup', 'campaign'] },
-  { title: 'Setup', cards: ['games', 'vision', 'mode', 'laptop'] },
-  { title: 'After class', cards: ['report'] },
-];
+type TabId = 'chat' | 'map' | 'warmup' | 'campaign' | 'history' | 'games' | 'vision' | 'laptop' | 'report';
+// label: a word or number of how it stands, beside the title.
+type TabInfo = { id: TabId; icon: string; title: string; label?: string };
+const TAB_KEY = 'pixelplaza.teacher.tab.v1';
 
-function readOpenCards(): Partial<Record<CardId, boolean>> {
-  try { return JSON.parse(localStorage.getItem(CARDS_KEY) ?? '{}') ?? {}; } catch { return {}; }
+function readTab(): TabId | null {
+  try { return localStorage.getItem(TAB_KEY) as TabId | null; } catch { return null; }
+}
+
+// The campaign's next step: a chapter to start, or the end.
+function nextStep(campaign: CampaignInfo): string {
+  return campaign.chapter + 1 < campaign.chapters ? `Start chapter ${campaign.chapter + 2}: ${campaign.chapterTitles?.[campaign.chapter + 1] ?? ''}` : 'End the campaign';
 }
 
 // The teacher's star: experience for a good message or report, once each.
 function StarButton({ starred, onStar }: { starred?: boolean; onStar: () => void }) {
   return starred ? <span className="teacher-starred">⭐ Starred</span>
     : <button className="btn btn-sm" title={`Give ${XP.teacher} XP for good English`} onClick={onStar}>⭐ +{XP.teacher} XP</button>;
-}
-
-function Badge({ info }: { info: CardInfo }) {
-  if (info.alert) return info.badge ? <span className="teacher-badge teacher-badge-alert">{info.badge}</span> : null;
-  return info.label ? <span className="teacher-badge">{info.label}</span> : null;
-}
-
-function Card({ info, open, onToggle, children }: { info: CardInfo; open: boolean; onToggle: (open: boolean) => void; children: ReactNode }) {
-  return <details id={`card-${info.id}`} className="teacher-card" open={open} onToggle={event => onToggle(event.currentTarget.open)}>
-    <summary><h3>{info.title}</h3><Badge info={info} /></summary>
-    <div className="teacher-card-body">{children}</div>
-  </details>;
 }
 
 // What is special about a campaign, from what it contains.

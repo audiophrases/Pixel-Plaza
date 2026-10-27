@@ -3206,3 +3206,62 @@ test('a student is told every classmate in the game, here or not, so naming an a
         removeTemp(persistTo);
     }
 });
+
+test("a student's conversations for the teacher: one thread per person or place, sent or not, with the teacher's messages", { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, ...(body ? { body } : {}) });
+        const opened = (await teacher('game', { name: 'Conversations', randomNames: false })).body;
+        PIN = opened.pin;
+        const alex = await enter(base, 'signed-a', null); const sam = await enter(base, 'signed-b', null); sockets.push(alex, sam);
+        assert.equal((await api(base, '/api/teacher/conversations?studentKey=stu_a')).status, 401, 'only the teacher reads them');
+        assert.equal((await teacher('conversations')).status, 400, 'a student must be chosen');
+
+        // Alex writes nearby, to everyone, to Sam (once stopped by the word check) and to the teacher; Sam whispers back.
+        alex.send({ t: 'chat', cid: 'near', text: 'Hello near me' });
+        await alex.next(m => m.t === 'notice' && m.cid === 'near', 'nearby message waiting');
+        await pause(1600);
+        alex.send({ t: 'chat', cid: 'all', text: 'Hello everyone', to: 'everyone' });
+        await alex.next(m => m.t === 'notice' && m.cid === 'all', 'message for everyone waiting');
+        await pause(1600);
+        alex.send({ t: 'chat', cid: 'whisper', text: 'Hello Sam', to: sam.me.id });
+        await alex.next(m => m.t === 'notice' && m.cid === 'whisper', 'whisper waiting');
+        alex.send({ t: 'attempt', id: 'word-block', text: 'Quero ir contigo', source: 'chat', to: sam.me.id });
+        alex.send({ t: 'attempt-outcome', id: 'word-block', status: 'language-blocked', reason: 'Quero was not recognised as an English word.' });
+        await alex.next(m => m.t === 'attempt-recorded' && m.id === 'word-block' && m.kind === 'attempt-outcome', 'stopped attempt');
+        alex.send({ t: 'chat', cid: 'teacher', to: 'teacher', text: 'I need help with my sentence.' });
+        await alex.next(m => m.t === 'result' && m.cid === 'teacher', 'message to the teacher');
+        sam.send({ t: 'chat', cid: 'back', text: 'Hi Alex', to: alex.me.id });
+        await sam.next(m => m.t === 'notice' && m.cid === 'back', 'reply waiting');
+        await teacher('help-message', { gameId: opened.game.id, studentKey: 'stu_a', text: 'Try: I want to go with you.' });
+
+        const { status, body } = await teacher('conversations?studentKey=stu_a');
+        assert.equal(status, 200);
+        const thread = key => body.lines.filter(line => line.thread === key).map(line => [line.mine, line.text, line.status]);
+        assert.deepEqual(thread('nearby'), [[true, 'Hello near me', 'pending']]);
+        assert.deepEqual(thread('everyone'), [[true, 'Hello everyone', 'pending']], 'a message for everyone is not a private one');
+        assert.deepEqual(thread('p:stu_b'), [[true, 'Hello Sam', 'pending'], [true, 'Quero ir contigo', 'language-blocked'], [false, 'Hi Alex', 'pending']],
+            'what Alex sent Sam, or tried to, and what Sam sent back');
+        assert.deepEqual(thread('teacher'), [[true, 'I need help with my sentence.', 'teacher-inbox'], [false, 'Try: I want to go with you.', 'sent']]);
+        assert.equal(new Set(body.lines.map(line => line.thread)).size, 4);
+        assert.equal(body.names.stu_b, 'Sam');
+        assert.ok(body.lines.every((line, index) => index === 0 || body.lines[index - 1].at <= line.at), 'oldest first');
+        assert.ok(body.lines.find(line => line.status === 'language-blocked').reason.includes('Quero'), 'why a line was not sent');
+
+        // Sam's side: the same private conversation, from Sam.
+        const fromSam = (await teacher('conversations?studentKey=stu_b')).body;
+        assert.deepEqual(fromSam.lines.filter(line => line.thread === 'p:stu_a').map(line => [line.mine, line.text]), [[false, 'Hello Sam'], [true, 'Hi Alex']],
+            'what Alex tried and could not send stays Alex’s');
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});

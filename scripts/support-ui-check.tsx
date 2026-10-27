@@ -1,7 +1,7 @@
-// Exercise teacher assistance, audit pagination and changes of class/student in rendered controls.
+// Exercise the teacher's message history: audit pagination, opening a student, and changes of class/student.
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import type { HelpAlert, MessageAttempt, TeacherSupport as Support } from '../shared/support';
+import type { MessageAttempt, TeacherSupport as Support } from '../shared/support';
 
 const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true, url: 'http://localhost/teacher' });
 const g = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean };
@@ -9,12 +9,7 @@ Object.assign(g, { window: dom.window, document: dom.window.document, HTMLElemen
 Object.defineProperty(g, 'navigator', { value: dom.window.navigator, configurable: true });
 
 const students = [{ studentKey: 'ada', name: 'Ada' }, { studentKey: 'sam', name: 'Sam' }];
-const alert: HelpAlert = {
-  id: 'help-ada', studentKey: 'ada', name: 'Ada', topic: 'writing', kind: 'suggested', status: 'open',
-  note: 'Repeated language checks', timestamp: 100, updated: 100,
-  evidence: [{ reason: 'Try writing in English.', text: 'Original blocked idea', timestamp: 90 }]
-};
-const support: Support = { alerts: [alert], students, ai: { used: 1, students: 2 } };
+const support: Support = { alerts: [], students, ai: { used: 1, students: 2 } };
 const records: MessageAttempt[] = Array.from({ length: 610 }, (_, index) => ({
   id: `audit-${index}`, studentKey: index % 2 ? 'sam' : 'ada', sender: index % 2 ? 'Sam' : 'Ada',
   text: index === 0 ? 'Original blocked idea' : `Submitted idea ${index}`,
@@ -24,8 +19,7 @@ const records: MessageAttempt[] = Array.from({ length: 610 }, (_, index) => ({
   chatId: null, correction: index === 0 ? 'Try using the past tense.' : null
 }));
 const requests: URL[] = [];
-const actions: { path: string; body: Record<string, unknown> }[] = [];
-let success = true;
+const opened: string[] = [];
 let deferred: { resolve: (response: Response) => void; signal: AbortSignal } | null = null;
 let deferNextSam = false;
 g.fetch = async (url, init) => {
@@ -50,8 +44,7 @@ const render = async (gameId = 'first-game') => {
   await act(async () => {
     root.render(<TeacherSupport key={gameId} gameId={gameId} token="teacher-session" support={support} students={students}
       who={(_key, name) => `${name} (real name)`}
-      action={async (path, body) => { actions.push({ path, body: body as Record<string, unknown> }); return success; }}
-      failed={cause => { throw cause; }} />);
+      failed={cause => { throw cause; }} onStudent={studentKey => opened.push(studentKey)} />);
   });
 };
 const button = (text: string) => {
@@ -60,51 +53,31 @@ const button = (text: string) => {
 };
 const click = async (text: string) => { await act(async () => { button(text).click(); }); };
 const edit = async (id: string, value: string) => {
-  const field = document.getElementById(id) as HTMLSelectElement | HTMLTextAreaElement;
+  const field = document.getElementById(id) as HTMLSelectElement;
   assert.ok(field, `Field exists: ${id}`);
-  const prototype = field.tagName === 'SELECT' ? dom.window.HTMLSelectElement.prototype : dom.window.HTMLTextAreaElement.prototype;
   await act(async () => {
-    Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(field, value);
-    field.dispatchEvent(new dom.window.Event(field.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+    Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value')!.set!.call(field, value);
+    field.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
   });
 };
-const submit = async () => { await act(async () => { document.querySelector('form')!.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })); }); };
 
 await render();
 assert.ok(document.querySelector('.teacher-ai-count')?.textContent?.includes('1 / 2'));
-assert.ok(document.body.textContent?.includes('Suggested check-in'));
 assert.ok(document.body.textContent?.includes('Original blocked idea'));
 assert.ok(document.body.textContent?.includes('Revised submission: I saw the thief in the plaza.'));
 assert.ok(document.querySelector('.teacher-attempt-teacher > div')?.textContent?.startsWith('Teacher → Sam (real name)'), 'private teacher replies show the named student recipient instead of the stored student key');
 assert.ok(document.body.textContent?.includes('Stopped by language check'));
 assert.ok(document.body.textContent?.includes('Language hint offered'));
 assert.equal(document.body.textContent?.includes('language-blocked'), false, 'status codes are explained in ordinary language');
-assert.ok(document.body.textContent?.includes('Three related language blocks, grammar hints or incorrect answers within five minutes'));
+assert.equal(document.querySelector('form'), null, 'help requests and private messages are answered in Needs you and the student drawer, not here');
 assert.equal(document.querySelectorAll('.teacher-attempt').length, 50);
 while ([...document.querySelectorAll('button')].some(item => item.textContent === 'Load older messages')) await click('Load older messages');
 assert.equal(document.querySelectorAll('.teacher-attempt').length, 610, 'all older submissions remain available beyond 500 records');
 assert.ok(document.body.textContent?.includes('Submitted idea 609'));
-await click('View messages & help');
-assert.equal((document.getElementById('teacher-help-recipient') as HTMLSelectElement).value, 'ada');
-assert.equal((document.getElementById('teacher-history-student') as HTMLSelectElement).value, 'ada');
-assert.equal(document.querySelectorAll('.teacher-attempt').length, 50, 'switching student discards the previous all-student history');
-await click('I’m helping');
-assert.deepEqual(actions.at(-1), { path: 'help-status', body: { id: 'help-ada', status: 'acknowledged', gameId: 'first-game' } });
-await click('Help completed / helped in person');
-assert.equal(actions.at(-1)!.body.status, 'resolved');
-
-await edit('teacher-help-recipient', 'sam');
-await edit('teacher-help-message', 'Tell me what you want to say.');
-success = false;
-await submit();
-assert.equal((document.getElementById('teacher-help-message') as HTMLTextAreaElement).value, 'Tell me what you want to say.', 'a failed private send preserves the draft');
-success = true;
-await submit();
-assert.deepEqual(actions.at(-1), { path: 'help-message', body: { studentKey: 'sam', text: 'Tell me what you want to say.', gameId: 'first-game' } });
-assert.equal((document.getElementById('teacher-help-message') as HTMLTextAreaElement).value, '');
-assert.ok(document.body.textContent?.includes('Private message sent.'));
-
+await click('Open this student');
+assert.deepEqual(opened, ['ada'], 'a submission opens its student beside the class');
 await edit('teacher-history-student', 'ada');
+assert.equal(document.querySelectorAll('.teacher-attempt').length, 50, 'switching student discards the previous all-student history');
 deferNextSam = true;
 await edit('teacher-history-student', 'sam');
 assert.ok(deferred);
@@ -112,14 +85,12 @@ await edit('teacher-history-student', 'ada');
 assert.ok(deferred!.signal.aborted, 'the previous student request is aborted');
 await act(async () => { deferred!.resolve(Response.json({ attempts: [{ ...records[0], id: 'stale-student', text: 'Stale student leak' }], next: null })); });
 assert.equal(document.body.textContent?.includes('Stale student leak'), false);
-await edit('teacher-help-message', 'First class draft');
 await render('second-game');
-assert.equal((document.getElementById('teacher-help-recipient') as HTMLSelectElement).value, '');
-assert.equal((document.getElementById('teacher-help-message') as HTMLTextAreaElement).value, '');
+assert.equal((document.getElementById('teacher-history-student') as HTMLSelectElement).value, '', 'another class starts with every student');
 assert.ok(document.body.textContent?.includes('Second class only'));
 assert.equal(document.body.textContent?.includes('Submitted idea 609'), false);
 assert.equal(requests.at(-1)!.searchParams.get('gameId'), 'second-game');
 await act(async () => { root.unmount(); });
 dom.window.close();
-console.log('Teacher support UI: alerts, private help, preserved failed drafts, original/revised attempts, full pagination and student/game isolation pass.');
+console.log('Teacher message history: original/revised attempts, opening a student, full pagination and student/game isolation pass.');
 process.exit(0);

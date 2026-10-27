@@ -1,0 +1,19 @@
+/* What students are saying, one kind of chat at a time: one line each, newest first. */
+.chat-log-filters { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: .6rem; }
+.chat-log-filters button { padding: .25rem .65rem; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--text-dark); font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; }
+.chat-log-filters button:hover { border-color: #c9ced8; background: #f4f6fa; }
+.chat-log-filters button[aria-pressed="true"] { border-color: var(--secondary); background: var(--secondary); color: #fff; }
+.chat-log-filters small { opacity: .75; }
+.chat-log-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; max-height: 60vh; overflow-y: auto; }
+.chat-log-empty { margin: .5rem 0; color: #6b7480; font-size: .9rem; }
+.chat-log .chat-log-line { display: flex; flex-wrap: nowrap; justify-content: flex-start; align-items: baseline; gap: .4rem; padding: .25rem .3rem; border-radius: 6px; font-size: .9rem; }
+.chat-log-line:hover { background: #f4f6fa; }
+.chat-log-who { flex: none; padding: 0; border: 0; background: none; color: var(--text-dark); font: inherit; font-weight: 700; cursor: pointer; }
+.chat-log-who:hover { text-decoration: underline; }
+.chat-log-scope { flex: none; color: #6b7480; font-size: .78rem; }
+.chat-log-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.chat-log-end { flex: none; display: inline-flex; gap: .25rem; color: #6b7480; }
+.chat-log-end button { padding: 0 .15rem; border: 0; background: none; font: inherit; cursor: pointer; opacity: .55; }
+.chat-log-end button:hover { opacity: 1; }
+.chat-log-rejected .chat-log-text, .chat-log-removed .chat-log-text { color: #8a93a3; text-decoration: line-through; }
+.chat-log-blocked .chat-log-text { color: #a8071a; }

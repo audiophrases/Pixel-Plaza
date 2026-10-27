@@ -5,7 +5,8 @@ import { readCorrection } from '../../shared/diff';
 import { tidy } from '../../shared/tidy';
 import Correction from './Correction';
 import Face from './Face';
-import { ago } from './LiveClass';
+import { ago } from './liveFormat';
+import './StudentDrawer.css';
 
 // Everything about one student, beside the class: who they are, a private message, the quick actions (chat,
 // sound, spells), and their conversations, one tab for each person or place they talked to.
@@ -53,8 +54,6 @@ export default function StudentDrawer({ token, gameId, student, online, muted, s
         if (!stopped) setData(result as Conversations);
       } catch (cause) { if (!stopped) failed(cause); }
     };
-    setData(null);
-    setThread(null);
     void load();
     const timer = window.setInterval(() => void load(), 3000);
     return () => { stopped = true; window.clearInterval(timer); };

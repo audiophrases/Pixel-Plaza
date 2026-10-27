@@ -1,11 +1,13 @@
 import { groupRepeats, tidy } from '../../shared/tidy';
 import { XP } from '../../shared/levels';
-import { ago, outcome, scope, type LiveEntry } from './LiveClass';
+import type { LiveEntry } from './LiveClass';
+import { ago, outcome, scope } from './liveFormat';
+import './ChatLog.css';
 
 // What students are saying, filtered to one kind of chat: everyone near each other, the whole plaza, private
 // messages, or what was blocked. Each line: who, to whom, the words, what became of it, and a star or a take-down.
 export type ChatFilter = 'all' | 'nearby' | 'everyone' | 'private' | 'blocked';
-export const CHAT_FILTERS: [ChatFilter, string][] = [['all', 'All'], ['nearby', '👥 Nearby'], ['everyone', '📢 Everyone'], ['private', '🔒 Private'], ['blocked', '⛔ Blocked']];
+const CHAT_FILTERS: [ChatFilter, string][] = [['all', 'All'], ['nearby', '👥 Nearby'], ['everyone', '📢 Everyone'], ['private', '🔒 Private'], ['blocked', '⛔ Blocked']];
 
 const shows = (filter: ChatFilter, entry: LiveEntry) => filter === 'all' ? true
   : filter === 'blocked' ? entry.status === 'blocked' || entry.status === 'rejected' || entry.status === 'removed'
@@ -29,15 +31,15 @@ export default function ChatLog({ entries, filter, onFilter, who, action, onSele
       {CHAT_FILTERS.map(([id, label]) => <button key={id} type="button" aria-pressed={filter === id} onClick={() => onFilter(id)}>
         {label} <small>{entries.filter(entry => entry.status !== 'pending' && shows(id, entry)).length}</small></button>)}
     </div>
-    {lines.length === 0 && <p className="live-clear">Nothing here yet.</p>}
+    {lines.length === 0 && <p className="chat-log-empty">Nothing here yet.</p>}
     {/* The same message sent again and again is one line with a count. */}
-    <ol className="live-recent">{groupRepeats(lines, (a, b) => a.studentKey === b.studentKey && a.text.trim() === b.text.trim() && a.status === b.status).map(({ item: entry, count }) => {
+    <ol className="chat-log-lines">{groupRepeats(lines, (a, b) => a.studentKey === b.studentKey && a.text.trim() === b.text.trim() && a.status === b.status).map(({ item: entry, count }) => {
       const [icon, label] = outcome[entry.status] ?? ['·', entry.status];
-      return <li key={entry.id} className={`live-line live-line-${entry.status}`}>
-        <button type="button" className="live-line-who" onClick={() => onSelect(entry.studentKey)} title="Open this student">{who(entry.studentKey, entry.sender)}</button>
-        <span className="live-line-scope">{scope(entry)}</span>
-        <span className="live-line-text">{tidy(entry.text)}{count > 1 && <span className="live-times">×{count}</span>}</span>
-        <span className="live-line-end">
+      return <li key={entry.id} className={`chat-log-line chat-log-${entry.status}`}>
+        <button type="button" className="chat-log-who" onClick={() => onSelect(entry.studentKey)} title="Open this student">{who(entry.studentKey, entry.sender)}</button>
+        <span className="chat-log-scope">{scope(entry)}</span>
+        <span className="chat-log-text">{tidy(entry.text)}{count > 1 && <span className="live-times">×{count}</span>}</span>
+        <span className="chat-log-end">
           <small>{ago(entry.timestamp)}</small>
           <span title={label}>{icon}</span>
           {entry.status === 'approved' && (entry.starred ? <span title="Starred">⭐</span>
