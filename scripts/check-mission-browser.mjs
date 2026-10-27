@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { castanyada, castanyadaComplete } from '../shared/campaign.ts';
+import { castanyada, castanyadaComplete } from '../worker/tests/fixtures/season-1.mjs';
 
 const root = path.join(import.meta.dirname, '..');
 const origin = process.argv[2] ?? 'http://127.0.0.1:5173';

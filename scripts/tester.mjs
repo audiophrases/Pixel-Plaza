@@ -7,11 +7,14 @@
 //   npm run tester -- 4 noai     (no OpenAI checks, so no cost)
 //   npm run tester -- 4 random   (the game gives made-up names, as a new game does by default)
 //
-// The OpenAI key in .dev.vars is used, so grammar hints and moderation work as in class.
+// The OpenAI key in .dev.vars is used, so grammar hints and moderation work as in class. Missions and the side quest
+// library live on the online server, which this plaza never talks to: it gets the frozen test copy of Season 1 and the
+// library instead (worker/tests/fixtures).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { library, missions } from '../worker/tests/fixtures/season-1.mjs';
 
 const root = path.join(import.meta.dirname, '..');
 const wrangler = path.join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
@@ -24,6 +27,7 @@ const count = Math.min(Math.max(Number(args.find(arg => /^\d+$/.test(arg))) || 4
 const noAi = args.includes('noai');
 const randomNames = args.includes('random');
 const teacherPassword = 'tester'; // only this throwaway server accepts it
+const contentToken = crypto.randomUUID(); // lets this run load the test missions into its own server
 
 // Every run starts with an empty plaza. If an earlier run still holds the folder, use a fresh one.
 try { fs.rmSync(state, { recursive: true, force: true }); } catch { state += `-${Date.now()}`; }
@@ -32,6 +36,7 @@ console.log(`\n  Starting a test plaza with ${count} players${noAi ? ' (OpenAI o
 const child = spawn(process.execPath, [wrangler, 'dev', '--port', String(port), '--persist-to', state,
     '--show-interactive-dev-session=false',
     '--var', 'TESTER_MODE:1',
+    '--var', `CONTENT_TOKEN:${contentToken}`,
     '--var', `CREATE_PASSWORD_HASH:${crypto.createHash('sha256').update(teacherPassword).digest('hex')}`,
     ...(noAi ? ['--var', 'OPENAI_API_KEY:'] : []),
     '--var', 'PINPLAY_API_URL:'], {
@@ -56,6 +61,7 @@ for (let attempt = 0; ; attempt++) {
 
 let pin;
 try {
+    await post('/api/content', { missions, library }, { 'x-content-token': contentToken });
     const { token } = await post('/api/teacher/login', { password: teacherPassword });
     ({ pin } = await post('/api/teacher/game', { name: 'Class 1', randomNames }, { 'x-teacher-session': token }));
 } catch (error) {

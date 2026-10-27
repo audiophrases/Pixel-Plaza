@@ -11,13 +11,13 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { sha256Hex } from '../rules.ts';
 import { voiceFor } from '../../shared/voices.ts';
-import { castanyada, castanyadaComplete, castanyadaInvestigations } from '../../shared/campaign.ts';
+import { castanyada, castanyadaComplete, castanyadaInvestigations, library, missions, sideQuests } from './fixtures/season-1.mjs';
 import { FACTS } from '../../shared/warmup.ts';
 import { IDENTITIES, identityById } from '../../shared/warmupKinds.ts';
 import { defaultWarmup } from '../../shared/warmupConfig.ts';
 import { missionEnvelope } from '../../shared/missionSchema.ts';
 import { legalMove } from '../../shared/plazaMap.ts';
-import { SIDE_QUEST_SOURCE, sideQuests } from '../../shared/sideQuests.ts';
+import { SIDE_QUEST_SOURCE } from '../../shared/sideQuests.ts';
 import { getWorld } from '../../shared/themeCatalog.ts';
 
 const root = path.join(import.meta.dirname, '..', '..');
@@ -59,14 +59,17 @@ function startPinPlay() {
     return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
 
-async function startPlaza(pinPlayUrl, persistTo, vars = {}) {
-    const port = await freePort();
+// Like the online server, a test server keeps missions and the side quest library as data. Each one gets the frozen
+// copy of Season 1 and the library (fixtures/) through /api/content, unless `content` is false.
+const CONTENT_TOKEN = 'test-content';
+async function startPlaza(pinPlayUrl, persistTo, vars = {}, { content = true, port: fixed } = {}) {
+    const port = fixed ?? await freePort();
     const child = spawn(process.execPath, [wrangler, 'dev', '--port', String(port), '--inspector-port', '0',
         '--persist-to', persistTo, '--show-interactive-dev-session=false',
         '--var', `CREATE_PASSWORD_HASH:${await sha256Hex(PASSWORD)}`,
         '--var', `PINPLAY_API_URL:${pinPlayUrl}`,
         // No OpenAI key unless a test brings its own: the one in .dev.vars must not change the results.
-        ...Object.entries({ OPENAI_API_KEY: '', MOVEMENT_CHECK: '0', ...vars }).flatMap(([key, value]) => ['--var', `${key}:${value}`])], {
+        ...Object.entries({ OPENAI_API_KEY: '', MOVEMENT_CHECK: '0', CONTENT_TOKEN, ...vars }).flatMap(([key, value]) => ['--var', `${key}:${value}`])], {
         cwd: root, env: { ...process.env, WRANGLER_SEND_METRICS: 'false' }, stdio: ['ignore', 'pipe', 'pipe']
     });
     let log = '';
@@ -85,7 +88,13 @@ async function startPlaza(pinPlayUrl, persistTo, vars = {}) {
         } else { child.once('exit', resolve); child.kill('SIGTERM'); }
     });
     for (let attempt = 0; attempt < 120; attempt++) {
-        try { if ((await fetch(`${base}/api/health`)).ok) return { base, stop }; } catch { /* starting */ }
+        let up = false;
+        try { up = (await fetch(`${base}/api/health`)).ok; } catch { /* starting */ }
+        if (up) {
+            const loaded = content && await fetch(`${base}/api/content`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-content-token': CONTENT_TOKEN }, body: JSON.stringify({ missions, library }) });
+            if (loaded && !loaded.ok) { await stop(); throw new Error(`Loading the test missions failed: ${await loaded.text()}`); }
+            return { base, stop };
+        }
         await new Promise(resolve => setTimeout(resolve, 250));
     }
     await stop();
@@ -1768,7 +1777,7 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         assert.equal(opened.campaign, null);
         assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada', 'castanyada-side-quests', 'castanyada-complete', 'castanyada-investigations', 'plaza-free-play']);
         assert.deepEqual(opened.campaigns.find(item => item.id === 'castanyada-investigations'),
-            { id: 'castanyada-investigations', title: 'Castanyada: Witness Investigations', revision: 'builtin-castanyada-investigations-v1', chapters: ['The Missing Chestnuts', 'Conflicting Stories', 'The Hotel Cellar', 'The Missing Festival Plan', 'The Haunted Celebration'],
+            { id: 'castanyada-investigations', title: 'Castanyada: Witness Investigations', revision: opened.campaigns.find(item => item.id === 'castanyada-investigations').revision, chapters: ['The Missing Chestnuts', 'Conflicting Stories', 'The Hotel Cellar', 'The Missing Festival Plan', 'The Haunted Celebration'],
                 mystery: true, partnerQuests: true, witnesses: true });
 
         // No story yet: nothing is sent.
@@ -3263,5 +3272,83 @@ test("a student's conversations for the teacher: one thread per person or place,
         await plaza.stop();
         await new Promise(resolve => pinPlay.close(resolve));
         removeTemp(persistTo);
+    }
+});
+
+test('missions live online: the laptop sends every change at once, fetches what changed online, waits offline and never overwrites', { timeout: 240000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const pinPlayUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    const dirs = [0, 1].map(() => fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-')));
+    const onlinePort = await freePort();
+    // The online server starts empty: the laptop's missions and library are its first content, as on the day they moved online.
+    let online = await startPlaza(pinPlayUrl, dirs[0], {}, { content: false, port: onlinePort });
+    let laptop;
+    try {
+        laptop = await startPlaza(pinPlayUrl, dirs[1], { LAN_URL: 'http://192.168.1.20:8787', CLOUD_URL: online.base });
+        assert.equal((await api(online.base, '/api/missions/sync', { body: { lease: 'forged', op: 'pull' } })).status, 401, 'only the linked laptop syncs');
+        const onlineSession = (await api(online.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const laptopSession = (await api(laptop.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const studio = (base, session) => (op, body) => api(base, `/api/teacher/missions/${op}`, { session, body });
+        const here = studio(laptop.base, laptopSession); const there = studio(online.base, onlineSession);
+        const save = async (call, id, change) => {
+            const draft = (await call(`get?id=${id}`)).body.draft;
+            const campaign = structuredClone(draft.campaign); change(campaign);
+            return (await call('save', { id, version: draft.version, envelope: missionEnvelope(campaign) })).body;
+        };
+        const titles = async call => Object.fromEntries((await call('list')).body.library.map(item => [item.id, item.title]));
+
+        // Signing in on the laptop links it; opening Mission Studio there uploads all of it.
+        let listed = (await here('list')).body;
+        assert.deepEqual(listed.sync, { state: 'synced', waiting: 0, keptBoth: [] });
+        assert.equal((await there('list')).body.sync.state, 'home', 'the online server is where missions live');
+        assert.deepEqual(await titles(there), await titles(here));
+        const onlineStatus = (await api(online.base, '/api/teacher/status', { session: onlineSession })).body;
+        assert.deepEqual(onlineStatus.campaigns.map(item => item.id), ['castanyada', 'castanyada-side-quests', 'castanyada-complete', 'castanyada-investigations', 'plaza-free-play'], 'in the same order');
+        assert.equal((await api(online.base, '/api/teacher/quest-library', { session: onlineSession })).body.library.quests.length, library.quests.length);
+
+        // A save on the laptop is online at once, at the same version, and so is a publication.
+        let saved = await save(here, 'castanyada', campaign => { campaign.title = 'Castanyada, laptop edit'; });
+        assert.equal(saved.sync.state, 'synced');
+        let mirrored = (await there('get?id=castanyada')).body.draft;
+        assert.equal(mirrored.campaign.title, 'Castanyada, laptop edit'); assert.equal(mirrored.version, saved.draft.version);
+        const published = (await here('publish', { id: 'castanyada', version: saved.draft.version })).body;
+        assert.equal((await there('get?id=castanyada')).body.draft.publishedRevision, published.draft.publishedRevision);
+        assert.equal((await api(online.base, '/api/teacher/status', { session: onlineSession })).body.campaigns[0].title, 'Castanyada, laptop edit');
+
+        // Published online: the laptop has it the next time Mission Studio opens, ready to start in a game.
+        const freePlay = await save(there, 'plaza-free-play', campaign => { campaign.title = 'Free play, online edit'; });
+        await there('publish', { id: 'plaza-free-play', version: freePlay.draft.version });
+        assert.equal((await titles(here))['plaza-free-play'], 'Free play, online edit');
+        assert.equal((await api(laptop.base, '/api/teacher/status', { session: laptopSession })).body.campaigns.find(item => item.id === 'plaza-free-play').title, 'Free play, online edit');
+
+        // No internet: the laptop keeps working and says what waits.
+        await online.stop();
+        saved = await save(here, 'castanyada', campaign => { campaign.title = 'Castanyada, offline edit'; });
+        assert.equal(saved.draft.campaign.title, 'Castanyada, offline edit');
+        assert.deepEqual(saved.sync, { state: 'offline', waiting: 1, keptBoth: [] });
+        saved = await save(here, 'castanyada-side-quests', campaign => { campaign.title = 'Side mysteries, offline edit'; });
+        assert.equal(saved.sync.waiting, 2);
+
+        // Meanwhile the same mission changes online. Back online, the laptop's other change goes up, and the clash keeps both.
+        online = await startPlaza(pinPlayUrl, dirs[0], {}, { content: false, port: onlinePort });
+        await save(there, 'castanyada', campaign => { campaign.title = 'Castanyada, online edit'; });
+        listed = (await here('list')).body;
+        assert.deepEqual(listed.sync, { state: 'synced', waiting: 0, keptBoth: [{ id: 'castanyada', copy: 'castanyada-laptop', title: 'Castanyada, offline edit (laptop)' }] });
+        const both = await titles(there);
+        assert.equal(both.castanyada, 'Castanyada, online edit');
+        assert.equal(both['castanyada-laptop'], 'Castanyada, offline edit (laptop)');
+        assert.equal(both['castanyada-side-quests'], 'Side mysteries, offline edit');
+        assert.deepEqual(await titles(here), both, 'nothing lost, and the same everywhere');
+
+        // A new library online reaches the laptop.
+        const smaller = { ...library, quests: library.quests.slice(0, 100) };
+        const loaded = await fetch(`${online.base}/api/content`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-content-token': CONTENT_TOKEN }, body: JSON.stringify({ library: smaller }) });
+        assert.equal(loaded.status, 200);
+        await here('list');
+        assert.equal((await api(laptop.base, '/api/teacher/quest-library', { session: laptopSession })).body.library.quests.length, 100);
+        assert.equal((await api(online.base, '/api/content', { body: { library: smaller } })).status, 404, 'files load only with the token');
+    } finally {
+        await laptop?.stop(); await online.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); for (const dir of dirs) removeTemp(dir);
     }
 });

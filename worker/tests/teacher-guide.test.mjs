@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { campaigns, castanyada, castanyadaSideQuests, castanyadaComplete, castanyadaInvestigations } from '../../shared/campaign.ts';
+import { missions as campaigns, castanyada, castanyadaSideQuests, castanyadaComplete, castanyadaInvestigations } from './fixtures/season-1.mjs';
 import { buildGuide } from '../../shared/teacherGuide.ts';
 
 test('every campaign has a concise guide for every main and optional task in the actual definition', () => {

@@ -2,7 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fillThiefClue, lookOf, thiefCount } from '../../shared/thief.ts';
-import { absentRoleClues, acceptedNames, answerMatches, castanyada, chapterDone, isUnlocked, pickRole, rewardClues, teamProgress } from '../../shared/campaign.ts';
+import { absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, pickRole, rewardClues, teamProgress } from '../../shared/campaign.ts';
+import { castanyada } from './fixtures/season-1.mjs';
 import { zoneAt, worldZones } from '../../shared/plazaMap.ts';
 
 test('absent-role notices preserve clue timing and restore every missing code fragment', () => {

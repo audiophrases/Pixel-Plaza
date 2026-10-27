@@ -9,16 +9,17 @@ import { harmFrom, slurIn, type Harm } from '../shared/safety.ts';
 import { isGlitch } from '../shared/tidy.ts';
 import { PARTICIPATION, Participation, participationDecision } from './participation.ts';
 import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
-import { MissionRepository, type MissionResult } from './missions.ts';
+import { MissionRepository, readCopy, type MissionResult } from './missions.ts';
+import { QuestLibrary } from './questLibrary.ts';
 import { QuestBoard, type BoardContext } from './questBoard.ts';
 import { Interviews } from './interviews.ts';
 import { StudentAssistance } from './support.ts';
 import type { AttemptPage, AttemptSource, Conversations, ConversationLine, HelpStatus, HelpTopic, TeacherSupport } from '../shared/support.ts';
 import type { ConversationView, Objective, InterviewView } from '../shared/campaign.ts';
 import { LiveMissions, type LiveMissionResult } from './liveMissions.ts';
-import type { CampaignChoice, LiveMissionTarget } from '../shared/missionTypes.ts';
+import type { CampaignChoice, LiveMissionTarget, MissionCopy, MissionPushResult, MissionSync } from '../shared/missionTypes.ts';
 import { boardWait, type Campaign } from '../shared/campaign.ts';
-import { SIDE_QUEST_LIBRARY_VERSION, SIDE_QUEST_SOURCE, questFit, questObjective, sideQuestById } from '../shared/sideQuests.ts';
+import { SIDE_QUEST_SOURCE, checkLibrary, findQuest, libraryVersion, questFit, questObjective, type SideQuestLibrary } from '../shared/sideQuests.ts';
 import { wordDiff } from '../shared/diff.ts';
 import { cleanName, shownNames } from '../shared/names.ts';
 import { isEnglishVoice, normalizeVoice, voiceFor } from '../shared/voices.ts';
@@ -39,6 +40,7 @@ import { missionId } from '../shared/missionSchema.ts';
 
 const TICKET_MS = 60_000;
 const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
+const MISSION_SYNC_EVERY_MS = 5 * 60 * 1000; // how often the laptop checks with the online server while the teacher page is open
 const CHAT_KEEP = 500;
 const STATUS_HISTORY = 100;
 const CHAT_GAP_MS = 1500;
@@ -53,6 +55,12 @@ const CHAT_HISTORY = 120; // messages of this lesson a returning page gets back
 const PLAYS_KEEP_MS = 60 * 60 * 1000; // what each device read aloud, kept for an hour
 const PLAYS_SHOWN_MS = 15 * 60 * 1000; // and shown to the teacher for the last 15 minutes
 const PLAYS_SHOWN = 300;
+
+// Why an exchange with the online server stopped, as the laptop reports it.
+class SyncStopped extends Error {
+    state: MissionSync['state'];
+    constructor(state: MissionSync['state']) { super(state); this.state = state; }
+}
 
 // Close codes the client acts on.
 const CLOSE_JOIN_AGAIN = 4001; // ticket unknown, used or expired
@@ -131,6 +139,9 @@ const publicSeat = (seat: Seat) => ({ id: seat.id, name: seat.name, x: seat.x, y
 export class PlazaRoom extends DurableObject<Env> {
     private sql: SqlStorage;
     private missions: MissionRepository;
+    private questLibrary: QuestLibrary;
+    private missionSync: Promise<MissionSync> = Promise.resolve({ state: 'home', waiting: 0, keptBoth: [] });
+    private missionSyncAt = 0;
     private questBoard: QuestBoard;
     private interviews: Interviews;
     private assistance: StudentAssistance;
@@ -231,6 +242,8 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         this.missions = new MissionRepository(this.sql);
         this.missions.initialize();
+        this.questLibrary = new QuestLibrary(this.sql);
+        this.questLibrary.initialize();
         this.questBoard = new QuestBoard(this.sql);
         this.questBoard.initialize();
         this.interviews = new Interviews(this.sql);
@@ -311,6 +324,24 @@ export class PlazaRoom extends DurableObject<Env> {
 
     saveSetting(key: string, value: string): void {
         this.sql.exec('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value', key, value);
+    }
+
+    // On the teacher's laptop, Mission Studio works on the laptop's copy: brought up to date before it is read, and every
+    // change sent to the online server at once (README, "Missions live online"). The answer says how that went.
+    async missionStudioSynced(token: string, op: string, body: unknown): Promise<(MissionResult | LiveMissionResult) & { sync?: MissionSync }> {
+        if (!this.teacherSignedIn(token)) return { error: 'Please sign in again.', status: 401 };
+        if (op === 'list' || op === 'get') {
+            const sync = await this.syncMissions();
+            return { ...this.missionStudio(token, op, body), sync };
+        }
+        const result = this.missionStudio(token, op, body);
+        if ('error' in result || !['create', 'save', 'publish'].includes(op) || !('draft' in result) || !result.draft) return result;
+        const sync = await this.syncMissions();
+        // The upload may have renumbered the draft, or kept it as a copy when it had changed online too: the page
+        // gets what is here now, and goes on with the teacher's own version.
+        const id = result.draft.campaign.id;
+        const draft = this.missions.draft(sync.keptBoth.find(item => item.id === id)?.copy ?? id) ?? result.draft;
+        return { ...result, draft, library: this.missions.list(), sync };
     }
 
     missionStudio(token: string, op: string, body: unknown): MissionResult | LiveMissionResult {
@@ -403,15 +434,17 @@ export class PlazaRoom extends DurableObject<Env> {
             if (b.gameId !== target.game.id || b.targetVersion !== target.version || b.targetEpoch !== target.epoch || b.chapterId !== target.chapter.id) return { error: 'The running game changed. Refresh the live target before reviewing quests.', status: 409 };
             if (!Array.isArray(b.questIds) || b.questIds.some(id => typeof id !== 'string')) return { error: 'Choose quests from the library.', status: 400 };
             const ids = b.questIds as string[];
-            const quests = ids.map(id => sideQuestById(id));
+            const library = this.questLibrary.get();
+            if (!library) return { error: 'The side quest library is not on this server yet.', status: 409 };
+            const quests = ids.map(id => findQuest(library, id));
             if (quests.some(quest => !quest)) return { error: 'Choose quests from the library.', status: 400 };
             for (const quest of quests) {
-                const reason = questFit(quest!, campaign, target.chapter.id);
+                const reason = questFit(quest!, campaign, target.chapter.id, library.chapters);
                 if (reason) return { error: `${quest!.title}: ${reason}`, status: 400 };
             }
             const source = structuredClone(campaign); source.id = SIDE_QUEST_SOURCE;
             source.chapters[target.chapter.index].objectives.push(...quests.map(quest => questObjective(quest!)).filter(quest => !campaign.chapters[target.chapter.index].objectives.some(o => o.id === quest.id)));
-            const result = this.liveMissions.preview(token, target, campaign, source, SIDE_QUEST_LIBRARY_VERSION, ids);
+            const result = this.liveMissions.preview(token, target, campaign, source, libraryVersion(library), ids);
             if ('error' in result) return result;
             this.countEligible(target, campaign, result.quests, result.preview);
             return { target, preview: result.preview };
@@ -420,7 +453,7 @@ export class PlazaRoom extends DurableObject<Env> {
             const preview = typeof b.previewId === 'string' ? this.liveMissions.pending(token, b.previewId) : undefined;
             if (!preview) return { error: 'This preview is no longer available. Review the quests again.', status: 409 };
             if (preview.expires <= Date.now() || preview.game_id !== target.game.id || preview.revision_id !== target.campaign.revision || preview.chapter_id !== target.chapter.id || preview.base_version !== target.version
-                || (preview.source_id === SIDE_QUEST_SOURCE ? SIDE_QUEST_LIBRARY_VERSION : this.missions.draft(preview.source_id)?.version) !== preview.source_version) return { error: 'The preview expired or the game/draft changed. Review the quests again.', status: 409 };
+                || (preview.source_id === SIDE_QUEST_SOURCE ? this.libraryVersionNow() : this.missions.draft(preview.source_id)?.version) !== preview.source_version) return { error: 'The preview expired or the game/draft changed. Review the quests again.', status: 409 };
             const released = this.liveMissions.release(preview);
             for (const id of released) this.questBoard.release(target.game.id, id);
             return { target: this.liveTarget(), released };
@@ -621,6 +654,105 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         lines.sort((a, b) => a.at - b.at);
         return { studentKey, lines, names: Object.fromEntries(names) };
+    }
+
+    // ---------- One home for missions ----------
+    // The online server keeps every mission and the side quest library. A teacher's laptop keeps a copy to play and
+    // edit, sends every change there at once and fetches what changed online. Without internet the laptop carries on
+    // and sends its changes later; a mission changed in both places is kept twice, never overwritten.
+
+    private teacherSignedIn(token: string): boolean {
+        return !!token && this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray().length > 0;
+    }
+    private libraryVersionNow(): number | undefined {
+        const library = this.questLibrary.get();
+        return library ? libraryVersion(library) : undefined;
+    }
+
+    // On the laptop: send what changed here, then fetch what changed online. One exchange at a time, each after the last.
+    syncMissions(): Promise<MissionSync> {
+        if (!this.env.LAN_URL || !this.env.CLOUD_URL) return Promise.resolve({ state: 'home', waiting: 0, keptBoth: [] });
+        this.missionSyncAt = Date.now();
+        this.missionSync = this.missionSync.catch(() => undefined).then(() => this.exchangeMissions());
+        return this.missionSync;
+    }
+    // While the teacher page is open on the laptop, now and then: what changed online arrives, and what waits goes up.
+    async syncMissionsSometimes(): Promise<void> {
+        if (Date.now() - this.missionSyncAt >= MISSION_SYNC_EVERY_MS) await this.syncMissions();
+    }
+
+    private async exchangeMissions(): Promise<MissionSync> {
+        const keptBoth: MissionSync['keptBoth'] = [];
+        const status = (state: MissionSync['state']): MissionSync => ({ state, waiting: this.missions.waiting() + (this.questLibrary.outbox() ? 1 : 0), keptBoth });
+        const lease = this.setting('cloud_lease');
+        if (!lease) return status('signin');
+        const call = async <T>(body: object): Promise<T> => {
+            const response = await fetch(new URL('/api/missions/sync', this.env.CLOUD_URL!), {
+                method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lease, ...body }), signal: AbortSignal.timeout(10_000)
+            });
+            if (!response.ok) throw new SyncStopped(response.status === 401 ? 'signin' : response.status === 404 ? 'outdated' : 'offline');
+            return await response.json() as T;
+        };
+        try {
+            for (const { copy, base } of this.missions.outbox()) {
+                const { result } = await call<{ result: MissionPushResult }>({ op: 'push', copy, base });
+                this.ctx.storage.transactionSync(() => this.missions.uploaded(copy, result));
+                if (result.outcome === 'kept-both' && result.copy) keptBoth.push({ id: copy.id, copy: result.copy.id, title: (JSON.parse(result.copy.content) as Campaign).title });
+            }
+            const library = this.questLibrary.outbox();
+            if (library) this.questLibrary.uploaded(library.version, (await call<{ version: number | null }>({ op: 'push-library', ...library })).version);
+            const changes = await call<{ missions: MissionCopy[]; library: { content: string; version: number } | null }>({ op: 'pull', ...this.missions.known(), library: this.questLibrary.synced() });
+            this.ctx.storage.transactionSync(() => {
+                this.missions.downloaded(changes.missions);
+                if (changes.library) this.questLibrary.downloaded(changes.library.content, changes.library.version);
+            });
+            return status('synced');
+        } catch (cause) {
+            return status(cause instanceof SyncStopped ? cause.state : 'offline');
+        }
+    }
+
+    // Online: a request from the teacher's laptop, which proves itself with the lease it got when the teacher signed in
+    // there (linkLaptop).
+    missionSyncServe(body: Record<string, unknown>): object | { error: string; status: number } {
+        const laptop = this.laptop();
+        if (!laptop || !secretsMatch(body.lease, laptop.lease)) return { error: 'Sign in again on the laptop.', status: 401 };
+        const base = body.base === null || Number.isInteger(body.base) ? body.base as number | null : undefined;
+        if (body.op === 'push') {
+            const copy = readCopy(body.copy);
+            if (!copy || base === undefined) return { error: 'That mission is not valid.', status: 400 };
+            return { result: this.ctx.storage.transactionSync(() => this.missions.receive(copy, base)) };
+        }
+        if (body.op === 'push-library') {
+            let checked: ReturnType<typeof checkLibrary> = { error: 'That library is not valid.' };
+            try { if (typeof body.content === 'string') checked = checkLibrary(JSON.parse(body.content)); } catch { /* not JSON */ }
+            if ('error' in checked || !Number.isInteger(body.version) || base === undefined) return { error: 'error' in checked ? checked.error : 'That library is not valid.', status: 400 };
+            return { version: this.questLibrary.receive(body.content as string, body.version as number, base) };
+        }
+        if (body.op === 'pull') {
+            const have = body.have && typeof body.have === 'object' ? Object.fromEntries(Object.entries(body.have).filter(([, version]) => Number.isInteger(version))) as Record<string, number> : {};
+            const revisions = Array.isArray(body.revisions) ? body.revisions.filter((id): id is string => typeof id === 'string') : [];
+            return { missions: this.missions.changes(have, revisions), library: this.questLibrary.changes(Number.isInteger(body.library) ? body.library as number : null) };
+        }
+        return { error: 'That request is not valid.', status: 400 };
+    }
+
+    // The side quest library, for the teacher's library page. A laptop without one fetches it first.
+    async questLibraryFor(token: string): Promise<{ library: SideQuestLibrary | null } | { error: string; status: number }> {
+        if (!this.teacherSignedIn(token)) return { error: 'Please sign in again.', status: 401 };
+        if (!this.questLibrary.get()) await this.syncMissions();
+        return { library: this.questLibrary.get() };
+    }
+
+    // Missions and the side quest library loaded from files (/api/content): the tests, or a new server's first content.
+    loadContent(missions: unknown, library: unknown): { missions: string[]; library: boolean } | { error: string; status: number } {
+        const checked = library === undefined ? undefined : checkLibrary(library);
+        if (checked && 'error' in checked) return { error: checked.error, status: 400 };
+        return this.ctx.storage.transactionSync(() => {
+            const loaded = missions === undefined ? { loaded: [] } : this.missions.load(missions);
+            if ('error' in loaded) return { error: loaded.error, status: 400 };
+            return { missions: loaded.loaded, library: checked ? this.questLibrary.load(checked.library) : false };
+        });
     }
 
     // ---------- The plaza socket ----------

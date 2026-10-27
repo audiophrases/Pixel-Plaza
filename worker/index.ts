@@ -26,6 +26,9 @@ export interface Env {
     // school network, and the online Pixel Plaza where students sign in.
     LAN_URL?: string;
     CLOUD_URL?: string;
+    // Set only for the tests and a new server's first content: lets /api/content load missions and the side quest
+    // library from files. The online site never sets it.
+    CONTENT_TOKEN?: string;
     // Set only by tester.bat on a local server: lets "tester:Name" tokens sign in without Google.
     TESTER_MODE?: string;
     // Optional override for PinPlay's existing Render speech bridge.
@@ -128,15 +131,18 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     return null;
 }
 
-async function handle(request: Request, env: Env): Promise<Response> {
+async function handle(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const path = new URL(request.url).pathname;
     const get = request.method === 'GET';
     const post = request.method === 'POST';
     const studio = path.startsWith('/api/teacher/missions/');
     const speech = path === '/api/plaza/speech' || path === '/api/plaza/voice-preview';
     const warmupEditor = path === '/api/teacher/warmup-editor';
+    // A mission (draft and published version) or the side quest library from the laptop; missions and the library from files.
+    const content = path === '/api/missions/sync' ? 3_000_000 : path === '/api/content' ? 8_000_000 : 0;
+    if (path === '/api/content' && (!env.CONTENT_TOKEN || !secretsMatch(request.headers.get('x-content-token'), env.CONTENT_TOKEN))) return json({ error: 'Not found.' }, 404);
     let body: any = {};
-    if (post && (studio || speech || warmupEditor)) {
+    if (post && (studio || speech || warmupEditor || content)) {
         // Bound authoring input before buffering or parsing JSON, even without Content-Length.
         const reader = request.body?.getReader();
         if (!reader) return json({ error: 'Expected JSON.' }, 400);
@@ -145,9 +151,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
             const { done, value } = await reader.read();
             if (done) break;
             size += value.byteLength;
-            if (size > (warmupEditor ? 68_096 : studio ? MISSION_MAX_BYTES + 4096 : 1024)) {
+            if (size > (content || (warmupEditor ? 68_096 : studio ? MISSION_MAX_BYTES + 4096 : 1024))) {
                 await reader.cancel();
-                return json({ error: warmupEditor ? 'Warm-up request exceeds 64 KB.' : studio ? 'Mission request exceeds 512 KB.' : 'Speech request is too large.' }, 413);
+                return json({ error: content ? 'Request is too large.' : warmupEditor ? 'Warm-up request exceeds 64 KB.' : studio ? 'Mission request exceeds 512 KB.' : 'Speech request is too large.' }, 413);
             }
             chunks.push(value);
         }
@@ -223,13 +229,16 @@ async function handle(request: Request, env: Env): Promise<Response> {
         const refused = await checkTeacherPassword(request, env, body?.password);
         if (refused) return refused;
         const token = await plaza(env).startTeacherSession();
-        return json({ token, notice: await linkOnline(env, { password: body.password, url: env.LAN_URL ?? null }) });
+        const notice = await linkOnline(env, { password: body.password, url: env.LAN_URL ?? null });
+        // Linked: the laptop's missions go up and the online ones come down while the teacher page opens.
+        if (onLaptop(env)) ctx.waitUntil(plaza(env).syncMissions());
+        return json({ token, notice });
     }
     if (studio) {
         const op = path.slice('/api/teacher/missions/'.length);
         if (!(get && ['list', 'get', 'live', 'live-inspect'].includes(op)) && !(post && ['create', 'save', 'publish', 'live-preview', 'library-preview', 'live-release', 'live-withdraw', 'live-cancel'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
         const args = get ? { id: new URL(request.url).searchParams.get('id') } : body;
-        const result = await plaza(env).missionStudio(request.headers.get('x-teacher-session') || '', op, args);
+        const result = await plaza(env).missionStudioSynced(request.headers.get('x-teacher-session') || '', op, args);
         return 'error' in result ? json(result, result.status) : json(result);
     }
     if (path === '/api/teacher/report' && get) {
@@ -244,6 +253,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (path === '/api/teacher/campaign-guide' && get) {
         const query = new URL(request.url).searchParams;
         const result = await plaza(env).campaignGuide(request.headers.get('x-teacher-session') || '', query.get('campaign') ?? undefined, query.get('game') ?? undefined);
+        return 'error' in result ? json({ error: result.error }, result.status) : json(result);
+    }
+    if (path === '/api/teacher/quest-library' && get) {
+        const result = await plaza(env).questLibraryFor(request.headers.get('x-teacher-session') || '');
         return 'error' in result ? json({ error: result.error }, result.status) : json(result);
     }
     if (path === '/api/teacher/conversations' && get) {
@@ -262,10 +275,22 @@ async function handle(request: Request, env: Env): Promise<Response> {
         if (!action) return json({ error: 'That request is not valid.' }, 400);
         const result = await plaza(env).teacher(request.headers.get('x-teacher-session') || '', action);
         if ('error' in result) return json({ error: result.error }, result.status);
+        if (onLaptop(env) && action.kind === 'status') ctx.waitUntil(plaza(env).syncMissionsSometimes());
         // Closing the class on the laptop stops sending students to it.
         const notice = action.kind === 'open' || action.kind === 'newGame'
             ? await linkOnline(env, { url: action.kind === 'newGame' || action.open ? env.LAN_URL ?? null : null }) : '';
         return json({ ...result, laptop: onLaptop(env) ? { url: env.LAN_URL, signInUrl: env.CLOUD_URL } : null, notice });
+    }
+
+    // Online: the teacher's laptop keeps its missions in step with this server (PlazaRoom, "One home for missions").
+    if (path === '/api/missions/sync' && post) {
+        const result = await plaza(env).missionSyncServe(body && typeof body === 'object' ? body : {});
+        return 'error' in result ? json({ error: result.error }, result.status) : json(result);
+    }
+    // Missions and the side quest library loaded from files, when CONTENT_TOKEN allows it (checked above).
+    if (path === '/api/content' && post) {
+        const result = await plaza(env).loadContent(body?.missions, body?.library);
+        return 'error' in result ? json({ error: result.error }, result.status) : json(result);
     }
 
     // Online: the teacher's laptop says where the class is playing.
@@ -287,9 +312,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
 
 // Only /api/* reaches the Worker; the built app is served as static assets.
 export default {
-    async fetch(request, env): Promise<Response> {
+    async fetch(request, env, ctx): Promise<Response> {
         try {
-            return await handle(request, env);
+            return await handle(request, env, ctx);
         } catch (error) {
             if (error instanceof PinPlayAuthError) return json({ error: error.message }, error.status);
             console.error(error);

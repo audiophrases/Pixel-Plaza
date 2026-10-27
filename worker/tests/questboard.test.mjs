@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { castanyada, castanyadaSideQuests, boardWait, isUnlocked } from '../../shared/campaign.ts';
+import { boardWait, isUnlocked } from '../../shared/campaign.ts';
+import { castanyada, castanyadaSideQuests } from './fixtures/season-1.mjs';
 import { missionEnvelope, missionJson, parseMission, validateMission } from '../../shared/missionSchema.ts';
 import { importMission } from '../../shared/missionImport.ts';
 

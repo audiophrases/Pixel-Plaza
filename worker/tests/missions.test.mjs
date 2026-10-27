@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { castanyada } from '../../shared/campaign.ts';
+import { castanyada } from './fixtures/season-1.mjs';
 import { missionEnvelope, missionJson, parseMission, validateMission } from '../../shared/missionSchema.ts';
 import { importMission } from '../../shared/missionImport.ts';
 import { buildMissionPrompt } from '../../shared/missionPrompt.ts';

@@ -1,6 +1,6 @@
 import { JSDOM } from 'jsdom';
 import assert from 'node:assert/strict';
-import { castanyada, castanyadaInvestigations } from '../shared/campaign';
+import { castanyada, castanyadaInvestigations } from '../worker/tests/fixtures/season-1.mjs';
 import { buildGuide, type TeacherGuide } from '../shared/teacherGuide';
 
 const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: 'http://localhost/teacher', pretendToBeVisual: true });

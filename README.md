@@ -88,7 +88,7 @@ The class can play on the teacher's laptop instead, over the school network. Stu
 1. Install Node.js (nodejs.org) and Git, then `git clone https://github.com/audiophrases/Pixel-Plaza.git`. To update later, run `git pull` in that folder.
 2. Double-click `classroom.bat`. The first time it asks for the teacher password. **Use the same password as the online site** (the online site only accepts the link from a laptop that knows it), and it saves a hash in `.dev.vars`. Allow Windows to let it through the firewall on private networks.
 3. Add your OpenAI key to `.dev.vars` as a line `OPENAI_API_KEY=sk-...` (the key is a secret, so it is not in git). Without it chat still works, but every message waits for you and there are no grammar hints. `PINPLAY_API_URL` is already written there by the setup.
-4. Progress (games, avatars, chat) is kept on that laptop in `.wrangler/classroom`, and is not in git, so it does not move to another laptop by itself.
+4. Progress (games, avatars, chat) is kept on that laptop in `.wrangler/classroom`, and is not in git, so it does not move to another laptop by itself. Missions and the side quest library come from the online site when you sign in (see *Missions live online*).
 
 ### Each lesson
 
@@ -139,6 +139,16 @@ If you cannot identify the device, use **Mute all student sound** beside that se
 Speech reuses PinPlay's Render Edge TTS bridge. The service may take a while to wake up on the first request. Its address and optional secret can be overridden with `EDGE_TTS_URL` and `EDGE_TTS_SECRET`; secrets stay server-side. Only messages the player received can be requested as speech, under the existing moderation and privacy rules. See [sound and voice details](docs/audio-voice-plan.md).
 
 ## Creating and editing missions (Mission Studio)
+
+### Missions live online
+
+Every mission, and the side quest library, is kept on the online Pixel Plaza. None is part of the app's code: the first stories (*The Haunted Castanyada* and its versions, *Plaza Free Play*) are ordinary missions there, like the ones you write, and appear in the order they were first made.
+
+The class laptop keeps a copy to play and edit. Each save or publication in Mission Studio on the laptop goes online at once, and what changed online arrives when you open Mission Studio, when you sign in to Teacher controls and every few minutes while Teacher controls is open. Mission Studio says how it stands: *Saved online*, or, without internet, how many changes wait on the laptop; they go up when the connection is back. If one mission was changed online and on the laptop while it was offline, nothing is overwritten: the laptop's version is kept as a second mission marked *(laptop)*. The link uses the sign-in to Teacher controls on the laptop; if it has expired, Mission Studio asks you to sign in there again. Games, chat and progress stay on whichever server runs the class.
+
+A new server (a test server, or the online site with an empty database) starts with no missions. They can be loaded from files with `/api/content`, which is off unless the server starts with `CONTENT_TOKEN` set; the tests and `npm run tester` use it to load a frozen copy of the first missions and the library from `worker/tests/fixtures/`. That copy is test data only: changing it does not change any game.
+
+### Writing a mission
 
 Open `/mission-studio` from Teacher controls. Choose a mission to edit, or press **New mission**, enter a name and choose a simple starter or an existing mission to copy. Internal IDs are created for you.
 

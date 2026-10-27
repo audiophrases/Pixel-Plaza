@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { Interviews } from '../interviews.ts';
-import { castanyadaInvestigations, castanyadaComplete } from '../../shared/campaign.ts';
+import { castanyadaInvestigations, castanyadaComplete } from './fixtures/season-1.mjs';
 import { missionJson, parseMission, missionEnvelope, validateMission } from '../../shared/missionSchema.ts';
 
 function repository() {

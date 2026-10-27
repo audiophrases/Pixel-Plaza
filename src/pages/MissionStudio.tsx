@@ -5,7 +5,7 @@ import type { Campaign } from '../../shared/campaign';
 import { missionEnvelope, missionJson, MISSION_MAX_BYTES, validateMission } from '../../shared/missionSchema';
 import { importMission, type MissionImport } from '../../shared/missionImport';
 import { buildMissionPrompt } from '../../shared/missionPrompt';
-import type { MissionDraft, MissionSummary } from '../../shared/missionTypes';
+import type { MissionDraft, MissionSummary, MissionSync } from '../../shared/missionTypes';
 import MissionEditor, { ClueReview, MissionPreview } from '../components/MissionEditor';
 import MissionField from '../components/MissionField';
 import { focusMissionIssue, issueLocation, missionIssueText } from '../components/missionEditing';
@@ -18,6 +18,14 @@ async function request<T>(token: string, op: string, body?: object): Promise<T> 
     const result = await response.json();
     if (!response.ok) throw Object.assign(new Error([result.error, ...(result.errors ?? []).map((e: { path: string; message: string }) => `${e.path}: ${e.message}`)].join('\n')), { status: response.status });
     return result;
+}
+// How this laptop's missions stand with the online Pixel Plaza, where missions live (nothing to say on the online site).
+function syncText(sync: MissionSync): string {
+    const waiting = sync.waiting === 1 ? '1 change waits' : `${sync.waiting} changes wait`;
+    if (sync.state === 'synced') return '✓ Saved online: this laptop has the same missions as the online Pixel Plaza.';
+    if (sync.state === 'signin') return `Not linked to the online Pixel Plaza: sign in to Teacher controls again on this laptop.${sync.waiting ? ` ${waiting} on this laptop to upload.` : ''}`;
+    if (sync.state === 'outdated') return `The online Pixel Plaza does not keep missions yet: it needs updating.${sync.waiting ? ` ${waiting} on this laptop until then.` : ''}`;
+    return sync.waiting ? `No internet: ${waiting} on this laptop and go online when the connection is back.` : 'No internet: showing the missions this laptop has.';
 }
 function download(text: string, filename: string, type = 'application/json') {
     const url = URL.createObjectURL(new Blob([text], { type })); const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -32,6 +40,7 @@ export default function MissionStudio() {
     const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
     const [newName, setNewName] = useState(''); const [source, setSource] = useState(''); const [creating, setCreating] = useState(false);
     const [view, setView] = useState<'setup' | 'build' | 'review' | 'tools' | 'live'>('build');
+    const [sync, setSync] = useState<MissionSync | null>(null);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [issueTarget, setIssueTarget] = useState<{ path: string } | null>(null);
     const [importText, setImportText] = useState(''); const [importMode, setImportMode] = useState<'append' | 'replace' | 'extend'>('extend'); const [candidate, setCandidate] = useState<MissionImport | null>(null);
@@ -42,10 +51,21 @@ export default function MissionStudio() {
         setError(cause instanceof Error ? cause.message : 'Connection failed.');
         if ((cause as { status?: number }).status === 401) { storeTeacherSession(''); setToken(''); }
     }, []);
+    // Every answer says how the missions stand with the online server; a mission that had changed there too was kept twice.
+    const noteSync = (next?: MissionSync) => {
+        if (!next) return;
+        setSync(next);
+        if (next.keptBoth.length) setNotice(`Changed online too, so both versions are kept. Yours is now “${next.keptBoth.map(item => item.title).join('”, “')}”.`);
+    };
+    const call = async <T,>(op: string, body?: object): Promise<T> => {
+        const result = await request<T & { sync?: MissionSync }>(token, op, body);
+        noteSync(result.sync);
+        return result;
+    };
     useEffect(() => {
         if (!token) return;
         let active = true;
-        request<{ library: MissionSummary[] }>(token, 'list').then(result => { if (active) setLibrary(result.library); }).catch(cause => { if (active) { setError(cause.message); if (cause.status === 401) { storeTeacherSession(''); setToken(''); } } });
+        request<{ library: MissionSummary[]; sync?: MissionSync }>(token, 'list').then(result => { if (active) { setLibrary(result.library); if (result.sync) setSync(result.sync); } }).catch(cause => { if (active) { setError(cause.message); if (cause.status === 401) { storeTeacherSession(''); setToken(''); } } });
         return () => { active = false; };
     }, [token]);
     useEffect(() => {
@@ -59,7 +79,7 @@ export default function MissionStudio() {
     const run = async (work: () => Promise<void>) => { setBusy(true); setError(''); try { await work(); } catch (cause) { failed(cause); } finally { setBusy(false); } };
     const mayLeave = () => !dirty || window.confirm('Discard unsaved draft changes? Save or export them first to keep them.');
     const save = async (): Promise<MissionDraft> => {
-        const result = await request<{ draft: MissionDraft; library: MissionSummary[] }>(token, 'save', { id: campaign!.id, version: draft!.version, envelope: missionEnvelope(campaign!) });
+        const result = await call<{ draft: MissionDraft; library: MissionSummary[] }>('save', { id: campaign!.id, version: draft!.version, envelope: missionEnvelope(campaign!) });
         setDraft(result.draft); setCampaign(result.draft.campaign); setLibrary(result.library); return result.draft;
     };
     const previewImport = (sources: string[]) => {
@@ -72,10 +92,10 @@ export default function MissionStudio() {
         }
         setCandidate({ ...validateMission(missionEnvelope(working)), changes });
     };
-    const openMission = (id: string) => { if (!id || !mayLeave()) return; void run(async () => { const result = await request<{ draft: MissionDraft }>(token, `get?id=${encodeURIComponent(id)}`); applyDraft(result.draft); setNotice(''); }); };
+    const openMission = (id: string) => { if (!id || !mayLeave()) return; void run(async () => { const result = await call<{ draft: MissionDraft }>(`get?id=${encodeURIComponent(id)}`); applyDraft(result.draft); setNotice(''); }); };
     const selectChapter = (index: number) => { setChapterIndex(index); setSelectedId(null); setCandidate(null); setPrompt(''); };
     return <main className="mission-page mission-studio-page">
-        <header className="mission-header"><div><p className="mission-eyebrow">PIXEL PLAZA · TEACHER WORKSPACE</p><h1>Mission Studio</h1><p>A great lesson starts with a few simple steps.</p></div>
+        <header className="mission-header"><div><p className="mission-eyebrow">PIXEL PLAZA · TEACHER WORKSPACE</p><h1>Mission Studio</h1><p>A great lesson starts with a few simple steps.</p>{sync && sync.state !== 'home' && <p className={`mission-sync mission-sync-${sync.state}`} role="status">{syncText(sync)}</p>}</div>
             <Link to="/teacher" onClick={e => { if (!mayLeave()) e.preventDefault(); }}>Teacher controls</Link></header>
         {(error || notice) && <div className="mission-feedback"><div className={error ? 'mission-error' : 'mission-notice'} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button type="button" className="mission-button" aria-label="Dismiss message" onClick={() => { setError(''); setNotice(''); }}>×</button></div></div>}
         {!token ? <form className="mission-card mission-login" onSubmit={e => { e.preventDefault(); void run(async () => {
@@ -90,9 +110,9 @@ export default function MissionStudio() {
                     <div className="mission-toolbar"><button className="mission-button primary" disabled={!newName.trim()} onClick={() => { if (!mayLeave()) return; void run(async () => {
                         const base = newName.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
                         const id = `${/^[a-z]/.test(base) ? base.slice(0, 45) : 'mission'}-${crypto.randomUUID().slice(0, 8)}`;
-                        const created = await request<{ draft: MissionDraft; library: MissionSummary[] }>(token, 'create', { id, ...(source ? { source } : {}) });
+                        const created = await call<{ draft: MissionDraft; library: MissionSummary[] }>('create', { id, ...(source ? { source } : {}) });
                         applyDraft(created.draft); setLibrary(created.library); setCampaign({ ...created.draft.campaign, title: newName.trim() }); setView('setup');
-                        const named = await request<{ draft: MissionDraft; library: MissionSummary[] }>(token, 'save', { id, version: created.draft.version, envelope: missionEnvelope({ ...created.draft.campaign, title: newName.trim() }) });
+                        const named = await call<{ draft: MissionDraft; library: MissionSummary[] }>('save', { id, version: created.draft.version, envelope: missionEnvelope({ ...created.draft.campaign, title: newName.trim() }) });
                         applyDraft(named.draft); setLibrary(named.library); setView('setup'); setNewName(''); setNotice('Mission created. Start with the title and roles, then build your steps.');
                     }); }}>Create mission</button><button className="mission-button" onClick={() => setCreating(false)}>Cancel</button></div>
                 </div>}
@@ -109,7 +129,7 @@ export default function MissionStudio() {
                     {!!checked?.warnings.length && <details className="mission-details"><summary>Teaching tips to review ({checked.warnings.length})</summary><ul>{checked.warnings.map((item, i) => <li key={i}>{item.message}</li>)}</ul></details>}
                     <div className="mission-publish"><p>Publishing makes this version available for <strong>new games</strong>. Games already in progress keep their story and student progress.</p><button className="mission-button primary" disabled={!!checked?.errors.length} onClick={() => void run(async () => {
                         const saved = dirty ? await save() : draft;
-                        const result = await request<{ draft: MissionDraft; library: MissionSummary[] }>(token, 'publish', { id: campaign.id, version: saved.version });
+                        const result = await call<{ draft: MissionDraft; library: MissionSummary[] }>('publish', { id: campaign.id, version: saved.version });
                         setDraft(result.draft); setCampaign(result.draft.campaign); setLibrary(result.library); setNotice('Published. Choose this mission in Teacher controls when starting a new game. Existing games keep their story and progress.');
                     })}>Publish for new games</button></div>
                 </section><section className="mission-card"><label className="mission-field"><span>Chapter to preview</span><select value={chapterIndex} onChange={e => selectChapter(Number(e.target.value))}>{campaign.chapters.map((c, i) => <option key={c.id} value={i}>{i + 1}. {c.title}</option>)}</select></label></section><MissionPreview key={`${campaign.id}-${campaign.chapters[chapterIndex]?.id}`} campaign={campaign} chapter={campaign.chapters[chapterIndex]} /><ClueReview campaign={campaign} chapter={campaign.chapters[chapterIndex]} /></>}

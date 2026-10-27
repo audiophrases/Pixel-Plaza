@@ -1,6 +1,9 @@
 .mission-page { max-width: 1440px; margin: auto; padding: 2rem; color: #263441; }
 .mission-header { display: flex; align-items: center; justify-content: space-between; gap: 2rem; margin-bottom: 2rem; }
 .mission-header h1 { margin: .3rem 0 .7rem; font-size: clamp(2rem, 4vw, 3rem); }
+/* How this laptop's missions stand with the online Pixel Plaza. */
+.mission-sync { margin: .4rem 0 0; font-size: .9rem; font-weight: 600; color: #1e6b34; }
+.mission-sync-offline, .mission-sync-signin, .mission-sync-outdated { color: #9a4510; }
 .mission-eyebrow { letter-spacing: .12em; font-size: .75rem; font-weight: 800; color: #516a72; }
 .mission-workspace { border: 0; padding: 0; min-width: 0; display: grid; grid-template-columns: 270px minmax(0, 1fr); align-items: start; gap: 1.5rem; }
 .mission-card { background: #fff; border: 1px solid #dae3e5; border-radius: 16px; padding: 1.4rem; margin-bottom: 1.2rem; box-shadow: 0 3px 15px #26344106; min-width: 0; }

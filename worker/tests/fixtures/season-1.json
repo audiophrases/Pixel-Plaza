@@ -1,0 +1,2222 @@
+[
+ {
+  "id": "castanyada",
+  "title": "The Haunted Castanyada",
+  "finale": "The end. Happy Castanyada!",
+  "roles": [
+   {
+    "id": "baker",
+    "name": "Café baker",
+    "card": "You roast the chestnuts.",
+    "clue": "No blue box came to the café."
+   },
+   {
+    "id": "shopkeeper",
+    "name": "Shopkeeper",
+    "card": "You pack the boxes.",
+    "clue": "A blue box left the shop at 9:00."
+   },
+   {
+    "id": "driver",
+    "name": "Driver",
+    "card": "You carry the boxes.",
+    "clue": "I carried a blue box. I left it near the water."
+   },
+   {
+    "id": "receptionist",
+    "name": "Hotel receptionist",
+    "card": "You work at the hotel desk.",
+    "clue": "No box came to the hotel."
+   },
+   {
+    "id": "planner",
+    "name": "Festival planner",
+    "card": "You plan the party.",
+    "clue": "The only water in town is the pond in the park."
+   }
+  ],
+  "chapters": [
+   {
+    "id": "missing-chestnuts",
+    "title": "The Missing Chestnuts",
+    "share": 0.6,
+    "intro": "The chestnuts are gone. Ask your classmates. Each of you knows something different.",
+    "recap": "Last time: the big box of chestnuts disappeared. You are still looking for it.",
+    "ending": "Two people have a key: the shopkeeper and the planner. But the lock is open and the box is empty! Who took the chestnuts?",
+    "objectives": [
+     {
+      "id": "where",
+      "text": "Where is the blue box?",
+      "accept": [
+       "park",
+       "pond"
+      ],
+      "rewards": {
+       "baker": "The café needs 20 chestnuts. That is half of the box.",
+       "shopkeeper": "I packed 40 chestnuts in the box.",
+       "driver": "The ride from the shop to the park takes 30 minutes.",
+       "receptionist": "A man in a green coat asked me about the park at 9:15.",
+       "planner": "The party starts at 6:00. We need the chestnuts before 5:00."
+      }
+     },
+     {
+      "id": "when",
+      "text": "What time did the box get to the park?",
+      "after": "where",
+      "accept": [
+       "9 30",
+       "nine thirty",
+       "half past nine"
+      ],
+      "rewards": {
+       "baker": "There is no key at the café.",
+       "shopkeeper": "I have one key. It is on my belt.",
+       "driver": "I never have a key. I only carry the box.",
+       "receptionist": "There is no key at the hotel.",
+       "planner": "I have one key. The other key is in the shop."
+      }
+     },
+     {
+      "id": "keys",
+      "text": "How many people have a key?",
+      "after": "when",
+      "accept": [
+       "two",
+       "2"
+      ]
+     },
+     {
+      "id": "note",
+      "text": "What does the note on the hotel door say?",
+      "after": "where",
+      "optional": true,
+      "accept": [
+       "safe",
+       "not worry"
+      ]
+     },
+     {
+      "id": "lock",
+      "text": "What is on the lock?",
+      "after": "where",
+      "optional": true,
+      "accept": [
+       "star"
+      ]
+     },
+     {
+      "id": "chestnuts",
+      "text": "How many chestnuts were in the box?",
+      "after": "when",
+      "optional": true,
+      "accept": [
+       "40",
+       "forty"
+      ]
+     },
+     {
+      "id": "report-1",
+      "text": "Write 2 sentences. Who do you think has the chestnuts? Why?",
+      "after": "keys",
+      "optional": true,
+      "kind": "report",
+      "accept": []
+     }
+    ],
+    "discoveries": [
+     {
+      "id": "hotel-note",
+      "zone": "hotel",
+      "text": "A note on the hotel door: \"The chestnuts are safe. Do not worry.\""
+     },
+     {
+      "id": "park-lock",
+      "zone": "park",
+      "text": "A small blue lock with a star on it, on the grass."
+     }
+    ],
+    "reveals": [
+     {
+      "id": "coat",
+      "text": "News: a neighbor saw a person in a green coat near the park at 9:20."
+     },
+     {
+      "id": "click",
+      "text": "News: somebody heard a lock click in the park."
+     }
+    ]
+   },
+   {
+    "id": "conflicting-stories",
+    "title": "Conflicting Stories",
+    "share": 0.6,
+    "intro": "Now people tell different stories. Somebody in this class took the chestnuts! Ask questions. Who is lying?",
+    "recap": "Last time: the box was in the park, and the lock was open. You are looking for who opened it.",
+    "ending": "You found the thief. But why did they take the chestnuts?",
+    "thieves": {
+     "card": "You took the chestnuts. Tell nobody! If a classmate asks, say you are innocent. Your classmates saw how you look, so be careful.",
+     "story": "At 9:25 I was at the hotel desk."
+    },
+    "roleClues": {
+     "baker": "At 9:20 somebody ran past the café. {hat}",
+     "shopkeeper": "At 9:10 somebody came to my shop. {coat} {glasses}",
+     "driver": "At 9:30 somebody ran into the park. {hair}",
+     "receptionist": "The hotel phone rang at 9:25. Nobody answered.",
+     "planner": "My key was in my bag. Somebody moved my bag at 9:00."
+    },
+    "objectives": [
+     {
+      "id": "meet-shop",
+      "text": "Who is the shopkeeper? Type their name.",
+      "accept": [],
+      "answerRole": "shopkeeper",
+      "rewards": {
+       "baker": "At 9:15 the café was empty. Nobody came.",
+       "shopkeeper": "At 9:05 I went to the bank. The shop door was open.",
+       "driver": "At 9:25 I was in my truck near the hotel. Nobody went in.",
+       "receptionist": "At 9:25 the hotel was closed. Nobody was at the desk.",
+       "planner": "At 9:20 I was in the square with the band."
+      }
+     },
+     {
+      "id": "meet-planner",
+      "text": "Who is the planner? Type their name.",
+      "after": "meet-shop",
+      "accept": [],
+      "answerRole": "planner"
+     },
+     {
+      "id": "thief",
+      "text": "Who took the chestnuts? Type their name.",
+      "after": "meet-planner",
+      "accept": [],
+      "answerThief": true
+     },
+     {
+      "id": "report-2",
+      "text": "Write 2 sentences. How do you know who took the chestnuts?",
+      "after": "meet-planner",
+      "optional": true,
+      "kind": "report",
+      "accept": []
+     }
+    ],
+    "discoveries": [],
+    "reveals": [
+     {
+      "id": "door",
+      "text": "News: the shop door was open at 9:05."
+     },
+     {
+      "id": "phone",
+      "text": "News: the hotel phone rang at 9:25."
+     }
+    ]
+   },
+   {
+    "id": "haunted-celebration",
+    "title": "The Haunted Celebration",
+    "share": 0.6,
+    "intro": "It is almost midnight. You know who took the chestnuts. Now find them before the party starts!",
+    "recap": "Last time: you found the thief. The chestnuts are still hidden somewhere.",
+    "ending": "The chestnuts are safe! The thief wanted a surprise party. Now the haunted celebration can start.",
+    "thieves": {
+     "carry": true,
+     "label": "Your plan",
+     "card": "You hid the chestnuts in the hotel cellar, for a surprise party. Give small hints. Never say the answers!",
+     "story": "Help the class with hints, but do not tell them where the chestnuts are."
+    },
+    "roleClues": {
+     "baker": "I smell hot chestnuts near the hotel.",
+     "shopkeeper": "At 9:00 somebody bought wood and matches. You need fire to roast chestnuts.",
+     "driver": "At 9:40 I carried a heavy bag to the hotel.",
+     "receptionist": "The cellar door at the hotel is old and locked. It has a four-number code.",
+     "planner": "The party starts at 6:00. The chestnuts must be ready before then."
+    },
+    "objectives": [
+     {
+      "id": "hide",
+      "text": "Where did the thief hide the chestnuts?",
+      "accept": [
+       "cellar",
+       "basement"
+      ],
+      "thiefKnows": true,
+      "rewards": {
+       "baker": "One number of the code is 4. It is the number of my oven.",
+       "shopkeeper": "One number of the code is 1. It is the number of doors in my shop.",
+       "driver": "One number of the code is 7. It is the number of my truck.",
+       "receptionist": "One number of the code is 3. It is the number of the hotel key.",
+       "planner": "Read the numbers in this order: driver, baker, receptionist, shopkeeper."
+      }
+     },
+     {
+      "id": "code",
+      "text": "What is the code of the cellar door? Type the four numbers.",
+      "after": "hide",
+      "accept": [
+       "7 4 3 1",
+       "7431"
+      ],
+      "rewards": {
+       "baker": "In the cellar there is a note. It says: \"I wanted a surprise...\"",
+       "shopkeeper": "The note says: \"...party for everyone...\"",
+       "driver": "The note says: \"...with hot chestnuts...\"",
+       "receptionist": "The note says: \"...I am sorry.\"",
+       "planner": "The note is signed by a friend of the town."
+      }
+     },
+     {
+      "id": "why",
+      "text": "Why did the thief take the chestnuts?",
+      "after": "code",
+      "accept": [
+       "surprise",
+       "party",
+       "present",
+       "gift"
+      ]
+     },
+     {
+      "id": "report-3",
+      "text": "Write 3 sentences. What happens at the celebration?",
+      "after": "why",
+      "optional": true,
+      "kind": "report",
+      "accept": []
+     }
+    ],
+    "discoveries": [
+     {
+      "id": "cellar-door",
+      "zone": "hotel",
+      "text": "At the hotel there is an old door. It has a lock with four numbers."
+     }
+    ],
+    "reveals": [
+     {
+      "id": "smell",
+      "text": "News: a neighbor smelled hot chestnuts near the hotel."
+     },
+     {
+      "id": "bag",
+      "text": "News: a heavy bag went into the hotel at 9:40."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "castanyada-side-quests",
+  "title": "Castanyada: Side Mysteries",
+  "finale": "The end. Happy Castanyada!",
+  "roles": [
+   {
+    "id": "baker",
+    "name": "Café baker",
+    "card": "You roast the chestnuts.",
+    "clue": "No blue box came to the café."
+   },
+   {
+    "id": "shopkeeper",
+    "name": "Shopkeeper",
+    "card": "You pack the boxes.",
+    "clue": "A blue box left the shop at 9:00."
+   },
+   {
+    "id": "driver",
+    "name": "Driver",
+    "card": "You carry the boxes.",
+    "clue": "I carried a blue box. I left it near the water."
+   },
+   {
+    "id": "receptionist",
+    "name": "Hotel receptionist",
+    "card": "You work at the hotel desk.",
+    "clue": "No box came to the hotel."
+   },
+   {
+    "id": "planner",
+    "name": "Festival planner",
+    "card": "You plan the party.",
+    "clue": "The only water in town is the pond in the park."
+   }
+  ],
+  "chapters": [
+   {
+    "id": "missing-chestnuts",
+    "title": "The Missing Chestnuts",
+    "share": 0.6,
+    "intro": "The chestnuts are gone. Ask your classmates. Each of you knows something different.",
+    "recap": "Last time: the big box of chestnuts disappeared. You are still looking for it.",
+    "ending": "Two people have a key: the shopkeeper and the planner. But the lock is open and the box is empty! Who took the chestnuts?",
+    "objectives": [
+     {
+      "id": "where",
+      "text": "Where is the blue box?",
+      "accept": [
+       "park",
+       "pond"
+      ],
+      "rewards": {
+       "baker": "The café needs 20 chestnuts. That is half of the box.",
+       "shopkeeper": "I packed 40 chestnuts in the box.",
+       "driver": "The ride from the shop to the park takes 30 minutes.",
+       "receptionist": "A man in a green coat asked me about the park at 9:15.",
+       "planner": "The party starts at 6:00. We need the chestnuts before 5:00."
+      }
+     },
+     {
+      "id": "when",
+      "text": "What time did the box get to the park?",
+      "after": "where",
+      "accept": [
+       "9 30",
+       "nine thirty",
+       "half past nine"
+      ],
+      "rewards": {
+       "baker": "There is no key at the café.",
+       "shopkeeper": "I have one key. It is on my belt.",
+       "driver": "I never have a key. I only carry the box.",
+       "receptionist": "There is no key at the hotel.",
+       "planner": "I have one key. The other key is in the shop."
+      }
+     },
+     {
+      "id": "keys",
+      "text": "How many people have a key?",
+      "after": "when",
+      "accept": [
+       "two",
+       "2"
+      ]
+     },
+     {
+      "id": "note",
+      "text": "What does the note on the hotel door say?",
+      "after": "where",
+      "optional": true,
+      "accept": [
+       "safe",
+       "not worry"
+      ]
+     },
+     {
+      "id": "lock",
+      "text": "What is on the lock?",
+      "after": "where",
+      "optional": true,
+      "accept": [
+       "star"
+      ]
+     },
+     {
+      "id": "chestnuts",
+      "text": "How many chestnuts were in the box?",
+      "after": "when",
+      "optional": true,
+      "accept": [
+       "40",
+       "forty"
+      ]
+     },
+     {
+      "id": "report-1",
+      "text": "Write 2 sentences. Who do you think has the chestnuts? Why?",
+      "after": "keys",
+      "optional": true,
+      "kind": "report",
+      "accept": []
+     },
+     {
+      "id": "delivery-interview",
+      "text": "Interview your partner about a strange delivery. Ask where it went, when it arrived, and what was inside. Write what you learned.",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "interview",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2
+      }
+     },
+     {
+      "id": "festival-exchange",
+      "text": "Compare two ideas for a secret festival surprise with your partner. Explain a problem with each idea and agree on one. Write your plan.",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "exchange",
+      "requires": {
+       "mode": "any",
+       "objectives": [
+        "delivery-interview",
+        "note"
+       ]
+      },
+      "board": {
+       "afterMain": true,
+       "teacherReleased": true,
+       "minPlayers": 2
+      }
+     }
+    ],
+    "discoveries": [
+     {
+      "id": "hotel-note",
+      "zone": "hotel",
+      "text": "A note on the hotel door: \"The chestnuts are safe. Do not worry.\""
+     },
+     {
+      "id": "park-lock",
+      "zone": "park",
+      "text": "A small blue lock with a star on it, on the grass."
+     }
+    ],
+    "reveals": [
+     {
+      "id": "coat",
+      "text": "News: a neighbor saw a person in a green coat near the park at 9:20."
+     },
+     {
+      "id": "click",
+      "text": "News: somebody heard a lock click in the park."
+     }
+    ]
+   },
+   {
+    "id": "conflicting-stories",
+    "title": "Conflicting Stories",
+    "share": 0.6,
+    "intro": "Now people tell different stories. Somebody in this class took the chestnuts! Ask questions. Who is lying?",
+    "recap": "Last time: the box was in the park, and the lock was open. You are looking for who opened it.",
+    "ending": "You found the thief. But why did they take the chestnuts?",
+    "thieves": {
+     "card": "You took the chestnuts. Tell nobody! If a classmate asks, say you are innocent. Your classmates saw how you look, so be careful.",
+     "story": "At 9:25 I was at the hotel desk."
+    },
+    "roleClues": {
+     "baker": "At 9:20 somebody ran past the café. {hat}",
+     "shopkeeper": "At 9:10 somebody came to my shop. {coat} {glasses}",
+     "driver": "At 9:30 somebody ran into the park. {hair}",
+     "receptionist": "The hotel phone rang at 9:25. Nobody answered.",
+     "planner": "My key was in my bag. Somebody moved my bag at 9:00."
+    },
+    "objectives": [
+     {
+      "id": "meet-shop",
+      "text": "Who is the shopkeeper? Type their name.",
+      "accept": [],
+      "answerRole": "shopkeeper",
+      "rewards": {
+       "baker": "At 9:15 the café was empty. Nobody came.",
+       "shopkeeper": "At 9:05 I went to the bank. The shop door was open.",
+       "driver": "At 9:25 I was in my truck near the hotel. Nobody went in.",
+       "receptionist": "At 9:25 the hotel was closed. Nobody was at the desk.",
+       "planner": "At 9:20 I was in the square with the band."
+      }
+     },
+     {
+      "id": "meet-planner",
+      "text": "Who is the planner? Type their name.",
+      "after": "meet-shop",
+      "accept": [],
+      "answerRole": "planner"
+     },
+     {
+      "id": "thief",
+      "text": "Who took the chestnuts? Type their name.",
+      "after": "meet-planner",
+      "accept": [],
+      "answerThief": true
+     },
+     {
+      "id": "report-2",
+      "text": "Write 2 sentences. How do you know who took the chestnuts?",
+      "after": "meet-planner",
+      "optional": true,
+      "kind": "report",
+      "accept": []
+     }
+    ],
+    "discoveries": [],
+    "reveals": [
+     {
+      "id": "door",
+      "text": "News: the shop door was open at 9:05."
+     },
+     {
+      "id": "phone",
+      "text": "News: the hotel phone rang at 9:25."
+     }
+    ]
+   },
+   {
+    "id": "haunted-celebration",
+    "title": "The Haunted Celebration",
+    "share": 0.6,
+    "intro": "It is almost midnight. You know who took the chestnuts. Now find them before the party starts!",
+    "recap": "Last time: you found the thief. The chestnuts are still hidden somewhere.",
+    "ending": "The chestnuts are safe! The thief wanted a surprise party. Now the haunted celebration can start.",
+    "thieves": {
+     "carry": true,
+     "label": "Your plan",
+     "card": "You hid the chestnuts in the hotel cellar, for a surprise party. Give small hints. Never say the answers!",
+     "story": "Help the class with hints, but do not tell them where the chestnuts are."
+    },
+    "roleClues": {
+     "baker": "I smell hot chestnuts near the hotel.",
+     "shopkeeper": "At 9:00 somebody bought wood and matches. You need fire to roast chestnuts.",
+     "driver": "At 9:40 I carried a heavy bag to the hotel.",
+     "receptionist": "The cellar door at the hotel is old and locked. It has a four-number code.",
+     "planner": "The party starts at 6:00. The chestnuts must be ready before then."
+    },
+    "objectives": [
+     {
+      "id": "hide",
+      "text": "Where did the thief hide the chestnuts?",
+      "accept": [
+       "cellar",
+       "basement"
+      ],
+      "thiefKnows": true,
+      "rewards": {
+       "baker": "One number of the code is 4. It is the number of my oven.",
+       "shopkeeper": "One number of the code is 1. It is the number of doors in my shop.",
+       "driver": "One number of the code is 7. It is the number of my truck.",
+       "receptionist": "One number of the code is 3. It is the number of the hotel key.",
+       "planner": "Read the numbers in this order: driver, baker, receptionist, shopkeeper."
+      }
+     },
+     {
+      "id": "code",
+      "text": "What is the code of the cellar door? Type the four numbers.",
+      "after": "hide",
+      "accept": [
+       "7 4 3 1",
+       "7431"
+      ],
+      "rewards": {
+       "baker": "In the cellar there is a note. It says: \"I wanted a surprise...\"",
+       "shopkeeper": "The note says: \"...party for everyone...\"",
+       "driver": "The note says: \"...with hot chestnuts...\"",
+       "receptionist": "The note says: \"...I am sorry.\"",
+       "planner": "The note is signed by a friend of the town."
+      }
+     },
+     {
+      "id": "why",
+      "text": "Why did the thief take the chestnuts?",
+      "after": "code",
+      "accept": [
+       "surprise",
+       "party",
+       "present",
+       "gift"
+      ]
+     },
+     {
+      "id": "report-3",
+      "text": "Write 3 sentences. What happens at the celebration?",
+      "after": "why",
+      "optional": true,
+      "kind": "report",
+      "accept": []
+     }
+    ],
+    "discoveries": [
+     {
+      "id": "cellar-door",
+      "zone": "hotel",
+      "text": "At the hotel there is an old door. It has a lock with four numbers."
+     }
+    ],
+    "reveals": [
+     {
+      "id": "smell",
+      "text": "News: a neighbor smelled hot chestnuts near the hotel."
+     },
+     {
+      "id": "bag",
+      "text": "News: a heavy bag went into the hotel at 9:40."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "castanyada-complete",
+  "title": "The Haunted Castanyada: Five Chapters",
+  "finale": "The town celebrates together. You recovered the chestnuts, checked the stories, made a safe festival plan and welcomed the new neighbors. Your investigations helped everyone belong. Happy Castanyada!",
+  "roles": [
+   {
+    "id": "baker",
+    "name": "Café baker",
+    "card": "You roast the chestnuts.",
+    "clue": "No blue box came to the café."
+   },
+   {
+    "id": "shopkeeper",
+    "name": "Shopkeeper",
+    "card": "You pack the boxes.",
+    "clue": "A blue box left the shop at 9:00."
+   },
+   {
+    "id": "driver",
+    "name": "Driver",
+    "card": "You carry the boxes.",
+    "clue": "I carried a blue box. I left it near the water."
+   },
+   {
+    "id": "receptionist",
+    "name": "Hotel receptionist",
+    "card": "You work at the hotel desk.",
+    "clue": "No box came to the hotel."
+   },
+   {
+    "id": "planner",
+    "name": "Festival planner",
+    "card": "You plan the party.",
+    "clue": "The only water in town is the pond in the park."
+   }
+  ],
+  "chapters": [
+   {
+    "id": "missing-chestnuts",
+    "title": "The Missing Chestnuts",
+    "share": 0.6,
+    "intro": "The chestnuts are gone. Ask your classmates. Each of you knows something different.",
+    "recap": "Last time: the big box of chestnuts disappeared. You are still looking for it.",
+    "ending": "Two people have a key: the shopkeeper and the planner. But the lock is open and the box is empty! Who took the chestnuts?",
+    "objectives": [
+     {
+      "id": "where",
+      "text": "Where is the blue box?",
+      "accept": [
+       "park",
+       "pond"
+      ],
+      "rewards": {
+       "baker": "The café needs 20 chestnuts. That is half of the box.",
+       "shopkeeper": "I packed 40 chestnuts in the box.",
+       "driver": "The ride from the shop to the park takes 30 minutes.",
+       "receptionist": "A man in a green coat asked me about the park at 9:15.",
+       "planner": "The party starts at 6:00. We need the chestnuts before 5:00."
+      }
+     },
+     {
+      "id": "when",
+      "text": "What time did the box get to the park?",
+      "after": "where",
+      "accept": [
+       "9 30",
+       "nine thirty",
+       "half past nine"
+      ],
+      "rewards": {
+       "baker": "There is no key at the café.",
+       "shopkeeper": "I have one key. It is on my belt.",
+       "driver": "I never have a key. I only carry the box.",
+       "receptionist": "There is no key at the hotel.",
+       "planner": "I have one key. The other key is in the shop."
+      }
+     },
+     {
+      "id": "keys",
+      "text": "How many people have a key?",
+      "after": "when",
+      "accept": [
+       "two",
+       "2"
+      ],
+      "rewards": {
+       "baker": "Delivery audit: I ordered paper lanterns, not another box of food. Fair shares: the cafe needs 20 of the 40 chestnuts to roast for guests.",
+       "shopkeeper": "Delivery audit: a second parcel had a moon label, not the blue box label. Fair shares: ten children will arrive and each wants one chestnut.",
+       "driver": "Delivery audit: I left the moon parcel at the hotel desk at 10:00. Fair shares: I can carry one tray of ten chestnuts at a time.",
+       "receptionist": "Delivery audit: the moon parcel contains folded paper and candles. Fair shares: ten new neighbors have been invited to the hotel.",
+       "planner": "Delivery audit: the moon parcel is for festival decorations. Fair shares: there are 40 chestnuts in total; every guest should get a fair share."
+      }
+     },
+     {
+      "id": "note",
+      "text": "What does the note on the hotel door say?",
+      "after": "where",
+      "optional": true,
+      "accept": [
+       "safe",
+       "not worry"
+      ]
+     },
+     {
+      "id": "lock",
+      "text": "What is on the lock?",
+      "after": "where",
+      "optional": true,
+      "accept": [
+       "star"
+      ]
+     },
+     {
+      "id": "chestnuts",
+      "text": "How many chestnuts were in the box?",
+      "after": "when",
+      "optional": true,
+      "accept": [
+       "40",
+       "forty"
+      ]
+     },
+     {
+      "id": "report-1",
+      "text": "Write 2 sentences. Who do you think has the chestnuts? Why?",
+      "after": "keys",
+      "optional": true,
+      "kind": "report",
+      "accept": []
+     },
+     {
+      "id": "moon-delivery-audit",
+      "text": "The town needs to know whether a second delivery is connected to the missing chestnuts. Read your Delivery audit note. Interview your assigned partner in English: What arrived? Where did it go? When? Ask one follow-up question. Compare your evidence and write a short delivery record with both findings and anything still uncertain. Useful phrases: \"What did you see?\" \"How do you know?\" \"So, do we agree that...?\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "interview",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      }
+     },
+     {
+      "id": "fair-chestnut-shares",
+      "text": "Help the festival committee plan a fair distribution. Read your Fair shares note and ask your partner about their needs. Suggest two ways to share the 40 chestnuts, explain a problem with each, and agree on a plan that uses no more than 40. Write the allocations, one reason and your partner's contribution. Useful phrases: \"We need... because...\" \"What if we...?\" \"Could we agree on...?\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "exchange",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      },
+      "after": "moon-delivery-audit"
+     }
+    ],
+    "discoveries": [
+     {
+      "id": "hotel-note",
+      "zone": "hotel",
+      "text": "A note on the hotel door: \"The chestnuts are safe. Do not worry.\""
+     },
+     {
+      "id": "park-lock",
+      "zone": "park",
+      "text": "A small blue lock with a star on it, on the grass."
+     }
+    ],
+    "reveals": [
+     {
+      "id": "coat",
+      "text": "News: a neighbor saw a person in a green coat near the park at 9:20."
+     },
+     {
+      "id": "click",
+      "text": "News: somebody heard a lock click in the park."
+     }
+    ]
+   },
+   {
+    "id": "conflicting-stories",
+    "title": "Conflicting Stories",
+    "share": 0.6,
+    "intro": "Now people tell different stories. Somebody in this class took the chestnuts! Ask questions. Who is lying?",
+    "recap": "Last time: the box was in the park, and the lock was open. You are looking for who opened it.",
+    "ending": "You found the thief. But why did they take the chestnuts?",
+    "thieves": {
+     "card": "You took the chestnuts. Tell nobody! If a classmate asks, say you are innocent. Your classmates saw how you look, so be careful.",
+     "story": "At 9:25 I was at the hotel desk."
+    },
+    "roleClues": {
+     "baker": "At 9:20 somebody ran past the café. {hat}",
+     "shopkeeper": "At 9:10 somebody came to my shop. {coat} {glasses}",
+     "driver": "At 9:30 somebody ran into the park. {hair}",
+     "receptionist": "The hotel phone rang at 9:25. Nobody answered.",
+     "planner": "My key was in my bag. Somebody moved my bag at 9:00."
+    },
+    "objectives": [
+     {
+      "id": "meet-shop",
+      "text": "Who is the shopkeeper? Type their name.",
+      "accept": [],
+      "answerRole": "shopkeeper",
+      "rewards": {
+       "baker": "At 9:15 the café was empty. Nobody came.",
+       "shopkeeper": "At 9:05 I went to the bank. The shop door was open.",
+       "driver": "At 9:25 I was in my truck near the hotel. Nobody went in.",
+       "receptionist": "At 9:25 the hotel was closed. Nobody was at the desk.",
+       "planner": "At 9:20 I was in the square with the band."
+      }
+     },
+     {
+      "id": "meet-planner",
+      "text": "Who is the planner? Type their name.",
+      "after": "meet-shop",
+      "accept": [],
+      "answerRole": "planner"
+     },
+     {
+      "id": "thief",
+      "text": "Who took the chestnuts? Type their name.",
+      "after": "meet-planner",
+      "accept": [],
+      "answerThief": true,
+      "rewards": {
+       "baker": "Alibi review: the cafe clock was five minutes slow. Rumor repair: somebody told visitors that everyone in town steals things; that is unfair.",
+       "shopkeeper": "Alibi review: my receipt is stamped 9:05 by the shop clock, which was correct. Rumor repair: an open door alone does not prove who entered.",
+       "driver": "Alibi review: the truck clock agreed with the shop clock. Rumor repair: I saw someone running, but I did not see what was in their bag.",
+       "receptionist": "Alibi review: the hotel bell rings automatically at 9:25, even if nobody is at the desk. Rumor repair: a ringing bell does not prove a receptionist was there.",
+       "planner": "Alibi review: my rehearsal list records the band in the square at 9:20. Rumor repair: name a fact, explain your evidence, and avoid blaming people for things you cannot prove."
+      }
+     },
+     {
+      "id": "report-2",
+      "text": "Write 2 sentences. How do you know who took the chestnuts?",
+      "after": "meet-planner",
+      "optional": true,
+      "kind": "report",
+      "accept": []
+     },
+     {
+      "id": "clock-alibi-review",
+      "text": "The investigation is solved, but the teacher needs a reliable witness record. Read your Alibi review note. Ask your partner which clock or record they used and whether a sound proves a person was present. Explain one apparent contradiction using both notes. Submit the original claim, the evidence and your correction; mark anything you cannot yet verify. Useful phrases: \"Which clock did you use?\" \"That could mean...\" \"The evidence shows...\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "interview",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      }
+     },
+     {
+      "id": "repair-town-rumor",
+      "text": "Visitors have heard a damaging rumor. Read your Rumor repair note. Discuss with your partner which claims are facts and which are guesses. Agree on a calm public update that explains one checked fact, corrects one unsupported claim and invites a question. Submit your agreed message and explain what your partner changed. Useful phrases: \"We can confirm...\" \"We cannot be sure about...\" \"Let's change that sentence because...\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "exchange",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      },
+      "after": "clock-alibi-review"
+     }
+    ],
+    "discoveries": [],
+    "reveals": [
+     {
+      "id": "door",
+      "text": "News: the shop door was open at 9:05."
+     },
+     {
+      "id": "phone",
+      "text": "News: the hotel phone rang at 9:25."
+     }
+    ]
+   },
+   {
+    "id": "haunted-celebration",
+    "title": "The Hotel Cellar",
+    "share": 0.6,
+    "intro": "It is late afternoon. You know who took the chestnuts. Find them before the party starts at 6:00!",
+    "recap": "Last time: you found the thief. The chestnuts are still hidden somewhere.",
+    "ending": "The chestnuts are safe! The thief wanted a surprise party and says sorry. But the festival plan is missing. Can the town prepare a safe celebration in time?",
+    "thieves": {
+     "carry": true,
+     "label": "Your plan",
+     "card": "You hid the chestnuts in the hotel cellar, for a surprise party. Give small hints. Never say the answers!",
+     "story": "Help the class with hints, but do not tell them where the chestnuts are."
+    },
+    "roleClues": {
+     "baker": "I smell hot chestnuts near the hotel.",
+     "shopkeeper": "At 9:00 somebody bought wood and matches. You need fire to roast chestnuts.",
+     "driver": "At 9:40 I carried a heavy bag to the hotel.",
+     "receptionist": "The cellar door at the hotel is old and locked. It has a four-number code.",
+     "planner": "The party starts at 6:00. The chestnuts must be ready before then."
+    },
+    "objectives": [
+     {
+      "id": "hide",
+      "text": "Where did the thief hide the chestnuts?",
+      "accept": [
+       "cellar",
+       "basement"
+      ],
+      "thiefKnows": true,
+      "rewards": {
+       "baker": "One number of the code is 4. It is the number of my oven.",
+       "shopkeeper": "One number of the code is 1. It is the number of doors in my shop.",
+       "driver": "One number of the code is 7. It is the number of my truck.",
+       "receptionist": "One number of the code is 3. It is the number of the hotel key.",
+       "planner": "Read the numbers in this order: driver, baker, receptionist, shopkeeper."
+      }
+     },
+     {
+      "id": "code",
+      "text": "What is the code of the cellar door? Type the four numbers.",
+      "after": "hide",
+      "accept": [
+       "7 4 3 1",
+       "7431"
+      ],
+      "rewards": {
+       "baker": "In the cellar there is a note. It says: \"I wanted a surprise...\"",
+       "shopkeeper": "The note says: \"...party for everyone...\"",
+       "driver": "The note says: \"...with hot chestnuts...\"",
+       "receptionist": "The note says: \"...I am sorry.\"",
+       "planner": "The note is signed by a friend of the town."
+      }
+     },
+     {
+      "id": "why",
+      "text": "Why did the thief take the chestnuts?",
+      "after": "code",
+      "accept": [
+       "surprise",
+       "party",
+       "present",
+       "gift"
+      ],
+      "rewards": {
+       "baker": "Cellar safety: hot roasting pans must stay away from paper decorations. Restoring trust: the food must be checked before guests eat it.",
+       "shopkeeper": "Cellar safety: the moon parcel contains paper lanterns; real flames could burn them. Restoring trust: I want the borrowed key returned.",
+       "driver": "Cellar safety: a heavy chestnut sack needs two people to carry it safely. Restoring trust: nobody should carry heavy boxes alone to keep a surprise secret.",
+       "receptionist": "Cellar safety: the corridor and both hotel exits must stay clear. Restoring trust: the hotel must know where every delivery is stored.",
+       "planner": "Cellar safety: battery lights can replace candles in the lanterns. Restoring trust: a good surprise needs permission and a safe plan."
+      }
+     },
+     {
+      "id": "report-3",
+      "text": "Write 3 sentences. What happens at the celebration?",
+      "after": "why",
+      "optional": true,
+      "kind": "report",
+      "accept": []
+     },
+     {
+      "id": "cellar-safety-inspection",
+      "text": "Before the celebration, investigate two safety risks. Read your Cellar safety note. Interview your partner about their risk, ask what could happen and suggest a safer alternative. Write a two-item inspection with the evidence, a solution and who should handle it. Useful phrases: \"What could go wrong?\" \"Would it be safer to...?\" \"Who can take responsibility?\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "interview",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      }
+     },
+     {
+      "id": "surprise-trust-agreement",
+      "text": "The chestnuts were taken for a surprise. How can the town rebuild trust? Read your Restoring trust note. Compare the needs of your two roles, propose conditions for continuing the party and negotiate an agreement. Submit two commitments, one thing you changed after listening and how the agreement makes the surprise safer. Useful phrases: \"I understand, but we need...\" \"I could accept that if...\" \"We agree to...\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "exchange",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      },
+      "after": "cellar-safety-inspection"
+     }
+    ],
+    "discoveries": [
+     {
+      "id": "cellar-door",
+      "zone": "hotel",
+      "text": "At the hotel there is an old door. It has a lock with four numbers."
+     }
+    ],
+    "reveals": [
+     {
+      "id": "smell",
+      "text": "News: a neighbor smelled hot chestnuts near the hotel."
+     },
+     {
+      "id": "bag",
+      "text": "News: a heavy bag went into the hotel at 9:40."
+     }
+    ]
+   },
+   {
+    "id": "missing-festival-plan",
+    "title": "The Missing Festival Plan",
+    "share": 0.6,
+    "intro": "The chestnuts are recovered, but the festival plan has vanished. One poster says \"park\" and another says \"hotel\". Find the latest plan, check the rehearsal time and agree on a safe place before the party starts at 6:00.",
+    "recap": "Last time: the chestnuts were in the hotel cellar. Now the town needs a reliable festival plan.",
+    "ending": "The latest plan puts rehearsal at 5:30 in the hotel hall. Your safety proposal is ready for the committee. But a strange invitation has arrived, and a ghostly sound comes from the park...",
+    "roleClues": {
+     "baker": "The planner borrowed my red folder. A hotel guest returned it to the reception desk.",
+     "shopkeeper": "The park poster is an old draft. The red folder contains the signed, latest plan.",
+     "driver": "I delivered a red folder to the hotel, not the park.",
+     "receptionist": "There is a red folder under the guest book on my hotel desk.",
+     "planner": "My latest plan is in a red folder. Ask who received it after I left the cafe."
+    },
+    "objectives": [
+     {
+      "id": "plan-location",
+      "text": "Where is the latest festival plan? Name the building.",
+      "accept": [
+       "hotel"
+      ],
+      "rewards": {
+       "baker": "The new plan says the food must be ready at 5:15, before rehearsal.",
+       "shopkeeper": "The old poster says rehearsal at 5:00. It is crossed out.",
+       "driver": "The new plan says I must deliver the decorations fifteen minutes before the 5:30 rehearsal.",
+       "receptionist": "The signed plan says: rehearsal at half past five; party at six.",
+       "planner": "The rehearsal starts at 5:30. The party still starts at 6:00."
+      }
+     },
+     {
+      "id": "plan-rehearsal",
+      "text": "What time does rehearsal start in the latest plan?",
+      "after": "plan-location",
+      "accept": [
+       "5 30",
+       "five thirty",
+       "half past five",
+       "17 30"
+      ],
+      "rewards": {
+       "baker": "The food can be served in the hotel hall. The cafe is too small for all the guests.",
+       "shopkeeper": "The shop has only one narrow exit. It is not a safe festival room.",
+       "driver": "Strong wind is forecast for the park. The hall at the hotel is sheltered.",
+       "receptionist": "The hotel hall has two clear exits and enough room for the guests.",
+       "planner": "The latest venue must be sheltered and have two clear exits. The park plan is cancelled."
+      }
+     },
+     {
+      "id": "plan-venue",
+      "text": "Which building meets the latest safety requirements for the celebration?",
+      "after": "plan-rehearsal",
+      "accept": [
+       "hotel"
+      ],
+      "rewards": {
+       "baker": "Planning requirement: put the hot food table away from paper lanterns.",
+       "shopkeeper": "Planning requirement: use battery lights; no flames inside paper lanterns.",
+       "driver": "Planning requirement: leave a clear route from the delivery door to the food table.",
+       "receptionist": "Planning requirement: keep both hotel exits clear.",
+       "planner": "Planning requirement: include a welcome space for ten new neighbors and start the party at 6:00."
+      }
+     },
+     {
+      "id": "plan-proposal",
+      "text": "Write a proposal for the festival committee. State the venue and rehearsal time, explain two safety arrangements, and name a decision you would discuss with another role. Use your planning requirement and the available clues.",
+      "after": "plan-venue",
+      "kind": "report",
+      "accept": [],
+      "rewards": {
+       "baker": "Poster review: my food list says hotel hall, rehearsal 5:30, party 6:00. Space negotiation: I need a food table away from lanterns.",
+       "shopkeeper": "Poster review: I printed an old park poster before the safety change. Space negotiation: visitors need a visible information table.",
+       "driver": "Poster review: the delivery note confirms hotel hall at 5:15. Space negotiation: the delivery route cannot cross a queue.",
+       "receptionist": "Poster review: the hotel booking confirms rehearsal at 5:30. Space negotiation: neither exit can have a table or a queue in front of it.",
+       "planner": "Poster review: my signed plan cancels the park rehearsal and keeps the 6:00 party. Space negotiation: the welcome space must be easy to find for ten new neighbors."
+      }
+     },
+     {
+      "id": "festival-poster-review",
+      "text": "Two posters disagree. Read your Poster review note and interview your partner about the date, source and times in their record. Agree which information belongs on a corrected invitation. Submit the venue, rehearsal time, party time and two sources, explaining why the older poster is misleading. Useful phrases: \"Which version is that?\" \"Does your record confirm...?\" \"We should correct...\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "interview",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      }
+     },
+     {
+      "id": "festival-space-negotiation",
+      "text": "Help the committee fit everyone into the hotel hall. Read your Space negotiation note. Explain your needs to your partner, compare two layouts and agree on one compromise that keeps both exits clear. Submit the layout in words, the needs it meets and the compromise each of you made. Useful phrases: \"We need space for...\" \"Could we move...?\" \"That works if...\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "exchange",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      },
+      "after": "festival-poster-review"
+     }
+    ],
+    "discoveries": [
+     {
+      "id": "plan-old-poster",
+      "zone": "park",
+      "text": "An old poster says: PARK, REHEARSAL 5:00. Across it someone wrote: OLD DRAFT — CHECK THE RED FOLDER."
+     },
+     {
+      "id": "plan-folder",
+      "zone": "hotel",
+      "text": "Under the guest book: a signed red folder. Latest plan: hotel hall; rehearsal 5:30; party 6:00. Keep both exits clear."
+     }
+    ],
+    "reveals": [
+     {
+      "id": "plan-folder-news",
+      "text": "News: the hotel receptionist found the red folder under the guest book."
+     },
+     {
+      "id": "plan-time-news",
+      "text": "News: the signed plan confirms rehearsal at half past five and the party at six."
+     },
+     {
+      "id": "plan-safety-news",
+      "text": "News: wind makes the park unsuitable. The hotel hall has shelter and two exits."
+     }
+    ]
+   },
+   {
+    "id": "haunted-festival",
+    "title": "The Haunted Celebration",
+    "share": 0.6,
+    "intro": "The hotel hall is ready. Before the celebration, a lantern disappears and a ghostly sound comes from the park. A strange invitation says there are special guests. Investigate the sound, recover the lantern and find out who the surprise is for.",
+    "recap": "Last time: you checked the latest festival plan and proposed a safe celebration in the hotel hall.",
+    "ending": "The lantern is recovered. The \"ghost\" was wind through a torn paper lantern, and the surprise is a welcome for the new neighbors. Your explanation and welcome proposal are ready. The town can celebrate together!",
+    "roleClues": {
+     "baker": "The missing lantern was beside the food boxes. The driver moved the boxes past the park.",
+     "shopkeeper": "A visitor saw a paper lantern caught on a branch beside the park pond.",
+     "driver": "A gust blew the lantern from my cart near the park pond. I could not reach the branch.",
+     "receptionist": "No lantern arrived at the hotel. Someone heard the strange sound by the park pond.",
+     "planner": "The lantern has a moon on it, just like the parcel from the first delivery investigation. Look near the water."
+    },
+    "objectives": [
+     {
+      "id": "lantern-location",
+      "text": "Where is the missing lantern? Name the place in town.",
+      "accept": [
+       "park",
+       "pond"
+      ],
+      "rewards": {
+       "baker": "The sound stops whenever the air is still.",
+       "shopkeeper": "Paper whistles when moving air passes through a small tear.",
+       "driver": "A strong gust made the sound louder. There was nobody behind the tree.",
+       "receptionist": "A neighbor recorded the noise: it began and ended with each gust of wind.",
+       "planner": "The lantern has a tear. Wind through that tear makes the ghostly sound."
+      }
+     },
+     {
+      "id": "lantern-sound",
+      "text": "What causes the ghostly sound? Name the natural cause.",
+      "after": "lantern-location",
+      "accept": [
+       "wind",
+       "moving air"
+      ],
+      "rewards": {
+       "baker": "The first line of the invitation says: \"A warm welcome...\"",
+       "shopkeeper": "The next line says: \"...to our new neighbors.\"",
+       "driver": "Ten people have recently moved into town. This is their first Castanyada here.",
+       "receptionist": "Ten new neighbors are staying at the hotel. They received the moon invitations.",
+       "planner": "The surprise is a welcome celebration for the new neighbors, not another theft."
+      }
+     },
+     {
+      "id": "festival-special-guests",
+      "text": "Who is the welcome surprise for?",
+      "after": "lantern-sound",
+      "accept": [
+       "new neighbors",
+       "new neighbours",
+       "new residents",
+       "new people"
+      ],
+      "rewards": {
+       "baker": "Welcome requirement: explain which food is hot and offer a safe place to eat.",
+       "shopkeeper": "Welcome requirement: explain the festival without assuming guests already know its customs.",
+       "driver": "Welcome requirement: give clear directions from the entrance to the food and welcome tables.",
+       "receptionist": "Welcome requirement: tell guests where the two exits are.",
+       "planner": "Welcome requirement: invite guests to choose whether to join an activity; do not make them perform."
+      }
+     },
+     {
+      "id": "festival-welcome-proposal",
+      "text": "Write your final message for the committee. Explain the ghostly sound using evidence, identify the special guests and suggest an inclusive welcome action. Say why your action would help a newcomer.",
+      "after": "festival-special-guests",
+      "kind": "report",
+      "accept": [],
+      "rewards": {
+       "baker": "Invitation inquiry: a guest worries that the chestnuts cost money; they are free at this celebration. Welcome negotiation: hot food needs a clear warning and a place to sit.",
+       "shopkeeper": "Invitation inquiry: a guest thinks costumes are compulsory; costumes are optional. Welcome negotiation: some visitors need a short explanation of Castanyada.",
+       "driver": "Invitation inquiry: a guest does not know the route from the entrance; the welcome table is beside the hotel desk. Welcome negotiation: signs should use short words and clear directions.",
+       "receptionist": "Invitation inquiry: a guest worries about not knowing anyone; investigators can introduce themselves at the welcome table. Welcome negotiation: offer company without forcing anyone to join.",
+       "planner": "Invitation inquiry: a guest thinks everyone must sing; every activity is optional. Welcome negotiation: let guests choose food, conversation or a quiet seat."
+      }
+     },
+     {
+      "id": "strange-invitation-inquiry",
+      "text": "Make sure the invitation helps its guests. Read your Invitation inquiry note. Ask your partner what their guest misunderstood, why and what would reassure them. Submit two guest questions and clear answers based on both notes. Useful phrases: \"What are they worried about?\" \"Do they have to...?\" \"We can reassure them that...\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "interview",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      }
+     },
+     {
+      "id": "neighbors-welcome-agreement",
+      "text": "Create a welcome recommendation for the class. Read your Welcome negotiation note. Compare your needs with your partner, propose two welcome activities and agree on one that guests can choose freely. Submit your recommendation, a sample English welcome message, and the change you made after hearing your partner. Useful phrases: \"Would you like to...?\" \"You can choose...\" \"Let's make sure...\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "exchange",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      },
+      "after": "strange-invitation-inquiry"
+     }
+    ],
+    "discoveries": [
+     {
+      "id": "festival-torn-lantern",
+      "zone": "park",
+      "text": "A moon lantern is caught beside the pond. Air whistles through a tear in the paper. When the wind stops, the sound stops."
+     },
+     {
+      "id": "festival-moon-invitation",
+      "zone": "hotel",
+      "text": "At the hotel desk: \"A warm welcome to our new neighbors! Hotel hall, 6:00. Free chestnuts, optional costumes and activities. Ask at the welcome table if you have a question.\""
+     }
+    ],
+    "reveals": [
+     {
+      "id": "festival-lantern-news",
+      "text": "News: the missing moon lantern is caught on a tree by the park pond."
+     },
+     {
+      "id": "festival-sound-news",
+      "text": "News: wind whistles through the torn paper. The noise stops when the wind stops."
+     },
+     {
+      "id": "festival-guests-news",
+      "text": "News: the surprise welcomes ten new neighbors to their first Castanyada in town."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "castanyada-investigations",
+  "title": "Castanyada: Witness Investigations",
+  "finale": "The town celebrates together. You recovered the chestnuts, checked the stories, made a safe festival plan and welcomed the new neighbors. Your investigations helped everyone belong. Happy Castanyada!",
+  "roles": [
+   {
+    "id": "baker",
+    "name": "Café baker",
+    "card": "You roast the chestnuts.",
+    "clue": "No blue box came to the café."
+   },
+   {
+    "id": "shopkeeper",
+    "name": "Shopkeeper",
+    "card": "You pack the boxes.",
+    "clue": "A blue box left the shop at 9:00."
+   },
+   {
+    "id": "driver",
+    "name": "Driver",
+    "card": "You carry the boxes.",
+    "clue": "I carried a blue box. I left it near the water."
+   },
+   {
+    "id": "receptionist",
+    "name": "Hotel receptionist",
+    "card": "You work at the hotel desk.",
+    "clue": "No box came to the hotel."
+   },
+   {
+    "id": "planner",
+    "name": "Festival planner",
+    "card": "You plan the party.",
+    "clue": "The only water in town is the pond in the park."
+   }
+  ],
+  "chapters": [
+   {
+    "id": "missing-chestnuts",
+    "title": "The Missing Chestnuts",
+    "share": 0.6,
+    "intro": "The chestnuts are gone. Ask your classmates. Each of you knows something different. Before each conclusion, ask a witness about this question and compare their private evidence with yours in your journal.",
+    "recap": "Last time: the big box of chestnuts disappeared. You are still looking for it.",
+    "ending": "Two people have a key: the shopkeeper and the planner. But the lock is open and the box is empty! Who took the chestnuts?",
+    "objectives": [
+     {
+      "id": "where",
+      "text": "Where is the blue box?",
+      "accept": [
+       "park",
+       "pond"
+      ],
+      "rewards": {
+       "baker": "The café needs 20 chestnuts. That is half of the box.",
+       "shopkeeper": "I packed 40 chestnuts in the box.",
+       "driver": "The ride from the shop to the park takes 30 minutes.",
+       "receptionist": "A man in a green coat asked me about the park at 9:15.",
+       "planner": "The party starts at 6:00. We need the chestnuts before 5:00."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "when",
+      "text": "What time did the box get to the park?",
+      "after": "where",
+      "accept": [
+       "9 30",
+       "nine thirty",
+       "half past nine"
+      ],
+      "rewards": {
+       "baker": "There is no key at the café.",
+       "shopkeeper": "I have one key. It is on my belt.",
+       "driver": "I never have a key. I only carry the box.",
+       "receptionist": "There is no key at the hotel.",
+       "planner": "I have one key. The other key is in the shop."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "keys",
+      "text": "How many people have a key?",
+      "after": "when",
+      "accept": [
+       "two",
+       "2"
+      ],
+      "rewards": {
+       "baker": "Delivery audit: I ordered paper lanterns, not another box of food. Fair shares: the cafe needs 20 of the 40 chestnuts to roast for guests.",
+       "shopkeeper": "Delivery audit: a second parcel had a moon label, not the blue box label. Fair shares: ten children will arrive and each wants one chestnut.",
+       "driver": "Delivery audit: I left the moon parcel at the hotel desk at 10:00. Fair shares: I can carry one tray of ten chestnuts at a time.",
+       "receptionist": "Delivery audit: the moon parcel contains folded paper and candles. Fair shares: ten new neighbors have been invited to the hotel.",
+       "planner": "Delivery audit: the moon parcel is for festival decorations. Fair shares: there are 40 chestnuts in total; every guest should get a fair share."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "note",
+      "text": "What does the note on the hotel door say?",
+      "after": "where",
+      "optional": true,
+      "accept": [
+       "safe",
+       "not worry"
+      ]
+     },
+     {
+      "id": "lock",
+      "text": "What is on the lock?",
+      "after": "where",
+      "optional": true,
+      "accept": [
+       "star"
+      ]
+     },
+     {
+      "id": "chestnuts",
+      "text": "How many chestnuts were in the box?",
+      "after": "when",
+      "optional": true,
+      "accept": [
+       "40",
+       "forty"
+      ]
+     },
+     {
+      "id": "report-1",
+      "text": "Write 2 sentences. Who do you think has the chestnuts? Why?",
+      "after": "keys",
+      "optional": true,
+      "kind": "report",
+      "accept": []
+     },
+     {
+      "id": "moon-delivery-audit",
+      "text": "The town needs to know whether a second delivery is connected to the missing chestnuts. Read your Delivery audit note. Interview your assigned partner in English: What arrived? Where did it go? When? Ask one follow-up question. Compare your evidence and write a short delivery record with both findings and anything still uncertain. Useful phrases: \"What did you see?\" \"How do you know?\" \"So, do we agree that...?\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "interview",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      }
+     },
+     {
+      "id": "fair-chestnut-shares",
+      "text": "Help the festival committee plan a fair distribution. Read your Fair shares note and ask your partner about their needs. Suggest two ways to share the 40 chestnuts, explain a problem with each, and agree on a plan that uses no more than 40. Write the allocations, one reason and your partner's contribution. Useful phrases: \"We need... because...\" \"What if we...?\" \"Could we agree on...?\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "exchange",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      },
+      "after": "moon-delivery-audit"
+     }
+    ],
+    "discoveries": [
+     {
+      "id": "hotel-note",
+      "zone": "hotel",
+      "text": "A note on the hotel door: \"The chestnuts are safe. Do not worry.\""
+     },
+     {
+      "id": "park-lock",
+      "zone": "park",
+      "text": "A small blue lock with a star on it, on the grass."
+     }
+    ],
+    "reveals": [
+     {
+      "id": "coat",
+      "text": "News: a neighbor saw a person in a green coat near the park at 9:20."
+     },
+     {
+      "id": "click",
+      "text": "News: somebody heard a lock click in the park."
+     }
+    ]
+   },
+   {
+    "id": "conflicting-stories",
+    "title": "Conflicting Stories",
+    "share": 0.6,
+    "intro": "Now people tell different stories. Somebody in this class took the chestnuts! Ask questions. Who is lying? Before each conclusion, ask a witness about this question and compare their private evidence with yours in your journal.",
+    "recap": "Last time: the box was in the park, and the lock was open. You are looking for who opened it.",
+    "ending": "You found the thief. But why did they take the chestnuts?",
+    "thieves": {
+     "card": "You took the chestnuts. Tell nobody! If a classmate asks, say you are innocent. Your classmates saw how you look, so be careful.",
+     "story": "At 9:25 I was at the hotel desk."
+    },
+    "roleClues": {
+     "baker": "At 9:20 somebody ran past the café. {hat}",
+     "shopkeeper": "At 9:10 somebody came to my shop. {coat} {glasses}",
+     "driver": "At 9:30 somebody ran into the park. {hair}",
+     "receptionist": "The hotel phone rang at 9:25. Nobody answered.",
+     "planner": "My key was in my bag. Somebody moved my bag at 9:00."
+    },
+    "objectives": [
+     {
+      "id": "meet-shop",
+      "text": "Who is the shopkeeper? Type their name.",
+      "accept": [],
+      "answerRole": "shopkeeper",
+      "rewards": {
+       "baker": "At 9:15 the café was empty. Nobody came.",
+       "shopkeeper": "At 9:05 I went to the bank. The shop door was open.",
+       "driver": "At 9:25 I was in my truck near the hotel. Nobody went in.",
+       "receptionist": "At 9:25 the hotel was closed. Nobody was at the desk.",
+       "planner": "At 9:20 I was in the square with the band."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "meet-planner",
+      "text": "Who is the planner? Type their name.",
+      "after": "meet-shop",
+      "accept": [],
+      "answerRole": "planner",
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "thief",
+      "text": "Who took the chestnuts? Type their name.",
+      "after": "meet-planner",
+      "accept": [],
+      "answerThief": true,
+      "rewards": {
+       "baker": "Alibi review: the cafe clock was five minutes slow. Rumor repair: somebody told visitors that everyone in town steals things; that is unfair.",
+       "shopkeeper": "Alibi review: my receipt is stamped 9:05 by the shop clock, which was correct. Rumor repair: an open door alone does not prove who entered.",
+       "driver": "Alibi review: the truck clock agreed with the shop clock. Rumor repair: I saw someone running, but I did not see what was in their bag.",
+       "receptionist": "Alibi review: the hotel bell rings automatically at 9:25, even if nobody is at the desk. Rumor repair: a ringing bell does not prove a receptionist was there.",
+       "planner": "Alibi review: my rehearsal list records the band in the square at 9:20. Rumor repair: name a fact, explain your evidence, and avoid blaming people for things you cannot prove."
+      },
+      "conversation": {
+       "witnesses": 2
+      }
+     },
+     {
+      "id": "report-2",
+      "text": "Write 2 sentences. How do you know who took the chestnuts?",
+      "after": "meet-planner",
+      "optional": true,
+      "kind": "report",
+      "accept": []
+     },
+     {
+      "id": "clock-alibi-review",
+      "text": "The investigation is solved, but the teacher needs a reliable witness record. Read your Alibi review note. Ask your partner which clock or record they used and whether a sound proves a person was present. Explain one apparent contradiction using both notes. Submit the original claim, the evidence and your correction; mark anything you cannot yet verify. Useful phrases: \"Which clock did you use?\" \"That could mean...\" \"The evidence shows...\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "interview",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      }
+     },
+     {
+      "id": "repair-town-rumor",
+      "text": "Visitors have heard a damaging rumor. Read your Rumor repair note. Discuss with your partner which claims are facts and which are guesses. Agree on a calm public update that explains one checked fact, corrects one unsupported claim and invites a question. Submit your agreed message and explain what your partner changed. Useful phrases: \"We can confirm...\" \"We cannot be sure about...\" \"Let's change that sentence because...\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "exchange",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      },
+      "after": "clock-alibi-review"
+     }
+    ],
+    "discoveries": [],
+    "reveals": [
+     {
+      "id": "door",
+      "text": "News: the shop door was open at 9:05."
+     },
+     {
+      "id": "phone",
+      "text": "News: the hotel phone rang at 9:25."
+     }
+    ]
+   },
+   {
+    "id": "haunted-celebration",
+    "title": "The Hotel Cellar",
+    "share": 0.6,
+    "intro": "It is late afternoon. You know who took the chestnuts. Find them before the party starts at 6:00! Before each conclusion, ask a witness about this question and compare their private evidence with yours in your journal.",
+    "recap": "Last time: you found the thief. The chestnuts are still hidden somewhere.",
+    "ending": "The chestnuts are safe! The thief wanted a surprise party and says sorry. But the festival plan is missing. Can the town prepare a safe celebration in time?",
+    "thieves": {
+     "carry": true,
+     "label": "Your plan",
+     "card": "You hid the chestnuts in the hotel cellar, for a surprise party. Give small hints. Never say the answers!",
+     "story": "Help the class with hints, but do not tell them where the chestnuts are."
+    },
+    "roleClues": {
+     "baker": "I smell hot chestnuts near the hotel.",
+     "shopkeeper": "At 9:00 somebody bought wood and matches. You need fire to roast chestnuts.",
+     "driver": "At 9:40 I carried a heavy bag to the hotel.",
+     "receptionist": "The cellar door at the hotel is old and locked. It has a four-number code.",
+     "planner": "The party starts at 6:00. The chestnuts must be ready before then."
+    },
+    "objectives": [
+     {
+      "id": "hide",
+      "text": "Where did the thief hide the chestnuts?",
+      "accept": [
+       "cellar",
+       "basement"
+      ],
+      "thiefKnows": true,
+      "rewards": {
+       "baker": "One number of the code is 4. It is the number of my oven.",
+       "shopkeeper": "One number of the code is 1. It is the number of doors in my shop.",
+       "driver": "One number of the code is 7. It is the number of my truck.",
+       "receptionist": "One number of the code is 3. It is the number of the hotel key.",
+       "planner": "Read the numbers in this order: driver, baker, receptionist, shopkeeper."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "code",
+      "text": "What is the code of the cellar door? Type the four numbers.",
+      "after": "hide",
+      "accept": [
+       "7 4 3 1",
+       "7431"
+      ],
+      "rewards": {
+       "baker": "In the cellar there is a note. It says: \"I wanted a surprise...\"",
+       "shopkeeper": "The note says: \"...party for everyone...\"",
+       "driver": "The note says: \"...with hot chestnuts...\"",
+       "receptionist": "The note says: \"...I am sorry.\"",
+       "planner": "The note is signed by a friend of the town."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "why",
+      "text": "Why did the thief take the chestnuts?",
+      "after": "code",
+      "accept": [
+       "surprise",
+       "party",
+       "present",
+       "gift"
+      ],
+      "rewards": {
+       "baker": "Cellar safety: hot roasting pans must stay away from paper decorations. Restoring trust: the food must be checked before guests eat it.",
+       "shopkeeper": "Cellar safety: the moon parcel contains paper lanterns; real flames could burn them. Restoring trust: I want the borrowed key returned.",
+       "driver": "Cellar safety: a heavy chestnut sack needs two people to carry it safely. Restoring trust: nobody should carry heavy boxes alone to keep a surprise secret.",
+       "receptionist": "Cellar safety: the corridor and both hotel exits must stay clear. Restoring trust: the hotel must know where every delivery is stored.",
+       "planner": "Cellar safety: battery lights can replace candles in the lanterns. Restoring trust: a good surprise needs permission and a safe plan."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "report-3",
+      "text": "Write 3 sentences. What happens at the celebration?",
+      "after": "why",
+      "optional": true,
+      "kind": "report",
+      "accept": []
+     },
+     {
+      "id": "cellar-safety-inspection",
+      "text": "Before the celebration, investigate two safety risks. Read your Cellar safety note. Interview your partner about their risk, ask what could happen and suggest a safer alternative. Write a two-item inspection with the evidence, a solution and who should handle it. Useful phrases: \"What could go wrong?\" \"Would it be safer to...?\" \"Who can take responsibility?\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "interview",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      }
+     },
+     {
+      "id": "surprise-trust-agreement",
+      "text": "The chestnuts were taken for a surprise. How can the town rebuild trust? Read your Restoring trust note. Compare the needs of your two roles, propose conditions for continuing the party and negotiate an agreement. Submit two commitments, one thing you changed after listening and how the agreement makes the surprise safer. Useful phrases: \"I understand, but we need...\" \"I could accept that if...\" \"We agree to...\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "exchange",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      },
+      "after": "cellar-safety-inspection"
+     }
+    ],
+    "discoveries": [
+     {
+      "id": "cellar-door",
+      "zone": "hotel",
+      "text": "At the hotel there is an old door. It has a lock with four numbers."
+     }
+    ],
+    "reveals": [
+     {
+      "id": "smell",
+      "text": "News: a neighbor smelled hot chestnuts near the hotel."
+     },
+     {
+      "id": "bag",
+      "text": "News: a heavy bag went into the hotel at 9:40."
+     }
+    ]
+   },
+   {
+    "id": "missing-festival-plan",
+    "title": "The Missing Festival Plan",
+    "share": 0.6,
+    "intro": "The chestnuts are recovered, but the festival plan has vanished. One poster says \"park\" and another says \"hotel\". Find the latest plan, check the rehearsal time and agree on a safe place before the party starts at 6:00. Before each conclusion, ask a witness about this question and compare their private evidence with yours in your journal.",
+    "recap": "Last time: the chestnuts were in the hotel cellar. Now the town needs a reliable festival plan.",
+    "ending": "The latest plan puts rehearsal at 5:30 in the hotel hall. Your safety proposal is ready for the committee. But a strange invitation has arrived, and a ghostly sound comes from the park...",
+    "roleClues": {
+     "baker": "The planner borrowed my red folder. A hotel guest returned it to the reception desk.",
+     "shopkeeper": "The park poster is an old draft. The red folder contains the signed, latest plan.",
+     "driver": "I delivered a red folder to the hotel, not the park.",
+     "receptionist": "There is a red folder under the guest book on my hotel desk.",
+     "planner": "My latest plan is in a red folder. Ask who received it after I left the cafe."
+    },
+    "objectives": [
+     {
+      "id": "plan-location",
+      "text": "Where is the latest festival plan? Name the building.",
+      "accept": [
+       "hotel"
+      ],
+      "rewards": {
+       "baker": "The new plan says the food must be ready at 5:15, before rehearsal.",
+       "shopkeeper": "The old poster says rehearsal at 5:00. It is crossed out.",
+       "driver": "The new plan says I must deliver the decorations fifteen minutes before the 5:30 rehearsal.",
+       "receptionist": "The signed plan says: rehearsal at half past five; party at six.",
+       "planner": "The rehearsal starts at 5:30. The party still starts at 6:00."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "plan-rehearsal",
+      "text": "What time does rehearsal start in the latest plan?",
+      "after": "plan-location",
+      "accept": [
+       "5 30",
+       "five thirty",
+       "half past five",
+       "17 30"
+      ],
+      "rewards": {
+       "baker": "The food can be served in the hotel hall. The cafe is too small for all the guests.",
+       "shopkeeper": "The shop has only one narrow exit. It is not a safe festival room.",
+       "driver": "Strong wind is forecast for the park. The hall at the hotel is sheltered.",
+       "receptionist": "The hotel hall has two clear exits and enough room for the guests.",
+       "planner": "The latest venue must be sheltered and have two clear exits. The park plan is cancelled."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "plan-venue",
+      "text": "Which building meets the latest safety requirements for the celebration?",
+      "after": "plan-rehearsal",
+      "accept": [
+       "hotel"
+      ],
+      "rewards": {
+       "baker": "Planning requirement: put the hot food table away from paper lanterns.",
+       "shopkeeper": "Planning requirement: use battery lights; no flames inside paper lanterns.",
+       "driver": "Planning requirement: leave a clear route from the delivery door to the food table.",
+       "receptionist": "Planning requirement: keep both hotel exits clear.",
+       "planner": "Planning requirement: include a welcome space for ten new neighbors and start the party at 6:00."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "plan-proposal",
+      "text": "Write a proposal for the festival committee. State the venue and rehearsal time, explain two safety arrangements, and name a decision you would discuss with another role. Use your planning requirement and the available clues.",
+      "after": "plan-venue",
+      "kind": "report",
+      "accept": [],
+      "rewards": {
+       "baker": "Poster review: my food list says hotel hall, rehearsal 5:30, party 6:00. Space negotiation: I need a food table away from lanterns.",
+       "shopkeeper": "Poster review: I printed an old park poster before the safety change. Space negotiation: visitors need a visible information table.",
+       "driver": "Poster review: the delivery note confirms hotel hall at 5:15. Space negotiation: the delivery route cannot cross a queue.",
+       "receptionist": "Poster review: the hotel booking confirms rehearsal at 5:30. Space negotiation: neither exit can have a table or a queue in front of it.",
+       "planner": "Poster review: my signed plan cancels the park rehearsal and keeps the 6:00 party. Space negotiation: the welcome space must be easy to find for ten new neighbors."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "festival-poster-review",
+      "text": "Two posters disagree. Read your Poster review note and interview your partner about the date, source and times in their record. Agree which information belongs on a corrected invitation. Submit the venue, rehearsal time, party time and two sources, explaining why the older poster is misleading. Useful phrases: \"Which version is that?\" \"Does your record confirm...?\" \"We should correct...\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "interview",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      }
+     },
+     {
+      "id": "festival-space-negotiation",
+      "text": "Help the committee fit everyone into the hotel hall. Read your Space negotiation note. Explain your needs to your partner, compare two layouts and agree on one compromise that keeps both exits clear. Submit the layout in words, the needs it meets and the compromise each of you made. Useful phrases: \"We need space for...\" \"Could we move...?\" \"That works if...\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "exchange",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      },
+      "after": "festival-poster-review"
+     }
+    ],
+    "discoveries": [
+     {
+      "id": "plan-old-poster",
+      "zone": "park",
+      "text": "An old poster says: PARK, REHEARSAL 5:00. Across it someone wrote: OLD DRAFT — CHECK THE RED FOLDER."
+     },
+     {
+      "id": "plan-folder",
+      "zone": "hotel",
+      "text": "Under the guest book: a signed red folder. Latest plan: hotel hall; rehearsal 5:30; party 6:00. Keep both exits clear."
+     }
+    ],
+    "reveals": [
+     {
+      "id": "plan-folder-news",
+      "text": "News: the hotel receptionist found the red folder under the guest book."
+     },
+     {
+      "id": "plan-time-news",
+      "text": "News: the signed plan confirms rehearsal at half past five and the party at six."
+     },
+     {
+      "id": "plan-safety-news",
+      "text": "News: wind makes the park unsuitable. The hotel hall has shelter and two exits."
+     }
+    ]
+   },
+   {
+    "id": "haunted-festival",
+    "title": "The Haunted Celebration",
+    "share": 0.6,
+    "intro": "The hotel hall is ready. Before the celebration, a lantern disappears and a ghostly sound comes from the park. A strange invitation says there are special guests. Investigate the sound, recover the lantern and find out who the surprise is for. Before each conclusion, ask a witness about this question and compare their private evidence with yours in your journal.",
+    "recap": "Last time: you checked the latest festival plan and proposed a safe celebration in the hotel hall.",
+    "ending": "The lantern is recovered. The \"ghost\" was wind through a torn paper lantern, and the surprise is a welcome for the new neighbors. Your explanation and welcome proposal are ready. The town can celebrate together!",
+    "roleClues": {
+     "baker": "The missing lantern was beside the food boxes. The driver moved the boxes past the park.",
+     "shopkeeper": "A visitor saw a paper lantern caught on a branch beside the park pond.",
+     "driver": "A gust blew the lantern from my cart near the park pond. I could not reach the branch.",
+     "receptionist": "No lantern arrived at the hotel. Someone heard the strange sound by the park pond.",
+     "planner": "The lantern has a moon on it, just like the parcel from the first delivery investigation. Look near the water."
+    },
+    "objectives": [
+     {
+      "id": "lantern-location",
+      "text": "Where is the missing lantern? Name the place in town.",
+      "accept": [
+       "park",
+       "pond"
+      ],
+      "rewards": {
+       "baker": "The sound stops whenever the air is still.",
+       "shopkeeper": "Paper whistles when moving air passes through a small tear.",
+       "driver": "A strong gust made the sound louder. There was nobody behind the tree.",
+       "receptionist": "A neighbor recorded the noise: it began and ended with each gust of wind.",
+       "planner": "The lantern has a tear. Wind through that tear makes the ghostly sound."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "lantern-sound",
+      "text": "What causes the ghostly sound? Name the natural cause.",
+      "after": "lantern-location",
+      "accept": [
+       "wind",
+       "moving air"
+      ],
+      "rewards": {
+       "baker": "The first line of the invitation says: \"A warm welcome...\"",
+       "shopkeeper": "The next line says: \"...to our new neighbors.\"",
+       "driver": "Ten people have recently moved into town. This is their first Castanyada here.",
+       "receptionist": "Ten new neighbors are staying at the hotel. They received the moon invitations.",
+       "planner": "The surprise is a welcome celebration for the new neighbors, not another theft."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "festival-special-guests",
+      "text": "Who is the welcome surprise for?",
+      "after": "lantern-sound",
+      "accept": [
+       "new neighbors",
+       "new neighbours",
+       "new residents",
+       "new people"
+      ],
+      "rewards": {
+       "baker": "Welcome requirement: explain which food is hot and offer a safe place to eat.",
+       "shopkeeper": "Welcome requirement: explain the festival without assuming guests already know its customs.",
+       "driver": "Welcome requirement: give clear directions from the entrance to the food and welcome tables.",
+       "receptionist": "Welcome requirement: tell guests where the two exits are.",
+       "planner": "Welcome requirement: invite guests to choose whether to join an activity; do not make them perform."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "festival-welcome-proposal",
+      "text": "Write your final message for the committee. Explain the ghostly sound using evidence, identify the special guests and suggest an inclusive welcome action. Say why your action would help a newcomer.",
+      "after": "festival-special-guests",
+      "kind": "report",
+      "accept": [],
+      "rewards": {
+       "baker": "Invitation inquiry: a guest worries that the chestnuts cost money; they are free at this celebration. Welcome negotiation: hot food needs a clear warning and a place to sit.",
+       "shopkeeper": "Invitation inquiry: a guest thinks costumes are compulsory; costumes are optional. Welcome negotiation: some visitors need a short explanation of Castanyada.",
+       "driver": "Invitation inquiry: a guest does not know the route from the entrance; the welcome table is beside the hotel desk. Welcome negotiation: signs should use short words and clear directions.",
+       "receptionist": "Invitation inquiry: a guest worries about not knowing anyone; investigators can introduce themselves at the welcome table. Welcome negotiation: offer company without forcing anyone to join.",
+       "planner": "Invitation inquiry: a guest thinks everyone must sing; every activity is optional. Welcome negotiation: let guests choose food, conversation or a quiet seat."
+      },
+      "conversation": {
+       "witnesses": 1
+      }
+     },
+     {
+      "id": "strange-invitation-inquiry",
+      "text": "Make sure the invitation helps its guests. Read your Invitation inquiry note. Ask your partner what their guest misunderstood, why and what would reassure them. Submit two guest questions and clear answers based on both notes. Useful phrases: \"What are they worried about?\" \"Do they have to...?\" \"We can reassure them that...\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "interview",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      }
+     },
+     {
+      "id": "neighbors-welcome-agreement",
+      "text": "Create a welcome recommendation for the class. Read your Welcome negotiation note. Compare your needs with your partner, propose two welcome activities and agree on one that guests can choose freely. Submit your recommendation, a sample English welcome message, and the change you made after hearing your partner. Useful phrases: \"Would you like to...?\" \"You can choose...\" \"Let's make sure...\"",
+      "accept": [],
+      "kind": "report",
+      "optional": true,
+      "activity": "exchange",
+      "board": {
+       "afterMain": true,
+       "minPlayers": 2,
+       "differentRole": true
+      },
+      "after": "strange-invitation-inquiry"
+     }
+    ],
+    "discoveries": [
+     {
+      "id": "festival-torn-lantern",
+      "zone": "park",
+      "text": "A moon lantern is caught beside the pond. Air whistles through a tear in the paper. When the wind stops, the sound stops."
+     },
+     {
+      "id": "festival-moon-invitation",
+      "zone": "hotel",
+      "text": "At the hotel desk: \"A warm welcome to our new neighbors! Hotel hall, 6:00. Free chestnuts, optional costumes and activities. Ask at the welcome table if you have a question.\""
+     }
+    ],
+    "reveals": [
+     {
+      "id": "festival-lantern-news",
+      "text": "News: the missing moon lantern is caught on a tree by the park pond."
+     },
+     {
+      "id": "festival-sound-news",
+      "text": "News: wind whistles through the torn paper. The noise stops when the wind stops."
+     },
+     {
+      "id": "festival-guests-news",
+      "text": "News: the surprise welcomes ten new neighbors to their first Castanyada in town."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "plaza-free-play",
+  "title": "Plaza Free Play: Side Quests",
+  "finale": "Thanks for playing! See you in the plaza.",
+  "roles": [
+   {
+    "id": "explorer",
+    "name": "Explorer",
+    "card": "You love finding new places and new people in the plaza.",
+    "clue": "Explorer tip: the park has a pond and a little bridge. Have you crossed it?"
+   },
+   {
+    "id": "reporter",
+    "name": "Reporter",
+    "card": "You collect news and stories from your classmates.",
+    "clue": "Reporter tip: a good follow-up question is \"Why?\" or \"What happened next?\""
+   },
+   {
+    "id": "host",
+    "name": "Host",
+    "card": "You welcome people and help them meet each other.",
+    "clue": "Host tip: say hello to someone you have not talked to today."
+   },
+   {
+    "id": "artist",
+    "name": "Artist",
+    "card": "You notice colours, styles and good ideas.",
+    "clue": "Artist tip: look at the hats, glasses and colours around you."
+   }
+  ],
+  "chapters": [
+   {
+    "id": "free-play-1",
+    "title": "Free play: session 1",
+    "share": 0.6,
+    "intro": "No mystery today. Check in, then choose quests on the quest board, chat with your classmates in English and have fun. Your teacher can add new quests at any time.",
+    "recap": "Last time: you played side quests in the plaza.",
+    "ending": "Great start! Keep choosing quests on the quest board. Your teacher can add more.",
+    "objectives": [
+     {
+      "id": "check-in-1",
+      "text": "Check in: write one or two sentences. How are you today, and what do you want to do in the plaza?",
+      "accept": [],
+      "kind": "report"
+     }
+    ],
+    "discoveries": [],
+    "reveals": []
+   },
+   {
+    "id": "free-play-2",
+    "title": "Free play: session 2",
+    "share": 0.6,
+    "intro": "No mystery today. Check in, then choose quests on the quest board, chat with your classmates in English and have fun. Your teacher can add new quests at any time.",
+    "recap": "Last time: you played side quests in the plaza.",
+    "ending": "Great start! Keep choosing quests on the quest board. Your teacher can add more.",
+    "objectives": [
+     {
+      "id": "check-in-2",
+      "text": "Check in: write one or two sentences. How are you today, and what do you want to do in the plaza?",
+      "accept": [],
+      "kind": "report"
+     }
+    ],
+    "discoveries": [],
+    "reveals": []
+   },
+   {
+    "id": "free-play-3",
+    "title": "Free play: session 3",
+    "share": 0.6,
+    "intro": "No mystery today. Check in, then choose quests on the quest board, chat with your classmates in English and have fun. Your teacher can add new quests at any time.",
+    "recap": "Last time: you played side quests in the plaza.",
+    "ending": "Great start! Keep choosing quests on the quest board. Your teacher can add more.",
+    "objectives": [
+     {
+      "id": "check-in-3",
+      "text": "Check in: write one or two sentences. How are you today, and what do you want to do in the plaza?",
+      "accept": [],
+      "kind": "report"
+     }
+    ],
+    "discoveries": [],
+    "reveals": []
+   },
+   {
+    "id": "free-play-4",
+    "title": "Free play: session 4",
+    "share": 0.6,
+    "intro": "No mystery today. Check in, then choose quests on the quest board, chat with your classmates in English and have fun. Your teacher can add new quests at any time.",
+    "recap": "Last time: you played side quests in the plaza.",
+    "ending": "Great start! Keep choosing quests on the quest board. Your teacher can add more.",
+    "objectives": [
+     {
+      "id": "check-in-4",
+      "text": "Check in: write one or two sentences. How are you today, and what do you want to do in the plaza?",
+      "accept": [],
+      "kind": "report"
+     }
+    ],
+    "discoveries": [],
+    "reveals": []
+   },
+   {
+    "id": "free-play-5",
+    "title": "Free play: session 5",
+    "share": 0.6,
+    "intro": "No mystery today. Check in, then choose quests on the quest board, chat with your classmates in English and have fun. Your teacher can add new quests at any time.",
+    "recap": "Last time: you played side quests in the plaza.",
+    "ending": "Great start! Keep choosing quests on the quest board. Your teacher can add more.",
+    "objectives": [
+     {
+      "id": "check-in-5",
+      "text": "Check in: write one or two sentences. How are you today, and what do you want to do in the plaza?",
+      "accept": [],
+      "kind": "report"
+     }
+    ],
+    "discoveries": [],
+    "reveals": []
+   },
+   {
+    "id": "free-play-6",
+    "title": "Free play: session 6",
+    "share": 0.6,
+    "intro": "No mystery today. Check in, then choose quests on the quest board, chat with your classmates in English and have fun. Your teacher can add new quests at any time.",
+    "recap": "Last time: you played side quests in the plaza.",
+    "ending": "Great start! Keep choosing quests on the quest board. Your teacher can add more.",
+    "objectives": [
+     {
+      "id": "check-in-6",
+      "text": "Check in: write one or two sentences. How are you today, and what do you want to do in the plaza?",
+      "accept": [],
+      "kind": "report"
+     }
+    ],
+    "discoveries": [],
+    "reveals": []
+   },
+   {
+    "id": "free-play-7",
+    "title": "Free play: session 7",
+    "share": 0.6,
+    "intro": "No mystery today. Check in, then choose quests on the quest board, chat with your classmates in English and have fun. Your teacher can add new quests at any time.",
+    "recap": "Last time: you played side quests in the plaza.",
+    "ending": "Great start! Keep choosing quests on the quest board. Your teacher can add more.",
+    "objectives": [
+     {
+      "id": "check-in-7",
+      "text": "Check in: write one or two sentences. How are you today, and what do you want to do in the plaza?",
+      "accept": [],
+      "kind": "report"
+     }
+    ],
+    "discoveries": [],
+    "reveals": []
+   },
+   {
+    "id": "free-play-8",
+    "title": "Free play: session 8",
+    "share": 0.6,
+    "intro": "No mystery today. Check in, then choose quests on the quest board, chat with your classmates in English and have fun. Your teacher can add new quests at any time.",
+    "recap": "Last time: you played side quests in the plaza.",
+    "ending": "Great start! Keep choosing quests on the quest board. Your teacher can add more.",
+    "objectives": [
+     {
+      "id": "check-in-8",
+      "text": "Check in: write one or two sentences. How are you today, and what do you want to do in the plaza?",
+      "accept": [],
+      "kind": "report"
+     }
+    ],
+    "discoveries": [],
+    "reveals": []
+   }
+  ]
+ }
+]

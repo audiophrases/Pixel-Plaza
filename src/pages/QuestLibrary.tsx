@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 import { missionJson } from '../../shared/missionSchema';
 import type { LiveMissionPreview, LiveMissionTarget } from '../../shared/missionTypes';
 import {
-    ANSWERS, FORMATS, LEVELS, STORY_CHAPTERS, THEMES, questCategories, questFacets, questObjective, searchQuests, sideQuests,
-    type QuestAnswer, type QuestFilters, type QuestFormat, type QuestLevel, type QuestTheme, type SideQuest,
+    ANSWERS, FORMATS, LEVELS, THEMES, questCategories, questFacets, questObjective, searchQuests,
+    type QuestAnswer, type QuestFilters, type QuestFormat, type QuestLevel, type QuestTheme, type SideQuest, type SideQuestLibrary,
 } from '../../shared/sideQuests';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import './MissionStudio.css';
@@ -22,7 +22,7 @@ function download(text: string, filename: string) {
 
 const MAX_RELEASE = 10; // the game reviews at most ten quests at a time
 const PAGE = 40;
-const chapterName = (id: string | null) => { const c = STORY_CHAPTERS.find(item => item.id === id); return c ? `${c.campaign} ch. ${c.number}` : ''; };
+const EMPTY: SideQuestLibrary = { chapters: [], quests: [] };
 const levelName = (id: QuestLevel) => `${id} ${LEVELS.find(l => l.id === id)?.name ?? ''}`;
 const toggle = <T,>(list: T[] | undefined, value: T): T[] => list?.includes(value) ? list.filter(item => item !== value) : [...(list ?? []), value];
 
@@ -49,6 +49,10 @@ export default function QuestLibrary() {
     const [selected, setSelected] = useState<string[]>([]);
     const [target, setTarget] = useState<LiveMissionTarget | null>(null);
     const [preview, setPreview] = useState<LiveMissionPreview | null>(null);
+    // The library is data on the server, like missions: null until it arrives, EMPTY when this server has none yet.
+    const [library, setLibrary] = useState<SideQuestLibrary | null>(null);
+    const quests = (library ?? EMPTY).quests;
+    const chapterName = (id: string | null) => { const c = library?.chapters.find(item => item.id === id); return c ? `${c.campaign} ch. ${c.number}` : ''; };
 
     const run = async (work: () => Promise<void>) => {
         setBusy(true); setError(''); setNotice('');
@@ -63,6 +67,11 @@ export default function QuestLibrary() {
         let active = true;
         request<{ target: LiveMissionTarget | null }>(token, 'live').then(result => { if (active) setTarget(result.target); })
             .catch(cause => { if (active) { setError(cause.message); if (cause.status === 401) { storeTeacherSession(''); setToken(''); } } });
+        fetch('/api/teacher/quest-library', { headers: { 'x-teacher-session': token } }).then(async response => {
+            const result = await response.json();
+            if (!response.ok) throw Object.assign(new Error(result.error || 'Could not load the library.'), { status: response.status });
+            if (active) setLibrary(result.library ?? EMPTY);
+        }).catch(cause => { if (active) { setError(cause.message); if (cause.status === 401) { storeTeacherSession(''); setToken(''); } } });
         return () => { active = false; };
     }, [token]);
     // A reviewed selection is only valid for what was reviewed; cancel it when the page moves on.
@@ -80,13 +89,13 @@ export default function QuestLibrary() {
         return null;
     };
     const results = useMemo(() => {
-        const found = searchQuests(query, filters);
+        const found = searchQuests(quests, query, filters);
         return fitsOnly && target ? found.filter(quest => !blocked(quest)) : found;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [query, filters, fitsOnly, target]);
-    const facets = useMemo(() => questFacets(query, filters), [query, filters]);
-    const categories = useMemo(() => questCategories(), []);
-    const chosen = selected.map(id => sideQuests.find(quest => quest.id === id)).filter((quest): quest is SideQuest => !!quest);
+    }, [quests, query, filters, fitsOnly, target]);
+    const facets = useMemo(() => questFacets(library ?? EMPTY, query, filters), [library, query, filters]);
+    const categories = useMemo(() => questCategories(quests), [quests]);
+    const chosen = selected.map(id => quests.find(quest => quest.id === id)).filter((quest): quest is SideQuest => !!quest);
     const setFilter = (next: QuestFilters) => { setFilters(next); setShown(PAGE); };
     const pick = (quest: SideQuest) => { setPreview(null); setSelected(current => current.includes(quest.id) ? current.filter(id => id !== quest.id) : [...current, quest.id]); };
     const surprise = (n: number) => {
@@ -100,7 +109,7 @@ export default function QuestLibrary() {
         { label: 'Auto-checked answers', apply: () => { setQuery(''); setFilter({ answers: ['text'] }); } },
         { label: 'Pair work', apply: () => { setQuery(''); setFilter({ formats: ['pair'] }); } },
         { label: 'Whole-class mingles', apply: () => { setQuery(''); setFilter({ formats: ['class'] }); } },
-        ...(target && STORY_CHAPTERS.some(c => c.id === target.chapter.id) ? [{ label: `Story quests for ${chapterName(target.chapter.id)}`, apply: () => { setQuery(''); setFilter({ chapters: [target.chapter.id] }); } }] : []),
+        ...(target && library?.chapters.some(c => c.id === target.chapter.id) ? [{ label: `Story quests for ${chapterName(target.chapter.id)}`, apply: () => { setQuery(''); setFilter({ chapters: [target.chapter.id] }); } }] : []),
         { label: 'Halloween & autumn', apply: () => { setQuery(''); setFilter({ categories: categories.filter(c => /autumn/i.test(c.category)).map(c => c.category) }); } },
         { label: 'Christmas & winter', apply: () => { setQuery(''); setFilter({ categories: categories.filter(c => /winter/i.test(c.category)).map(c => c.category) }); } },
     ];
@@ -108,7 +117,7 @@ export default function QuestLibrary() {
 
     return <main className="mission-page ql-page">
         <header className="mission-header"><div><p className="mission-eyebrow">PIXEL PLAZA · TEACHER WORKSPACE</p><h1>Side Quest Library</h1>
-            <p>{sideQuests.length} ready-made quests for fast finishers, warm-ups and sessions between chapters. Search, pick, and add them to the running game.</p></div>
+            <p>{library === null ? 'Ready-made quests' : `${quests.length} ready-made quests`} for fast finishers, warm-ups and sessions between chapters. Search, pick, and add them to the running game.</p></div>
             <nav className="ql-links"><Link to="/teacher">Teacher controls</Link><Link to="/mission-studio">Mission Studio</Link></nav></header>
         {error && <p className="mission-error" role="alert">{error}</p>}{notice && <p className="mission-notice" role="status">{notice}</p>}
         {!token ? <form className="mission-card mission-login" onSubmit={e => { e.preventDefault(); void run(async () => {
@@ -116,6 +125,7 @@ export default function QuestLibrary() {
             const result = await response.json(); if (!response.ok) throw new Error(result.error);
             storeTeacherSession(result.token); setToken(result.token); setPassword('');
         }); }}><h2>Teacher sign-in</h2><label className="mission-field"><span>Teacher password</span><input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label><button className="mission-button primary" disabled={busy}>Open the library</button></form>
+        : library !== null && !quests.length ? <p className="mission-card ql-empty">The side quest library is not on this server yet. On the class laptop it arrives from the online Pixel Plaza once you sign in to Teacher controls with internet.</p>
         : <div className="ql-layout">
             <section className="ql-main">
                 <div className="mission-card ql-search">
@@ -128,7 +138,7 @@ export default function QuestLibrary() {
                                 onClick={() => setFilter({ ...filters, kind: value || undefined })}>{label}</button>)}
                     </div></div>
                     <Chips label="Theme" values={THEMES.map(t => t.id)} chosen={filters.themes} counts={facets.themes} name={(id: QuestTheme) => THEMES.find(t => t.id === id)!.name} onChange={themes => setFilter({ ...filters, themes })} />
-                    {(filters.kind === 'story' || filters.themes?.includes('castanyada') || filters.chapters?.length) ? <Chips label="Chapter" values={STORY_CHAPTERS.map(c => c.id)} chosen={filters.chapters} counts={facets.chapters} name={id => `${STORY_CHAPTERS.findIndex(c => c.id === id) + 1}. ${STORY_CHAPTERS.find(c => c.id === id)!.title}`} onChange={chapters => setFilter({ ...filters, chapters })} /> : null}
+                    {(filters.kind === 'story' || filters.themes?.includes('story') || filters.chapters?.length) ? <Chips label="Chapter" values={(library ?? EMPTY).chapters.map(c => c.id)} chosen={filters.chapters} counts={facets.chapters} name={id => { const c = library!.chapters.find(item => item.id === id)!; return `${c.campaign} ${c.number}. ${c.title}`; }} onChange={chapters => setFilter({ ...filters, chapters })} /> : null}
                     <Chips label="Level" values={LEVELS.map(l => l.id)} chosen={filters.levels} counts={facets.levels} name={levelName} onChange={levels => setFilter({ ...filters, levels })} />
                     <Chips label="Who" values={FORMATS.map(f => f.id)} chosen={filters.formats} counts={facets.formats} name={(id: QuestFormat) => FORMATS.find(f => f.id === id)!.name} onChange={formats => setFilter({ ...filters, formats })} />
                     <Chips label="Answer" values={ANSWERS.map(a => a.id)} chosen={filters.answers} counts={facets.answers} name={(id: QuestAnswer) => ANSWERS.find(a => a.id === id)!.name} onChange={answers => setFilter({ ...filters, answers })} />
@@ -144,7 +154,7 @@ export default function QuestLibrary() {
                         {anyFilter && <button type="button" className="mission-button" onClick={() => { setQuery(''); setFilter({}); setFitsOnly(false); }}>Clear search</button>}
                     </div>
                 </div>
-                <div className="mission-toolbar ql-count"><h2>{results.length === sideQuests.length ? `All ${results.length} quests` : `${results.length} of ${sideQuests.length} quests`}</h2>
+                <div className="mission-toolbar ql-count"><h2>{results.length === quests.length ? `All ${results.length} quests` : `${results.length} of ${quests.length} quests`}</h2>
                     <button type="button" className="mission-button" disabled={!results.length || selected.length >= MAX_RELEASE} onClick={() => surprise(Math.min(5, MAX_RELEASE - selected.length))}>Pick 5 at random from these</button></div>
                 {!results.length && <p className="mission-card ql-empty">No quests match. Try fewer words or clear a filter.</p>}
                 <div className="ql-results">{results.slice(0, shown).map(quest => {
@@ -180,7 +190,7 @@ export default function QuestLibrary() {
                     {!target.open && <><br /><em>Open this game in Teacher controls to add quests.</em></>}{target.ended && <><br /><em>This campaign has ended.</em></>}</p>
                     : <p className="ql-target">No game is running. In Teacher controls, open a game and start a campaign (for example <strong>Plaza Free Play</strong>) to add quests. You can still browse and download.</p>}
                 <p className="mission-muted">{selected.length} of {MAX_RELEASE} chosen. The game adds up to {MAX_RELEASE} at a time.</p>
-                {chosen.length ? <ol className="ql-chosen">{chosen.map(quest => <li key={quest.id}><span>{quest.title} <small>{quest.level} · {quest.theme === 'castanyada' ? chapterName(quest.chapter) : THEMES.find(t => t.id === quest.theme)!.name}</small></span>
+                {chosen.length ? <ol className="ql-chosen">{chosen.map(quest => <li key={quest.id}><span>{quest.title} <small>{quest.level} · {quest.theme === 'story' ? chapterName(quest.chapter) : THEMES.find(t => t.id === quest.theme)!.name}</small></span>
                     <button type="button" aria-label={`Remove ${quest.title}`} onClick={() => pick(quest)}>×</button></li>)}</ol> : <p>Select quests from the results.</p>}
                 <fieldset className="ql-actions" disabled={busy}>
                     <button type="button" className="mission-button primary" disabled={!target?.open || target.ended || !chosen.length || chosen.some(quest => !!blocked(quest))} onClick={() => void run(async () => {
@@ -192,7 +202,7 @@ export default function QuestLibrary() {
                 </fieldset>
                 {preview && <div className="mission-import-preview"><h3>Ready to release to {preview.game.name}</h3>
                     <p className="mission-muted">This review expires at {new Date(preview.expires).toLocaleTimeString()}. Students who can accept now:</p>
-                    <ul>{preview.quests.map(quest => <li key={quest.id}><strong>{sideQuests.find(q => q.id === quest.id)?.title ?? quest.id}</strong> · {quest.audience} · {quest.eligibleNow} now</li>)}</ul>
+                    <ul>{preview.quests.map(quest => <li key={quest.id}><strong>{quests.find(q => q.id === quest.id)?.title ?? quest.id}</strong> · {quest.audience} · {quest.eligibleNow} now</li>)}</ul>
                     <div className="mission-toolbar"><button type="button" className="mission-button primary" disabled={busy} onClick={() => void run(async () => {
                         const result = await request<{ target: LiveMissionTarget; released: string[] }>(token, 'live-release', { previewId: preview.id });
                         setTarget(result.target); setPreview(null); setSelected([]); setNotice(`${result.released.length} quests are on the quest board in ${preview.game.name}.`);
@@ -200,10 +210,10 @@ export default function QuestLibrary() {
                     <button type="button" className="mission-button" disabled={busy} onClick={() => void run(async () => { await request(token, 'live-cancel', { previewId: preview.id }); setPreview(null); })}>Cancel</button></div>
                 </div>}
                 {!!target?.additions.length && <details className="ql-added"><summary>Added to this chapter ({target.additions.length})</summary>
-                    <ul>{target.additions.map(item => <li key={item.id}>{sideQuests.find(q => q.id === item.id)?.title ?? item.text}{item.withdrawn ? ' · withdrawn' : item.started ? ' · started' : ''}</li>)}</ul>
+                    <ul>{target.additions.map(item => <li key={item.id}>{quests.find(q => q.id === item.id)?.title ?? item.text}{item.withdrawn ? ' · withdrawn' : item.started ? ' · started' : ''}</li>)}</ul>
                     <p className="mission-muted">Withdraw unstarted quests in Mission Studio.</p></details>}
                 <details className="ql-help"><summary>How it works</summary>
-                    <p><strong>Story quests</strong> use one Castanyada chapter and can be added while that chapter runs. <strong>Generic quests</strong> work in any game, also in Plaza Free Play between chapters.</p>
+                    <p><strong>Story quests</strong> use one chapter of a story mission and can be added while that chapter runs. <strong>Generic quests</strong> work in any game, also in a free-play mission between chapters.</p>
                     <p>Levels: {LEVELS.map(l => `${l.id} ${l.name}: ${l.description}`).join(' ')}</p>
                     <p>Students accept a quest on their quest board, do it and type their answer. Typed answers are checked by the game; written reports count once a student writes a real attempt, and you read them in Teacher controls.</p>
                 </details>

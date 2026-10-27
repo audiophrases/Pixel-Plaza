@@ -1,5 +1,6 @@
-// A campaign: a story told over several lessons. Plain data and plain functions, no
-// imports, so the worker, the page and the tests all read the same file.
+// A campaign: a story told over several lessons. Its types and the rules of play, no imports, so the worker, the
+// page and the tests all read the same file. The campaigns themselves are not here: they are missions, data that
+// teachers write and change in Mission Studio, kept on the online server (worker/missions.ts).
 //
 // How it plays: each student gets a role at random and keeps it for the whole campaign.
 // A role knows one thing the others do not (its clue). Walking into a place can reveal
@@ -10,12 +11,10 @@
 // cliffhanger, but questions stay open until the teacher starts the next chapter. If the
 // class is stuck, the teacher can reveal a prepared piece of news to everyone.
 
-// The student types the answer. `accept` lists the words or short phrases that make an answer right;
-// "the park", "In the park!" and a small spelling slip in a long word all count for "park".
-import { buildCastanyadaComplete } from './castanyadaComplete.ts';
-
 export const REPORT_MAX_LENGTH = 1000;
 
+// The student types the answer. `accept` lists the words or short phrases that make an answer right;
+// "the park", "In the park!" and a small spelling slip in a long word all count for "park".
 export type Objective = {
     id: string; text: string; accept: string[];
     answerThief?: boolean;            // the answer is the name of the chapter's thief (the thief does not get this question)
@@ -86,202 +85,6 @@ export type ConversationView = {
     required: number; completed: number;
     witnesses: { id: string; name: string }[];
 };
-
-export const castanyada: Campaign = {
-    id: 'castanyada',
-    title: 'The Haunted Castanyada',
-    finale: 'The end. Happy Castanyada!',
-    roles: [
-        { id: 'baker', name: 'Café baker', card: 'You roast the chestnuts.',
-            clue: 'No blue box came to the café.' },
-        { id: 'shopkeeper', name: 'Shopkeeper', card: 'You pack the boxes.',
-            clue: 'A blue box left the shop at 9:00.' },
-        { id: 'driver', name: 'Driver', card: 'You carry the boxes.',
-            clue: 'I carried a blue box. I left it near the water.' },
-        { id: 'receptionist', name: 'Hotel receptionist', card: 'You work at the hotel desk.',
-            clue: 'No box came to the hotel.' },
-        { id: 'planner', name: 'Festival planner', card: 'You plan the party.',
-            clue: 'The only water in town is the pond in the park.' },
-    ],
-    chapters: [{
-        id: 'missing-chestnuts', title: 'The Missing Chestnuts', share: 0.6,
-        intro: 'The chestnuts are gone. Ask your classmates. Each of you knows something different.',
-        recap: 'Last time: the big box of chestnuts disappeared. You are still looking for it.',
-        ending: 'Two people have a key: the shopkeeper and the planner. But the lock is open and the box is empty! Who took the chestnuts?',
-        objectives: [
-            {
-                id: 'where', text: 'Where is the blue box?', accept: ['park', 'pond'],
-                rewards: {
-                    baker: 'The café needs 20 chestnuts. That is half of the box.',
-                    shopkeeper: 'I packed 40 chestnuts in the box.',
-                    driver: 'The ride from the shop to the park takes 30 minutes.',
-                    receptionist: 'A man in a green coat asked me about the park at 9:15.',
-                    planner: 'The party starts at 6:00. We need the chestnuts before 5:00.',
-                },
-            },
-            {
-                id: 'when', text: 'What time did the box get to the park?', after: 'where',
-                accept: ['9 30', 'nine thirty', 'half past nine'],
-                rewards: {
-                    baker: 'There is no key at the café.',
-                    shopkeeper: 'I have one key. It is on my belt.',
-                    driver: 'I never have a key. I only carry the box.',
-                    receptionist: 'There is no key at the hotel.',
-                    planner: 'I have one key. The other key is in the shop.',
-                },
-            },
-            { id: 'keys', text: 'How many people have a key?', after: 'when', accept: ['two', '2'] },
-            // Bonus questions: they need clues from other students, and never hold the class up. The last asks for a few
-            // written sentences, for the students who want more; the teacher reads them.
-            { id: 'note', text: 'What does the note on the hotel door say?', after: 'where', optional: true, accept: ['safe', 'not worry'] },
-            { id: 'lock', text: 'What is on the lock?', after: 'where', optional: true, accept: ['star'] },
-            { id: 'chestnuts', text: 'How many chestnuts were in the box?', after: 'when', optional: true, accept: ['40', 'forty'] },
-            { id: 'report-1', text: 'Write 2 sentences. Who do you think has the chestnuts? Why?', after: 'keys', optional: true, kind: 'report', accept: [] },
-        ],
-        discoveries: [
-            { id: 'hotel-note', zone: 'hotel', text: 'A note on the hotel door: "The chestnuts are safe. Do not worry."' },
-            { id: 'park-lock', zone: 'park', text: 'A small blue lock with a star on it, on the grass.' },
-        ],
-        reveals: [
-            { id: 'coat', text: 'News: a neighbor saw a person in a green coat near the park at 9:20.' },
-            { id: 'click', text: 'News: somebody heard a lock click in the park.' },
-        ],
-    }, {
-        // A first draft of chapter 2: the class has to find each other. Every answer is a classmate's name.
-        id: 'conflicting-stories', title: 'Conflicting Stories', share: 0.6,
-        intro: 'Now people tell different stories. Somebody in this class took the chestnuts! Ask questions. Who is lying?',
-        recap: 'Last time: the box was in the park, and the lock was open. You are looking for who opened it.',
-        ending: 'You found the thief. But why did they take the chestnuts?',
-        thieves: {
-            card: 'You took the chestnuts. Tell nobody! If a classmate asks, say you are innocent. Your classmates saw how you look, so be careful.',
-            story: 'At 9:25 I was at the hotel desk.',
-        },
-        // Each role saw something about the thief; together the clues describe an avatar in the plaza.
-        roleClues: {
-            baker: 'At 9:20 somebody ran past the café. {hat}',
-            shopkeeper: 'At 9:10 somebody came to my shop. {coat} {glasses}',
-            driver: 'At 9:30 somebody ran into the park. {hair}',
-            receptionist: 'The hotel phone rang at 9:25. Nobody answered.',
-            planner: 'My key was in my bag. Somebody moved my bag at 9:00.',
-        },
-        objectives: [
-            {
-                id: 'meet-shop', text: 'Who is the shopkeeper? Type their name.', accept: [], answerRole: 'shopkeeper',
-                rewards: {
-                    baker: 'At 9:15 the café was empty. Nobody came.',
-                    shopkeeper: 'At 9:05 I went to the bank. The shop door was open.',
-                    driver: 'At 9:25 I was in my truck near the hotel. Nobody went in.',
-                    receptionist: 'At 9:25 the hotel was closed. Nobody was at the desk.',
-                    planner: 'At 9:20 I was in the square with the band.',
-                },
-            },
-            { id: 'meet-planner', text: 'Who is the planner? Type their name.', after: 'meet-shop', accept: [], answerRole: 'planner' },
-            { id: 'thief', text: 'Who took the chestnuts? Type their name.', after: 'meet-planner', accept: [], answerThief: true },
-            { id: 'report-2', text: 'Write 2 sentences. How do you know who took the chestnuts?', after: 'meet-planner', optional: true, kind: 'report', accept: [] },
-        ],
-        discoveries: [],
-        reveals: [
-            { id: 'door', text: 'News: the shop door was open at 9:05.' },
-            { id: 'phone', text: 'News: the hotel phone rang at 9:25.' },
-        ],
-    }, {
-        // A first draft of chapter 3: the thief hid the chestnuts for a surprise, and the class opens the cellar together.
-        id: 'haunted-celebration', title: 'The Haunted Celebration', share: 0.6,
-        intro: 'It is almost midnight. You know who took the chestnuts. Now find them before the party starts!',
-        recap: 'Last time: you found the thief. The chestnuts are still hidden somewhere.',
-        ending: 'The chestnuts are safe! The thief wanted a surprise party. Now the haunted celebration can start.',
-        thieves: {
-            carry: true, label: 'Your plan',
-            card: 'You hid the chestnuts in the hotel cellar, for a surprise party. Give small hints. Never say the answers!',
-            story: 'Help the class with hints, but do not tell them where the chestnuts are.',
-        },
-        roleClues: {
-            baker: 'I smell hot chestnuts near the hotel.',
-            shopkeeper: 'At 9:00 somebody bought wood and matches. You need fire to roast chestnuts.',
-            driver: 'At 9:40 I carried a heavy bag to the hotel.',
-            receptionist: 'The cellar door at the hotel is old and locked. It has a four-number code.',
-            planner: 'The party starts at 6:00. The chestnuts must be ready before then.',
-        },
-        objectives: [
-            {
-                id: 'hide', text: 'Where did the thief hide the chestnuts?', accept: ['cellar', 'basement'], thiefKnows: true,
-                rewards: {
-                    baker: 'One number of the code is 4. It is the number of my oven.',
-                    shopkeeper: 'One number of the code is 1. It is the number of doors in my shop.',
-                    driver: 'One number of the code is 7. It is the number of my truck.',
-                    receptionist: 'One number of the code is 3. It is the number of the hotel key.',
-                    planner: 'Read the numbers in this order: driver, baker, receptionist, shopkeeper.',
-                },
-            },
-            {
-                id: 'code', text: 'What is the code of the cellar door? Type the four numbers.', after: 'hide',
-                accept: ['7 4 3 1', '7431'],
-                rewards: {
-                    baker: 'In the cellar there is a note. It says: "I wanted a surprise..."',
-                    shopkeeper: 'The note says: "...party for everyone..."',
-                    driver: 'The note says: "...with hot chestnuts..."',
-                    receptionist: 'The note says: "...I am sorry."',
-                    planner: 'The note is signed by a friend of the town.',
-                },
-            },
-            { id: 'why', text: 'Why did the thief take the chestnuts?', after: 'code', accept: ['surprise', 'party', 'present', 'gift'] },
-            { id: 'report-3', text: 'Write 3 sentences. What happens at the celebration?', after: 'why', optional: true, kind: 'report', accept: [] },
-        ],
-        discoveries: [
-            { id: 'cellar-door', zone: 'hotel', text: 'At the hotel there is an old door. It has a lock with four numbers.' },
-        ],
-        reveals: [
-            { id: 'smell', text: 'News: a neighbor smelled hot chestnuts near the hotel.' },
-            { id: 'bag', text: 'News: a heavy bag went into the hotel at 9:40.' },
-        ],
-    }],
-};
-
-// A separate template: never changes a revision already played by an existing class.
-export const castanyadaSideQuests: Campaign = {
-    ...structuredClone(castanyada), id: 'castanyada-side-quests', title: 'Castanyada: Side Mysteries',
-};
-castanyadaSideQuests.chapters[0].objectives.push(
-    { id: 'delivery-interview', text: 'Interview your partner about a strange delivery. Ask where it went, when it arrived, and what was inside. Write what you learned.', accept: [], kind: 'report', optional: true, activity: 'interview', board: { afterMain: true, minPlayers: 2 } },
-    { id: 'festival-exchange', text: 'Compare two ideas for a secret festival surprise with your partner. Explain a problem with each idea and agree on one. Write your plan.', accept: [], kind: 'report', optional: true, activity: 'exchange', requires: { mode: 'any', objectives: ['delivery-interview', 'note'] }, board: { afterMain: true, teacherReleased: true, minPlayers: 2 } },
-);
-export const castanyadaComplete = buildCastanyadaComplete(castanyada);
-// A new template so lessons already in progress keep their saved mystery and progress.
-export const castanyadaInvestigations: Campaign = structuredClone(castanyadaComplete);
-castanyadaInvestigations.id = 'castanyada-investigations';
-castanyadaInvestigations.title = 'Castanyada: Witness Investigations';
-for (const chapter of castanyadaInvestigations.chapters) {
-    chapter.intro += ' Before each conclusion, ask a witness about this question and compare their private evidence with yours in your journal.';
-    for (const objective of chapter.objectives) {
-        if (!objective.optional) objective.conversation = { witnesses: objective.answerThief ? 2 : 1 };
-    }
-}
-// No mystery: a home for side quests from the library, for short sessions between chapters, warm-ups and any day of
-// the year. Each session starts with a short check-in; the teacher adds quests from the Side Quest Library while it
-// runs, and "Start the next chapter" opens a fresh session with an empty quest board.
-const FREE_PLAY_SESSIONS = 8;
-export const plazaFreePlay: Campaign = {
-    id: 'plaza-free-play',
-    title: 'Plaza Free Play: Side Quests',
-    finale: 'Thanks for playing! See you in the plaza.',
-    roles: [
-        { id: 'explorer', name: 'Explorer', card: 'You love finding new places and new people in the plaza.', clue: 'Explorer tip: the park has a pond and a little bridge. Have you crossed it?' },
-        { id: 'reporter', name: 'Reporter', card: 'You collect news and stories from your classmates.', clue: 'Reporter tip: a good follow-up question is "Why?" or "What happened next?"' },
-        { id: 'host', name: 'Host', card: 'You welcome people and help them meet each other.', clue: 'Host tip: say hello to someone you have not talked to today.' },
-        { id: 'artist', name: 'Artist', card: 'You notice colours, styles and good ideas.', clue: 'Artist tip: look at the hats, glasses and colours around you.' },
-    ],
-    chapters: Array.from({ length: FREE_PLAY_SESSIONS }, (_, i): Chapter => ({
-        id: `free-play-${i + 1}`, title: `Free play: session ${i + 1}`, share: 0.6,
-        intro: 'No mystery today. Check in, then choose quests on the quest board, chat with your classmates in English and have fun. Your teacher can add new quests at any time.',
-        recap: 'Last time: you played side quests in the plaza.',
-        ending: 'Great start! Keep choosing quests on the quest board. Your teacher can add more.',
-        objectives: [{ id: `check-in-${i + 1}`, text: 'Check in: write one or two sentences. How are you today, and what do you want to do in the plaza?', accept: [], kind: 'report' }],
-        discoveries: [], reveals: [],
-    })),
-};
-
-export const campaigns: Campaign[] = [castanyadaInvestigations, castanyada, castanyadaSideQuests, castanyadaComplete, plazaFreePlay];
-export const campaignById = (id: string): Campaign | undefined => campaigns.find(campaign => campaign.id === id);
 
 // The role the fewest students have so far, so a class is spread across the roles; ties are
 // broken at random. `random` is a number in [0, 1).

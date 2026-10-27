@@ -1,8 +1,10 @@
-// The side quest library: hundreds of optional quests a teacher can search and add to a running game.
+// The side quest library: hundreds of optional quests a teacher can search and add to a running game. The library is
+// data on the server; these tests use the frozen copy in fixtures/.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FORMATS, LEVELS, STORY_CHAPTERS, THEMES, matchesFilters, questFacets, questFit, questObjective, searchQuests, sideQuestById, sideQuests } from '../../shared/sideQuests.ts';
-import { answerMatches, castanyada, castanyadaComplete, castanyadaInvestigations, castanyadaSideQuests, plazaFreePlay } from '../../shared/campaign.ts';
+import { FORMATS, LEVELS, THEMES, checkLibrary, findQuest, matchesFilters, questFacets, questFit, questObjective, searchQuests } from '../../shared/sideQuests.ts';
+import { answerMatches } from '../../shared/campaign.ts';
+import { castanyada, castanyadaComplete, castanyadaInvestigations, castanyadaSideQuests, library, plazaFreePlay, sideQuests, storyChapters } from './fixtures/season-1.mjs';
 import { missionEnvelope, missionId, validateMission } from '../../shared/missionSchema.ts';
 import { liveMissionCandidate } from '../../shared/missionLive.ts';
 
@@ -18,9 +20,10 @@ function withQuests(campaign, chapterId, quests) {
 }
 
 test('the library is large, varied and fully labelled', () => {
+    assert.deepEqual(checkLibrary(library), { library }, 'the library check accepts it');
     assert.ok(generic.length >= 500, `${generic.length} generic quests`);
     assert.ok(story.length >= 50, `${story.length} story quests`);
-    for (const chapter of STORY_CHAPTERS) assert.ok(story.filter(q => q.chapter === chapter.id).length >= 10, `chapter ${chapter.number} has ten story quests`);
+    for (const chapter of storyChapters) assert.ok(story.filter(q => q.chapter === chapter.id).length >= 10, `chapter ${chapter.number} has ten story quests`);
     for (const level of LEVELS) assert.ok(generic.filter(q => q.level === level.id).length >= 100, `${level.id} has at least 100 generic quests`);
     for (const theme of THEMES) assert.ok(sideQuests.some(q => q.theme === theme.id), `${theme.name} has quests`);
     for (const format of FORMATS) assert.ok(generic.some(q => q.format === format.id), `${format.name} quests exist`);
@@ -33,8 +36,8 @@ test('the library is large, varied and fully labelled', () => {
         const where = `${q.id} (${q.title})`;
         assert.ok(missionId(q.id) && q.id.startsWith('sq-'), `${where}: a library ID`);
         assert.ok(THEMES.some(t => t.id === q.theme) && LEVELS.some(l => l.id === q.level) && FORMATS.some(f => f.id === q.format), `${where}: known labels`);
-        assert.equal(q.theme === 'castanyada', q.chapter !== null, `${where}: only Castanyada quests belong to a chapter`);
-        assert.ok(q.chapter === null || STORY_CHAPTERS.some(c => c.id === q.chapter), `${where}: a known chapter`);
+        assert.equal(q.theme === 'story', q.chapter !== null, `${where}: only story quests belong to a chapter`);
+        assert.ok(q.chapter === null || storyChapters.some(c => c.id === q.chapter), `${where}: a known chapter`);
         assert.ok(Number.isInteger(q.minutes) && q.minutes >= 2 && q.minutes <= 20, `${where}: minutes`);
         assert.ok(q.title.trim() && q.title.length <= 60 && q.category.trim() && q.teacherNote.trim(), `${where}: title, category, teacher note`);
         assert.ok(q.focus.length >= 1 && q.tags.length >= 1 && q.tags.every(tag => tag === tag.toLowerCase()), `${where}: focus and lowercase tags`);
@@ -53,11 +56,11 @@ test('every generic quest is a valid board quest in Plaza Free Play and in every
     for (const batch of chunks(generic, 90)) {
         const free = withQuests(plazaFreePlay, plazaFreePlay.chapters[0].id, batch);
         assert.deepEqual(free.errors, [], 'valid in Plaza Free Play');
-        for (const quest of batch) assert.equal(questFit(quest, plazaFreePlay, plazaFreePlay.chapters[0].id), null);
+        for (const quest of batch) assert.equal(questFit(quest, plazaFreePlay, plazaFreePlay.chapters[0].id, storyChapters), null);
     }
     for (const chapter of castanyadaComplete.chapters) {
         assert.deepEqual(withQuests(castanyadaComplete, chapter.id, generic.slice(0, 90)).errors, [], `valid in ${chapter.title}`);
-        for (const quest of generic) assert.equal(questFit(quest, castanyadaComplete, chapter.id), null);
+        for (const quest of generic) assert.equal(questFit(quest, castanyadaComplete, chapter.id, storyChapters), null);
     }
     const objective = questObjective(generic.find(q => q.format === 'pair'));
     assert.equal(objective.optional, true); assert.equal(objective.board.minPlayers, 2, 'pair quests wait for a second student');
@@ -66,19 +69,19 @@ test('every generic quest is a valid board quest in Plaza Free Play and in every
 
 test('story quests fit their own chapter in every Castanyada template that has it, and nowhere else', () => {
     for (const template of castanyadaTemplates) {
-        for (const chapter of STORY_CHAPTERS) {
+        for (const chapter of storyChapters) {
             const quests = story.filter(q => q.chapter === chapter.id);
             if (!template.chapters.some(c => c.id === chapter.id)) {
-                for (const quest of quests) assert.ok(questFit(quest, template, chapter.id), `${template.id} has no ${chapter.title}`);
+                for (const quest of quests) assert.ok(questFit(quest, template, chapter.id, storyChapters), `${template.id} has no ${chapter.title}`);
                 continue;
             }
-            for (const quest of quests) assert.equal(questFit(quest, template, chapter.id), null, `${quest.id} fits ${template.id}`);
+            for (const quest of quests) assert.equal(questFit(quest, template, chapter.id, storyChapters), null, `${quest.id} fits ${template.id}`);
             assert.deepEqual(withQuests(template, chapter.id, quests).errors, [], `${template.id}: ${chapter.title}`);
             const other = template.chapters.find(c => c.id !== chapter.id);
-            for (const quest of quests) assert.match(questFit(quest, template, other.id), /chapter/i, `${quest.id} does not fit ${other.id}`);
+            for (const quest of quests) assert.match(questFit(quest, template, other.id, storyChapters), /chapter/i, `${quest.id} does not fit ${other.id}`);
         }
     }
-    for (const quest of story) assert.ok(questFit(quest, plazaFreePlay, plazaFreePlay.chapters[0].id), 'story quests stay with their story');
+    for (const quest of story) assert.ok(questFit(quest, plazaFreePlay, plazaFreePlay.chapters[0].id, storyChapters), 'story quests stay with their story');
     // A live release of ten story quests checks the same rules the server uses.
     const chapter = castanyadaComplete.chapters[0];
     const source = structuredClone(castanyadaComplete); const quests = story.filter(q => q.chapter === chapter.id).slice(0, 10);
@@ -98,26 +101,36 @@ test('Plaza Free Play is a valid campaign of sessions with a check-in each', () 
 });
 
 test('search finds quests by words, tags, labels and filters, title matches first', () => {
-    assert.equal(searchQuests('').length, sideQuests.length);
+    assert.equal(searchQuests(sideQuests, '').length, sideQuests.length);
     const sample = generic.find(q => q.answer === 'text');
-    assert.equal(searchQuests(sample.title)[0].id, sample.id, 'an exact title comes first');
-    assert.ok(searchQuests(sample.title.toUpperCase().replace(/ /g, '  ')).some(q => q.id === sample.id), 'case and spacing do not matter');
+    assert.equal(searchQuests(sideQuests, sample.title)[0].id, sample.id, 'an exact title comes first');
+    assert.ok(searchQuests(sideQuests, sample.title.toUpperCase().replace(/ /g, '  ')).some(q => q.id === sample.id), 'case and spacing do not matter');
     const tag = sample.tags[0];
-    assert.ok(searchQuests(tag).every(q => q.tags.includes(tag) || JSON.stringify(q).toLowerCase().includes(tag.toLowerCase())));
-    assert.ok(searchQuests('starter').every(q => q.level === 'A1' || JSON.stringify(q).toLowerCase().includes('starter')), 'level names are searchable');
-    assert.deepEqual(searchQuests('zzzz-no-such-word'), []);
+    assert.ok(searchQuests(sideQuests, tag).every(q => q.tags.includes(tag) || JSON.stringify(q).toLowerCase().includes(tag.toLowerCase())));
+    assert.ok(searchQuests(sideQuests, 'starter').every(q => q.level === 'A1' || JSON.stringify(q).toLowerCase().includes('starter')), 'level names are searchable');
+    assert.deepEqual(searchQuests(sideQuests, 'zzzz-no-such-word'), []);
 
     const filters = { levels: ['A1', 'A2'], formats: ['pair'], answers: ['report'], maxMinutes: 8, kind: 'generic' };
-    const found = searchQuests('', filters);
+    const found = searchQuests(sideQuests, '', filters);
     assert.ok(found.length > 0);
     assert.ok(found.every(q => ['A1', 'A2'].includes(q.level) && q.format === 'pair' && q.answer === 'report' && q.minutes <= 8 && q.chapter === null));
-    assert.ok(searchQuests('', { kind: 'story' }).every(q => q.chapter !== null));
-    assert.ok(searchQuests('', { chapters: ['haunted-festival'] }).every(q => q.chapter === 'haunted-festival'));
+    assert.ok(searchQuests(sideQuests, '', { kind: 'story' }).every(q => q.chapter !== null));
+    assert.ok(searchQuests(sideQuests, '', { chapters: ['haunted-festival'] }).every(q => q.chapter === 'haunted-festival'));
     assert.ok(sideQuests.every(q => matchesFilters(q, {})));
 
     // Each count shows how many quests choosing that value would show, keeping the other choices.
-    const facets = questFacets('', { levels: ['B1'] });
-    for (const theme of THEMES) assert.equal(facets.themes[theme.id], searchQuests('', { levels: ['B1'], themes: [theme.id] }).length);
-    for (const level of LEVELS) assert.equal(facets.levels[level.id], searchQuests('', { levels: [level.id] }).length, 'a facet ignores its own choice');
-    assert.equal(sideQuestById(sample.id), sample); assert.equal(sideQuestById('nope'), undefined);
+    const facets = questFacets(library, '', { levels: ['B1'] });
+    for (const theme of THEMES) assert.equal(facets.themes[theme.id], searchQuests(sideQuests, '', { levels: ['B1'], themes: [theme.id] }).length);
+    for (const level of LEVELS) assert.equal(facets.levels[level.id], searchQuests(sideQuests, '', { levels: [level.id] }).length, 'a facet ignores its own choice');
+    assert.equal(findQuest(library, sample.id), sample); assert.equal(findQuest(library, 'nope'), undefined);
+});
+
+test('a library from a file is checked before a server keeps it', () => {
+    const broken = change => { const copy = structuredClone(library); change(copy); return checkLibrary(copy).error; };
+    assert.match(checkLibrary(null).error, /chapters and quests/);
+    assert.match(broken(copy => { copy.quests[1].id = copy.quests[0].id; }), /used twice/);
+    assert.match(broken(copy => { copy.quests.find(q => q.chapter).chapter = 'nowhere'; }), /chapter the library does not list/);
+    assert.match(broken(copy => { const q = copy.quests.find(item => item.answer === 'text'); q.accept = []; }), /accepted answers/);
+    assert.match(broken(copy => { copy.quests[0].level = 'C2'; }), /unknown theme, level/);
+    assert.match(broken(copy => { delete copy.quests[0].title; }), /needs an ID, a title/);
 });

@@ -1,7 +1,7 @@
 // Exercise the teacher workflow through rendered controls. Backend behavior has separate runtime tests.
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { castanyada } from '../shared/campaign';
+import { castanyada } from '../worker/tests/fixtures/season-1.mjs';
 import type { QuestView } from '../shared/campaign';
 import { missionEnvelope, missionId, missionJson, validateMission } from '../shared/missionSchema';
 import type { MissionDraft } from '../shared/missionTypes';
