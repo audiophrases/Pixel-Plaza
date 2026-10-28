@@ -86,6 +86,7 @@ export type TeacherAction =
     | { kind: 'status' }
     | { kind: 'open'; open: boolean; game?: string } // a saved game (the last played by default), or close the open one
     | { kind: 'newGame'; name: string; randomNames?: boolean; vision?: number; themeId?: string } // a new game with its own PIN, opened at once
+    | { kind: 'realNames'; gameId: string } // switch the current live game to real first names
     | { kind: 'deleteGame'; game: string; confirm?: boolean } // erases a game and everything saved in it
     | { kind: 'vision'; radius: number }                // how far a student sees, in map pixels; 0 shows everyone
     | { kind: 'warmup'; op: 'start' | 'end'; type?: WarmupKind } // a get-to-know-you warm-up at the start of a lesson
@@ -532,6 +533,11 @@ export class PlazaRoom extends DurableObject<Env> {
             if (game === null || !Number.isFinite(action.radius)) return { error: 'Open a game first.', status: 400 };
             this.sql.exec('UPDATE games SET vision = ? WHERE id = ?', Math.max(0, Math.min(MAX_VISION, Math.round(action.radius))), game);
             this.broadcast({ t: 'vision', radius: this.vision(game) });
+        }
+        if (action.kind === 'realNames') {
+            const game = this.activeGame();
+            if (!this.isOpen() || !game || action.gameId !== game) return { error: 'The open game has changed. Refresh and try again.', status: 409 };
+            this.useRealNames(game);
         }
         if (action.kind === 'newGame') {
             const name = action.name.trim().replace(/\s+/g, ' ').slice(0, 40);
@@ -1549,6 +1555,37 @@ export class PlazaRoom extends DurableObject<Env> {
         }
     }
 
+    private useRealNames(game: string): void {
+        if (!this.isRandom(game)) return;
+        this.sql.exec('UPDATE games SET random_names = 0 WHERE id = ?', game);
+        const names = this.rosterNames(game);
+        // Keep displayed chat labels consistent, including messages awaiting approval
+        // and classmates who are offline. Student IDs and activity state stay intact.
+        for (const [studentKey, name] of names) {
+            this.sql.exec('UPDATE chat SET sender = ? WHERE game_id = ? AND student_key = ?', name, game, studentKey);
+            this.sql.exec('UPDATE chat SET target_name = ? WHERE game_id = ? AND target_key = ?', name, game, studentKey);
+        }
+        for (const ws of this.ctx.getWebSockets()) {
+            const seat = ws.deserializeAttachment() as Seat | null;
+            if (!seat || seat.left || seat.game !== game) continue;
+            seat.name = names.get(seat.studentKey) ?? seat.name;
+            ws.serializeAttachment(seat);
+        }
+        // One event also renames offline conversations and avoids sequential name collisions.
+        this.broadcast(this.realNameUpdate(game, names));
+        this.sendWarmupToAll(game);
+        this.sendQuestToAll(game);
+    }
+
+    private realNameUpdate(game: string, names = this.rosterNames(game)) {
+        const ids = new Map(this.seats().filter(seat => seat.game === game).map(seat => [seat.studentKey, seat.id]));
+        const aliases = this.sql.exec<{ student_key: string; name: string }>('SELECT student_key, name FROM aliases WHERE game_id = ?', game).toArray();
+        return { t: 'names', names: [...names.values()], changes: aliases.flatMap(alias => {
+            const name = names.get(alias.student_key);
+            return name && name !== alias.name ? [{ id: ids.get(alias.student_key), from: alias.name, name }] : [];
+        }) };
+    }
+
     private activeGame(): string | null {
         return this.setting('active_game');
     }
@@ -1822,8 +1859,9 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     private sendAlias(target: WebSocket, game: string, studentKey: string): void {
-        if (!this.isRandom(game)) return;
-        try { target.send(JSON.stringify({ t: 'alias', ...this.alias(game, studentKey) })); } catch { /* closing */ }
+        // A reconnect may have missed the live switch. Clear its name picker and
+        // relabel old conversations before sending chat history with current names.
+        try { target.send(JSON.stringify(this.isRandom(game) ? { t: 'alias', ...this.alias(game, studentKey) } : this.realNameUpdate(game))); } catch { /* closing */ }
     }
 
     // A student asks for another name, or keeps the one they have, while the game shows made-up names.
@@ -2211,7 +2249,8 @@ export class PlazaRoom extends DurableObject<Env> {
         // that passes `valid`) always waits: the teacher's approval is part of that activity.
         const posts = !problem && cleared && !valid && this.mode() === 'review';
         // A message for everyone keeps no place: where the sender stood decides nothing.
-        const entry = { id: crypto.randomUUID(), game_id: seat.game, student_key: seat.studentKey, sender: seat.name, text: value.trim().slice(0, 200),
+        const currentNames = this.rosterNames(seat.game); // Names may change while moderation is in flight.
+        const entry = { id: crypto.randomUUID(), game_id: seat.game, student_key: seat.studentKey, sender: currentNames.get(seat.studentKey) ?? seat.name, text: value.trim().slice(0, 200),
             target_key: target?.studentKey ?? null, x: everyone ? null : seat.x, y: everyone ? null : seat.y, marks: null as string | null, voice: normalizeVoice(seat.avatar.voice) };
         // Sent as written although a better version was offered: mark the words that differ, for everyone who reads it.
         const slips = better ? wordDiff(entry.text, better).original : [];
@@ -2219,7 +2258,7 @@ export class PlazaRoom extends DurableObject<Env> {
         this.sql.exec(`INSERT INTO chat (id, student_key, sender, text, ts, status, target_key, target_name, x, y, flag, note, game_id, marks, voice)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             entry.id, entry.student_key, entry.sender, entry.text, now, problem ? 'blocked' : posts ? 'approved' : 'pending',
-            entry.target_key, target?.name ?? null, entry.x, entry.y, flag, note, seat.game, entry.marks, entry.voice);
+            entry.target_key, target ? currentNames.get(target.studentKey) ?? target.name : null, entry.x, entry.y, flag, note, seat.game, entry.marks, entry.voice);
         if (audit) this.attemptStatus(audit, problem ? 'blocked' : posts ? 'approved' : 'pending', blockedReason || (problem ?? note ?? flag ?? undefined), entry.id);
         if (term) this.blockedWords.tried(seat.game, this.helpSession(), term.key, seat.studentKey);
         if (harm) this.flagHarm(seat, harm, String(value), audit);
@@ -2306,9 +2345,10 @@ export class PlazaRoom extends DurableObject<Env> {
                 : entry.x === null || entry.y === null || Math.hypot(seat.x - entry.x, seat.y - entry.y) <= HEARING_RANGE;
             if (heard) recipients.add(seat.studentKey);
         }
-        const body = { t: 'chat', id: entry.id, sender: entry.sender, text: entry.text, voice: normalizeVoice(entry.voice), ts: Date.now(),
+        const names = this.rosterNames(game ?? '');
+        const body = { t: 'chat', id: entry.id, sender: names.get(entry.student_key) ?? entry.sender, text: entry.text, voice: normalizeVoice(entry.voice), ts: Date.now(),
             ...(entry.marks ? { marks: JSON.parse(entry.marks) } : {}),
-            ...(entry.target_key !== null ? { whisper: true, to: this.rosterNames(this.activeGame() ?? '').get(entry.target_key) ?? 'a classmate' }
+            ...(entry.target_key !== null ? { whisper: true, to: names.get(entry.target_key) ?? 'a classmate' }
                 : entry.x === null || entry.y === null ? { all: true } : {}) };
         const message = JSON.stringify(body);
         // The sender's copy says how many classmates it reached: none means nobody was near enough to hear.

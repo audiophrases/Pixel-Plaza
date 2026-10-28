@@ -1,7 +1,7 @@
 // The rules that sort chat into a student's conversations and decide who hears what.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ALL, HEARING_RANGE, NEAR, STILL_TALKING_MS, TEACHER, conversationOf, inEarshot, opensItself, partnerOf, privateChat, renamed } from '../../shared/chat.ts';
+import { ALL, HEARING_RANGE, NEAR, STILL_TALKING_MS, TEACHER, conversationOf, inEarshot, opensItself, partnerOf, privateChat, renamed, renamedTogether } from '../../shared/chat.ts';
 
 test('each message lands in one conversation, seen from the student reading it', () => {
     assert.equal(conversationOf({ sender: 'Sam', text: 'Hi' }, 'Alex'), NEAR);
@@ -30,6 +30,15 @@ test('a rename carries the messages and the private chat with it', () => {
     assert.deepEqual(after.map(line => conversationOf(line, 'Alex')), [privateChat('Roger L.'), privateChat('Roger L.'), privateChat('Roger L.'), NEAR]);
     assert.equal(after[3], lines[3], 'messages with nothing to change stay as they were');
     assert.equal(renamed(lines, 'Roger', 'Roger'), lines);
+});
+
+test('renaming a class applies overlapping names once and keeps offline conversations', () => {
+    const lines = [{ sender: 'Brave Alex', to: 'Alex', whisper: true }, { sender: 'Alex', to: 'Brave Alex', whisper: true },
+        { sender: 'System', conv: privateChat('Kind Sam') }];
+    const changed = renamedTogether(lines, new Map([['Brave Alex', 'Alex'], ['Alex', 'Alex B'], ['Kind Sam', 'Sam']]));
+    assert.deepEqual(changed, [{ sender: 'Alex', to: 'Alex B', whisper: true }, { sender: 'Alex B', to: 'Alex', whisper: true },
+        { sender: 'System', conv: privateChat('Sam') }]);
+    assert.equal(lines[0].sender, 'Brave Alex', 'the old snapshot stays intact');
 });
 
 test('a private message opens by itself only when nothing is being written and the open chat has gone quiet', () => {

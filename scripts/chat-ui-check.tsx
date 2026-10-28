@@ -251,7 +251,26 @@ try {
   assert.equal(dialog(), null, 'switching games drops the old activity');
   await act(async () => back.receive({ t: 'quest', quest }));
   assert.match(dialog()?.textContent ?? '', /The missing chestnuts/, 'another game has its own acknowledgement scope');
-  console.log('Chat and announcement UI checks pass: chat behavior, name selection first, OK-only acknowledgement, sequential dialogs, review, reloads, restarted activities, chapter changes and game isolation.');
+  await ok();
+  await act(async () => {
+    back.receive({ t: 'join', player: { id: 'b', name: 'Brave Sam', x: 1100, y: 1000 } });
+    back.receive(chat('Brave Sam', 'Our conversation stays here.', { whisper: true, to: 'Alex' }));
+  });
+  await press(tab('Brave Sam')); await type('My unfinished reply');
+  await act(async () => {
+    back.receive({ t: 'alias', name: 'Alex', kept: false });
+    back.receive({ t: 'leave', id: 'b' });
+  });
+  assert.ok(document.querySelector('[aria-label="Choose your name"]'));
+  await act(async () => back.receive({ t: 'names', names: ['Alex R', 'Sam'], changes: [
+    { id: 'a', from: 'Alex', name: 'Alex R' }, { from: 'Brave Sam', name: 'Sam' },
+  ] }));
+  assert.equal(document.querySelector('[aria-label="Choose your name"]'), null, 'switching clears an unfinished random name choice');
+  assert.equal(selected(), 'Sam'); assert.ok(tab('Sam')?.classList.contains('chat-conv-away'));
+  assert.equal(tab('Brave Sam'), null); assert.match(pane(), /Our conversation stays here/);
+  assert.equal(input().value, 'My unfinished reply', 'renaming preserves the chat draft');
+  assert.match(document.querySelector('.room-info')?.textContent ?? '', /Alex R/);
+  console.log('Chat, announcements and live names pass: renamed online/offline conversations, preserved drafts, cleared name picker, instructions, reloads and game isolation.');
 } finally {
   await act(async () => root.unmount());
   dom.window.close();

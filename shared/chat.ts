@@ -39,12 +39,18 @@ export function inEarshot<T extends { id: string; x: number; y: number }>(me: { 
 // A namesake arrived and someone's shown name changed: their messages, and the private chat with them, follow.
 export function renamed<T extends ChatLine>(lines: T[], from: string, to: string): T[] {
     if (!from || from === to) return lines;
+    return renamedTogether(lines, new Map([[from, to]]));
+}
+
+// Apply a whole class's name change in one pass, including offline conversations.
+export function renamedTogether<T extends ChatLine>(lines: T[], names: ReadonlyMap<string, string>): T[] {
     return lines.map(line => {
-        if (line.sender !== from && line.to !== from && line.conv !== privateChat(from)) return line;
+        const partner = line.conv ? partnerOf(line.conv) : null;
+        if (!names.has(line.sender) && (!line.to || !names.has(line.to)) && (!partner || !names.has(partner))) return line;
         const next = { ...line };
-        if (line.sender === from) next.sender = to;
-        if (line.to === from) next.to = to;
-        if (line.conv === privateChat(from)) next.conv = privateChat(to);
+        next.sender = names.get(line.sender) ?? line.sender;
+        if (line.to) next.to = names.get(line.to) ?? line.to;
+        if (partner && names.has(partner)) next.conv = privateChat(names.get(partner)!);
         return next;
     });
 }

@@ -83,6 +83,7 @@ export default function Teacher() {
   const [copied, setCopied] = useState(''); // the PIN whose link was just copied
   const [vision, setVision] = useState(450); // how far students see in a new game, in map pixels
   const [randomNames, setRandomNames] = useState(true); // students get made-up names, and the teacher sees who they are
+  const [changingNames, setChangingNames] = useState(false);
   // Everything beyond the class now is a tab, one open at a time or none; the last one is remembered on this computer.
   const [tab, setTab] = useState<TabId | null>(readTab);
   useEffect(() => { try { if (tab) localStorage.setItem(TAB_KEY, tab); else localStorage.removeItem(TAB_KEY); } catch { /* remembered for this visit only */ } }, [tab]);
@@ -407,6 +408,13 @@ export default function Teacher() {
           PIN <strong>{status.pin}</strong> <span>{copied === status.pin ? 'Link copied ✓' : 'Copy link'}</span></button>}
         {status.game && <button className="btn btn-primary btn-sm" onClick={() => void action('class', { open: !status.open })}>
           {status.open ? 'Close class' : 'Open class'}</button>}
+        {status.game && <div className="teacher-live-names" aria-label="Student names">
+          <span>{status.game.randomNames ? 'Random names' : 'Real first names'}</span>
+          {status.open && status.game.randomNames && <button type="button" className="btn btn-secondary btn-sm" disabled={changingNames}
+            title="Switch everyone to real first names now. Students stay in the game and keep their progress."
+            onClick={async () => { setChangingNames(true); await action('real-names', { gameId: status.game!.id }); setChangingNames(false); }}>
+            {changingNames ? 'Changing names…' : 'Use real names'}</button>}
+        </div>}
         {status.game && <div className="teacher-review" role="group" aria-label="How chat is checked">
           <button type="button" aria-pressed={status.mode === 'approve'} onClick={() => void action('mode', { mode: 'approve' })} title="Every message waits for you">✋ Approve first</button>
           <button type="button" aria-pressed={status.mode === 'review'} disabled={!status.moderation} onClick={() => void action('mode', { mode: 'review' })}

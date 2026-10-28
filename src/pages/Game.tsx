@@ -12,7 +12,7 @@ import { DEFAULT_STYLE, emotesFor, levelOf, type Style } from '../../shared/leve
 import { correctedSentence, readCorrection, wordDiff } from '../../shared/diff';
 import Correction from '../components/Correction';
 import { firstName } from '../../shared/names';
-import { ALL, NEAR, TEACHER, TYPING_EVERY_MS, TYPING_SHOWN_MS, conversationOf, inEarshot, opensItself, partnerOf, privateChat, renamed } from '../../shared/chat';
+import { ALL, NEAR, TEACHER, TYPING_EVERY_MS, TYPING_SHOWN_MS, conversationOf, inEarshot, opensItself, partnerOf, privateChat, renamedTogether } from '../../shared/chat';
 import PhaserGame from '../components/PhaserGame';
 import type { QuestView } from '../../shared/campaign';
 import type { StudentSupport } from '../../shared/support';
@@ -342,19 +342,23 @@ export default function Game() {
       if (event.t === 'xp') { setXpReason(event.reason); setXp(event.xp); return; }
       if (event.t === 'roster' || (event.t === 'style' && event.id === plaza.selfId)) setMyStyle(plaza.players.get(plaza.selfId)?.style ?? DEFAULT_STYLE);
       // A namesake arrived: the messages of whoever was renamed, and the chat with them, follow the new name.
-      if (event.t === 'rename') {
-        const before = names.get(event.id);
-        if (before && before !== event.name) {
-          const move = (key: string) => key === privateChat(before) ? privateChat(event.name) : key;
+      if (event.t === 'rename' || event.t === 'names') {
+        const before = event.t === 'rename' ? names.get(event.id) : null;
+        const changes = new Map(event.t === 'names' ? event.changes.map(c => [c.from, c.name]) : before ? [[before, event.name]] : []);
+        if (event.t === 'names') setAlias(null);
+        if (changes.size) {
+          const move = (key: string) => { const partner = partnerOf(key); return partner && changes.has(partner) ? privateChat(changes.get(partner)!) : key; };
           const moveKeys = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).map(([key, value]) => [move(key), value]));
-          setMessages(prev => renamed(prev, before, event.name));
+          setMessages(prev => renamedTogether(prev, changes));
           setActive(move);
           setStarted(moveKeys);
           setLastSeen(moveKeys);
           newest.current = moveKeys(newest.current);
+          setPeek(prev => prev && { key: move(prev.key), message: renamedTogether([prev.message], changes)[0] });
+          if (pending.current) pending.current.conv = move(pending.current.conv);
         }
       }
-      if (event.t === 'roster' || event.t === 'join' || event.t === 'leave' || event.t === 'rename') {
+      if (event.t === 'roster' || event.t === 'join' || event.t === 'leave' || event.t === 'rename' || event.t === 'names') {
         const self = plaza.players.get(plaza.selfId ?? '');
         if (self) setMyName(self.name);
         names.clear();

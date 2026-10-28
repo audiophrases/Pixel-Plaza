@@ -223,6 +223,9 @@ export default class LobbyScene extends Phaser.Scene {
     else if (event.t === 'roster') this.syncRoster();
     else if (event.t === 'join') this.addPlayer(event.player);
     else if (event.t === 'leave') this.removePlayer(event.id);
+    else if (event.t === 'names') {
+      for (const player of this.connection.players.values()) this.nameplates[player.id]?.setText(plateText(player));
+    }
     else if (event.t === 'rename' || event.t === 'style') {
       const player = this.connection.players.get(event.id);
       if (player) this.nameplates[event.id]?.setText(plateText(player)).setColor(plateColour(player));

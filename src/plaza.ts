@@ -31,6 +31,7 @@ export type PlazaEvent =
   | { t: 'sound'; off: boolean }                                           // the teacher turned your sound off, or back on
   | { t: 'alias'; name: string; kept: boolean }                            // your made-up name, and whether you have kept it
   | { t: 'rename'; id: string; name: string }                              // a namesake arrived: this player's shown name changed
+  | { t: 'names'; names: string[]; changes: { id?: string; from: string; name: string }[] } // the teacher switched to real names
   | { t: 'quest'; quest: QuestView | null }                                  // this student's view of the campaign
   | { t: 'answered'; objective: string; correct: boolean; wait: boolean }
   | { t: 'support'; support: StudentSupport; history?: boolean }
@@ -323,6 +324,10 @@ export class PlazaConnection {
     if (message.t === 'xp') this.xp = message.xp;
     if (message.t === 'style') { const player = this.players.get(message.id); if (player) player.style = message.style; }
     if (message.t === 'rename') { const player = this.players.get(message.id); if (player) player.name = message.name; }
+    if (message.t === 'names') {
+      this.classNames = message.names;
+      for (const change of message.changes) { const player = this.players.get(change.id); if (player) player.name = change.name; }
+    }
     if (message.t === 'leave') this.players.delete(message.id);
     if (message.t === 'move') {
       const player = this.players.get(message.id);

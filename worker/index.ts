@@ -103,6 +103,7 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     }
     if (path === '/api/teacher/game' && typeof body?.name === 'string') return { kind: 'newGame', name: body.name, randomNames: body.randomNames !== false, ...(typeof body.vision === 'number' ? { vision: body.vision } : {}), ...(body.themeId !== undefined ? { themeId: body.themeId } : {}) };
     if (path === '/api/teacher/game/delete' && typeof body?.game === 'string') return { kind: 'deleteGame', game: body.game, confirm: body.confirm === true };
+    if (path === '/api/teacher/real-names' && typeof body?.gameId === 'string') return { kind: 'realNames', gameId: body.gameId };
     if (path === '/api/teacher/magic' && method === 'POST' && ['freeze', 'thaw', 'lightning', 'teleport', 'rain'].includes(body?.power)) return { kind: 'magic', power: body.power, studentKey: body.studentKey, x: body.x, y: body.y };
     if (path === '/api/teacher/vision' && typeof body?.radius === 'number') return { kind: 'vision', radius: body.radius };
     if (path === '/api/teacher/warmup' && (body?.op === 'start' || body?.op === 'end')) {

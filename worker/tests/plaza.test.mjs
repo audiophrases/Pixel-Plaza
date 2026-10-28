@@ -2065,6 +2065,79 @@ test('random names: a made-up name to keep, hidden from classmates, known to the
     }
 });
 
+test('a live game switches to real names without losing chat, warm-up or mission progress', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
+    let plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        let session = (await api(plaza.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (path, body) => api(plaza.base, `/api/teacher/${path}`, { session, body });
+        const opened = (await teacher('game', { name: 'Live names', randomNames: true })).body;
+        PIN = opened.pin;
+        const join = async (token, keep = true) => {
+            const socket = await enter(plaza.base, token, null); sockets.push(socket);
+            if (keep) { socket.send({ t: 'keep' }); await socket.next(m => m.t === 'alias' && m.kept); }
+            return socket;
+        };
+        const alex = await join('signed-a'), sam = await join('signed-b'), roger = await join('roger-1'), away = await join('roger-2', false);
+        await teacher('campaign', { op: 'start', campaign: 'castanyada' });
+        const firstTask = castanyada.chapters[0].objectives[0];
+        alex.send({ t: 'answer', objective: firstTask.id, text: firstTask.accept[0] });
+        assert.equal((await alex.next(m => m.t === 'answered')).correct, true);
+        await teacher('warmup', { op: 'start', type: 'facts' });
+        const round = (await alex.next(m => m.t === 'warmup' && m.warmup)).warmup;
+        alex.send({ t: 'chat', text: 'Hello, can you help me?', to: sam.me.id, cid: 'before-names' });
+        const pending = await alex.next(m => m.t === 'notice' && m.cid === 'before-names');
+        assert.ok(pending.id, 'a message awaits teacher approval');
+        away.ws.close(); await away.closed; await pause(100);
+        const before = (await teacher('status')).body;
+        for (const socket of [alex, sam, roger]) socket.inbox.splice(0);
+
+        assert.equal((await api(plaza.base, '/api/teacher/real-names', { body: { gameId: opened.game.id } })).status, 401);
+        assert.equal((await teacher('real-names', { gameId: 'another-game' })).status, 409);
+        const changed = await teacher('real-names', { gameId: opened.game.id });
+        assert.equal(changed.status, 200); const after = changed.body;
+        assert.equal(after.game.randomNames, false); assert.equal(after.open, true); assert.equal(after.pin, PIN);
+        assert.deepEqual(after.online.map(s => [s.studentKey, s.id, s.x, s.y]), before.online.map(s => [s.studentKey, s.id, s.x, s.y]), 'students stay connected in place');
+        assert.deepEqual(after.online.map(s => s.name).sort(), ['Alex', 'Roger L', 'Sam']);
+        assert.equal(after.entries.find(e => e.id === pending.id).sender, 'Alex');
+        assert.equal(after.entries.find(e => e.id === pending.id).target, 'Sam');
+        assert.deepEqual(after.campaign.players.map(({ name, ...p }) => p), before.campaign.players.map(({ name, ...p }) => p));
+        assert.deepEqual(after.warmup.players.map(({ name, ...p }) => p), before.warmup.players.map(({ name, ...p }) => p));
+        const updated = await alex.next(m => m.t === 'names');
+        assert.ok(updated.changes.some(c => c.id === alex.me.id && c.name === 'Alex'));
+        assert.ok(updated.changes.some(c => c.from === away.me.name && c.name === 'Roger C' && !c.id), 'offline conversations get renamed too');
+        const refreshed = (await alex.next(m => m.t === 'warmup' && m.warmup)).warmup;
+        assert.equal(refreshed.runId, round.runId); assert.equal(refreshed.task, round.task);
+        assert.ok((await alex.next(m => m.t === 'quest' && m.quest)).quest.objectives.find(o => o.id === firstTask.id)?.done);
+        await teacher('review', { id: pending.id, approve: true });
+        const delivered = await sam.next(m => m.t === 'chat' && m.id === pending.id);
+        assert.equal(delivered.sender, 'Alex'); assert.equal(delivered.to, 'Sam');
+        const wanted = FACTS.find(fact => `Find someone who ${fact.find}.` === refreshed.task);
+        const holder = after.warmup.players.find(p => p.studentKey !== 'stu_a' && p.fact === wanted.mine);
+        assert.ok(holder);
+        alex.send({ t: 'warmup-answer', text: holder.name });
+        assert.equal((await alex.next(m => m.t === 'warmup-answered')).correct, true, 'real names work as warm-up answers');
+        assert.equal((await teacher('real-names', { gameId: opened.game.id })).status, 200, 'the action is idempotent');
+
+        // Persist the mode and replay the mapping for clients who missed the live event.
+        for (const socket of sockets) socket.ws.close(); await pause(100); await plaza.stop();
+        plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+        session = (await api(plaza.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const back = await join('roger-2', false);
+        assert.equal(back.me.name, 'Roger C');
+        assert.ok((await back.next(m => m.t === 'names')).changes.some(c => c.from === away.me.name && c.name === 'Roger C'));
+        assert.equal((await teacher('status')).body.game.randomNames, false);
+        await teacher('class', { open: false });
+        assert.equal((await teacher('real-names', { gameId: opened.game.id })).status, 409, 'closed games cannot be changed accidentally');
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('movement: no walking through walls, no teleporting, but real walking is believed', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay();
     const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));
