@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { defaultWarmup, validateWarmup, type SavedWarmup } from '../shared/warmupConfig';
 import type { WarmupKind } from '../shared/warmupKinds';
+import identityFile from '../worker/tests/fixtures/who-am-i-110.json';
 
 const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true, url: 'http://localhost/warmup-studio' });
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement,
@@ -38,6 +39,15 @@ const edit = async (label: string, value: string) => act(async () => {
     f.dispatchEvent(new dom.window.Event(f.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
 });
 const click = (label: string) => act(async () => { button(label).click(); });
+const envelope = (definition: unknown) => JSON.stringify({ format: 'pixel-plaza-warmup', schemaVersion: 1, definition });
+const upload = (text: string, size = new TextEncoder().encode(text).length, failRead = false) => act(async () => {
+    const input = document.querySelector('input[type="file"]')!;
+    Object.defineProperty(input, 'files', { value: [{ name: 'warmup.json', size, text: async () => {
+        if (failRead) throw new Error('Could not read the file.'); return text;
+    } }], configurable: true });
+    input.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+});
+const backup = () => document.querySelector('section[aria-label="Backup and restore"]')!;
 assert.equal(field('Title').value, 'Who am I?'); assert.equal(button('Save warm-up').disabled, true);
 await edit('Title', 'Scientists'); await edit('Identity 1', 'Ada Lovelace');
 await edit('Aliases 1 (comma separated)', 'Ada,');
@@ -63,16 +73,70 @@ await edit('Matching word 1', 'vinegar'); await click('Save warm-up');
 assert.equal(saved.pairs.definition.kind, 'pairs');
 if (saved.pairs.definition.kind === 'pairs') assert.equal(saved.pairs.definition.pairs[0][1], 'vinegar');
 const imported = defaultWarmup('pairs'); imported.title = 'Imported pairs';
-await act(async () => {
-    const input = document.querySelector('input[type="file"]')!;
-    Object.defineProperty(input, 'files', { value: [{ size: 100, text: async () => JSON.stringify({ format: 'pixel-plaza-warmup', schemaVersion: 1, definition: imported }) }], configurable: true });
-    input.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-});
+await upload(envelope(imported));
+assert.equal(field('Title').value, 'Find your pair', 'selecting a file only previews changes');
+assert.ok(document.activeElement?.textContent?.includes('Import preview'));
+await click('Apply import');
 assert.equal(field('Title').value, 'Imported pairs'); assert.equal(saved.pairs.definition.title, 'Find your pair', 'import remains a draft until saved');
 await click('Save warm-up'); assert.equal(saved.pairs.definition.title, 'Imported pairs');
 await click('Use built-in content'); assert.equal(field('Title').value, 'Find your pair'); assert.equal(button('Save warm-up').disabled, false);
 assert.equal(saved.pairs.definition.title, 'Imported pairs', 'restore needs an explicit save');
 assert.equal(writes, 4);
+
+await edit('Warm-up type', 'identity'); await click('Use built-in content');
+await edit('Title', 'Keep this title');
+await upload(JSON.stringify(identityFile));
+assert.ok(backup().textContent?.includes('110 imported entries'));
+assert.equal(field('Title').value, 'Keep this title');
+await edit('Import action', 'append');
+assert.ok(backup().textContent?.includes('Add 77 new identities; skip 33 duplicates; 110 identities in total'));
+await click('Apply import');
+assert.equal(field('Title').value, 'Keep this title');
+assert.ok(document.body.textContent?.includes('Secret identities (110)'));
+assert.ok(backup().contains(document.activeElement), 'success feedback receives focus beside the upload control');
+assert.ok(document.activeElement?.textContent?.includes('Added 77 identities'));
+assert.equal(writes, 4, 'applying an import does not save');
+await click('Save warm-up'); await click('Reload saved version');
+assert.equal(saved.identity.definition.kind, 'identity');
+if (saved.identity.definition.kind === 'identity') assert.equal(saved.identity.definition.identities.length, 110);
+assert.ok(document.body.textContent?.includes('Secret identities (110)'));
+
+await upload(JSON.stringify(identityFile)); await edit('Import action', 'append');
+assert.ok(backup().textContent?.includes('Add 0 new identities; skip 110 duplicates'));
+await click('Cancel import'); assert.ok(!backup().textContent?.includes('Import preview'));
+
+const tooMany = { ...identityFile.definition, identities: Array.from({ length: 201 }, (_, i) => ({ id: `person-${i}`, name: `Person ${i.toString(36).split('').join(' ')}`, accept: [] })) };
+for (const [text, size, failRead] of [
+    ['{', undefined, false], ['{}', undefined, false], [envelope(defaultWarmup('facts')), undefined, false],
+    [envelope(tooMany), undefined, false], [JSON.stringify(identityFile), 64_001, false], [JSON.stringify(identityFile), undefined, true],
+] as [string, number | undefined, boolean][]) {
+    await upload(text, size, failRead);
+    const alert = backup().querySelector('[role="alert"]'); assert.ok(alert);
+    assert.equal(document.activeElement, alert, 'each import failure focuses the error beside Import JSON');
+    assert.equal(field('Title').value, 'Keep this title');
+    assert.ok(document.body.textContent?.includes('Secret identities (110)'));
+    assert.ok(!backup().textContent?.includes('Import preview'), 'failed files cannot leave an old import ready to apply');
+}
+
+const conflictFile = structuredClone(identityFile);
+conflictFile.definition.identities[0] = { id: 'messi', name: 'Someone Else', accept: [] };
+conflictFile.definition.identities = conflictFile.definition.identities.slice(0, 2);
+await upload(JSON.stringify(conflictFile)); await edit('Import action', 'append');
+assert.ok(backup().querySelector('[role="alert"]')?.textContent?.includes('same ID as'));
+assert.equal(button('Apply import').disabled, true); assert.equal(field('Title').value, 'Keep this title');
+await click('Cancel import');
+
+await upload(JSON.stringify(identityFile)); await click('Apply import');
+assert.equal(field('Title').value, 'Who am I?', 'replace uses the imported metadata');
+assert.ok(document.activeElement?.textContent?.includes('Imported 110 entries'));
+await click('Save warm-up'); await click('Reload saved version');
+assert.equal(field('Title').value, 'Who am I?'); assert.ok(document.body.textContent?.includes('Secret identities (110)'));
+
+await upload(envelope({ ...tooMany, identities: tooMany.identities.slice(0, 200) })); await click('Apply import');
+assert.equal(button('Add identity').disabled, true, 'editor and validator share the 200-identity cap');
+await upload(JSON.stringify(identityFile)); await edit('Title', 'Edit after preview');
+assert.ok(!backup().textContent?.includes('Import preview'), 'editing a draft cancels a stale import preview');
+assert.equal(writes, 6);
 await act(async () => root.unmount()); dom.window.close();
-console.log('Warm-up editor UI: identities/aliases, facts/rounds, pairs, validation, conflicts, import/export, restore and save pass.');
+console.log('Warm-up editor UI: 110-identity replace/append, duplicates, limits, focused errors, save/reload, all three modes and conflicts pass.');
 process.exit(0);

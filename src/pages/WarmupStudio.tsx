@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { WARMUP_KINDS, isWarmupKind, type WarmupKind } from '../../shared/warmupKinds';
-import { defaultWarmup, validateWarmup, WARMUP_LEVELS, WARMUP_MAX_BYTES, type SavedWarmup, type WarmupDefinition } from '../../shared/warmupConfig';
+import { defaultWarmup, validateWarmup, WARMUP_LEVELS, WARMUP_MAX_BYTES, WARMUP_MAX_IDENTITIES, type SavedWarmup, type WarmupDefinition } from '../../shared/warmupConfig';
+import { parseWarmupImport, previewWarmupImport, warmupEntryCount, type WarmupImportMode } from '../../shared/warmupImport';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import { downloadFile } from '../themeFiles';
 import './MissionStudio.css';
@@ -22,9 +23,16 @@ export default function WarmupStudio() {
     const [token, setToken] = useState(readTeacherSession), [password, setPassword] = useState('');
     const [editor, setEditor] = useState<{ saved: SavedWarmup; draft: WarmupDefinition } | null>(null);
     const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [reload, setReload] = useState(0);
+    const [pendingImport, setPendingImport] = useState<{ name: string; definition: WarmupDefinition } | null>(null);
+    const [importMode, setImportMode] = useState<WarmupImportMode>('replace');
+    const [importFeedback, setImportFeedback] = useState<{ error: boolean; text: string } | null>(null);
+    const importFeedbackRef = useRef<HTMLParagraphElement>(null), importPreviewRef = useRef<HTMLHeadingElement>(null);
     const current = editor?.draft.kind === kind ? editor : null, draft = current?.draft;
     const dirty = !!current && JSON.stringify(current.draft) !== JSON.stringify(current.saved.definition);
     const problems = draft ? validateWarmup(draft).errors : [];
+    const importPreview = draft && pendingImport ? previewWarmupImport(draft, pendingImport.definition, importMode) : null;
+    useEffect(() => { if (importFeedback) importFeedbackRef.current?.focus(); }, [importFeedback]);
+    useEffect(() => { if (pendingImport) importPreviewRef.current?.focus(); }, [pendingImport]);
     const failed = (cause: unknown) => {
         setError(cause instanceof Error ? cause.message : 'Connection failed.');
         if ((cause as { status?: number }).status === 401) { storeTeacherSession(''); setToken(''); }
@@ -43,7 +51,8 @@ export default function WarmupStudio() {
         window.addEventListener('beforeunload', prevent); return () => window.removeEventListener('beforeunload', prevent);
     }, [dirty]);
     const mayLeave = () => !dirty || window.confirm('Discard unsaved warm-up edits? Save or export them first to keep them.');
-    const edit = (next: WarmupDefinition) => { if (current) setEditor({ ...current, draft: next }); setNotice(''); };
+    const clearImport = () => { setPendingImport(null); setImportFeedback(null); };
+    const edit = (next: WarmupDefinition) => { if (current) setEditor({ ...current, draft: next }); setNotice(''); clearImport(); };
     const run = async (work: () => Promise<void>) => { setBusy(true); setError(''); try { await work(); } catch (cause) { failed(cause); } finally { setBusy(false); } };
     const input = (label: string, value: string, onChange: (value: string) => void, maxLength = 80) => <label className="mission-field"><span>{label}</span><input value={value} maxLength={maxLength} onChange={e => onChange(e.target.value)} /></label>;
     return <main className="mission-page warmup-studio">
@@ -57,16 +66,16 @@ export default function WarmupStudio() {
         }); }}><h2>Teacher sign-in</h2><label className="mission-field"><span>Teacher password</span><input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label><button className="mission-button primary" disabled={busy}>Open editor</button></form>
         : <fieldset className="warmup-editor-content" disabled={busy}>
             <section className="mission-card"><label className="mission-field"><span>Warm-up type</span><select aria-label="Warm-up type" value={kind} onChange={event => {
-                if (!mayLeave()) return; setParams({ kind: event.target.value }); setError(''); setNotice('');
+                if (!mayLeave()) return; setParams({ kind: event.target.value }); setError(''); setNotice(''); clearImport();
             }}>{WARMUP_KINDS.map(item => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
                 <p>Saved changes apply to the next start or restart of this warm-up. A round already running keeps its original content.</p>
-                <button className="mission-button" onClick={() => { if (mayLeave()) { setEditor(null); setError(''); setReload(n => n + 1); } }}>Reload saved version</button>
+                <button className="mission-button" onClick={() => { if (mayLeave()) { setEditor(null); setError(''); setNotice(''); clearImport(); setReload(n => n + 1); } }}>Reload saved version</button>
             </section>
             {!draft || !current ? !error && <p role="status">Loading the warm-up…</p> : <>
                 <section className="mission-card">
                     <div className="mission-savebar"><strong>{dirty ? 'Unsaved changes' : `Saved · version ${current.saved.version}`}</strong><button className="mission-button primary" disabled={!dirty || problems.length > 0} onClick={() => void run(async () => {
                         const saved = await request(token, kind, { version: current.saved.version, definition: draft });
-                        setEditor({ saved, draft: structuredClone(saved.definition) }); setNotice('Warm-up saved. Start or restart this type in Teacher controls to use it.');
+                        setEditor({ saved, draft: structuredClone(saved.definition) }); clearImport(); setNotice('Warm-up saved. Start or restart this type in Teacher controls to use it.');
                     })}>Save warm-up</button></div>
                     {input('Title', draft.title, value => edit({ ...draft, title: value }), 120)}
                     <label className="mission-field"><span>Language level</span><select value={draft.level} onChange={e => edit({ ...draft, level: e.target.value as WarmupDefinition['level'] })}>{WARMUP_LEVELS.map(level => <option key={level}>{level}</option>)}</select></label>
@@ -80,7 +89,7 @@ export default function WarmupStudio() {
                             {input(`Aliases ${i + 1} (comma separated)`, identity.accept.join(','), value => edit({ ...draft, identities: draft.identities.map((row, n) => n === i ? { ...row, accept: value ? value.split(',') : [] } : row) }), 1600)}
                             <button className="mission-button danger" aria-label={`Remove identity ${i + 1}`} onClick={() => edit({ ...draft, identities: draft.identities.filter((_, n) => n !== i) })}>Remove</button>
                         </div>)}
-                        <button className="mission-button" disabled={draft.identities.length >= 80} onClick={() => edit({ ...draft, identities: [...draft.identities, { id: freshId(), name: '', accept: [] }] })}>Add identity</button>
+                        <button className="mission-button" disabled={draft.identities.length >= WARMUP_MAX_IDENTITIES} onClick={() => edit({ ...draft, identities: [...draft.identities, { id: freshId(), name: '', accept: [] }] })}>Add identity</button>
                     </>}
                     {draft.kind === 'facts' && <><h2>Facts ({draft.facts.length})</h2><label className="mission-field"><span>Facts to find per student (up to)</span><input aria-label="Facts to find" type="number" min={1} max={10} value={draft.rounds} onChange={e => edit({ ...draft, rounds: Number(e.target.value) })} /></label>
                         <p>Write a made-up fact for the student's card and its matching “Find someone who…” phrase. Only facts held by classmates will be assigned.</p>
@@ -104,21 +113,43 @@ export default function WarmupStudio() {
                         : draft.kind === 'facts' ? `Your fact: ${draft.facts[0]?.mine || '…'}` : `Your word: ${draft.pairs[0]?.[0] || '…'}`}</p>
                     <p className="mission-muted">Each student gets their own assignment when you start the activity.</p>
                 </section>
-                <section className="mission-card"><h2>Backup and restore</h2><div className="mission-toolbar">
+                <section className="mission-card" aria-label="Backup and restore"><h2>Backup and restore</h2>
+                    <p id="warmup-import-limits">Up to {draft.kind === 'identity' ? `${WARMUP_MAX_IDENTITIES} identities` : draft.kind === 'facts' ? '80 facts' : '40 pairs'} and 64 KB (64,000 bytes) per file. Choose a file to preview changes before applying them.</p>
+                    <div className="mission-toolbar">
                     <button className="mission-button" onClick={() => downloadFile(`${kind}-warmup.json`, JSON.stringify({ format: 'pixel-plaza-warmup', schemaVersion: 1, definition: draft }, null, 2), 'application/json')}>Export JSON</button>
-                    <label className="mission-file">Import JSON<input type="file" accept=".json,application/json" onChange={event => {
+                    <label className="mission-file">Import JSON<input type="file" accept=".json,application/json" aria-describedby="warmup-import-limits" onChange={event => {
                         const file = event.target.files?.[0]; event.target.value = ''; if (!file) return;
+                        clearImport(); setNotice(''); setImportMode('replace');
                         void run(async () => {
-                            if (file.size > WARMUP_MAX_BYTES) throw new Error('Warm-up files must be smaller than 64 KB.');
-                            const value = JSON.parse(await file.text());
-                            if (!value || value.format !== 'pixel-plaza-warmup' || value.schemaVersion !== 1) throw new Error('Choose an exported Pixel Plaza warm-up file.');
-                            const checked = validateWarmup(value.definition); if (!checked.definition) throw new Error(checked.errors.join(' '));
-                            if (checked.definition.kind !== kind) throw new Error('Select the matching warm-up type before importing this file.');
-                            edit(checked.definition); setNotice('Imported into your draft. Review it, then save.');
+                            try {
+                                if (file.size > WARMUP_MAX_BYTES) throw new Error(`This file is ${file.size.toLocaleString()} bytes; the maximum is 64,000 bytes. Choose a smaller file.`);
+                                setPendingImport({ name: file.name, definition: parseWarmupImport(await file.text(), kind) });
+                            } catch (cause) {
+                                setImportFeedback({ error: true, text: cause instanceof Error ? cause.message : 'Could not read this file. Try selecting it again.' });
+                            }
                         });
                     }} /></label>
                     <button className="mission-button" onClick={() => edit(defaultWarmup(kind))}>Use built-in content</button>
-                </div><p className="mission-muted">Importing and restoring change your draft. Save when ready.</p></section>
+                </div>
+                    {importFeedback && <p ref={importFeedbackRef} tabIndex={-1} className={importFeedback.error ? 'mission-error' : 'mission-notice'} role={importFeedback.error ? 'alert' : 'status'}>{importFeedback.text}</p>}
+                    {pendingImport && importPreview && <div className="warmup-import-preview">
+                        <h3 ref={importPreviewRef} tabIndex={-1}>Import preview: {pendingImport.name}</h3>
+                        {draft.kind === 'identity' && <label className="mission-field"><span>Import action</span><select value={importMode} onChange={event => setImportMode(event.target.value as WarmupImportMode)}>
+                            <option value="replace">Replace draft</option><option value="append">Append new identities</option>
+                        </select></label>}
+                        <p role="status">{importMode === 'replace'
+                            ? `Replace ${warmupEntryCount(draft)} current entries with ${importPreview.total} imported entries, including the file’s title, level and instructions.`
+                            : `Add ${importPreview.added} new identities; skip ${importPreview.skipped} duplicates; ${importPreview.total} identities in total. Existing identities, aliases, title, level and instructions are kept.`}</p>
+                        {importPreview.errors.length > 0 && <div className="mission-error" role="alert"><strong>Resolve these issues before appending:</strong><ul>{importPreview.errors.map(problem => <li key={problem}>{problem}</li>)}</ul></div>}
+                        <div className="mission-toolbar"><button className="mission-button primary" disabled={!importPreview.definition} onClick={() => {
+                            if (!importPreview.definition) return;
+                            edit(importPreview.definition);
+                            setImportFeedback({ error: false, text: importMode === 'replace'
+                                ? `Imported ${importPreview.total} entries into your draft. Review them, then Save warm-up.`
+                                : `Added ${importPreview.added} identities and skipped ${importPreview.skipped} duplicates. Your draft contains ${importPreview.total} identities. Review it, then Save warm-up.` });
+                        }}>Apply import</button><button className="mission-button" onClick={clearImport}>Cancel import</button></div>
+                    </div>}
+                    <p className="mission-muted">Importing and restoring change your draft. Save when ready.</p></section>
             </>}
         </fieldset>}
     </main>;

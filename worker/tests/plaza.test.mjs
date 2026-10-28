@@ -14,7 +14,7 @@ import { voiceFor } from '../../shared/voices.ts';
 import { castanyada, castanyadaComplete, castanyadaInvestigations, library, missions, sideQuests } from './fixtures/season-1.mjs';
 import { FACTS } from '../../shared/warmup.ts';
 import { IDENTITIES, identityById } from '../../shared/warmupKinds.ts';
-import { defaultWarmup } from '../../shared/warmupConfig.ts';
+import { defaultWarmup, validateWarmup } from '../../shared/warmupConfig.ts';
 import { missionEnvelope } from '../../shared/missionSchema.ts';
 import { legalMove } from '../../shared/plazaMap.ts';
 import { SIDE_QUEST_SOURCE } from '../../shared/sideQuests.ts';
@@ -2797,6 +2797,42 @@ test('chapter 3: the thief hides the chestnuts, and the class opens the cellar w
         await plaza.stop();
         await new Promise(resolve => pinPlay.close(resolve));
         removeTemp(persistTo);
+    }
+});
+
+test('warm-up editor saves all 110 imported identities and enforces the 200-entry cap after restart', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-warmup-import-'));
+    const pinUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    let plaza = await startPlaza(pinUrl, persistTo, {}, { content: false });
+    const sockets = [];
+    try {
+        let session = (await api(plaza.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const config = body => api(plaza.base, '/api/teacher/warmup-editor?kind=identity', { session, body });
+        const file = JSON.parse(fs.readFileSync(new URL('./fixtures/who-am-i-110.json', import.meta.url), 'utf8'));
+        const expected = validateWarmup(file.definition).definition;
+        const saved = await config({ version: 0, definition: file.definition });
+        assert.equal(saved.status, 200); assert.equal(saved.body.definition.identities.length, 110);
+        assert.deepEqual((await config()).body.definition, expected);
+        await plaza.stop(); plaza = await startPlaza(pinUrl, persistTo, {}, { content: false });
+        session = (await api(plaza.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        assert.deepEqual((await config()).body.definition, expected, 'all imported names and aliases survive a server restart');
+        PIN = (await api(plaza.base, '/api/teacher/game', { session, body: { name: 'Imported identities', randomNames: false } })).body.pin;
+        const alex = await enter(plaza.base, 'signed-a', null), sam = await enter(plaza.base, 'signed-b', null); sockets.push(alex, sam);
+        const started = await api(plaza.base, '/api/teacher/warmup', { session, body: { op: 'start', type: 'identity' } });
+        assert.equal(started.status, 200);
+        const card = (await alex.next(message => message.t === 'warmup' && message.warmup?.title === expected.title)).warmup;
+        for (const identity of expected.identities) assert.ok(card.vocabulary.includes(identity.name));
+        assert.ok(expected.identities.some(identity => card.fact.includes(identity.name)));
+        const atLimit = { ...expected, identities: Array.from({ length: 200 }, (_, i) => ({ id: `person-${i}`, name: `Person ${i.toString(36).split('').join(' ')}`, accept: [] })) };
+        assert.equal((await config({ version: 1, definition: atLimit })).status, 200);
+        const overLimit = { ...atLimit, identities: [...atLimit.identities, { id: 'extra', name: 'Extra Person', accept: [] }] };
+        const rejected = await config({ version: 2, definition: overLimit });
+        assert.equal(rejected.status, 400); assert.match(rejected.body.error, /found 201 entries; the maximum is 200/);
+        assert.equal((await config()).body.definition.identities.length, 200, 'rejected writes keep the saved definition');
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
     }
 });
 

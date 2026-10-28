@@ -2,6 +2,7 @@ import { FACTS, WARMUP_ROUNDS, type Fact } from './warmup.ts';
 import { IDENTITIES, PAIRS, WARMUP_KINDS, isWarmupKind, type Identity, type WarmupKind } from './warmupKinds.ts';
 
 export const WARMUP_MAX_BYTES = 64_000;
+export const WARMUP_MAX_IDENTITIES = 200;
 export const WARMUP_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'] as const;
 type Base = { title: string; instructions: string; level: typeof WARMUP_LEVELS[number] };
 export type WarmupDefinition = Base & (
@@ -32,6 +33,7 @@ export function validateWarmup(value: unknown): { definition: WarmupDefinition |
         return v.trim();
     };
     const list = (v: unknown, label: string, min: number, max: number): unknown[] => {
+        if (Array.isArray(v) && v.length > max) { errors.push(`${label}: found ${v.length} entries; the maximum is ${max}.`); return []; }
         if (!Array.isArray(v) || v.length < min || v.length > max) { errors.push(`${label}: include ${min}–${max} entries.`); return []; }
         return v;
     };
@@ -46,7 +48,7 @@ export function validateWarmup(value: unknown): { definition: WarmupDefinition |
     let definition: WarmupDefinition;
     if (value.kind === 'identity') {
         const names = new Map<string, string>();
-        const identities = list(value.identities, 'Identities', 2, 80).map((v, i): Identity => {
+        const identities = list(value.identities, 'Identities', 2, WARMUP_MAX_IDENTITIES).map((v, i): Identity => {
             const row = object(v) ? v : {};
             const rowId = id(row.id), name = text(row.name, `Identity ${i + 1}`, 80);
             const accept = [...new Set([name, ...list(row.accept, `Aliases for identity ${i + 1}`, 0, 20).map(a => text(a, 'Alias', 80))].filter(Boolean))];

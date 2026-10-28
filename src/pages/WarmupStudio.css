@@ -3,4 +3,6 @@
 .warmup-editor-row { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: .75rem; align-items: end; padding: .65rem 0; border-bottom: 1px solid #e4e7ec; }
 .warmup-editor-row .mission-field { margin: 0; }
 .warmup-editor-row + button { margin-top: .8rem; }
+.warmup-import-preview { margin-top: 1rem; padding: 1rem; border: 1px solid #cbd5e1; border-radius: 10px; overflow-wrap: anywhere; }
+.warmup-studio [tabindex="-1"]:focus { outline: 2px solid #2563eb; outline-offset: 4px; }
 @media (max-width: 650px) { .warmup-editor-row { grid-template-columns: 1fr; } }

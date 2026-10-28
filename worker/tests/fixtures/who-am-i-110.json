@@ -1,0 +1,888 @@
+{
+  "format": "pixel-plaza-warmup",
+  "schemaVersion": 1,
+  "definition": {
+    "title": "Who am I?",
+    "level": "A2",
+    "instructions": "Ask yes or no questions to discover your classmate’s identity. Keep your own identity secret. You may name guesses; helpers confirm with yes or no.",
+    "kind": "identity",
+    "identities": [
+      {
+        "id": "mrbeast",
+        "name": "MrBeast",
+        "accept": [
+          "mrbeast",
+          "mr beast",
+          "jimmy donaldson"
+        ]
+      },
+      {
+        "id": "steve",
+        "name": "Steve (Minecraft)",
+        "accept": [
+          "steve",
+          "minecraft steve"
+        ]
+      },
+      {
+        "id": "freddy",
+        "name": "Freddy Fazbear",
+        "accept": [
+          "freddy fazbear",
+          "freddy",
+          "fnaf freddy"
+        ]
+      },
+      {
+        "id": "kratos",
+        "name": "Kratos",
+        "accept": [
+          "kratos"
+        ]
+      },
+      {
+        "id": "laracroft",
+        "name": "Lara Croft",
+        "accept": [
+          "lara croft",
+          "tomb raider"
+        ]
+      },
+      {
+        "id": "link",
+        "name": "Link",
+        "accept": [
+          "link",
+          "zelda"
+        ]
+      },
+      {
+        "id": "naruto",
+        "name": "Naruto",
+        "accept": [
+          "naruto",
+          "naruto uzumaki"
+        ]
+      },
+      {
+        "id": "luffy",
+        "name": "Luffy",
+        "accept": [
+          "luffy",
+          "monkey d luffy"
+        ]
+      },
+      {
+        "id": "gojo",
+        "name": "Satoru Gojo",
+        "accept": [
+          "gojo",
+          "satoru gojo"
+        ]
+      },
+      {
+        "id": "levi",
+        "name": "Levi Ackerman",
+        "accept": [
+          "levi",
+          "levi ackerman",
+          "captain levi"
+        ]
+      },
+      {
+        "id": "tanjiro",
+        "name": "Tanjiro",
+        "accept": [
+          "tanjiro",
+          "tanjiro kamado"
+        ]
+      },
+      {
+        "id": "deadpool",
+        "name": "Deadpool",
+        "accept": [
+          "deadpool",
+          "wade wilson"
+        ]
+      },
+      {
+        "id": "wolverine",
+        "name": "Wolverine",
+        "accept": [
+          "wolverine",
+          "logan"
+        ]
+      },
+      {
+        "id": "joker",
+        "name": "The Joker",
+        "accept": [
+          "joker",
+          "the joker"
+        ]
+      },
+      {
+        "id": "harleyquinn",
+        "name": "Harley Quinn",
+        "accept": [
+          "harley quinn",
+          "harley"
+        ]
+      },
+      {
+        "id": "loki",
+        "name": "Loki",
+        "accept": [
+          "loki"
+        ]
+      },
+      {
+        "id": "thanos",
+        "name": "Thanos",
+        "accept": [
+          "thanos"
+        ]
+      },
+      {
+        "id": "milesmorales",
+        "name": "Miles Morales",
+        "accept": [
+          "miles morales",
+          "miles"
+        ]
+      },
+      {
+        "id": "eleven",
+        "name": "Eleven (Stranger Things)",
+        "accept": [
+          "eleven",
+          "el"
+        ]
+      },
+      {
+        "id": "vecna",
+        "name": "Vecna",
+        "accept": [
+          "vecna"
+        ]
+      },
+      {
+        "id": "katniss",
+        "name": "Katniss Everdeen",
+        "accept": [
+          "katniss",
+          "katniss everdeen"
+        ]
+      },
+      {
+        "id": "johnwick",
+        "name": "John Wick",
+        "accept": [
+          "john wick",
+          "wick"
+        ]
+      },
+      {
+        "id": "ghostface",
+        "name": "Ghostface",
+        "accept": [
+          "ghostface",
+          "scream"
+        ]
+      },
+      {
+        "id": "haaland",
+        "name": "Erling Haaland",
+        "accept": [
+          "haaland",
+          "erling haaland"
+        ]
+      },
+      {
+        "id": "bellingham",
+        "name": "Jude Bellingham",
+        "accept": [
+          "bellingham",
+          "jude bellingham",
+          "jude"
+        ]
+      },
+      {
+        "id": "vinicius",
+        "name": "Vinícius Jr.",
+        "accept": [
+          "vinicius",
+          "vini jr",
+          "vinicius jr",
+          "vini"
+        ]
+      },
+      {
+        "id": "curry",
+        "name": "Stephen Curry",
+        "accept": [
+          "curry",
+          "stephen curry",
+          "steph curry"
+        ]
+      },
+      {
+        "id": "badbunny",
+        "name": "Bad Bunny",
+        "accept": [
+          "bad bunny",
+          "benito"
+        ]
+      },
+      {
+        "id": "weeknd",
+        "name": "The Weeknd",
+        "accept": [
+          "the weeknd",
+          "weeknd",
+          "abel"
+        ]
+      },
+      {
+        "id": "drake",
+        "name": "Drake",
+        "accept": [
+          "drake"
+        ]
+      },
+      {
+        "id": "oliviarodrigo",
+        "name": "Olivia Rodrigo",
+        "accept": [
+          "olivia rodrigo",
+          "olivia"
+        ]
+      },
+      {
+        "id": "dualipa",
+        "name": "Dua Lipa",
+        "accept": [
+          "dua lipa",
+          "dua"
+        ]
+      },
+      {
+        "id": "arianagrande",
+        "name": "Ariana Grande",
+        "accept": [
+          "ariana grande",
+          "ariana"
+        ]
+      },
+      {
+        "id": "harrystyles",
+        "name": "Harry Styles",
+        "accept": [
+          "harry styles",
+          "styles"
+        ]
+      },
+      {
+        "id": "travisscott",
+        "name": "Travis Scott",
+        "accept": [
+          "travis scott",
+          "travis"
+        ]
+      },
+      {
+        "id": "bizarrap",
+        "name": "Bizarrap",
+        "accept": [
+          "bizarrap",
+          "biza"
+        ]
+      },
+      {
+        "id": "jungkook",
+        "name": "Jungkook (BTS)",
+        "accept": [
+          "jungkook",
+          "bts"
+        ]
+      },
+      {
+        "id": "zendaya",
+        "name": "Zendaya",
+        "accept": [
+          "zendaya"
+        ]
+      },
+      {
+        "id": "tomholland",
+        "name": "Tom Holland",
+        "accept": [
+          "tom holland"
+        ]
+      },
+      {
+        "id": "jennaortega",
+        "name": "Jenna Ortega",
+        "accept": [
+          "jenna ortega",
+          "ortega"
+        ]
+      },
+      {
+        "id": "messi",
+        "name": "Messi",
+        "accept": [
+          "messi",
+          "lionel messi"
+        ]
+      },
+      {
+        "id": "ronaldo",
+        "name": "Cristiano Ronaldo",
+        "accept": [
+          "ronaldo",
+          "cristiano ronaldo",
+          "cristiano"
+        ]
+      },
+      {
+        "id": "mbappe",
+        "name": "Kylian Mbappé",
+        "accept": [
+          "mbappe",
+          "kylian mbappe",
+          "kylian"
+        ]
+      },
+      {
+        "id": "yamal",
+        "name": "Lamine Yamal",
+        "accept": [
+          "yamal",
+          "lamine yamal",
+          "lamine"
+        ]
+      },
+      {
+        "id": "nadal",
+        "name": "Rafa Nadal",
+        "accept": [
+          "nadal",
+          "rafa nadal",
+          "rafael nadal"
+        ]
+      },
+      {
+        "id": "alcaraz",
+        "name": "Carlos Alcaraz",
+        "accept": [
+          "alcaraz",
+          "carlos alcaraz"
+        ]
+      },
+      {
+        "id": "serena",
+        "name": "Serena Williams",
+        "accept": [
+          "serena",
+          "serena williams"
+        ]
+      },
+      {
+        "id": "gasol",
+        "name": "Pau Gasol",
+        "accept": [
+          "gasol",
+          "pau gasol"
+        ]
+      },
+      {
+        "id": "jordan",
+        "name": "Michael Jordan",
+        "accept": [
+          "jordan",
+          "michael jordan"
+        ]
+      },
+      {
+        "id": "lebron",
+        "name": "LeBron James",
+        "accept": [
+          "lebron",
+          "lebron james",
+          "james"
+        ]
+      },
+      {
+        "id": "bolt",
+        "name": "Usain Bolt",
+        "accept": [
+          "bolt",
+          "usain bolt"
+        ]
+      },
+      {
+        "id": "alonso",
+        "name": "Fernando Alonso",
+        "accept": [
+          "alonso",
+          "fernando alonso"
+        ]
+      },
+      {
+        "id": "shakira",
+        "name": "Shakira",
+        "accept": [
+          "shakira"
+        ]
+      },
+      {
+        "id": "rosalia",
+        "name": "Rosalía",
+        "accept": [
+          "rosalia"
+        ]
+      },
+      {
+        "id": "taylor",
+        "name": "Taylor Swift",
+        "accept": [
+          "taylor swift",
+          "swift",
+          "taylor"
+        ]
+      },
+      {
+        "id": "beyonce",
+        "name": "Beyoncé",
+        "accept": [
+          "beyonce"
+        ]
+      },
+      {
+        "id": "billie",
+        "name": "Billie Eilish",
+        "accept": [
+          "billie eilish",
+          "billie"
+        ]
+      },
+      {
+        "id": "gaga",
+        "name": "Lady Gaga",
+        "accept": [
+          "lady gaga",
+          "gaga"
+        ]
+      },
+      {
+        "id": "sheeran",
+        "name": "Ed Sheeran",
+        "accept": [
+          "ed sheeran",
+          "sheeran"
+        ]
+      },
+      {
+        "id": "jackson",
+        "name": "Michael Jackson",
+        "accept": [
+          "michael jackson",
+          "jackson"
+        ]
+      },
+      {
+        "id": "mercury",
+        "name": "Freddie Mercury",
+        "accept": [
+          "freddie mercury",
+          "mercury"
+        ]
+      },
+      {
+        "id": "mozart",
+        "name": "Mozart",
+        "accept": [
+          "mozart"
+        ]
+      },
+      {
+        "id": "beethoven",
+        "name": "Beethoven",
+        "accept": [
+          "beethoven",
+          "ludwig van beethoven"
+        ]
+      },
+      {
+        "id": "picasso",
+        "name": "Picasso",
+        "accept": [
+          "picasso",
+          "pablo picasso"
+        ]
+      },
+      {
+        "id": "dali",
+        "name": "Dalí",
+        "accept": [
+          "dali",
+          "salvador dali"
+        ]
+      },
+      {
+        "id": "gaudi",
+        "name": "Gaudí",
+        "accept": [
+          "gaudi",
+          "antoni gaudi"
+        ]
+      },
+      {
+        "id": "kahlo",
+        "name": "Frida Kahlo",
+        "accept": [
+          "kahlo",
+          "frida kahlo",
+          "frida"
+        ]
+      },
+      {
+        "id": "davinci",
+        "name": "Leonardo da Vinci",
+        "accept": [
+          "da vinci",
+          "leonardo da vinci",
+          "leonardo"
+        ]
+      },
+      {
+        "id": "einstein",
+        "name": "Einstein",
+        "accept": [
+          "einstein",
+          "albert einstein"
+        ]
+      },
+      {
+        "id": "curie",
+        "name": "Marie Curie",
+        "accept": [
+          "curie",
+          "marie curie"
+        ]
+      },
+      {
+        "id": "newton",
+        "name": "Isaac Newton",
+        "accept": [
+          "newton",
+          "isaac newton"
+        ]
+      },
+      {
+        "id": "armstrong",
+        "name": "Neil Armstrong",
+        "accept": [
+          "armstrong",
+          "neil armstrong"
+        ]
+      },
+      {
+        "id": "shakespeare",
+        "name": "William Shakespeare",
+        "accept": [
+          "shakespeare",
+          "william shakespeare"
+        ]
+      },
+      {
+        "id": "columbus",
+        "name": "Columbus",
+        "accept": [
+          "columbus",
+          "christopher columbus"
+        ]
+      },
+      {
+        "id": "cleopatra",
+        "name": "Cleopatra",
+        "accept": [
+          "cleopatra"
+        ]
+      },
+      {
+        "id": "caesar",
+        "name": "Julius Caesar",
+        "accept": [
+          "caesar",
+          "julius caesar"
+        ]
+      },
+      {
+        "id": "napoleon",
+        "name": "Napoleon",
+        "accept": [
+          "napoleon"
+        ]
+      },
+      {
+        "id": "batman",
+        "name": "Batman",
+        "accept": [
+          "batman"
+        ]
+      },
+      {
+        "id": "superman",
+        "name": "Superman",
+        "accept": [
+          "superman"
+        ]
+      },
+      {
+        "id": "spiderman",
+        "name": "Spider-Man",
+        "accept": [
+          "spiderman",
+          "spider man"
+        ]
+      },
+      {
+        "id": "ironman",
+        "name": "Iron Man",
+        "accept": [
+          "ironman",
+          "iron man",
+          "tony stark"
+        ]
+      },
+      {
+        "id": "wonderwoman",
+        "name": "Wonder Woman",
+        "accept": [
+          "wonder woman",
+          "wonderwoman"
+        ]
+      },
+      {
+        "id": "harry",
+        "name": "Harry Potter",
+        "accept": [
+          "harry potter",
+          "harry"
+        ]
+      },
+      {
+        "id": "hermione",
+        "name": "Hermione",
+        "accept": [
+          "hermione",
+          "hermione granger"
+        ]
+      },
+      {
+        "id": "vader",
+        "name": "Darth Vader",
+        "accept": [
+          "darth vader",
+          "vader"
+        ]
+      },
+      {
+        "id": "yoda",
+        "name": "Yoda",
+        "accept": [
+          "yoda",
+          "master yoda"
+        ]
+      },
+      {
+        "id": "sherlock",
+        "name": "Sherlock Holmes",
+        "accept": [
+          "sherlock holmes",
+          "sherlock",
+          "holmes"
+        ]
+      },
+      {
+        "id": "barbie",
+        "name": "Barbie",
+        "accept": [
+          "barbie"
+        ]
+      },
+      {
+        "id": "wednesday",
+        "name": "Wednesday Addams",
+        "accept": [
+          "wednesday",
+          "wednesday addams"
+        ]
+      },
+      {
+        "id": "sparrow",
+        "name": "Jack Sparrow",
+        "accept": [
+          "jack sparrow",
+          "captain jack sparrow",
+          "sparrow"
+        ]
+      },
+      {
+        "id": "mario",
+        "name": "Mario",
+        "accept": [
+          "mario",
+          "super mario"
+        ]
+      },
+      {
+        "id": "luigi",
+        "name": "Luigi",
+        "accept": [
+          "luigi"
+        ]
+      },
+      {
+        "id": "sonic",
+        "name": "Sonic",
+        "accept": [
+          "sonic",
+          "sonic the hedgehog"
+        ]
+      },
+      {
+        "id": "pikachu",
+        "name": "Pikachu",
+        "accept": [
+          "pikachu"
+        ]
+      },
+      {
+        "id": "goku",
+        "name": "Goku",
+        "accept": [
+          "goku",
+          "son goku"
+        ]
+      },
+      {
+        "id": "shrek",
+        "name": "Shrek",
+        "accept": [
+          "shrek"
+        ]
+      },
+      {
+        "id": "elsa",
+        "name": "Elsa",
+        "accept": [
+          "elsa"
+        ]
+      },
+      {
+        "id": "simba",
+        "name": "Simba",
+        "accept": [
+          "simba"
+        ]
+      },
+      {
+        "id": "sponge",
+        "name": "SpongeBob",
+        "accept": [
+          "spongebob",
+          "sponge bob"
+        ]
+      },
+      {
+        "id": "mickey",
+        "name": "Mickey Mouse",
+        "accept": [
+          "mickey mouse",
+          "mickey"
+        ]
+      },
+      {
+        "id": "woody",
+        "name": "Woody",
+        "accept": [
+          "woody",
+          "sheriff woody"
+        ]
+      },
+      {
+        "id": "buzz",
+        "name": "Buzz Lightyear",
+        "accept": [
+          "buzz lightyear",
+          "buzz"
+        ]
+      },
+      {
+        "id": "minion",
+        "name": "Minion",
+        "accept": [
+          "minion",
+          "a minion",
+          "minions"
+        ]
+      },
+      {
+        "id": "stitch",
+        "name": "Stitch",
+        "accept": [
+          "stitch"
+        ]
+      },
+      {
+        "id": "scooby",
+        "name": "Scooby-Doo",
+        "accept": [
+          "scooby",
+          "scooby doo",
+          "scoobydoo"
+        ]
+      },
+      {
+        "id": "gru",
+        "name": "Gru",
+        "accept": [
+          "gru",
+          "felonius gru"
+        ]
+      },
+      {
+        "id": "aladdin",
+        "name": "Aladdin",
+        "accept": [
+          "aladdin"
+        ]
+      },
+      {
+        "id": "cinderella",
+        "name": "Cinderella",
+        "accept": [
+          "cinderella"
+        ]
+      },
+      {
+        "id": "pinocchio",
+        "name": "Pinocchio",
+        "accept": [
+          "pinocchio"
+        ]
+      },
+      {
+        "id": "dracula",
+        "name": "Dracula",
+        "accept": [
+          "dracula",
+          "count dracula"
+        ]
+      }
+    ]
+  }
+}
