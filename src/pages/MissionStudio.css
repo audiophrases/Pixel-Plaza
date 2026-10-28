@@ -355,7 +355,7 @@
     .mission-studio-page *, .mission-studio-page *::before, .mission-studio-page *::after { scroll-behavior: auto !important; transition: none !important; }
 }
 /* Explain the lesson before exposing its authoring pieces. */
-.mission-play-guide { background: #fff; border: 1px solid #cbded1; border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; }
+.mission-play-guide { background: #fff; border: 1px solid #cbded1; border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; scroll-margin-top: 100px; }
 .mission-play-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
 .mission-play-heading h2 { color: #264b3d; font-size: 1.5rem; line-height: 1.3; margin-bottom: .6rem; }
 .mission-play-heading p:not(.mission-eyebrow) { color: #52685a; font-size: .9rem; line-height: 1.7; max-width: 750px; }
