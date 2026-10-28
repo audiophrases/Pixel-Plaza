@@ -55,7 +55,13 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
         if (tasks.length) add(taskKey(tasks[0].id), { kind: 'task', eyebrow: 'NEW TASK', title: tasks.length === 1 ? 'Your next task is ready' : `${tasks.length} new tasks are ready`, sections: tasks.flatMap(taskInstructions), next: 'Read your clues and talk to classmates. Submit your answers in the Journal.' }, tasks.slice(1).map(o => taskKey(o.id)));
     }
     if (quest.status !== 'campaign_complete') {
-        const available = (quest.board ?? []).filter(o => o.state === 'available' && !seen.has(key('offer', run, o.id)));
+        // Free for side quests: choose one. Asked again each time the student is free after finishing one.
+        if (quest.sideQuests?.state === 'choose') {
+            const open = (quest.board ?? []).filter(o => o.sideQuest && o.state === 'available');
+            add(key('choose', run, (quest.board ?? []).filter(o => o.sideQuest && o.state === 'done').length), { kind: 'board', eyebrow: 'YOUR MAIN WORK IS DONE', title: 'Choose a side quest',
+                sections: open.slice(0, 5).map(o => ({ label: 'Side quest', text: o.text })), next: `Press OK, then accept one in Journal → Quest board${open.length > 5 ? ` (${open.length} to choose from)` : ''}. You do one side quest at a time.` });
+        }
+        const available = (quest.board ?? []).filter(o => o.state === 'available' && !o.sideQuest && !seen.has(key('offer', run, o.id)));
         if (available.length) add(key('offer', run, available[0].id), { kind: 'board', eyebrow: 'OPTIONAL SIDE QUESTS', title: available.length === 1 ? 'A side quest is available' : `${available.length} side quests are available`,
             sections: available.map(o => ({ label: o.activity ? 'Partner activity' : 'Optional activity', text: o.text })),
             next: 'These are optional. Press OK, then open Journal → Quest board and choose Accept quest if you want to join. OK does not accept a quest.' }, available.slice(1).map(o => key('offer', run, o.id)));

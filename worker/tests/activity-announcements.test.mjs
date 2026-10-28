@@ -60,6 +60,26 @@ test('side quests are offered separately from accepting, waiting quests stay qui
     acknowledge(seen, finale[0]); assert.deepEqual(activityAnnouncements(q, null, seen), []);
 });
 
+test('a student free for side quests is asked to choose one, again after each one finished; side quests are not offered twice', () => {
+    const q = quest(), seen = new Set();
+    acknowledge(seen, activityAnnouncements(q, null, seen)[0]);
+    q.sideQuests = { state: 'locked', reason: 'Side quests open when you finish your main questions.', waiting: 2 };
+    assert.deepEqual(activityAnnouncements(q, null, seen), [], 'locked side quests stay quiet');
+    q.board.push({ id: 'riddle', text: 'Riddle: what has keys?', kind: 'text', activity: null, state: 'available', reason: null, partner: null, sideQuest: true },
+        { id: 'chat', text: 'Chat: ask about hobbies.', kind: 'report', activity: null, state: 'available', reason: null, partner: null, sideQuest: true });
+    q.sideQuests = { state: 'choose', reason: null, waiting: 2 };
+    const choose = activityAnnouncements(q, null, seen);
+    assert.equal(choose.length, 1, 'one prompt, not an offer as well');
+    assert.equal(choose[0].title, 'Choose a side quest'); assert.equal(choose[0].sections.length, 2);
+    acknowledge(seen, choose[0]);
+    assert.deepEqual(activityAnnouncements(q, null, seen), []);
+    q.board[0].state = 'active'; q.board.pop(); q.sideQuests = { state: 'active', reason: null, waiting: 1 };
+    acknowledge(seen, activityAnnouncements(q, null, seen)[0]);
+    q.board[0].state = 'done'; q.board.push({ id: 'chat', text: 'Chat: ask about hobbies.', kind: 'report', activity: null, state: 'available', reason: null, partner: null, sideQuest: true });
+    q.sideQuests = { state: 'choose', reason: null, waiting: 1 };
+    assert.equal(activityAnnouncements(q, null, seen)[0].title, 'Choose a side quest', 'asked again once free');
+});
+
 test('warm-up instructions precede chapters; progress, completion and new rounds have distinct acknowledgements', () => {
     const w = warmup(), q = quest(), seen = new Set();
     let pending = activityAnnouncements(q, w, seen);

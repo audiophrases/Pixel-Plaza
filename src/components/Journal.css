@@ -94,6 +94,8 @@
 .journal-right { color: #237804; font-weight: 700; }
 .journal-wrong { color: #a8071a; font-weight: 700; }
 .journal-ending { border-left-color: #52c41a; background: #f6ffed; font-weight: 700; }
+.journal-choosing { box-shadow: 0 0 0 3px #faad14; }
+.journal-choose { background: #fffbe6; border: 1px solid #ffd666; border-radius: 6px; padding: .6rem; }
 .journal-board { border-left-color: #389e8b; background: #effaf6; }.journal-board-card { border-top: 1px solid #bfddd2; margin-top: .8rem; padding-top: .8rem; }.journal-partner { line-height: 1.6; }.journal-partner button { display: block; margin-top: .4rem; }
 .journal-investigation { border: 1px solid #a7c1c4; border-radius: 8px; padding: .7rem; margin: .6rem 0; background: #edf7f6; }
 .journal-investigation label, .journal-evidence-form { display: grid; gap: .4rem; margin: .5rem 0; }

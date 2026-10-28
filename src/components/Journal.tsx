@@ -10,17 +10,18 @@ type Props = {
   feedback: { objective: string; correct: boolean; wait: boolean } | null;
   onAnswer: (objective: string, text: string) => void;
   onAccept?: (objective: string, changePartner?: boolean) => void;
+  onLeave?: (objective: string) => void;
   onTurn?: (turn: InvestigationTurn) => void;
 };
 
 const SOURCE: Record<string, string> = { job: 'Your clue', reward: 'New clue', news: 'News' };
 
 // One question with its own answer box, so typing in one never lands in another.
-function Question({ objective, feedback, onAnswer, closed = false, quest, onTurn }: { objective: QuestView['objectives'][number]; feedback: Props['feedback']; onAnswer: Props['onAnswer']; closed?: boolean; quest: QuestView; onTurn: Props['onTurn'] }) {
+function Question({ objective, feedback, onAnswer, closed = false, quest, onTurn, heading }: { objective: QuestView['objectives'][number]; feedback: Props['feedback']; onAnswer: Props['onAnswer']; closed?: boolean; quest: QuestView; onTurn: Props['onTurn']; heading?: string }) {
   const [typed, setTyped] = useState('');
   const report = objective.kind === 'report';
   return <section className={`journal-block journal-question${objective.optional ? ' journal-bonus' : ''}`}>
-    <h3>{objective.optional ? 'Bonus question' : 'Question'}</h3>
+    <h3>{heading ?? (objective.optional ? 'Bonus question' : 'Question')}</h3>
     <p className="journal-ask">{objective.text}</p>
     {objective.done ? <p className="journal-right">{report ? 'Sent to your teacher.' : 'Correct.'}</p> : closed ? <p>Your teacher ended this campaign.</p> : <>
       {objective.conversation && <Investigation objective={objective.id} conversation={objective.conversation} interviews={quest.interviews ?? []} clues={quest.clues} onTurn={onTurn} />}
@@ -44,11 +45,15 @@ function Question({ objective, feedback, onAnswer, closed = false, quest, onTurn
 
 // The student's side of the campaign, in short labelled blocks: the task, who you are, what
 // you know, and the questions. It shows only what the server sent this student.
-export default function Journal({ quest, feedback, onAnswer, onAccept, onTurn }: Props) {
+export default function Journal({ quest, feedback, onAnswer, onAccept, onLeave, onTurn }: Props) {
   const [open, setOpen] = useState(() => window.innerHeight >= 700); // shut at first on a short screen, where it would cover the map
   const [fresh, setFresh] = useState(false); // something changed while the journal was shut
   const [recapSeen, setRecapSeen] = useState(false);
   const seen = useRef('');
+  const choosing = quest.sideQuests?.state === 'choose';
+  // Free for a side quest: the journal opens at the choice.
+  const [wasChoosing, setWasChoosing] = useState(choosing);
+  if (choosing !== wasChoosing) { setWasChoosing(choosing); if (choosing) { setOpen(true); setFresh(false); } }
 
   useEffect(() => {
     const now = JSON.stringify([quest.status, quest.chapter.index, quest.clues.length, quest.objectives, quest.board, quest.interviews]);
@@ -58,6 +63,8 @@ export default function Journal({ quest, feedback, onAnswer, onAccept, onTurn }:
 
   const main = quest.objectives.filter(item => !item.optional);
   const bonus = quest.objectives.filter(item => item.optional);
+  const side = quest.sideQuests;
+  const otherBoard = (quest.board ?? []).some(item => !item.sideQuest);
 
   return <aside className="journal glass-panel">
     <button type="button" className="journal-toggle" onClick={() => { setOpen(value => !value); setFresh(false); }}>
@@ -121,14 +128,19 @@ export default function Journal({ quest, feedback, onAnswer, onAccept, onTurn }:
       </section>}
 
       {bonus.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} closed={quest.status === 'campaign_complete'} quest={quest} onTurn={onTurn} />)}
-      {(quest.status !== 'campaign_complete' || !!quest.board?.length) && <section className="journal-block journal-board"><h3>Quest board</h3><p>Optional activities you can choose here in your Journal. Each quest is yours to do once.</p>
-        {!quest.board?.length && <p className="journal-board-card">No optional quests are available right now. Your teacher can add activities. You can continue any tasks above while you wait.</p>}
+      {(quest.status !== 'campaign_complete' || !!quest.board?.length) && <section className={`journal-block journal-board${choosing ? ' journal-choosing' : ''}`}><h3>Quest board</h3>
+        <p>Side quests open when you finish your main questions. Do one at a time; each is yours to do once.</p>
+        {side?.state === 'locked' && <p className="journal-board-card">{side.reason}{side.waiting ? ` ${side.waiting === 1 ? 'One side quest is' : `${side.waiting} side quests are`} waiting for you.` : ''}</p>}
+        {choosing && <p className="journal-board-card journal-choose"><strong>Choose a side quest.</strong> You finished your main work. Accept one quest below.</p>}
+        {side?.state === 'empty' && !otherBoard && <p className="journal-board-card">{side.reason} You can help classmates while you wait.</p>}
+        {!quest.board?.length && !side && <p className="journal-board-card">No optional quests are available right now. Your teacher can add activities. You can continue any tasks above while you wait.</p>}
         {(quest.board ?? []).map(item => <article key={item.id} className="journal-board-card">
           {item.state === 'active' || item.state === 'done' ? <>
             {item.partner && <p className="journal-partner">Your partner: <strong>{item.partner.name}</strong>{!item.partner.online && ' · away from the plaza'}
               {!item.partner.online && item.state === 'active' && quest.status !== 'campaign_complete' && <button className="journal-choice" onClick={() => onAccept?.(item.id, true)}>Find another partner</button>}</p>}
             {item.activity && <p>Exchange evidence with your partner, then write what you learned. Your teacher will read the report.</p>}
-            <Question objective={{ id: item.id, text: item.text, kind: item.kind, optional: true, done: item.state === 'done', conversation: item.conversation }} feedback={feedback} onAnswer={onAnswer} closed={quest.status === 'campaign_complete'} quest={quest} onTurn={onTurn} />
+            <Question objective={{ id: item.id, text: item.text, kind: item.kind, optional: true, done: item.state === 'done', conversation: item.conversation }} feedback={feedback} onAnswer={onAnswer} closed={quest.status === 'campaign_complete'} quest={quest} onTurn={onTurn} heading={item.sideQuest ? 'Side quest' : undefined} />
+            {item.sideQuest && item.state === 'active' && quest.status !== 'campaign_complete' && <button type="button" className="journal-dismiss" onClick={() => onLeave?.(item.id)}>Leave this quest and choose another</button>}
           </> : <><p className="journal-ask">{item.text}</p>{item.activity && <p>{item.activity === 'interview' ? 'Interview a classmate' : 'Exchange information with a classmate'}</p>}
             {item.reason && <p>{item.reason}</p>}<button className="journal-choice" disabled={item.state !== 'available'} onClick={() => onAccept?.(item.id)}>Accept quest</button></>}
         </article>)}

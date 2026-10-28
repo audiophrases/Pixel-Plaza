@@ -777,7 +777,7 @@ test('Live missions: reviewed additions preserve progress, enforce conflicts and
     }
 });
 
-test('Side quest library: teachers add generic and story quests to Castanyada and to Plaza Free Play', { timeout: 120000 }, async () => {
+test('Side quest library: quests added to Castanyada and Plaza Free Play open after the main work, one at a time', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-library-'));
     const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); const sockets = [];
     try {
@@ -804,39 +804,75 @@ test('Side quest library: teachers add generic and story quests to Castanyada an
         assert.equal((await live('library-preview', { gameId: target.game.id, targetVersion: target.version + 1, targetEpoch: target.epoch, chapterId: target.chapter.id, questIds: [riddle.id] })).status, 409);
         const reviewed = await review([riddle.id, report.id, story.id]); assert.equal(reviewed.status, 200, JSON.stringify(reviewed.body));
         assert.deepEqual(reviewed.body.preview.quests.map(q => q.id), [riddle.id, report.id, story.id]);
-        assert.equal(reviewed.body.preview.quests[0].eligibleNow, 2);
+        assert.equal(reviewed.body.preview.quests[0].eligibleNow, 0, 'nobody has finished the main questions yet');
         const released = await live('live-release', { previewId: reviewed.body.preview.id }); assert.equal(released.status, 200, JSON.stringify(released.body));
         target = released.body.target;
         assert.deepEqual(target.additions.map(a => a.id), [riddle.id, report.id, story.id]);
         assert.equal((await live(`live-inspect?id=${riddle.id}`)).body.inspection.sourceId, SIDE_QUEST_SOURCE);
         assert.equal((await review([riddle.id])).status, 400, 'a library quest joins a game once');
 
-        const view = (await alex.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === riddle.id), 'library quests on the board')).quest;
-        assert.equal(view.board.find(q => q.id === riddle.id).text, `${riddle.title}: ${riddle.text}`);
-        assert.equal(JSON.stringify(view).includes('"accept"'), false, 'answers stay on the server');
+        // In a story, side quests wait for the main questions, out of sight.
+        const locked = (await alex.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'locked' && m.quest.sideQuests.waiting === 3, 'side quests waiting')).quest;
+        assert.match(locked.sideQuests.reason, /main questions/);
+        assert.ok(!locked.board?.some(q => q.id === riddle.id));
         alex.send({ t: 'quest-accept', objective: riddle.id });
-        await alex.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === riddle.id && q.state === 'active'), 'accepted');
-        alex.send({ t: 'answer', objective: riddle.id, text: `It is ${riddle.accept[0]}` });
-        assert.equal((await alex.next(m => m.t === 'answered' && m.objective === riddle.id)).correct, true);
-        alex.send({ t: 'quest-accept', objective: report.id });
-        await alex.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === report.id && q.state === 'active'), 'accepted report');
-        await new Promise(resolve => setTimeout(resolve, 3100)); // a wrong answer earlier would make the next one wait
-        alex.send({ t: 'answer', objective: report.id, text: 'I asked two classmates and they told me their ideas.' });
-        assert.equal((await alex.next(m => m.t === 'answered' && m.objective === report.id)).correct, true);
+        assert.match((await alex.next(m => m.t === 'notice' && /Side quests open/.test(m.text), 'refused')).text, /main questions/);
+        let sideStatus = (await teacher('status')).body.campaign.sideQuests;
+        assert.deepEqual([sideStatus.free, sideStatus.doing, sideStatus.busy, sideStatus.quests], [[], [], 2, 3]);
 
-        // Between chapters, or any day: Plaza Free Play has no mystery, only a check-in and the library.
+        // Between chapters, or any day: Plaza Free Play has no mystery, only a check-in and side quests.
         await teacher('game', { name: 'Free play', randomNames: false });
         PIN = (await teacher('status')).body.pin;
-        const chris = await enter(base, 'signed-c', null); sockets.push(chris);
+        const chris = await enter(base, 'signed-c', null); const roger = await enter(base, 'roger-1', null); sockets.push(chris, roger);
         assert.ok((await teacher('status')).body.campaigns.some(c => c.id === 'plaza-free-play'));
         await teacher('campaign', { op: 'start', campaign: 'plaza-free-play' });
         const free = (await chris.next(m => m.t === 'quest' && m.quest, 'free play journal')).quest;
         assert.equal(free.chapter.title, 'Free play: session 1'); assert.equal(free.objectives[0].kind, 'report');
+        assert.deepEqual(free.sideQuests, { state: 'locked', reason: 'Side quests open when you finish your main questions.', waiting: 0 }, 'the check-in is the main work');
         let freeTarget = (await live('live')).body.target;
         assert.equal((await review([story.id], freeTarget)).status, 400, 'story quests stay with their story');
-        const freeReview = await review([riddle.id], freeTarget); assert.equal(freeReview.status, 200, JSON.stringify(freeReview.body));
+        const freeReview = await review([riddle.id, report.id], freeTarget); assert.equal(freeReview.status, 200, JSON.stringify(freeReview.body));
         assert.equal((await live('live-release', { previewId: freeReview.body.preview.id })).status, 200);
-        await chris.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === riddle.id && q.state === 'available'), 'free play board');
+        await chris.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'locked' && m.quest.sideQuests.waiting === 2, 'waiting for the check-in');
+
+        // The check-in done, Chris chooses one side quest; the other waits out of sight until it is finished or left.
+        const checkIn = 'Hello, I am ready to play today.';
+        chris.send({ t: 'answer', objective: free.objectives[0].id, text: checkIn });
+        assert.equal((await chris.next(m => m.t === 'answered' && m.objective === free.objectives[0].id)).correct, true);
+        let view = (await chris.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'choose', 'choose a side quest')).quest;
+        assert.deepEqual(view.board.filter(q => q.sideQuest).map(q => [q.id, q.state]), [[riddle.id, 'available'], [report.id, 'available']]);
+        assert.equal(view.board.find(q => q.id === riddle.id).text, `${riddle.title}: ${riddle.text}`);
+        assert.equal(JSON.stringify(view).includes('"accept"'), false, 'answers stay on the server');
+        chris.send({ t: 'quest-accept', objective: riddle.id });
+        view = (await chris.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'active', 'doing one')).quest;
+        assert.deepEqual(view.board.filter(q => q.sideQuest).map(q => [q.id, q.state]), [[riddle.id, 'active']]);
+        chris.send({ t: 'quest-accept', objective: report.id });
+        assert.match((await chris.next(m => m.t === 'notice' && /side quest first/.test(m.text), 'one at a time')).text, /leave it/);
+        sideStatus = (await teacher('status')).body.campaign.sideQuests;
+        assert.deepEqual(sideStatus.doing.map(item => [item.name, item.quest]), [['Chris', riddle.title]]); assert.equal(sideStatus.busy, 1, 'Roger has not checked in');
+        chris.send({ t: 'quest-leave', objective: riddle.id });
+        await chris.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'choose' && m.quest.sideQuests.waiting === 2, 'back to the choice');
+        chris.send({ t: 'quest-accept', objective: report.id });
+        await chris.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === report.id && q.state === 'active'), 'accepted report');
+        chris.send({ t: 'answer', objective: report.id, text: 'I asked two classmates and they told me their ideas.' });
+        assert.equal((await chris.next(m => m.t === 'answered' && m.objective === report.id)).correct, true);
+        await chris.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'choose' && m.quest.sideQuests.waiting === 1, 'free again');
+        chris.send({ t: 'quest-accept', objective: riddle.id });
+        await chris.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === riddle.id && q.state === 'active'), 'accepted riddle');
+        chris.send({ t: 'answer', objective: riddle.id, text: `It is ${riddle.accept[0]}` });
+        assert.equal((await chris.next(m => m.t === 'answered' && m.objective === riddle.id)).correct, true);
+        view = (await chris.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'empty' && m.quest.board?.every(q => q.state === 'done'), 'all done')).quest;
+        assert.match(view.sideQuests.reason, /teacher will add/);
+
+        // A warm-up comes first too: while Roger has a warm-up task, his side quests wait.
+        roger.send({ t: 'answer', objective: free.objectives[0].id, text: checkIn });
+        await roger.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'choose', 'Roger is free');
+        assert.equal((await teacher('warmup', { op: 'start' })).status, 200);
+        await roger.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'locked' && /warm-up/.test(m.quest.sideQuests.reason), 'warm-up first');
+        assert.ok(!roger.state.quest.board.some(q => q.sideQuest && q.state === 'available'), 'out of sight during the warm-up');
+        roger.inbox.length = 0; // only what comes after the warm-up ends
+        await teacher('warmup', { op: 'end' });
+        await roger.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'choose', 'free after the warm-up');
         await teacher('campaign', { op: 'next' });
         freeTarget = (await live('live')).body.target;
         assert.equal(freeTarget.chapter.id, 'free-play-2'); assert.deepEqual(freeTarget.additions, [], 'each session starts with a fresh board');

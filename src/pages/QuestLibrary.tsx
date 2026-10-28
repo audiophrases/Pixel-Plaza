@@ -286,7 +286,7 @@ export default function QuestLibrary() {
                 <details className="ql-help"><summary>How it works</summary>
                     <p><strong>Story quests</strong> use one chapter of a story mission and can be added while that chapter runs. <strong>Generic quests</strong> work in any game, also in a free-play mission between chapters.</p>
                     <p>Levels: {LEVELS.map(l => `${l.id} ${l.name}: ${l.description}`).join(' ')}</p>
-                    <p>Students accept a quest on their quest board, do it and type their answer. Typed answers are checked by the game; written reports count once a student writes a real attempt, and you read them in Teacher controls.</p>
+                    <p>Students see the side quests once they finish their main questions (and their warm-up task), then choose and do one at a time on their quest board. Typed answers are checked by the game; written reports count once a student writes a real attempt, and you read them in Teacher controls.</p>
                     <p>Every quest is yours to change: <strong>Edit</strong> it, <strong>Duplicate</strong> it to make a variant, or <strong>Delete</strong> it (it goes to Trash). <strong>Export</strong> saves quests as a file; <strong>Import file</strong> adds the quests in a file and updates those with the same ID.</p>
                 </details>
             </aside>}

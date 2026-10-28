@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { boardWait, isUnlocked } from '../../shared/campaign.ts';
+import { boardWait, isUnlocked, sideQuestWait } from '../../shared/campaign.ts';
 import { castanyada, castanyadaSideQuests } from './fixtures/season-1.mjs';
 import { missionEnvelope, missionJson, parseMission, validateMission } from '../../shared/missionSchema.ts';
 import { importMission } from '../../shared/missionImport.ts';
@@ -45,6 +45,15 @@ test('board availability enforces audience, main-story work, teacher release and
     assert.match(boardWait(quest, chapter, 'baker', done, false, 3), /teacher/);
     assert.match(boardWait(quest, chapter, 'baker', done, true, 2), /more classmates/);
     assert.equal(boardWait(quest, chapter, 'baker', done, true, 3), null);
+});
+
+test('side quests wait until the main questions and the warm-up are done', () => {
+    const chapter = castanyadaSideQuests.chapters[0];
+    const main = chapter.objectives.filter(o => !o.optional).map(o => o.id);
+    assert.match(sideQuestWait(chapter, main.slice(1), false), /main questions/);
+    assert.match(sideQuestWait(chapter, main, true), /warm-up/);
+    assert.equal(sideQuestWait(chapter, main, false), null);
+    assert.equal(sideQuestWait({ ...chapter, objectives: chapter.objectives.filter(o => o.optional) }, [], false), null, 'a chapter with no main questions is free at once');
 });
 
 test('append remaps all/any graph links without changing the existing campaign', () => {

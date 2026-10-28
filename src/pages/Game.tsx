@@ -694,6 +694,7 @@ export default function Game() {
             sendRecorded(plaza, { ...turn, attemptId }, attemptId);
           }}
           onAccept={(objective, changePartner) => connection?.send({ t: 'quest-accept', objective, changePartner })}
+          onLeave={objective => connection?.send({ t: 'quest-leave', objective })}
           onAnswer={(objective, text) => {
             const plaza = plazaRef.current;
             if (!plaza) return;

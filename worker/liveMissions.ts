@@ -2,10 +2,11 @@ import { prerequisiteIds, type Campaign, type Objective } from '../shared/campai
 import { liveMissionCandidate } from '../shared/missionLive.ts';
 import type { LiveMissionInspection, LiveMissionPreview, LiveMissionTarget } from '../shared/missionTypes.ts';
 import type { MissionIssue } from '../shared/missionSchema.ts';
+import { SIDE_QUEST_SOURCE } from '../shared/sideQuests.ts';
 
 export type LiveMissionResult = { target: LiveMissionTarget | null; preview?: LiveMissionPreview; inspection?: LiveMissionInspection; released?: string[]; withdrawn?: string } | { error: string; status: number; errors?: MissionIssue[] };
 export const LIVE_PER_CHAPTER = 40;
-type LiveRow = { objective_id: string; chapter_id: string; content: string; withdrawn: number };
+type LiveRow = { objective_id: string; chapter_id: string; content: string; source_id: string; withdrawn: number };
 export type StoredPreview = { preview_id: string; game_id: string; revision_id: string; chapter_id: string; source_id: string; source_version: number; base_version: number; content: string; expires: number };
 
 export class LiveMissions {
@@ -24,7 +25,7 @@ export class LiveMissions {
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaigns')").toArray().some(c => c.name === 'live_epoch')) this.sql.exec('ALTER TABLE campaigns ADD COLUMN live_epoch TEXT');
         for (const row of this.sql.exec<{ game_id: string }>('SELECT game_id FROM campaigns WHERE live_epoch IS NULL').toArray()) this.sql.exec('UPDATE campaigns SET live_epoch = ? WHERE game_id = ?', crypto.randomUUID(), row.game_id);
     }
-    rows(game: string): LiveRow[] { return this.sql.exec<LiveRow>('SELECT objective_id, chapter_id, content, withdrawn FROM mission_live_quests WHERE game_id = ? ORDER BY created, rowid', game).toArray(); } // released together: in the order the teacher chose
+    rows(game: string): LiveRow[] { return this.sql.exec<LiveRow>('SELECT objective_id, chapter_id, content, source_id, withdrawn FROM mission_live_quests WHERE game_id = ? ORDER BY created, rowid', game).toArray(); } // released together: in the order the teacher chose
     inspect(game: string, id: string): LiveMissionInspection | null {
         const row = this.sql.exec<{ content: string; source_id: string; source_version: number; created: number; withdrawn: number }>('SELECT content, source_id, source_version, created, withdrawn FROM mission_live_quests WHERE game_id = ? AND objective_id = ?', game, id).toArray()[0];
         return row ? { id, definition: JSON.parse(row.content), sourceId: row.source_id, sourceVersion: row.source_version, created: row.created, withdrawn: !!row.withdrawn } : null;
@@ -35,6 +36,11 @@ export class LiveMissions {
         const campaign = structuredClone(base);
         for (const row of rows) campaign.chapters.find(c => c.id === row.chapter_id)?.objectives.push(JSON.parse(row.content));
         return campaign;
+    }
+    // The quests added to this game from the side quest library: they follow the side quest rules (shared/campaign.ts,
+    // sideQuestWait), which the quests themselves do not carry.
+    sideQuestIds(game: string): Set<string> {
+        return new Set(this.rows(game).filter(row => row.source_id === SIDE_QUEST_SOURCE && !row.withdrawn).map(row => row.objective_id));
     }
     additions(game: string, chapterId: string): LiveMissionTarget['additions'] {
         return this.rows(game).filter(row => row.chapter_id === chapterId).map(row => ({ id: row.objective_id, text: (JSON.parse(row.content) as Objective).text, withdrawn: !!row.withdrawn,

@@ -31,7 +31,15 @@ Every quest card shows its kind (**Story** in orange, **Generic** in blue), its 
 
 1. In Teacher controls, open the game and start a campaign. Between chapters, or on any day without a story, start **Plaza Free Play: Side Quests**.
 2. In the library, select up to ten quests (or press **Pick 5 at random from these**) and choose **Review and add to the game**. The review shows how many students could accept each quest right now.
-3. Choose **Release to students**. The quests appear on every student's quest board at once; progress in the story is not touched.
+3. Choose **Release to students**. The quests join the game's quest board; progress in the story is not touched. The review counts the students who could accept each quest right now.
+
+## How students play them
+
+- **After the main work.** A student sees the side quests once they have finished the chapter's main questions (in Plaza Free Play, the check-in) and, while a warm-up runs, their warm-up task. Until then the Journal says what is left and how many side quests are waiting.
+- **Choose one.** When a student is free, a *Choose a side quest* message appears and the Journal opens at the quest board. They accept one quest.
+- **One at a time.** While a student does a side quest, the others are out of sight. **Leave this quest and choose another** in the Journal gives it up and brings the choice back. After finishing one, they choose the next.
+- **Teacher controls** shows, under *Side quests*, who is free to choose, who is doing which quest, and how many students are still on their main work. It warns when students are free and the chapter has no side quests.
+- Pair, group and mingle quests still need 2, 3 or 4 students online; each student does and answers their own.
 
 The server builds each quest from its own copy of the library, checks that it fits the chapter, and adds it once per game. A chapter can receive up to 40 live additions. In Plaza Free Play, **Start the next chapter** opens a new session with an empty board. Unstarted quests can be withdrawn from Mission Studio.
 

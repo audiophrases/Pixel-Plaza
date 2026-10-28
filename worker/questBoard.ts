@@ -1,7 +1,9 @@
-import { boardWait, mainFinished, type BoardQuestView, type Chapter, type Objective, type QuestView } from '../shared/campaign.ts';
+import { boardWait, mainFinished, sideQuestWait, type BoardQuestView, type Chapter, type Objective, type QuestView, type SideQuestsView } from '../shared/campaign.ts';
 
 export type BoardPlayer = { student_key: string; role_id: string; done: string[] };
-export type BoardContext = { game: string; chapterIndex: number; chapter: Chapter; status: QuestView['status']; player: BoardPlayer; players: BoardPlayer[]; online: Set<string>; names: Map<string, string> };
+// `sideQuests`: the board quests that came from the side quest library. `warmupLeft`: this student still has a warm-up task.
+export type BoardContext = { game: string; chapterIndex: number; chapter: Chapter; status: QuestView['status']; player: BoardPlayer; players: BoardPlayer[]; online: Set<string>; names: Map<string, string>;
+    sideQuests: ReadonlySet<string>; warmupLeft: boolean };
 type Assignment = { objective: string; student_key: string; partner_key: string | null; accepted: number };
 
 export class QuestBoard {
@@ -25,8 +27,19 @@ export class QuestBoard {
             && (!objective.board?.differentRole || p.role_id !== ctx.player.role_id)
             && (!objective.board?.afterMain || mainFinished(ctx.chapter, p.done)));
     }
+    // The side quest this student is doing: accepted and not finished. A student does one at a time.
+    activeSideQuest(ctx: BoardContext): Objective | undefined {
+        const accepted = new Set(this.sql.exec<{ objective: string }>('SELECT objective FROM quest_assignments WHERE game_id = ? AND chapter = ? AND student_key = ?', ctx.game, ctx.chapterIndex, ctx.player.student_key).toArray().map(row => row.objective));
+        return ctx.chapter.objectives.find(o => ctx.sideQuests.has(o.id) && accepted.has(o.id) && !ctx.player.done.includes(o.id));
+    }
     wait(ctx: BoardContext, objective: Objective): string | null {
         if (ctx.status === 'campaign_complete') return 'The campaign has ended.';
+        if (ctx.sideQuests.has(objective.id)) {
+            const free = sideQuestWait(ctx.chapter, ctx.player.done, ctx.warmupLeft);
+            if (free) return free;
+            const active = this.activeSideQuest(ctx);
+            if (active && active.id !== objective.id) return 'Finish your side quest first, or leave it to choose another.';
+        }
         const reason = boardWait(objective, ctx.chapter, ctx.player.role_id, ctx.player.done, this.released(ctx.game, objective.id), ctx.online.size);
         if (reason) return reason;
         if (objective.activity && !this.partners(ctx, objective).length) return objective.board?.differentRole
@@ -52,20 +65,42 @@ export class QuestBoard {
             ON CONFLICT (game_id, objective, student_key) DO UPDATE SET partner_key = excluded.partner_key`, ctx.game, ctx.chapterIndex, objective.id, ctx.player.student_key, partner, Date.now());
         return null;
     }
+    // A student can leave the side quest they are doing, to choose another.
+    leave(ctx: BoardContext, objective: Objective): string | null {
+        if (!ctx.sideQuests.has(objective.id)) return 'Only side quests can be left.';
+        if (ctx.player.done.includes(objective.id)) return 'You have already finished this quest.';
+        this.sql.exec('DELETE FROM quest_assignments WHERE game_id = ? AND objective = ? AND student_key = ?', ctx.game, objective.id, ctx.player.student_key);
+        return null;
+    }
     view(ctx: BoardContext): BoardQuestView[] {
+        // Side quests the student cannot take yet stay out of sight: the main work comes first, then one at a time.
+        const busy = !!sideQuestWait(ctx.chapter, ctx.player.done, ctx.warmupLeft) || !!this.activeSideQuest(ctx);
         return ctx.chapter.objectives.filter(o => o.board && (!o.board.roles?.length || o.board.roles.includes(ctx.player.role_id))).flatMap(o => {
             const assignment = this.assignment(ctx.game, o.id, ctx.player.student_key);
             if (o.board?.teacherReleased && !this.released(ctx.game, o.id) && !assignment) return [];
             const done = ctx.player.done.includes(o.id);
+            const sideQuest = ctx.sideQuests.has(o.id);
+            if (sideQuest && busy && !assignment && !done) return [];
             const reason = !assignment && !done ? this.wait(ctx, o) : null;
             return [{ id: o.id, text: o.text, kind: o.kind === 'report' ? 'report' as const : o.answerRole ? 'name' as const : 'text' as const, activity: o.activity ?? null,
                 state: done ? 'done' as const : assignment ? 'active' as const : reason ? 'waiting' as const : 'available' as const, reason,
-                partner: assignment?.partner_key ? { name: ctx.names.get(assignment.partner_key) ?? 'Classmate', online: ctx.online.has(assignment.partner_key) } : null }];
+                partner: assignment?.partner_key ? { name: ctx.names.get(assignment.partner_key) ?? 'Classmate', online: ctx.online.has(assignment.partner_key) } : null,
+                ...(sideQuest ? { sideQuest: true } : {}) }];
         });
     }
-    summary(game: string, chapter: Chapter): { id: string; text: string; released: boolean; teacherReleased: boolean; accepted: number; completed: number }[] {
+    // Where the student stands with the side quests of this chapter.
+    sideQuestsView(ctx: BoardContext): SideQuestsView {
+        const left = ctx.chapter.objectives.filter(o => ctx.sideQuests.has(o.id) && (!o.board?.roles?.length || o.board.roles.includes(ctx.player.role_id)) && !ctx.player.done.includes(o.id));
+        const reason = sideQuestWait(ctx.chapter, ctx.player.done, ctx.warmupLeft);
+        if (reason) return { state: 'locked', reason, waiting: left.length };
+        if (this.activeSideQuest(ctx)) return { state: 'active', reason: null, waiting: left.length - 1 };
+        const open = left.filter(o => !this.wait(ctx, o)).length;
+        return open ? { state: 'choose', reason: null, waiting: open }
+            : { state: 'empty', reason: left.length ? 'The side quests here wait for more classmates or for a later question.' : 'Your teacher will add side quests soon.', waiting: 0 };
+    }
+    summary(game: string, chapter: Chapter, sideQuests: ReadonlySet<string>): { id: string; text: string; released: boolean; teacherReleased: boolean; sideQuest: boolean; accepted: number; completed: number }[] {
         const players = this.sql.exec<{ done: string }>('SELECT done FROM campaign_players WHERE game_id = ?', game).toArray().map(p => JSON.parse(p.done) as string[]);
-        return chapter.objectives.filter(o => o.board).map(o => ({ id: o.id, text: o.text, released: this.released(game, o.id), teacherReleased: !!o.board?.teacherReleased,
+        return chapter.objectives.filter(o => o.board).map(o => ({ id: o.id, text: o.text, released: this.released(game, o.id), teacherReleased: !!o.board?.teacherReleased, sideQuest: sideQuests.has(o.id),
             accepted: this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM quest_assignments WHERE game_id = ? AND objective = ?', game, o.id).one().n,
             completed: players.filter(done => done.includes(o.id)).length }));
     }

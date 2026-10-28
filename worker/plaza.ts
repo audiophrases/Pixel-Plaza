@@ -10,7 +10,7 @@ import { BlockedWords } from './blockedWords.ts';
 import { blockedIn, repeated, taskWordSet, type BlockedStatus, type Term } from '../shared/blockedWords.ts';
 import { isGlitch } from '../shared/tidy.ts';
 import { PARTICIPATION, Participation, participationDecision } from './participation.ts';
-import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
+import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, pickRole, rewardClues, sideQuestWait, teamProgress, type QuestView } from '../shared/campaign.ts';
 import { MissionRepository, readCopy, type MissionResult } from './missions.ts';
 import { SideQuestStore, readQuestCopy, type SideQuestResult } from './sideQuestStore.ts';
 import { QuestBoard, type BoardContext } from './questBoard.ts';
@@ -118,6 +118,9 @@ export type CampaignStatus = {
     reports: { studentKey: string; objective: string; text: string; partner?: string; starred: boolean }[]; // what students wrote for the written questions
     interviews: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
     board?: ReturnType<QuestBoard['summary']>;
+    // Side quests: students free to choose one (main work done), those doing one, how many are still on their main
+    // work, and how many side quests this chapter has.
+    sideQuests?: { free: { studentKey: string; name: string }[]; doing: { studentKey: string; name: string; quest: string }[]; busy: number; quests: number };
 };
 
 export type TeacherStatus = {
@@ -412,13 +415,15 @@ export class PlazaRoom extends DurableObject<Env> {
             objectiveIds: campaign.chapters.flatMap(c => c.objectives.map(o => o.id)), additions: this.liveMissions.additions(game.id, chapter.id)
         } : null;
     }
-    // How many students could accept each previewed quest right now: a snapshot for the teacher.
-    private countEligible(target: LiveMissionTarget, campaign: Campaign, quests: Objective[], preview: { quests: { eligibleNow: number }[] }): void {
+    // How many students could accept each previewed quest right now: a snapshot for the teacher. Side quests also need
+    // the student's main work done and no other side quest under way.
+    private countEligible(target: LiveMissionTarget, campaign: Campaign, quests: Objective[], preview: { quests: { eligibleNow: number }[] }, sideQuests = false): void {
         const chapter = { ...campaign.chapters[target.chapter.index], objectives: [...campaign.chapters[target.chapter.index].objectives, ...quests] };
         const players = this.campaignPlayers(target.game.id);
         for (const [i, objective] of quests.entries()) preview.quests[i].eligibleNow = players.filter(p => {
             const ctx = this.boardContext(target.game.id, p.student_key)!;
             return ctx.online.has(p.student_key) && !boardWait(objective, chapter, p.role_id, p.done, true, ctx.online.size)
+                && (!sideQuests || (!sideQuestWait(chapter, p.done, ctx.warmupLeft) && !this.questBoard.activeSideQuest(ctx)))
                 && (!objective.activity || this.questBoard.partners({ ...ctx, chapter }, objective).length > 0);
         }).length;
     }
@@ -463,7 +468,7 @@ export class PlazaRoom extends DurableObject<Env> {
             source.chapters[target.chapter.index].objectives.push(...chosen.map(quest => questObjective(quest!)).filter(quest => !campaign.chapters[target.chapter.index].objectives.some(o => o.id === quest.id)));
             const result = this.liveMissions.preview(token, target, campaign, source, libraryVersion(library), ids);
             if ('error' in result) return result;
-            this.countEligible(target, campaign, result.quests, result.preview);
+            this.countEligible(target, campaign, result.quests, result.preview, true);
             return { target, preview: result.preview };
         }
         if (op === 'live-release') {
@@ -524,6 +529,8 @@ export class PlazaRoom extends DurableObject<Env> {
                 this.sql.exec('UPDATE warmups SET active = 0 WHERE game_id = ?', game);
                 this.sendWarmupToAll(game);
             }
+            // Side quests wait while a student has a warm-up task.
+            if (this.campaignRow(game)) this.sendQuestToAll(game);
         }
         if (action.kind === 'deleteGame') {
             if (action.confirm !== true) return { error: 'Confirm to delete the game.', status: 400 };
@@ -1090,6 +1097,8 @@ export class PlazaRoom extends DurableObject<Env> {
             this.answer(ws, seat, data.objective, data.text, typeof data.attemptId === 'string' ? data.attemptId : undefined);
         } else if (data?.t === 'quest-accept' && typeof data.objective === 'string') {
             this.claimQuest(ws, seat, data.objective, data.changePartner === true);
+        } else if (data?.t === 'quest-leave' && typeof data.objective === 'string') {
+            this.leaveQuest(ws, seat, data.objective);
         } else if (data?.t === 'interview-ask' || data?.t === 'interview-reply') {
             await this.interviewTurn(ws, seat, data);
         } else if (data?.t === 'reroll' || data?.t === 'keep') {
@@ -1237,6 +1246,7 @@ export class PlazaRoom extends DurableObject<Env> {
             present.filter(item => !chapter.thieves || !thieves.includes(item.student_key)).map(item => item.role_id),
             present.map(item => item.role_id));
         const showResolution = row.status === 'campaign_complete' || mainFinished(chapter, player.done);
+        const board = this.boardContext(game, studentKey);
         return {
             runId: `${game}:${row.live_epoch ?? row.revision_id ?? campaign.id}`,
             campaign: { id: campaign.id, title: campaign.title },
@@ -1264,10 +1274,11 @@ export class PlazaRoom extends DurableObject<Env> {
                         kind: objective.kind === 'report' ? 'report' as const : objective.answerRole ? 'name' as const : 'text' as const,
                         ...(objective.conversation ? { conversation: this.conversation(game, studentKey, objective) } : {}) };
                 }),
-            ...(chapter.objectives.some(o => o.board) ? { board: this.questBoard.view(this.boardContext(game, studentKey)!).map(item => {
+            ...(board && chapter.objectives.some(o => o.board) ? { board: this.questBoard.view(board).map(item => {
                 const objective = chapter.objectives.find(o => o.id === item.id)!;
                 return { ...item, ...(objective.activity || objective.conversation ? { conversation: this.conversation(game, studentKey, objective) } : {}) };
             }) } : {}),
+            ...(board && row.status !== 'campaign_complete' ? { sideQuests: this.questBoard.sideQuestsView(board) } : {}),
             interviews: this.interviews.view(game, row.chapter, studentKey, names, new Map(chapter.objectives.map(o => [o.id, o.text]))),
             team: teamProgress(chapter, this.campaignPlayers(game).map(item => ({ done: item.done, thief: thieves.includes(item.student_key) }))),
             // "Previously", for a student coming back to a story that is already under way
@@ -1288,7 +1299,22 @@ export class PlazaRoom extends DurableObject<Env> {
         const players = this.campaignPlayers(game); const player = players.find(p => p.student_key === studentKey);
         const kept = this.isRandom(game) ? new Set(this.sql.exec<{ student_key: string }>('SELECT student_key FROM aliases WHERE game_id = ? AND kept = 1', game).toArray().map(r => r.student_key)) : null;
         return row && chapter && player ? { game, chapterIndex: row.chapter, chapter, status: row.status, player, players,
-            online: new Set(this.seats().filter(s => s.game === game && (!kept || kept.has(s.studentKey))).map(s => s.studentKey)), names: this.rosterNames(game) } : null;
+            online: new Set(this.seats().filter(s => s.game === game && (!kept || kept.has(s.studentKey))).map(s => s.studentKey)), names: this.rosterNames(game),
+            sideQuests: this.liveMissions.sideQuestIds(game), warmupLeft: this.warmupLeft(game, studentKey) } : null;
+    }
+    // True while the student still has a warm-up task: side quests wait until it is done.
+    private warmupLeft(game: string, studentKey: string): boolean {
+        if (!this.warmupActive(game)) return false;
+        const me = this.sql.exec<{ step: number; targets: string }>('SELECT step, targets FROM warmup_players WHERE game_id = ? AND student_key = ?', game, studentKey).toArray()[0];
+        return !!me && me.step < (JSON.parse(me.targets) as string[]).length;
+    }
+    private leaveQuest(ws: WebSocket, seat: Seat, objective: string): void {
+        if (!this.isOpen()) return;
+        const ctx = this.boardContext(seat.game, seat.studentKey); const quest = ctx?.chapter.objectives.find(o => o.id === objective);
+        if (!ctx || ctx.status === 'campaign_complete' || !quest) return;
+        const error = this.questBoard.leave(ctx, quest);
+        if (error) ws.send(JSON.stringify({ t: 'notice', level: 'warning', text: error }));
+        for (const socket of this.ctx.getWebSockets(seat.studentKey)) this.sendQuest(socket, seat.game, seat.studentKey);
     }
     private claimQuest(ws: WebSocket, seat: Seat, objective: string, changePartner: boolean): void {
         if (!this.isOpen()) return;
@@ -1451,7 +1477,7 @@ export class PlazaRoom extends DurableObject<Env> {
             JSON.stringify([...player.done, objective.id]), seat.game, seat.studentKey);
         reply(true);
         this.award(seat.studentKey, `answer:${seat.game}:${objective.id}`, objective.board ? XP.quest : XP.answer,
-            objective.board ? 'Partner quest completed' : 'Right answer in your journal', seat.game);
+            !objective.board ? 'Right answer in your journal' : this.liveMissions.sideQuestIds(seat.game).has(objective.id) ? 'Side quest completed' : 'Partner quest completed', seat.game);
         const chapter = campaign.chapters[row.chapter];
         if (row.status === 'active' && chapterDone(chapter, this.campaignPlayers(seat.game))) {
             this.sql.exec("UPDATE campaigns SET status = 'chapter_complete' WHERE game_id = ?", seat.game);
@@ -1509,6 +1535,22 @@ export class PlazaRoom extends DurableObject<Env> {
         return null;
     }
 
+    // Every student's place with the side quests, for the teacher. One board context, reused for each student.
+    private sideQuestStatus(game: string, anyStudent: string, names: Map<string, string>): CampaignStatus['sideQuests'] {
+        const base = this.boardContext(game, anyStudent);
+        if (!base) return undefined;
+        const status: NonNullable<CampaignStatus['sideQuests']> = { free: [], doing: [], busy: 0, quests: base.chapter.objectives.filter(o => base.sideQuests.has(o.id)).length };
+        for (const player of base.players) {
+            const ctx = { ...base, player, warmupLeft: this.warmupLeft(game, player.student_key) };
+            const name = names.get(player.student_key) ?? 'Student';
+            const active = this.questBoard.activeSideQuest(ctx);
+            if (active) status.doing.push({ studentKey: player.student_key, name, quest: this.sideQuests.quests().find(quest => quest.id === active.id)?.title ?? active.text });
+            else if (sideQuestWait(ctx.chapter, player.done, ctx.warmupLeft)) status.busy++;
+            else status.free.push({ studentKey: player.student_key, name });
+        }
+        return status;
+    }
+
     private campaignStatus(game: string | null): CampaignStatus | null {
         const row = this.campaignRow(game);
         const campaign = row && this.gameCampaign(game);
@@ -1530,7 +1572,8 @@ export class PlazaRoom extends DurableObject<Env> {
                 role: campaign.roles.find(role => role.id === item.role_id)?.name ?? item.role_id, clues: item.clues.length, done: item.done,
                 thief: thieves.includes(item.student_key)
             })),
-            ...(campaign.chapters[row.chapter].objectives.some(o => o.board) ? { board: this.questBoard.summary(game, campaign.chapters[row.chapter]) } : {}),
+            ...(campaign.chapters[row.chapter].objectives.some(o => o.board) ? { board: this.questBoard.summary(game, campaign.chapters[row.chapter], this.liveMissions.sideQuestIds(game)) } : {}),
+            ...(row.status !== 'campaign_complete' && players.length ? { sideQuests: this.sideQuestStatus(game, players[0].student_key, names) } : {}),
             interviews: this.interviews.rows(game, row.chapter).map(i => ({
                 id: i.id, objective: i.objective, task: campaign.chapters[row.chapter].objectives.find(o => o.id === i.objective)?.text ?? i.objective,
                 incoming: false, studentKey: i.investigator, witnessKey: i.witness, questionId: i.question_id, answerId: i.answer_id, name: names.get(i.witness) ?? 'Classmate',
@@ -1863,6 +1906,8 @@ export class PlazaRoom extends DurableObject<Env> {
         if (me.step + 1 >= me.targets.length) {
             const started = this.sql.exec<{ started: number }>('SELECT started FROM warmups WHERE game_id = ?', seat.game).toArray()[0]?.started ?? 0;
             this.award(seat.studentKey, `warmup:${seat.game}:${started}`, XP.warmup, 'Warm-up finished', seat.game);
+            // Done with the warm-up: side quests may open for this student.
+            for (const socket of this.ctx.getWebSockets(seat.studentKey)) this.sendQuest(socket, seat.game, seat.studentKey);
         }
         // Everyone's progress bar moves
         this.sendWarmupToAll(seat.game);
