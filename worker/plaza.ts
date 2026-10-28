@@ -30,7 +30,8 @@ import { fillThiefClue, lookOf, thiefCount } from '../shared/thief.ts';
 import { assignLateJoiner, assignWarmup, factById, type WarmupView } from '../shared/warmup.ts';
 import { IDENTITY_NAMES, assignIdentities, assignLateIdentity, assignLatePair, assignPairs, identityById, isWarmupKind, type WarmupKind } from '../shared/warmupKinds.ts';
 import { randomName } from '../shared/randomNames.ts';
-import { DEFAULT_THEME, getTheme, getWorld, hasTheme } from '../shared/themeCatalog.ts';
+import { ThemeStore } from './themeStore.ts';
+import type { Theme } from '../shared/theme.ts';
 import { XP, checkStyle, emotesFor, levelOf, readStyle, type Style } from '../shared/levels.ts';
 import { REPORT_LINES_PER_STUDENT, type ClassReportData, type ReportLine } from '../shared/classReport.ts';
 import { type Avatar, chatProblem, clampPosition, defaultAvatar, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
@@ -130,6 +131,7 @@ export type TeacherStatus = {
     open: boolean;
     game: { id: string; name: string; randomNames: boolean; vision: number; themeId: string } | null; // the open game, or the one last played
     realNames: Record<string, string>; // every student's real name, since the plaza may show made-up ones
+    themesVersion: number; // changes when a map is added, changed or deleted: the page then fetches /api/themes again
     games: GameSummary[];                      // every saved game, most recently played first
     pin: string | null; // the open game's PIN, which students type to join
     // `target` is the classmate a whisper is for; `everyone` marks a message for the whole plaza.
@@ -151,6 +153,7 @@ export class PlazaRoom extends DurableObject<Env> {
     private sql: SqlStorage;
     private missions: MissionRepository;
     private sideQuests: SideQuestStore;
+    private themes: ThemeStore;
     private missionSync: Promise<MissionSync> = Promise.resolve({ state: 'home', waiting: 0, keptBoth: [] });
     private missionSyncAt = 0;
     private questBoard: QuestBoard;
@@ -258,6 +261,8 @@ export class PlazaRoom extends DurableObject<Env> {
         this.missions.initialize();
         this.sideQuests = new SideQuestStore(this.sql);
         this.sideQuests.initialize();
+        this.themes = new ThemeStore(this.sql);
+        this.themes.initialize();
         this.groups = new SideQuestGroups(this.sql);
         this.groups.initialize();
         this.questBoard = new QuestBoard(this.sql, this.groups, this.env.GROUP_START_MS !== undefined ? Number(this.env.GROUP_START_MS) : undefined);
@@ -337,6 +342,11 @@ export class PlazaRoom extends DurableObject<Env> {
 
     laptopUrl(): string | null {
         return this.laptop()?.url ?? null;
+    }
+
+    // The maps a game can be played on, for any page: pages fetch them instead of carrying their own copies.
+    themeList(): { themes: Theme[]; version: number } {
+        return { themes: this.themes.list(), version: this.themes.version() };
     }
 
     // On the laptop, this keeps the online plaza's lease.
@@ -572,7 +582,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (action.kind === 'newGame') {
             const name = action.name.trim().replace(/\s+/g, ' ').slice(0, 40);
             if (!name) return { error: 'Give the game a name.', status: 400 };
-            if (action.themeId !== undefined && !hasTheme(action.themeId)) return { error: 'Choose an available map.', status: 400 };
+            if (action.themeId !== undefined && !this.themes.has(action.themeId)) return { error: 'Choose an available map.', status: 400 };
             this.setOpen(true, this.createGame(name, action.randomNames !== false, action.vision ?? DEFAULT_VISION, action.themeId));
         }
         if (action.kind === 'remove' && !this.remove(action.id)) return { error: 'Only a message that posted can be taken down.', status: 400 };
@@ -591,8 +601,8 @@ export class PlazaRoom extends DurableObject<Env> {
                 const seat = socket?.deserializeAttachment() as Seat | undefined;
                 if (!socket || !seat) return { error: 'Select a student who is online.', status: 400 };
                 if (action.power === 'teleport') {
-                    const position = clampPosition(action.x, action.y, getTheme(seat.themeId).world);
-                    if (!position || getWorld(seat.themeId).isBlocked(position.x, position.y)) return { error: 'Choose an open path on the map.', status: 400 };
+                    const position = clampPosition(action.x, action.y, this.themes.theme(seat.themeId).world);
+                    if (!position || this.themes.world(seat.themeId).isBlocked(position.x, position.y)) return { error: 'Choose an open path on the map.', status: 400 };
                     seat.x = position.x; seat.y = position.y; seat.movedAt = Date.now();
                     this.discover(seat);
                     this.moves.delete(seat.id);
@@ -654,6 +664,7 @@ export class PlazaRoom extends DurableObject<Env> {
             campaigns: this.missions.published(),
             open: this.isOpen(),
             game: current && { id: current.id, name: current.name, randomNames: this.isRandom(current.id), vision: this.vision(current.id), themeId: current.themeId },
+            themesVersion: this.themes.version(),
             realNames: Object.fromEntries(this.sql.exec<{ student_key: string; full: string }>(
                 'SELECT student_key, COALESCE(full_name, name) AS full FROM students').toArray().map(row => [row.student_key, row.full])),
             games: this.sql.exec<{ id: string; name: string; pin: string; lastOpened: number; randomNames: number; themeId: string }>(
@@ -675,7 +686,7 @@ export class PlazaRoom extends DurableObject<Env> {
                     current.id, Date.now() - PLAYS_SHOWN_MS, PLAYS_SHOWN).toArray() : []
             },
             online: this.seats().filter(seat => seat.game === current?.id).map(seat => ({
-                studentKey: seat.studentKey, name: seat.name, x: seat.x, y: seat.y, zone: getWorld(seat.themeId).zoneAt(seat.x, seat.y), level: levelOf(this.xpOf(seat.studentKey)).level, look: seat.avatar
+                studentKey: seat.studentKey, name: seat.name, x: seat.x, y: seat.y, zone: this.themes.world(seat.themeId).zoneAt(seat.x, seat.y), level: levelOf(this.xpOf(seat.studentKey)).level, look: seat.avatar
             }))
         };
     }
@@ -1008,8 +1019,8 @@ export class PlazaRoom extends DurableObject<Env> {
         }
 
         const game = this.activeGame() ?? '';
-        const themeId = this.game(game)?.themeId ?? DEFAULT_THEME;
-        const { isBlocked, SPAWN } = getWorld(themeId);
+        const themeId = this.game(game)?.themeId ?? this.themes.defaultId();
+        const { isBlocked, SPAWN } = this.themes.world(themeId);
         // Joining may make two students share a first name: everyone already here is told their new name.
         this.sql.exec('INSERT OR IGNORE INTO game_students (game_id, student_key) VALUES (?, ?)', game, row.student_key);
         this.assistance.joinSession(this.helpSession(), game, row.student_key);
@@ -1035,7 +1046,8 @@ export class PlazaRoom extends DurableObject<Env> {
         this.ctx.acceptWebSocket(server, [seat.studentKey]);
         server.serializeAttachment(seat);
         // Every classmate in this game, here or not, so naming one who is absent is still English.
-        server.send(JSON.stringify({ t: 'welcome', id: seat.id, gameId: seat.game, themeId, players: [...others, seat].map(publicSeat),
+        // The map itself comes with the welcome: the page has none of its own.
+        server.send(JSON.stringify({ t: 'welcome', id: seat.id, gameId: seat.game, themeId, theme: this.themes.theme(themeId), players: [...others, seat].map(publicSeat),
             names: [...this.rosterNames(seat.game).values()] }));
         this.broadcast({ t: 'join', player: publicSeat(seat) }, server);
         if (replaced.length === 0) this.systemChat(`${seat.name} has joined the Plaza.`, server);
@@ -1088,11 +1100,11 @@ export class PlazaRoom extends DurableObject<Env> {
         } else if (data?.t === 'help-request') {
             await this.requestHelp(seat, data);
         } else if (data?.t === 'move') {
-            const position = clampPosition(data.x, data.y, getTheme(seat.themeId).world);
+            const position = clampPosition(data.x, data.y, this.themes.theme(seat.themeId).world);
             if (!position) return;
             // A move through a wall, or further than anyone can walk, puts the student back where they were.
             const now = Date.now();
-            if (Math.max(seat.frozenUntil ?? 0, seat.downUntil ?? 0) > now || this.env.MOVEMENT_CHECK !== '0' && !getWorld(seat.themeId).legalMove(seat.x, seat.y, position.x, position.y, now - (seat.movedAt ?? now))) {
+            if (Math.max(seat.frozenUntil ?? 0, seat.downUntil ?? 0) > now || this.env.MOVEMENT_CHECK !== '0' && !this.themes.world(seat.themeId).legalMove(seat.x, seat.y, position.x, position.y, now - (seat.movedAt ?? now))) {
                 try { ws.send(JSON.stringify({ t: 'snap', x: seat.x, y: seat.y })); } catch { /* closing */ }
                 return;
             }
@@ -1445,7 +1457,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // Stepping into a named place can reveal a clue, once.
     private discover(seat: Seat): void {
-        const zone = getWorld(seat.themeId).zoneAt(seat.x, seat.y);
+        const zone = this.themes.world(seat.themeId).zoneAt(seat.x, seat.y);
         if (zone === (seat.zone ?? null)) return;
         seat.zone = zone;
         const row = zone ? this.campaignRow(seat.game) : null;
@@ -1738,7 +1750,7 @@ export class PlazaRoom extends DurableObject<Env> {
         }
     }
 
-    private createGame(name: string, randomNames: boolean, vision: number, themeId = DEFAULT_THEME): string {
+    private createGame(name: string, randomNames: boolean, vision: number, themeId = this.themes.defaultId()): string {
         const id = crypto.randomUUID().slice(0, 8);
         const now = Date.now();
         this.sql.exec('INSERT INTO games (id, name, pin, created, last_opened, random_names, vision, theme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',

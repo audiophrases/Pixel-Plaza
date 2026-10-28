@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PlazaConnection } from '../../src/plaza.ts';
 
+// The server sends the game's map with every welcome; the page has none of its own.
+const theme = { id: 'plaza', name: 'Pixel Plaza', image: '/assets/maps/plaza.webp' };
+
 test('explicit chat attempts survive disconnects and reloads until acknowledged without crossing students or games', async () => {
     // Plain HTTP classroom browsers expose getRandomValues, but not randomUUID.
     const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
@@ -47,7 +50,7 @@ test('explicit chat attempts survive disconnects and reloads until acknowledged 
         const socket = sockets[0];
         socket.open();
         assert.equal(socket.sent.length, 0, 'the server welcome must precede audit messages');
-        socket.receive({ t: 'welcome', id: 'socket-a', gameId: 'game-a', players: [] });
+        socket.receive({ t: 'welcome', id: 'socket-a', gameId: 'game-a', players: [], theme });
         assert.deepEqual(socket.sent.map(message => message.t), ['attempt', 'attempt-outcome']);
         assert.equal(socket.sent[0].text, 'No entenc');
         assert.equal(socket.sent[0].to, 'teacher');
@@ -72,7 +75,7 @@ test('explicit chat attempts survive disconnects and reloads until acknowledged 
         await tick();
         const rejoined = sockets[1];
         rejoined.open();
-        rejoined.receive({ t: 'welcome', id: 'socket-b', gameId: 'game-a', players: [] });
+        rejoined.receive({ t: 'welcome', id: 'socket-b', gameId: 'game-a', players: [], theme });
         assert.equal(rejoined.sent[0].id, retry);
         assert.equal(rejoined.sent[1].id, retry);
         assert.equal(rejoined.sent[2].id, journal);
@@ -85,20 +88,20 @@ test('explicit chat attempts survive disconnects and reloads until acknowledged 
         const otherStudent = connect('123456', 'student-b');
         await tick();
         sockets.at(-1).open();
-        sockets.at(-1).receive({ t: 'welcome', id: 'socket-other-student', gameId: 'game-a', players: [] });
+        sockets.at(-1).receive({ t: 'welcome', id: 'socket-other-student', gameId: 'game-a', players: [], theme });
         assert.equal(sockets.at(-1).sent.length, 0, 'another student never restores this student’s messages');
         otherStudent.close();
         const otherRoom = connect('654321', 'student-a');
         await tick();
         sockets.at(-1).open();
-        sockets.at(-1).receive({ t: 'welcome', id: 'socket-other-room', gameId: 'game-b', players: [] });
+        sockets.at(-1).receive({ t: 'welcome', id: 'socket-other-room', gameId: 'game-b', players: [], theme });
         assert.equal(sockets.at(-1).sent.length, 0, 'another room never receives the saved submissions');
         otherRoom.close();
         plaza = connect('123456', 'student-a', 'rotated-private-credential');
         await tick();
         const restored = sockets.at(-1);
         restored.open();
-        restored.receive({ t: 'welcome', id: 'socket-reloaded', gameId: 'game-b', players: [] });
+        restored.receive({ t: 'welcome', id: 'socket-reloaded', gameId: 'game-b', players: [], theme });
         assert.deepEqual(restored.sent.map(message => [message.t, message.id]), [['attempt', retry], ['attempt-outcome', retry], ['attempt', journal], ['attempt-outcome', journal]], 'reloading restores exact IDs and outcomes that the server has not confirmed');
         assert.equal(restored.sent[2].source, 'answer');
         assert.equal(restored.sent[2].objective, 'where');
@@ -114,7 +117,7 @@ test('explicit chat attempts survive disconnects and reloads until acknowledged 
         await tick();
         const secondTab = sockets.at(-1);
         secondTab.open();
-        secondTab.receive({ t: 'welcome', id: 'socket-second-tab', gameId: 'game-b', players: [] });
+        secondTab.receive({ t: 'welcome', id: 'socket-second-tab', gameId: 'game-b', players: [], theme });
         const secondTabAttempt = secondTabConnection.recordAttempt('Second tab pending');
         restored.receive({ t: 'attempt-recorded', id: firstTab, kind: 'attempt' });
         assert.deepEqual(JSON.parse([...storage.values()][0]).map(message => message.id), [secondTabAttempt], 'acknowledging one tab preserves a newer submission queued by another tab');
@@ -123,6 +126,16 @@ test('explicit chat attempts survive disconnects and reloads until acknowledged 
         restored.receive({ t: 'attempt-recorded', id: secondTabAttempt, kind: 'attempt' });
         assert.equal(storage.size, 0);
         secondTabConnection.close();
+
+        // A welcome without its map (an older server) cannot draw a game: the page says to reload instead.
+        const mapless = connect('123456', 'student-c');
+        await tick();
+        const maplessSocket = sockets.at(-1);
+        maplessSocket.open();
+        maplessSocket.receive({ t: 'welcome', id: 'socket-mapless', gameId: 'game-b', players: [] });
+        assert.deepEqual([mapless.status.state, mapless.theme], ['stopped', null]);
+        assert.match(mapless.status.message, /Reload/);
+        mapless.close();
 
         const hint = plaza.check('He walk home', retry);
         const check = restored.sent.at(-1);

@@ -7,7 +7,7 @@ import { WARMUP_KINDS } from '../../shared/warmupKinds';
 import type { WarmupKind } from '../../shared/warmupKinds';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import './Teacher.css';
-import { getTheme, themes } from '../../shared/themeCatalog';
+import type { Theme } from '../../shared/theme';
 import ThemePicture from '../components/ThemePicture';
 import TeacherMissionGuide from '../components/TeacherMissionGuide';
 import type { InterviewView } from '../../shared/campaign';
@@ -44,7 +44,7 @@ type Status = {
   warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
   incidents?: Incident[];
   blocked?: BlockedStatus;
-  open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number; themeId?: string } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; moderation: boolean; muted: string[]; sound?: LiveSound; online: LiveStudent[];
+  open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number; themeId?: string } | null; realNames: Record<string, string>; themesVersion?: number; games: Game[]; pin: string | null; entries: Entry[]; moderation: boolean; muted: string[]; sound?: LiveSound; online: LiveStudent[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
   support: Support;
 };
@@ -77,9 +77,20 @@ export default function Teacher() {
   const [notice, setNotice] = useState('');
   const [newGameName, setNewGameName] = useState('');
   const [newThemeId, setNewThemeId] = useState('commons-garden');
-  const plazaMap = getTheme(status?.game?.themeId);
-  const placeName = (id: string | null) => plazaMap.zones.find(z => z.id === id)?.name ?? id ?? plazaMap.name;
-  const MAP_SIZE = plazaMap.world;
+  // The maps are data on the server: fetched once, and again whenever one is added, changed or deleted.
+  const [themes, setThemes] = useState<Theme[]>([]);
+  const themesVersion = status?.themesVersion;
+  useEffect(() => {
+    if (themesVersion === undefined) return;
+    let active = true;
+    fetch('/api/themes').then(response => response.json()).then(body => { if (active && Array.isArray(body.themes)) setThemes(body.themes); }).catch(() => { /* the next status tries again */ });
+    return () => { active = false; };
+  }, [themesVersion]);
+  const themeOf = (id?: string | null): Theme | undefined => themes.find(theme => theme.id === id) ?? themes[0];
+  const plazaMap = themeOf(status?.game?.themeId);
+  const placeName = (id: string | null) => plazaMap?.zones.find(z => z.id === id)?.name ?? id ?? plazaMap?.name ?? '';
+  const MAP_SIZE = plazaMap?.world ?? 2048;
+  const newTheme = themeOf(newThemeId);
   const [warmupKind, setWarmupKind] = useState<WarmupKind>('facts');
   const [copyNote, setCopyNote] = useState(''); // shown when the browser would not copy
   const [copied, setCopied] = useState(''); // the PIN whose link was just copied
@@ -448,7 +459,7 @@ export default function Teacher() {
             void action('magic', { power: 'teleport', studentKey: selectedStudent, x: (event.clientX - bounds.left) / bounds.width * MAP_SIZE, y: (event.clientY - bounds.top) / bounds.height * MAP_SIZE });
             setMovingStudent(false);
           }}>
-            <ThemePicture theme={plazaMap} />
+            {plazaMap && <ThemePicture theme={plazaMap} />}
             {status.online.map(student => <button key={student.studentKey} type="button"
               className={`teacher-map-marker${selectedStudent === student.studentKey ? ' selected' : ''}`}
               style={{ left: `${student.x / MAP_SIZE * 100}%`, top: `${student.y / MAP_SIZE * 100}%` }}
@@ -572,18 +583,18 @@ export default function Teacher() {
           <form className="teacher-newgame" onSubmit={event => {
             event.preventDefault();
             if (!newGameName.trim()) return;
-            void action('game', { name: newGameName, randomNames, vision, themeId: newThemeId });
+            void action('game', { name: newGameName, randomNames, vision, ...(newTheme ? { themeId: newTheme.id } : {}) });
             setNewGameName('');
           }}>
             <input aria-label="Name for a new game" placeholder="New game, e.g. 3A Castanyada" maxLength={40}
               value={newGameName} onChange={event => setNewGameName(event.target.value)} />
             <button className="btn btn-primary" disabled={!newGameName.trim()}>New game</button>
             <div className="teacher-map-choice">
-              <label>Map for this game <select aria-label="Map for a new game" value={newThemeId} onChange={event => setNewThemeId(event.target.value)}>
-                {Object.values(themes).map(theme => <option key={theme.id} value={theme.id}>{theme.name}{theme.id === 'plaza' ? ' · Season 1' : ''}</option>)}
+              <label>Map for this game <select aria-label="Map for a new game" value={newTheme?.id ?? ''} onChange={event => setNewThemeId(event.target.value)}>
+                {themes.map(theme => <option key={theme.id} value={theme.id}>{theme.name}{theme.id === 'plaza' ? ' · Season 1' : ''}</option>)}
               </select></label>
-              <ThemePicture theme={getTheme(newThemeId)} />
-              <small>The map stays with this saved game. <Link to={`/studio?theme=${newThemeId}`}>Try it in Studio</Link></small>
+              {newTheme && <ThemePicture theme={newTheme} />}
+              <small>The map stays with this saved game. {newTheme && <Link to={`/studio?theme=${newTheme.id}`}>Try it in Studio</Link>}</small>
             </div>
             <label className="teacher-toggle">
               Vision:
@@ -599,7 +610,7 @@ export default function Teacher() {
           </form>
           {status.games.length > 0 && <ul>
             {status.games.map(game => <li key={game.id}>
-              <span><strong>{game.name}</strong> · PIN {game.pin} · {getTheme(game.themeId).name} · {game.randomNames ? 'random names' : 'real first names'} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
+              <span><strong>{game.name}</strong> · PIN {game.pin} · {themes.find(theme => theme.id === game.themeId)?.name ?? game.themeId} · {game.randomNames ? 'random names' : 'real first names'} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
               <span className="teacher-actions">
                 <button className="btn btn-secondary btn-sm" onClick={() => void copyLink(game.pin)} title={linkFor(game.pin)}>{copied === game.pin ? 'Link copied' : 'Copy join link'}</button>
                 {!game.open && <button className="btn btn-secondary btn-sm" onClick={() => void action('class', { open: true, game: game.id })}>

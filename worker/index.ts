@@ -172,6 +172,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     } else if (post) body = await request.json().catch(() => ({}));
 
     if (path === '/api/health') return json({ ok: true });
+    // The maps: data on the server, like missions. Nothing in them is private.
+    if (path === '/api/themes' && get) return json(await plaza(env).themeList());
 
     if (path === '/api/student/config' && get) {
         // Google sign-in needs HTTPS, which the laptop does not have: students

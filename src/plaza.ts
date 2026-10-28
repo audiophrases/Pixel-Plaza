@@ -4,7 +4,7 @@ import type { AnswerFeedback, QuestView } from '../shared/campaign';
 import type { WarmupView } from '../shared/warmup';
 import type { AttemptSource, StudentSupport } from '../shared/support';
 import type { Style } from '../shared/levels';
-import { DEFAULT_THEME, hasTheme } from '../shared/themeCatalog.ts';
+import type { Theme } from '../shared/theme';
 
 export type PlazaPlayer = AvatarConfig & { id: string; name: string; x: number; y: number; style?: Style; frozenUntil?: number; downUntil?: number };
 // A hint on one chat message, from the server. Never a refusal.
@@ -59,7 +59,8 @@ class Refused extends Error {}
 export class PlazaConnection {
   players = new Map<string, PlazaPlayer>();
   selfId = '';
-  themeId = DEFAULT_THEME;
+  themeId = '';
+  theme: Theme | null = null; // the game's map, sent by the server with the welcome
   vision = 0; // how far this student sees, from the server; 0 shows everyone
   classNames: string[] = []; // every classmate in this game, online or not, for the English word check
   xp = 0; // this student's experience, kept for good
@@ -277,12 +278,13 @@ export class PlazaConnection {
 
   private receive(message: any): void {
     if (message.t === 'welcome') {
-      if (message.themeId !== undefined && !hasTheme(message.themeId)) {
+      if (!message.theme || typeof message.theme !== 'object' || typeof message.theme.image !== 'string') {
         this.stop('This map needs an updated page. Reload Pixel Plaza to join.');
         this.ws?.close();
         return;
       }
-      this.themeId = message.themeId ?? DEFAULT_THEME;
+      this.theme = message.theme as Theme;
+      this.themeId = this.theme.id;
       this.selfId = message.id;
       this.players = new Map((message.players as PlazaPlayer[]).map(player => [player.id, player]));
       if (Array.isArray(message.names)) this.classNames = message.names.filter((name: unknown): name is string => typeof name === 'string');

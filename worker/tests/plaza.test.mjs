@@ -3267,6 +3267,49 @@ test('chat for everyone, who heard it, "is writing", and the lesson\'s chat back
     }
 });
 
+test('maps are data on the server: seeded once, sent with the welcome, and changed without a new version of the app', { timeout: 120000 }, async () => {
+    const { DatabaseSync } = await import('node:sqlite');
+    const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-map-records-'));
+    const pinPlayUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    let plaza = await startPlaza(pinPlayUrl, persistTo); const sockets = [];
+    try {
+        let base = plaza.base;
+        const session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (op, body) => api(base, `/api/teacher/${op}`, { session, body });
+        // A new server starts with the starter maps, as records any page can read.
+        let listed = (await api(base, '/api/themes')).body;
+        assert.deepEqual(listed.themes.map(theme => theme.id), ['plaza', 'commons-garden', 'commons-autumn']);
+        assert.equal((await teacher('status')).body.themesVersion, listed.version);
+        assert.equal((await teacher('game', { name: 'Nowhere', randomNames: false, themeId: 'no-such-map' })).status, 400, 'only a map on the server');
+        PIN = (await teacher('game', { name: 'Autumn class', randomNames: false, themeId: 'commons-autumn' })).body.pin;
+        const alex = await enter(base, 'signed-a', null); sockets.push(alex);
+        assert.deepEqual([alex.welcome.themeId, alex.welcome.theme.id, alex.welcome.theme.name], ['commons-autumn', 'commons-autumn', 'Autumn Commons'], 'the map comes with the welcome');
+        assert.deepEqual(alex.welcome.theme.zones.map(zone => zone.id), listed.themes[2].zones.map(zone => zone.id));
+
+        // Changed in the server's data only, the map is what every page and game gets: no new version of the app.
+        for (const socket of sockets) socket.ws.close(); await new Promise(resolve => setTimeout(resolve, 200)); await plaza.stop();
+        const files = directory => fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);
+        let changed = false;
+        for (const file of files(persistTo).filter(file => file.endsWith('.sqlite'))) {
+            const db = new DatabaseSync(file);
+            try {
+                if (!db.prepare("SELECT name FROM sqlite_master WHERE name = 'themes'").get()) continue;
+                const row = db.prepare("SELECT content FROM themes WHERE theme_id = 'commons-autumn'").get();
+                db.prepare("UPDATE themes SET content = ?, version = version + 1 WHERE theme_id = 'commons-autumn'").run(JSON.stringify({ ...JSON.parse(row.content), name: 'Harvest Commons' }));
+                changed = true;
+            } finally { db.close(); }
+        }
+        assert.ok(changed, 'test found the isolated PlazaRoom database');
+        plaza = await startPlaza(pinPlayUrl, persistTo, {}, { content: false }); base = plaza.base;
+        listed = (await api(base, '/api/themes')).body;
+        assert.deepEqual(listed.themes.map(theme => theme.name), ['Pixel Plaza', 'Garden Commons', 'Harvest Commons'], 'seeded once: a restart keeps the changed record');
+        const back = await enter(base, 'signed-a', null); sockets.push(back);
+        assert.equal(back.welcome.theme.name, 'Harvest Commons');
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('saved games keep their maps, authoritative geometry and positions across switches and restart', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay();
     const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-themes-'));

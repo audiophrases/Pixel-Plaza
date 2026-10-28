@@ -187,6 +187,8 @@ The **quest board is inside each student's Journal**. It lists optional activiti
 
 ## Editing the map (theme studio)
 
+Maps are kept on the server, one record each, like missions. Every game plays on the map the server sends it with the welcome, and Teacher controls reads the list from `/api/themes`; neither carries a copy of its own. A new server starts with the starter maps (*Pixel Plaza*, *Garden Commons*, *Autumn Commons*) as ordinary records. A map installed with `npm run theme` joins on the server's next start, and a map the server already has is never overwritten. Saving, publishing and deleting maps from the studio itself comes next.
+
 Open `/studio` (for example `http://localhost:8787/studio`). It starts with a neutral layout guide for an **external art AI**. Choose a snow, beach, cruise-deck or custom brief, describe the season/campaign, and copy the prompt or download the AI template kit. The starter has five simple obstacles, two hiding areas and broad connected walking space. Every visible feature can change with the setting.
 
 Your chosen AI creates **one complete background**. Use **Import AI background**, then **Adjust an area** to move/resize the small number of collision and hiding areas. Check paths and walk around it, download the theme, then install with `npm run theme -- "theme.json" --picture "background.png"`. Studio prepares the brief, guides and preview; art creation happens outside the app. Original maps and older Commons treatments remain available. See the [external art workflow](docs/seasonal-art.md).

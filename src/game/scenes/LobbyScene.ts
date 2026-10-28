@@ -1,6 +1,5 @@
 import Phaser from 'phaser';
 import { AvatarFigure, FIGURE_BODY, FIGURE_TOP } from '../AvatarFigure';
-import { getTheme } from '../../../shared/themeCatalog';
 import { makeWorld, type Theme } from '../../../shared/theme';
 import type { PlazaConnection, PlazaEvent, PlazaPlayer } from '../../plaza';
 import { NAME_COLOURS } from '../../../shared/levels';
@@ -55,7 +54,7 @@ export default class LobbyScene extends Phaser.Scene {
 
   init(data: { connection: PlazaConnection; onPick?: (id: string) => void }) {
     this.connection = data.connection;
-    this.theme = getTheme(data.connection.themeId);
+    this.theme = data.connection.theme!; // the scene starts once the welcome brought the game's map
     this.onPick = data.onPick;
   }
 
