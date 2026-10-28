@@ -1992,7 +1992,7 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada', 'castanyada-side-quests', 'castanyada-complete', 'castanyada-investigations', 'plaza-free-play']);
         assert.deepEqual(opened.campaigns.find(item => item.id === 'castanyada-investigations'),
             { id: 'castanyada-investigations', title: 'Castanyada: Witness Investigations', revision: opened.campaigns.find(item => item.id === 'castanyada-investigations').revision, chapters: ['The Missing Chestnuts', 'Conflicting Stories', 'The Hotel Cellar', 'The Missing Festival Plan', 'The Haunted Celebration'],
-                mystery: true, partnerQuests: true, witnesses: true });
+                zones: ['hotel', 'park'], mystery: true, partnerQuests: true, witnesses: true });
 
         // No story yet: nothing is sent.
         const early = await enter(base, 'signed-a', null);

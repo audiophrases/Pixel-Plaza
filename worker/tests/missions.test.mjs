@@ -4,6 +4,10 @@ import { castanyada } from './fixtures/season-1.mjs';
 import { missionEnvelope, missionJson, parseMission, validateMission } from '../../shared/missionSchema.ts';
 import { importMission } from '../../shared/missionImport.ts';
 import { buildMissionPrompt } from '../../shared/missionPrompt.ts';
+import { themes } from '../../shared/themeCatalog.ts';
+
+// The places map clues can be in, as the server passes them: here, the starter maps' zones.
+const zones = new Set(Object.values(themes).flatMap(theme => theme.zones.map(zone => zone.id)));
 
 test('campaign export and import preserve every answer, role secret and prerequisite', () => {
     const result = parseMission(missionJson(castanyada));
@@ -30,7 +34,7 @@ test('malformed or unsupported AI output cannot become a published campaign', ()
     ];
     for (const mutate of variants) {
         const data = structuredClone(missionEnvelope(castanyada)); mutate(data);
-        const result = validateMission(data);
+        const result = validateMission(data, 'publish', zones);
         assert.equal(result.campaign, null); assert.ok(result.errors.length);
     }
     assert.equal(parseMission('```json\n{}\n```').campaign, null);
