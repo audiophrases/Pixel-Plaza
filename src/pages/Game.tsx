@@ -157,6 +157,7 @@ export default function Game() {
   const [myStyle, setMyStyle] = useState<Style>(DEFAULT_STYLE);
   const [showRewards, setShowRewards] = useState(false);
   const [connection, setConnection] = useState<PlazaConnection | null>(null);
+  const [mapKey, setMapKey] = useState(0); // a new map from the teacher builds the game view again
   const [status, setStatus] = useState<PlazaStatus>({ state: 'connecting' });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatBox = useRef<HTMLDivElement>(null);
@@ -334,6 +335,7 @@ export default function Game() {
     };
     let joinedGame = '';
     const unsubscribe = plaza.subscribe(event => {
+      if (event.t === 'theme') setMapKey(key => key + 1);
       if (event.t === 'roster' && plaza.gameId !== joinedGame) {
         joinedGame = plaza.gameId;
         setGameId(joinedGame);
@@ -628,7 +630,7 @@ export default function Game() {
   return (
     <div className="game-container">
       {/* Background Phaser Canvas */}
-      {connection && <PhaserGame connection={connection} onPick={onPick} />}
+      {connection && <PhaserGame key={mapKey} connection={connection} onPick={onPick} />}
 
       {/* React UI Overlay */}
       <div className="ui-layer">

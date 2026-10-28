@@ -79,14 +79,15 @@ export default function Teacher() {
   const [newThemeId, setNewThemeId] = useState('commons-garden');
   // The maps are data on the server: fetched once, and again whenever one is added, changed or deleted.
   const [themes, setThemes] = useState<Theme[]>([]);
+  const [retired, setRetired] = useState<Theme[]>([]); // maps in Trash, for the games still on them
   const themesVersion = status?.themesVersion;
   useEffect(() => {
     if (themesVersion === undefined) return;
     let active = true;
-    fetch('/api/themes').then(response => response.json()).then(body => { if (active && Array.isArray(body.themes)) setThemes(body.themes); }).catch(() => { /* the next status tries again */ });
+    fetch('/api/themes').then(response => response.json()).then(body => { if (active && Array.isArray(body.themes)) { setThemes(body.themes); setRetired(Array.isArray(body.trash) ? body.trash : []); } }).catch(() => { /* the next status tries again */ });
     return () => { active = false; };
   }, [themesVersion]);
-  const themeOf = (id?: string | null): Theme | undefined => themes.find(theme => theme.id === id) ?? themes[0];
+  const themeOf = (id?: string | null): Theme | undefined => themes.find(theme => theme.id === id) ?? retired.find(theme => theme.id === id) ?? themes[0];
   const plazaMap = themeOf(status?.game?.themeId);
   const placeName = (id: string | null) => plazaMap?.zones.find(z => z.id === id)?.name ?? id ?? plazaMap?.name ?? '';
   const MAP_SIZE = plazaMap?.world ?? 2048;
@@ -610,7 +611,7 @@ export default function Teacher() {
           </form>
           {status.games.length > 0 && <ul>
             {status.games.map(game => <li key={game.id}>
-              <span><strong>{game.name}</strong> · PIN {game.pin} · {themes.find(theme => theme.id === game.themeId)?.name ?? game.themeId} · {game.randomNames ? 'random names' : 'real first names'} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
+              <span><strong>{game.name}</strong> · PIN {game.pin} · {[...themes, ...retired].find(theme => theme.id === game.themeId)?.name ?? game.themeId} · {game.randomNames ? 'random names' : 'real first names'} · {game.open ? 'open now' : `last played ${new Date(game.lastOpened).toLocaleDateString()}`}</span>
               <span className="teacher-actions">
                 <button className="btn btn-secondary btn-sm" onClick={() => void copyLink(game.pin)} title={linkFor(game.pin)}>{copied === game.pin ? 'Link copied' : 'Copy join link'}</button>
                 {!game.open && <button className="btn btn-secondary btn-sm" onClick={() => void action('class', { open: true, game: game.id })}>

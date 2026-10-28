@@ -19,6 +19,12 @@ const { createRoot } = await import('react-dom/client');
 const { act } = await import('react');
 const { MemoryRouter } = await import('react-router-dom');
 const { default: Studio } = await import('../src/pages/Studio');
+// The maps come from the server; here, the starter maps as /api/themes lists them to a page that is not signed in.
+const { themes } = await import('../shared/themeCatalog');
+g.fetch = async (url: string) => {
+  if (url !== '/api/themes') throw new Error(`unexpected request: ${url}`);
+  return { ok: true, status: 200, json: async () => ({ themes: Object.values(themes), trash: [], version: 1 }) };
+};
 
 const root = createRoot(document.getElementById('root')!);
 await act(async () => { root.render(<MemoryRouter initialEntries={['/studio?theme=plaza']}><Studio /></MemoryRouter>); });

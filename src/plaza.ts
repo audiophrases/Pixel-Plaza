@@ -25,6 +25,7 @@ export type PlazaEvent =
   | { t: 'notice'; level: 'info' | 'warning'; text: string; cid?: string; id?: string } // cid: the attempt this answers; id: the chat message it is about
   | { t: 'result'; cid: string; id?: string }
   | { t: 'snap'; x: number; y: number }                                    // the server put you back: your last move was not possible
+  | { t: 'theme' }                                                         // the game's map changed: draw it again (it is in `theme`)
   | { t: 'warmup'; warmup: WarmupView | null; vocabulary?: string[] }         // your part of the warm-up, or null when it is over
   | { t: 'warmup-answered'; correct: boolean; wait: boolean }
   | { t: 'vision'; radius: number }                                        // how far you see, in map pixels; 0 is everyone
@@ -283,8 +284,11 @@ export class PlazaConnection {
         this.ws?.close();
         return;
       }
+      // Back after a drop, the map may have changed meanwhile: the page draws it again.
+      const changed = !!this.theme && JSON.stringify(this.theme) !== JSON.stringify(message.theme);
       this.theme = message.theme as Theme;
       this.themeId = this.theme.id;
+      if (changed) this.emit({ t: 'theme' });
       this.selfId = message.id;
       this.players = new Map((message.players as PlazaPlayer[]).map(player => [player.id, player]));
       if (Array.isArray(message.names)) this.classNames = message.names.filter((name: unknown): name is string => typeof name === 'string');
@@ -312,6 +316,14 @@ export class PlazaConnection {
     }
     if (message.t === 'checked') {
       this.hints.get(message.id)?.(message.ok ? { ok: true } : { ok: false, corrected: String(message.corrected), why: String(message.why) });
+      return;
+    }
+    // The teacher published a new version of this game's map.
+    if (message.t === 'theme') {
+      if (!message.theme || typeof message.theme !== 'object' || typeof message.theme.image !== 'string') return;
+      this.theme = message.theme as Theme;
+      this.themeId = this.theme.id;
+      this.emit({ t: 'theme' });
       return;
     }
     if (message.t === 'moves') {

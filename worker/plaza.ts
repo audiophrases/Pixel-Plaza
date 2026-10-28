@@ -30,7 +30,8 @@ import { fillThiefClue, lookOf, thiefCount } from '../shared/thief.ts';
 import { assignLateJoiner, assignWarmup, factById, type WarmupView } from '../shared/warmup.ts';
 import { IDENTITY_NAMES, assignIdentities, assignLateIdentity, assignLatePair, assignPairs, identityById, isWarmupKind, type WarmupKind } from '../shared/warmupKinds.ts';
 import { randomName } from '../shared/randomNames.ts';
-import { ThemeStore } from './themeStore.ts';
+import { ThemeStore, type ThemeResult } from './themeStore.ts';
+import { ThemeAssets } from './themeAssets.ts';
 import type { Theme } from '../shared/theme.ts';
 import { XP, checkStyle, emotesFor, levelOf, readStyle, type Style } from '../shared/levels.ts';
 import { REPORT_LINES_PER_STUDENT, type ClassReportData, type ReportLine } from '../shared/classReport.ts';
@@ -154,6 +155,7 @@ export class PlazaRoom extends DurableObject<Env> {
     private missions: MissionRepository;
     private sideQuests: SideQuestStore;
     private themes: ThemeStore;
+    private themeAssets: ThemeAssets;
     private missionSync: Promise<MissionSync> = Promise.resolve({ state: 'home', waiting: 0, keptBoth: [] });
     private missionSyncAt = 0;
     private questBoard: QuestBoard;
@@ -261,8 +263,10 @@ export class PlazaRoom extends DurableObject<Env> {
         this.missions.initialize();
         this.sideQuests = new SideQuestStore(this.sql);
         this.sideQuests.initialize();
-        this.themes = new ThemeStore(this.sql);
+        this.themes = new ThemeStore(this.sql, hash => this.themeAssets.has(hash));
         this.themes.initialize();
+        this.themeAssets = new ThemeAssets(this.sql);
+        this.themeAssets.initialize();
         this.groups = new SideQuestGroups(this.sql);
         this.groups.initialize();
         this.questBoard = new QuestBoard(this.sql, this.groups, this.env.GROUP_START_MS !== undefined ? Number(this.env.GROUP_START_MS) : undefined);
@@ -344,9 +348,44 @@ export class PlazaRoom extends DurableObject<Env> {
         return this.laptop()?.url ?? null;
     }
 
-    // The maps a game can be played on, for any page: pages fetch them instead of carrying their own copies.
-    themeList(): { themes: Theme[]; version: number } {
-        return { themes: this.themes.list(), version: this.themes.version() };
+    // The maps a game can be played on, for any page: pages fetch them instead of carrying their own copies. Maps in
+    // Trash are listed apart, for the games still on them.
+    themeList(): { themes: Theme[]; trash: Theme[]; version: number } {
+        return { themes: this.themes.list(), trash: this.themes.trash(), version: this.themes.version() };
+    }
+
+    // The theme studio: the maps with their drafts, and saving, publishing, discarding, deleting and restoring them.
+    themeStudio(token: string, op: string, body: unknown): ThemeResult {
+        if (!this.teacherSignedIn(token)) return { error: 'Please sign in again.', status: 401 };
+        const result = this.ctx.storage.transactionSync(() => this.themes.execute(op, body));
+        if (!('error' in result) && result.published) this.mapPublished(result.published);
+        return result;
+    }
+    async themeAsset(token: string, bytes: Uint8Array): Promise<{ url: string; hash: string } | { error: string; status: number }> {
+        if (!this.teacherSignedIn(token)) return { error: 'Please sign in again.', status: 401 };
+        return this.themeAssets.put(bytes);
+    }
+    themeAssetFile(hash: string): { type: string; bytes: Uint8Array } | null {
+        return /^[0-9a-f]{64}$/.test(hash) ? this.themeAssets.get(hash) : null;
+    }
+    // A published map is live at once in every game on it: students standing where there is now a wall go back to
+    // the start, and every page draws the new map.
+    private mapPublished(id: string): void {
+        const theme = this.themes.theme(id); const world = this.themes.world(id);
+        for (const ws of this.ctx.getWebSockets()) {
+            const seat = ws.deserializeAttachment() as Seat | null;
+            if (!seat || seat.left || seat.themeId !== id) continue;
+            if (world.isBlocked(seat.x, seat.y)) {
+                const tries = Array.from({ length: 12 }, () => ({ x: world.SPAWN.x + Math.round(Math.random() * 100 - 50), y: world.SPAWN.y + Math.round(Math.random() * 100 - 50) }));
+                const spot = tries.find(point => !world.isBlocked(point.x, point.y)) ?? world.SPAWN;
+                seat.x = spot.x; seat.y = spot.y; seat.movedAt = Date.now();
+                this.moves.delete(seat.id);
+                ws.serializeAttachment(seat);
+                try { ws.send(JSON.stringify({ t: 'snap', x: seat.x, y: seat.y })); } catch { /* closing */ }
+                this.broadcast({ t: 'move', id: seat.id, x: seat.x, y: seat.y });
+            }
+            try { ws.send(JSON.stringify({ t: 'theme', theme })); } catch { /* closing */ }
+        }
     }
 
     // On the laptop, this keeps the online plaza's lease.

@@ -103,10 +103,10 @@ try {
     const wide = await evaluate(`(()=>{const c=document.createElement('canvas');c.width=128;c.height=64;return c.toDataURL().split(',')[1]})()`);
     const invalid = path.join(qa, 'wide.png'); fs.writeFileSync(invalid, Buffer.from(wide, 'base64'));
     const before = await evaluate(`document.querySelector('svg.studio-canvas > image').getAttribute('href')`);
-    await upload('input[accept="image/*"]', invalid);
+    await upload('input[accept="image/png,image/webp,image/jpeg"]', invalid);
     await waitFor(`document.body.textContent.includes('Use a square background')`);
     assert.equal(await evaluate(`document.querySelector('svg.studio-canvas > image').getAttribute('href')`), before);
-    await upload('input[accept="image/*"]', sheet);
+    await upload('input[accept="image/png,image/webp,image/jpeg"]', sheet);
     await waitFor(`document.body.textContent.includes('map coordinates stay at 1024')`);
     assert.equal(await evaluate(`document.querySelector('svg.studio-canvas').getAttribute('viewBox')`), '0 0 1024 1024');
     // The handoff starts with a neutral guide and asks an external AI for one background.
@@ -191,8 +191,10 @@ try {
         }
         assert.deepEqual(missingArt, [], 'all game art loads successfully');
         await send('Page.navigate', { url: `${origin}/teacher?autologin=tester` });
-        await waitFor(`document.querySelector('select[aria-label="Map for a new game"]')`);
-        await evaluate(`document.querySelector('select[aria-label="Map for a new game"]').closest('details').querySelector('summary').click()`);
+        // The Games tab opens by itself only while no game is open; the maps come from the server.
+        await waitFor(`[...document.querySelectorAll('button')].some(b=>/Games/.test(b.textContent))`);
+        await evaluate(`document.querySelector('select[aria-label="Map for a new game"]') || [...document.querySelectorAll('button')].find(b=>/Games/.test(b.textContent)).click()`);
+        await waitFor(`document.querySelector('select[aria-label="Map for a new game"]')?.options.length > 1`);
         await evaluate(`(()=>{const s=document.querySelector('select[aria-label="Map for a new game"]');s.value='plaza';s.dispatchEvent(new Event('change',{bubbles:true}))})()`);
         await waitFor(`document.querySelector('.teacher-map-choice > svg')?.getAttribute('aria-label')==='Pixel Plaza'`);
         await evaluate(`(()=>{const s=document.querySelector('select[aria-label="Map for a new game"]');s.value='commons-garden';s.dispatchEvent(new Event('change',{bubbles:true}))})()`);

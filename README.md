@@ -187,13 +187,23 @@ The **quest board is inside each student's Journal**. It lists optional activiti
 
 ## Editing the map (theme studio)
 
-Maps are kept on the server, one record each, like missions. Every game plays on the map the server sends it with the welcome, and Teacher controls reads the list from `/api/themes`; neither carries a copy of its own. A new server starts with the starter maps (*Pixel Plaza*, *Garden Commons*, *Autumn Commons*) as ordinary records. A map installed with `npm run theme` joins on the server's next start, and a map the server already has is never overwritten. Saving, publishing and deleting maps from the studio itself comes next.
+Maps are kept on the server, one record each, like missions. Every game plays on the map the server sends it with the welcome, and Teacher controls reads the list from `/api/themes`; neither carries a copy of its own. A new server starts with the starter maps (*Pixel Plaza*, *Garden Commons*, *Autumn Commons*) as ordinary records.
+
+Sign in under **On the server** in the studio to work on them:
+
+- **Save draft** keeps your work on the server. Games keep the published map until you choose **Publish to games**. A new map is offered for new games once it is published.
+- Publishing is live. Every game on that map draws the new version at once, and a student standing where there is now a wall goes back to the start.
+- **Discard draft** goes back to the published map. **Duplicate** starts a copy with a new id.
+- **Move to Trash** stops new games from choosing a map; games already on it keep it, and **Restore** brings it back. The last map for new games cannot go to Trash.
+- A picture you open (a background or an art sheet) is uploaded to the plaza database when you save. PNG, WebP or JPEG, up to 8 MB; never SVG.
+
+Signed out, the studio opens the published maps to look at, change and download. `npm run theme` still installs a map file, but it only adds maps the server does not have yet: it joins on the server's next start, and a map the server already has is never overwritten.
 
 Open `/studio` (for example `http://localhost:8787/studio`). It starts with a neutral layout guide for an **external art AI**. Choose a snow, beach, cruise-deck or custom brief, describe the season/campaign, and copy the prompt or download the AI template kit. The starter has five simple obstacles, two hiding areas and broad connected walking space. Every visible feature can change with the setting.
 
-Your chosen AI creates **one complete background**. Use **Import AI background**, then **Adjust an area** to move/resize the small number of collision and hiding areas. Check paths and walk around it, download the theme, then install with `npm run theme -- "theme.json" --picture "background.png"`. Studio prepares the brief, guides and preview; art creation happens outside the app. Original maps and older Commons treatments remain available. See the [external art workflow](docs/seasonal-art.md).
+Your chosen AI creates **one complete background**. Use **Import AI background**, then **Adjust an area** to move/resize the small number of collision and hiding areas. Check paths and walk around it, then save and publish it. Studio prepares the brief, guides and preview; art creation happens outside the app. Original maps and older Commons treatments remain available. See the [external art workflow](docs/seasonal-art.md).
 
-Studio's original tools remain available: draw or move **blocks** (rectangles, ovals or free shapes), **walk-behind areas**, **zones** and the **start**. **Check where students can walk** shows places that are cut off. **Open a picture** replaces the background without changing the logical coordinate size; nonsquare pictures are rejected. **Download the theme file** and `npm run theme -- plaza` still install the latest `plaza.json` from Downloads. Restart the server to play it. `git checkout shared/themes/plaza.json` restores the original geometry.
+Studio's original tools remain available: draw or move **blocks** (rectangles, ovals or free shapes), **walk-behind areas**, **zones** and the **start**. **Check where students can walk** shows places that are cut off. **Open a picture** replaces the background without changing the logical coordinate size; nonsquare pictures are rejected. **Download the theme file** saves the map as a file, and **Open a theme file** brings one back. To change a map the server already has, open it here and publish it; **Discard draft** throws away changes that are not published yet.
 
 ## Names in the plaza
 

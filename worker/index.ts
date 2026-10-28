@@ -4,6 +4,7 @@ import { laptopOrigin, sanitizeAvatar, secretsMatch, teacherPasswordMatches } fr
 import { MISSION_MAX_BYTES } from '../shared/missionSchema.ts';
 import { isEnglishVoice } from '../shared/voices.ts';
 import { synthesize, VOICE_SAMPLE } from './speech.ts';
+import { ASSET_MAX_BYTES } from './themeAssets.ts';
 
 export { PlazaRoom };
 
@@ -146,9 +147,35 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const speech = path === '/api/plaza/speech' || path === '/api/plaza/voice-preview';
     const warmupEditor = path === '/api/teacher/warmup-editor';
     const questStudio = path.startsWith('/api/teacher/side-quests/');
+    const themeStudio = path.startsWith('/api/teacher/themes/');
     // A mission (draft and published version) or side quests from the laptop; missions and side quests from files or
-    // an import on the library page.
-    const content = path === '/api/missions/sync' ? 3_000_000 : path === '/api/content' ? 8_000_000 : questStudio ? 4_000_000 : 0;
+    // an import on the library page; a map from the theme studio.
+    const content = path === '/api/missions/sync' ? 3_000_000 : path === '/api/content' ? 8_000_000 : questStudio ? 4_000_000 : themeStudio ? 300_000 : 0;
+
+    // A map picture from the theme studio: raw bytes, not JSON, bounded before they are buffered.
+    if (path === '/api/teacher/theme-asset' && post) {
+        if (!request.headers.get('x-teacher-session')) return json({ error: 'Please sign in again.' }, 401);
+        const reader = request.body?.getReader();
+        if (!reader) return json({ error: 'Send a picture.' }, 400);
+        let size = 0; const chunks: Uint8Array[] = [];
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            size += value.byteLength;
+            if (size > ASSET_MAX_BYTES) { await reader.cancel(); return json({ error: `Use a picture of up to ${ASSET_MAX_BYTES / 1_000_000} MB.` }, 413); }
+            chunks.push(value);
+        }
+        const bytes = new Uint8Array(size); let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+        const result = await plaza(env).themeAsset(request.headers.get('x-teacher-session') || '', bytes);
+        return 'error' in result ? json({ error: result.error }, result.status) : json(result);
+    }
+    // A map picture, by its SHA-256: it never changes, so browsers keep it.
+    if (path.startsWith('/api/theme-assets/') && get) {
+        const file = await plaza(env).themeAssetFile(path.slice('/api/theme-assets/'.length));
+        if (!file) return json({ error: 'Not found.' }, 404);
+        return new Response(file.bytes, { headers: { 'content-type': file.type, 'cache-control': 'public, max-age=31536000, immutable', 'x-content-type-options': 'nosniff' } });
+    }
     if (path === '/api/content' && (!env.CONTENT_TOKEN || !secretsMatch(request.headers.get('x-content-token'), env.CONTENT_TOKEN))) return json({ error: 'Not found.' }, 404);
     let body: any = {};
     if (post && (studio || speech || warmupEditor || content)) {
@@ -265,6 +292,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         const query = new URL(request.url).searchParams;
         const result = await plaza(env).campaignGuide(request.headers.get('x-teacher-session') || '', query.get('campaign') ?? undefined, query.get('game') ?? undefined);
         return 'error' in result ? json({ error: result.error }, result.status) : json(result);
+    }
+    if (themeStudio) {
+        const op = path.slice('/api/teacher/themes/'.length);
+        if (!(get && op === 'list') && !(post && ['save', 'publish', 'discard', 'delete', 'restore'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
+        const result = await plaza(env).themeStudio(request.headers.get('x-teacher-session') || '', op, get ? {} : body);
+        return 'error' in result ? json({ error: result.error, ...(result.errors ? { errors: result.errors } : {}) }, result.status) : json(result);
     }
     if (questStudio) {
         const op = path.slice('/api/teacher/side-quests/'.length);

@@ -19,6 +19,8 @@ import { missionEnvelope } from '../../shared/missionSchema.ts';
 import { legalMove } from '../../shared/plazaMap.ts';
 import { SIDE_QUEST_SOURCE } from '../../shared/sideQuests.ts';
 import { getWorld } from '../../shared/themeCatalog.ts';
+import { makeWorld } from '../../shared/theme.ts';
+import { createHash } from 'node:crypto';
 
 const root = path.join(import.meta.dirname, '..', '..');
 const wrangler = path.join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
@@ -3305,6 +3307,113 @@ test('maps are data on the server: seeded once, sent with the welcome, and chang
         assert.deepEqual(listed.themes.map(theme => theme.name), ['Pixel Plaza', 'Garden Commons', 'Harvest Commons'], 'seeded once: a restart keeps the changed record');
         const back = await enter(base, 'signed-a', null); sockets.push(back);
         assert.equal(back.welcome.theme.name, 'Harvest Commons');
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
+test('the theme studio: drafts, publishing to live games, Trash, and pictures kept in the plaza database', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-map-studio-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); const sockets = [];
+    try {
+        const base = plaza.base;
+        const session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (op, body) => api(base, `/api/teacher/${op}`, { session, body });
+        const studio = (op, body) => api(base, `/api/teacher/themes/${op}`, { session, body });
+        assert.equal((await api(base, '/api/teacher/themes/list')).status, 401, 'teachers only');
+        let maps = (await studio('list')).body.maps;
+        assert.deepEqual(maps.map(map => [map.id, map.published, map.deleted, map.draft]), [['plaza', true, false, null], ['commons-garden', true, false, null], ['commons-autumn', true, false, null]]);
+        const autumn = maps.find(map => map.id === 'commons-autumn');
+
+        // Pictures: PNG, JPEG or WebP only, by their SHA-256, served whole and kept by browsers. Never SVG, which can carry script.
+        const upload = (bytes, by = session) => fetch(`${base}/api/teacher/theme-asset`, { method: 'POST', headers: by ? { 'x-teacher-session': by } : {}, body: bytes });
+        const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(2_500_000, 7)]);
+        const stored = await (await upload(png)).json();
+        assert.deepEqual(stored, { url: `/api/theme-assets/${createHash('sha256').update(png).digest('hex')}`, hash: createHash('sha256').update(png).digest('hex') });
+        assert.deepEqual(await (await upload(png)).json(), stored, 'the same picture is kept once');
+        const served = await fetch(base + stored.url);
+        assert.deepEqual([served.status, served.headers.get('content-type'), served.headers.get('cache-control'), served.headers.get('x-content-type-options')], [200, 'image/png', 'public, max-age=31536000, immutable', 'nosniff']);
+        assert.ok(Buffer.from(await served.arrayBuffer()).equals(png), 'a picture larger than one database piece comes back whole');
+        assert.equal((await upload(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'))).status, 415);
+        assert.equal((await upload(Buffer.from('<html><script>alert(1)</script></html>'))).status, 415);
+        assert.equal((await upload(png, '')).status, 401);
+        assert.equal((await upload(Buffer.concat([png.subarray(0, 8), Buffer.alloc(8_000_000)]))).status, 413);
+        assert.equal((await fetch(`${base}/api/theme-assets/${'0'.repeat(64)}`)).status, 404);
+
+        // A new map is a draft: not offered to games until it is published.
+        const winter = { ...autumn.theme, id: 'commons-winter', name: 'Winter Commons', image: stored.url };
+        const created = await studio('save', { theme: winter, create: true });
+        assert.equal(created.status, 200, JSON.stringify(created.body));
+        assert.deepEqual([created.body.map.published, created.body.map.draft.name, created.body.map.games], [false, 'Winter Commons', 0]);
+        assert.equal((await studio('save', { theme: winter, create: true })).status, 409, 'one map per id');
+        assert.equal((await api(base, '/api/themes')).body.themes.some(theme => theme.id === 'commons-winter'), false);
+        assert.equal((await teacher('game', { name: 'Too soon', randomNames: false, themeId: 'commons-winter' })).status, 400, 'not published: no game can use it');
+        let version = created.body.map.version;
+        const refused = await studio('save', { theme: { ...winter, image: `/api/theme-assets/${'a'.repeat(64)}` }, version });
+        assert.equal(refused.status, 400); assert.match(refused.body.errors.join(' '), /not on the server/);
+        assert.equal((await studio('save', { theme: { ...winter, image: 'https://example.com/winter.png' }, version })).status, 400, 'no picture from another site');
+        assert.equal((await studio('save', { theme: { ...winter, spawn: { x: -5, y: -5 } }, version })).status, 400, 'the studio checks run on the server too');
+        assert.equal((await studio('save', { theme: winter, version: version - 1 })).status, 409, 'saved somewhere else meanwhile');
+        assert.equal((await studio('discard', { id: 'commons-winter', version })).status, 409, 'nothing published to go back to');
+        const live = await studio('publish', { id: 'commons-winter', version });
+        assert.deepEqual([live.body.map.published, live.body.map.draft, live.body.map.theme.image], [true, null, stored.url]);
+        assert.ok((await api(base, '/api/themes')).body.themes.some(theme => theme.id === 'commons-winter'));
+
+        // A game on Autumn Commons: a draft changes nothing there; publishing it reaches the game at once.
+        PIN = (await teacher('game', { name: 'Autumn class', randomNames: false, themeId: 'commons-autumn' })).body.pin;
+        const alex = await enter(base, 'signed-a', null); const sam = await enter(base, 'signed-b', null); sockets.push(alex, sam);
+        const before = makeWorld(autumn.theme); const scale = autumn.theme.world / autumn.theme.art; let spot;
+        for (let y = 60; y < autumn.theme.art - 60 && !spot; y += 20) for (let x = 60; x < autumn.theme.art - 60 && !spot; x += 20) {
+            if (Math.hypot(x - autumn.theme.spawn.x, y - autumn.theme.spawn.y) < 200) continue;
+            if ([[0, 0], [-14, -14], [14, -14], [-14, 14], [14, 14]].every(([dx, dy]) => !before.isBlocked((x + dx) * scale, (y + dy) * scale))) spot = { x, y };
+        }
+        assert.ok(spot, 'test found open ground away from the start');
+        alex.send({ t: 'move', x: Math.round(spot.x * scale), y: Math.round(spot.y * scale) });
+        await sam.next(m => m.t === 'move' && m.id === alex.me.id && m.x === Math.round(spot.x * scale), 'Alex walking');
+        const walled = { ...autumn.theme, name: 'Autumn Commons, fenced', blocked: [...autumn.theme.blocked, [spot.x - 10, spot.y - 10, 20, 20]] };
+        const draft = await studio('save', { theme: walled, version: autumn.version });
+        assert.deepEqual([draft.status, draft.body.map.theme.name, draft.body.map.draft.name, draft.body.map.games], [200, 'Autumn Commons', 'Autumn Commons, fenced', 1]);
+        await new Promise(resolve => setTimeout(resolve, 300));
+        assert.equal(alex.inbox.some(m => m.t === 'theme'), false, 'a draft is not sent to games');
+        const themesVersion = (await teacher('status')).body.themesVersion;
+        assert.equal((await studio('publish', { id: 'commons-autumn', version: draft.body.map.version })).status, 200);
+        const after = makeWorld(walled);
+        const snap = await alex.next(m => m.t === 'snap', 'Alex moved out of the new wall');
+        assert.ok(after.isBlocked(Math.round(spot.x * scale), Math.round(spot.y * scale)) && !after.isBlocked(snap.x, snap.y), 'out of the wall, onto open ground');
+        assert.deepEqual((await alex.next(m => m.t === 'theme', 'the new map')).theme.blocked.at(-1), [spot.x - 10, spot.y - 10, 20, 20]);
+        await sam.next(m => m.t === 'move' && m.id === alex.me.id && m.x === snap.x && m.y === snap.y, 'everyone sees Alex moved');
+        assert.equal((await sam.next(m => m.t === 'theme', 'the new map')).theme.name, 'Autumn Commons, fenced');
+        assert.equal(sam.inbox.some(m => m.t === 'snap'), false, 'a student on open ground stays where they are');
+        assert.notEqual((await teacher('status')).body.themesVersion, themesVersion, 'Teacher controls fetch the maps again');
+        alex.ws.close(); await new Promise(resolve => setTimeout(resolve, 200));
+        const back = await enter(base, 'signed-a', null); sockets.push(back);
+        assert.deepEqual([back.welcome.theme.name, back.me.x, back.me.y], ['Autumn Commons, fenced', snap.x, snap.y]);
+
+        // Discard: the draft goes, the published map stays.
+        let autumnNow = (await studio('list')).body.maps.find(map => map.id === 'commons-autumn');
+        const tried = await studio('save', { theme: { ...walled, name: 'Not this one' }, version: autumnNow.version });
+        const discarded = await studio('discard', { id: 'commons-autumn', version: tried.body.map.version });
+        assert.deepEqual([discarded.body.map.draft, discarded.body.map.theme.name], [null, 'Autumn Commons, fenced']);
+
+        // Trash: no new games on it, games already on it keep it, and it can come back.
+        autumnNow = discarded.body.map;
+        const trashed = await studio('delete', { id: 'commons-autumn', version: autumnNow.version });
+        assert.equal(trashed.body.map.deleted, true);
+        const listed = (await api(base, '/api/themes')).body;
+        assert.deepEqual([listed.themes.map(theme => theme.id), listed.trash.map(theme => theme.id)], [['plaza', 'commons-garden', 'commons-winter'], ['commons-autumn']]);
+        assert.equal((await teacher('game', { name: 'Trashed', randomNames: false, themeId: 'commons-autumn' })).status, 400);
+        back.ws.close(); await new Promise(resolve => setTimeout(resolve, 200));
+        const again = await enter(base, 'signed-a', null); sockets.push(again);
+        assert.equal(again.welcome.theme.name, 'Autumn Commons, fenced', 'the game on it keeps its map');
+        const restored = await studio('restore', { id: 'commons-autumn', version: trashed.body.map.version });
+        assert.equal(restored.body.map.deleted, false);
+        // At least one map stays for new games.
+        for (const id of ['plaza', 'commons-garden', 'commons-winter']) {
+            const map = (await studio('list')).body.maps.find(item => item.id === id);
+            assert.equal((await studio('delete', { id, version: map.version })).status, 200);
+        }
+        const last = await studio('delete', { id: 'commons-autumn', version: restored.body.map.version });
+        assert.deepEqual([last.status, last.body.error], [409, 'Keep at least one map for new games.']);
     } finally {
         for (const socket of sockets) socket.ws.close(); await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
     }

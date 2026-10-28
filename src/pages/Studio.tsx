@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { getTheme, themes } from '../../shared/themeCatalog';
+import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import { COMMONS_LAYOUT } from '../../shared/commons';
 import { isBackgroundBrief, SCENERY_PRESETS, sceneryTheme, type SceneryPreset } from '../../shared/scenery';
 import { layoutGuide } from '../../shared/artTemplate';
@@ -14,6 +14,8 @@ import type { Rect, Theme, WalkBehind } from '../../shared/theme';
 import { feetBlocked, walkReport } from '../../shared/walk';
 import './Studio.css';
 
+// A map on the server, as the studio sees it: what games play, the unpublished draft, and how many saved games use it.
+type StudioMap = { id: string; theme: Theme; draft: Theme | null; version: number; published: boolean; deleted: boolean; updated: number; games: number };
 type Tool = 'select' | 'block' | 'bellipse' | 'bpoly' | 'zone' | 'ellipse' | 'poly' | 'spawn';
 type Selection = { kind: 'block' | 'shape' | 'behind' | 'zone'; index: number } | { kind: 'spawn' } | null;
 type Corner = 'nw' | 'ne' | 'sw' | 'se';
@@ -64,10 +66,17 @@ const polygon = (points: readonly (readonly [number, number])[]) => points.map(p
 
 export default function Studio() {
   const [params] = useSearchParams();
-  const [initial] = useState(() => params.get('theme') ? getTheme(params.get('theme')) : sceneryTheme('custom', 'scenery-draft'));
+  const [initial] = useState(() => sceneryTheme('custom', 'scenery-draft'));
   const [theme, setTheme] = useState<Theme>(() => clone(initial));
-  const [imageUrl, setImageUrl] = useState(() => isBackgroundBrief(initial) && !Object.hasOwn(themes, initial.id) ? guideUrl(initial) : initial.image);
-  const [hasBackground, setHasBackground] = useState(!isBackgroundBrief(initial) || Object.hasOwn(themes, initial.id));
+  const [imageUrl, setImageUrl] = useState(() => guideUrl(initial));
+  const [hasBackground, setHasBackground] = useState(false);
+  // The maps are kept on the server. `stored` is the one open here (null: not saved there yet); `saved` is it as last
+  // saved or opened, to tell when there is something to save.
+  const [token, setToken] = useState(readTeacherSession); const [password, setPassword] = useState('');
+  const [maps, setMaps] = useState<StudioMap[]>([]);
+  const [stored, setStored] = useState<StudioMap | null>(null);
+  const [saved, setSaved] = useState('');
+  const [busy, setBusy] = useState(false);
   const [sheetUrl, setSheetUrl] = useState<string | undefined>();
   const [direction, setDirection] = useState('A welcoming, colorful world with generous space for a class to gather.');
   const [sceneryPreset, setSceneryPreset] = useState<SceneryPreset>('custom');
@@ -335,6 +344,8 @@ export default function Studio() {
       const loaded = parseTheme(JSON.parse(await file.text()));
       setTheme(loaded); setPast([]); setFuture([]); setSelection(null); setReport(null); setOverlay(''); setPreview(false); keys.current.clear();
       setImageUrl(loaded.image); setHasBackground(true); setSheetUrl(undefined);
+      // A file of a map the server has saves over it; any other id saves as a new map.
+      setStored(maps.find(map => map.id === loaded.id && !map.deleted) ?? null); setSaved('');
       setMessage(`Opened ${loaded.name}. If its picture does not show, use "Open picture".`);
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'That file is not a theme file.'); }
   };
@@ -344,7 +355,6 @@ export default function Studio() {
     try {
       const probe = await loadPicture(url);
       if (probe.naturalWidth !== probe.naturalHeight) throw new Error('Use a square background. The current picture and geometry have been kept.');
-      if (theme.scenery && Object.hasOwn(themes, theme.id)) newTreatment();
       setImageUrl(url); setHasBackground(true);
       setMessage(`Opened ${probe.naturalWidth} × ${probe.naturalHeight}. The map coordinates stay at ${theme.art} × ${theme.art}, so every shape stays in place.`);
     } catch (cause) { URL.revokeObjectURL(url); setMessage(cause instanceof Error ? cause.message : 'Could not open that picture.'); }
@@ -361,29 +371,120 @@ export default function Studio() {
       const pixels = ctx.getImageData(0, 0, width, height).data;
       const problem = sheetTransparencyProblem(pixels, width, height);
       if (problem) throw new Error(problem);
-      if (Object.hasOwn(themes, theme.id)) newTreatment();
       setSheetUrl(url); setMessage('Art sheet opened. All collisions stay in place. Walk behind both trees to check their shape and trunk position.');
     } catch (cause) { URL.revokeObjectURL(url); setMessage(cause instanceof Error ? cause.message : 'Could not open that art sheet.'); }
   };
   const newTreatment = () => {
     const id = theme.scenery ? 'scenery-custom' : 'commons-custom';
-    change({ ...clone(theme), id, name: theme.scenery ? 'My scenery' : 'My Commons',
-      layers: theme.layers?.map(layer => ({ ...layer, image: theme.scenery ? layer.image : `/assets/maps/${id}.png` })) });
+    // The art stays the current sheet's until a new one is opened; saving uploads it (npm run theme sets its own).
+    change({ ...clone(theme), id, name: theme.scenery ? 'My scenery' : 'My Commons' });
     // Keep the current art visible until a replacement sheet is chosen.
     if (!sheetUrl) setSheetUrl(theme.layers?.[0]?.image);
-    setMessage('Name your new scenery and choose an unused id. Import its art, walk around it, then download the theme file.');
+    setMessage('Name your new scenery and choose an unused id. Import its art, walk around it, then save it as a new map.');
   };
   const newScenery = () => {
     const next = sceneryTheme(sceneryPreset, `scene-${sceneryPreset}-custom`);
-    change(next); setImageUrl(guideUrl(next)); setHasBackground(false);
+    change(next); setImageUrl(guideUrl(next)); setHasBackground(false); setStored(null);
     setSheetUrl(undefined); setSelection(null); setPreview(false); keys.current.clear();
     setMessage('Brief ready. Copy the prompt and give it with the layout guide to your art AI. Import its complete background here, then adjust the few areas.');
   };
-  const loadRegistered = (id: string) => {
-    const chosen = themes[id];
-    if (!chosen) return;
-    setTheme(clone(chosen)); setImageUrl(chosen.image); setHasBackground(true); setSheetUrl(undefined); setPast([]); setFuture([]); setSelection(null); setReport(null); setOverlay(''); setMessage(''); setPreview(false); keys.current.clear();
+  // A map from the server opens with its draft, if it has one.
+  const openMap = (map: StudioMap) => {
+    const chosen = clone(map.draft ?? map.theme);
+    // A scenery brief saved before its background was imported shows its layout guide again.
+    const pictured = !isBackgroundBrief(chosen) || chosen.image.startsWith('/api/theme-assets/') || map.published && chosen.image === map.theme.image;
+    setTheme(chosen); setImageUrl(pictured ? chosen.image : guideUrl(chosen)); setHasBackground(pictured); setSheetUrl(undefined); setPast([]); setFuture([]); setSelection(null); setReport(null); setOverlay(''); setMessage(''); setPreview(false); keys.current.clear();
+    setStored(map); setSaved(JSON.stringify(chosen));
   };
+
+  // ---------- the server ----------
+  const call = async (op: string, body?: object, by = token): Promise<{ maps: StudioMap[]; map?: StudioMap }> => {
+    const response = await fetch(`/api/teacher/themes/${op}`, { method: body ? 'POST' : 'GET', headers: { 'x-teacher-session': by, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const result = await response.json();
+    if (response.status === 401) { storeTeacherSession(''); setToken(''); }
+    if (!response.ok) throw new Error([result.error, ...(result.errors ?? [])].filter(Boolean).join(' '));
+    setMaps(result.maps);
+    return result;
+  };
+  const run = async (work: () => Promise<void>) => {
+    setBusy(true);
+    try { await work(); } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Could not reach the server.'); } finally { setBusy(false); }
+  };
+  // The maps: the server's records when signed in; before that, the published maps, to look at, change and download.
+  // A map named in the address (?theme=…) opens at once.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      let listed: StudioMap[] | null = null;
+      if (token) { try { listed = (await call('list')).maps; } catch { /* signed out: the published maps below */ } }
+      if (!listed) {
+        const body = await (await fetch('/api/themes')).json();
+        listed = (body.themes as Theme[]).map(theme => ({ id: theme.id, theme, draft: null, version: 0, published: true, deleted: false, updated: 0, games: 0 }));
+        if (active) setMaps(listed);
+      }
+      const wanted = listed.find(map => map.id === params.get('theme') && !map.deleted);
+      if (active && wanted) openMap(wanted);
+    })().catch(() => { if (active) setMessage('Could not load the maps from the server.'); });
+    return () => { active = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // A picture opened here goes to the server's picture store, which gives its address in the game.
+  const upload = async (url: string) => {
+    const blob = await (await fetch(url)).blob();
+    const response = await fetch('/api/teacher/theme-asset', { method: 'POST', headers: { 'x-teacher-session': token }, body: blob });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error ?? 'The picture could not be uploaded.');
+    return result.url as string;
+  };
+  const onServer = !!stored && stored.id === theme.id;
+  const changed = JSON.stringify(theme) !== saved || imageUrl.startsWith('blob:') || !!sheetUrl?.startsWith('blob:');
+  const dirty = !onServer || changed;
+  // Signing in keeps what is open, changes included; an unchanged map opens again with its draft, if it has one.
+  const signIn = () => run(async () => {
+    const response = await fetch('/api/teacher/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password }) });
+    const result = await response.json(); if (!response.ok) throw new Error(result.error);
+    storeTeacherSession(result.token); setToken(result.token); setPassword('');
+    const mine = stored && (await call('list', undefined, result.token)).maps.find(map => map.id === stored.id);
+    if (!mine) return;
+    if (!changed) openMap(mine);
+    else { setStored(mine); if (mine.draft) setMessage('This map also has an unpublished draft on the server. Saving replaces it; choose the map again to open the draft instead.'); }
+  });
+  // Saved as a draft: games keep the published map until it is published. A new id saves a new map.
+  const saveDraft = async (): Promise<StudioMap> => {
+    const next = clone(theme);
+    if (imageUrl.startsWith('blob:')) next.image = await upload(imageUrl);
+    if (sheetUrl?.startsWith('blob:')) { const url = await upload(sheetUrl); next.layers = next.layers?.map(layer => ({ ...layer, image: url })); }
+    const result = await call('save', onServer ? { theme: next, version: stored!.version } : { theme: next, create: true });
+    setTheme(next); setImageUrl(next.image); setSheetUrl(undefined); setStored(result.map!); setSaved(JSON.stringify(next));
+    return result.map!;
+  };
+  const publish = () => run(async () => {
+    const map = dirty ? await saveDraft() : stored!;
+    const result = await call('publish', { id: map.id, version: map.version });
+    setStored(result.map!); setSaved(JSON.stringify(result.map!.theme));
+    const games = result.map!.games;
+    setMessage(`Published. ${games ? `The ${games} saved game${games === 1 ? '' : 's'} on this map play${games === 1 ? 's' : ''} it now; students in a new wall are moved to the start.` : 'New games can be played on it.'}`);
+  });
+  const discard = () => run(async () => {
+    const result = await call('discard', { id: stored!.id, version: stored!.version });
+    openMap(result.map!); setMessage('Draft discarded: this is the published map.');
+  });
+  const duplicate = () => {
+    const taken = new Set(maps.map(map => map.id));
+    let id = `${theme.id}-copy`;
+    for (let n = 2; taken.has(id); n++) id = `${theme.id}-copy-${n}`;
+    change({ ...clone(theme), id, name: `${theme.name} (copy)`.slice(0, 120) }); setStored(null);
+    setMessage('A copy, not saved yet. Change it, then save it as a new map.');
+  };
+  const toTrash = () => {
+    if (!stored || !window.confirm(`Move “${stored.theme.name}” to Trash? New games cannot use it; games already on it keep it. You can restore it.`)) return;
+    void run(async () => { const result = await call('delete', { id: stored.id, version: stored.version }); setStored(result.map!); setMessage('Moved to Trash. Restore it below whenever you need it.'); });
+  };
+  const restore = (map: StudioMap) => run(async () => { const result = await call('restore', { id: map.id, version: map.version }); openMap(result.map!); setMessage(`“${map.theme.name}” is back.`); });
+  const serverState = !onServer ? 'Not saved on the server yet.' : stored!.deleted ? 'In Trash: restore it to edit or publish it.'
+    : !stored!.published ? 'Saved, not published: no game can use it yet.'
+    : stored!.draft || dirty ? `Live${stored!.games ? ` in ${stored!.games} saved game${stored!.games === 1 ? '' : 's'}` : ''}; your changes are not published yet.`
+    : `Live${stored!.games ? ` in ${stored!.games} saved game${stored!.games === 1 ? '' : 's'}` : ''}: games play this version.`;
 
   // ---------- the walking check ----------
   const check = () => {
@@ -528,9 +629,10 @@ export default function Studio() {
       <section className="studio-template">
         <span className="studio-eyebrow">EXTERNAL AI ART WORKFLOW</span>
         <label className="studio-field">Choose a map
-          <select aria-label="Choose a map" value={Object.hasOwn(themes, theme.id) ? theme.id : ''} onChange={event => loadRegistered(event.target.value)}>
-            {!Object.hasOwn(themes, theme.id) && <option value="">{theme.name} · draft</option>}
-            {Object.values(themes).map(item => <option key={item.id} value={item.id}>{item.name}{item.id === 'plaza' ? ' · Season 1' : ''}</option>)}
+          <select aria-label="Choose a map" value={onServer ? stored!.id : ''} onChange={event => { const map = maps.find(item => item.id === event.target.value); if (map) openMap(map); }}>
+            {!onServer && <option value="">{theme.name} · not saved yet</option>}
+            {onServer && stored!.deleted && <option value={stored!.id}>{stored!.theme.name} · in Trash</option>}
+            {maps.filter(map => !map.deleted).map(map => <option key={map.id} value={map.id}>{map.theme.name}{!map.published ? ' · not published' : map.draft ? ' · unpublished changes' : ''}</option>)}
           </select>
         </label>
         <label className="studio-field">Start a background brief
@@ -638,19 +740,39 @@ export default function Studio() {
 
       <h2>Theme</h2>
       <div className="studio-row">
-        <button onClick={() => { setTheme(blank()); setImageUrl(''); setSheetUrl(undefined); setPast([]); setFuture([]); setSelection(null); setReport(null); setOverlay(''); setPreview(false); keys.current.clear(); }}>New theme</button>
+        <button onClick={() => { setTheme(blank()); setImageUrl(''); setSheetUrl(undefined); setPast([]); setFuture([]); setSelection(null); setReport(null); setOverlay(''); setPreview(false); keys.current.clear(); setStored(null); }}>New theme</button>
         <label className="file">Open a theme file<input type="file" accept="application/json,.json" onChange={event => void openTheme(event.target.files?.[0])} /></label>
-        <label className="file">Open a picture<input type="file" accept="image/*" onChange={event => void openPicture(event.target.files?.[0])} /></label>
+        <label className="file">Open a picture<input type="file" accept="image/png,image/webp,image/jpeg" onChange={event => void openPicture(event.target.files?.[0])} /></label>
       </div>
       <label className="studio-field">Name <input value={theme.name} onChange={event => setField({ name: event.target.value })} /></label>
       <label className="studio-field">Id (lower case, no spaces) <input value={theme.id} onChange={event => setField({ id: event.target.value })} /></label>
       <label className="studio-field">Picture address in the game <input value={theme.image} onChange={event => setField({ image: event.target.value })} /></label>
       <p className="studio-hint">The picture is {theme.art} pixels across and the game world {theme.world}.</p>
+      <h2>On the server</h2>
+      {!token ? <form className="studio-signin" onSubmit={event => { event.preventDefault(); void signIn(); }}>
+        <p className="studio-hint">Sign in to save maps on the server and publish them to games.</p>
+        <label className="studio-field">Teacher password<input type="password" required autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} /></label>
+        <button className="primary" disabled={busy}>Sign in</button>
+      </form> : <>
+        <p className="studio-hint" role="status">{serverState}</p>
+        <div className="studio-row">
+          <button disabled={busy || !dirty || problems.errors.length > 0 || (onServer && stored!.deleted)} onClick={() => void run(async () => { await saveDraft(); setMessage('Saved as a draft. Games keep the published map until you publish.'); })}>Save draft</button>
+          <button className="primary" disabled={busy || problems.errors.length > 0 || (backgroundBrief && !hasBackground) || (onServer && (stored!.deleted || (stored!.published && !stored!.draft && !dirty)))} onClick={() => void publish()}>Publish to games</button>
+        </div>
+        <div className="studio-row">
+          {onServer && stored!.published && stored!.draft && <button disabled={busy} onClick={() => void discard()}>Discard draft</button>}
+          <button disabled={busy} onClick={duplicate}>Duplicate</button>
+          {onServer && !stored!.deleted && <button disabled={busy} onClick={toTrash}>Move to Trash</button>}
+        </div>
+        {maps.some(map => map.deleted) && <details className="studio-trash"><summary>Trash ({maps.filter(map => map.deleted).length})</summary>
+          {maps.filter(map => map.deleted).map(map => <p key={map.id}>{map.theme.name}{map.games ? ` · ${map.games} saved game${map.games === 1 ? '' : 's'} still on it` : ''} <button disabled={busy} onClick={() => void restore(map)}>Restore</button></p>)}
+        </details>}
+      </>}
+      <h2>File</h2>
       <div className="studio-row">
-        <button className="primary" onClick={download} disabled={problems.errors.length > 0 || backgroundBrief && !hasBackground}>Download the theme file</button>
+        <button onClick={download} disabled={problems.errors.length > 0 || backgroundBrief && !hasBackground}>Download the theme file</button>
         <button onClick={() => { void navigator.clipboard?.writeText(formatTheme(theme)); setMessage('The theme is copied.'); }}>Copy it</button>
       </div>
-      {(theme.layout === COMMONS_LAYOUT || theme.scenery) && <p className="studio-hint">Install: <code>npm run theme -- "theme.json" {backgroundBrief ? '--picture "background.png"' : '--sheet "art.png"'}</code>. Restart to offer it for new games.</p>}
     </aside>
   </main>;
 }

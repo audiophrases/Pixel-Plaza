@@ -9,7 +9,6 @@ import {
 } from '../studentAuth';
 import type { StudentConfig, StudentSession } from '../studentAuth';
 import { firstName } from '../../shared/names';
-import { plazaMap } from '../../shared/plazaMap';
 import { testerAvatar, testerPin } from '../tester';
 import { unlockSound } from '../audio';
 import './Login.css';
@@ -26,6 +25,13 @@ export default function Login() {
     return readStudentSession();
   });
   const [config, setConfig] = useState<StudentConfig | null>(null);
+  // The background is the first map on the server, which keeps every map.
+  const [backdrop, setBackdrop] = useState('');
+  useEffect(() => {
+    let active = true;
+    fetch('/api/themes').then(response => response.json()).then(body => { if (active && typeof body.themes?.[0]?.image === 'string') setBackdrop(body.themes[0].image); }).catch(() => { /* a plain background */ });
+    return () => { active = false; };
+  }, []);
   // Saved in the plaza: a returning student walks straight in looking the same.
   const [savedAvatar, setSavedAvatar] = useState<AvatarConfig | null>(null);
   const [error, setError] = useState('');
@@ -97,7 +103,7 @@ export default function Login() {
   };
 
   return (
-    <div className="login-wrapper" style={{ backgroundImage: `url(${plazaMap.image})` }}>
+    <div className="login-wrapper" style={backdrop ? { backgroundImage: `url(${backdrop})` } : undefined}>
       <div className="login-overlay" />
       <main className={`login-content${step === 'avatar' ? ' login-content-wide' : ''}`}>
         <div className="login-brand animate-float">
