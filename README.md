@@ -206,7 +206,7 @@ During an open session, click **Use real names** beside **Random names** in the 
 
 The local filter catches listed slurs about race, origin, sexuality, gender and disability in English, Spanish and Catalan, including disguises such as `n1gga`, `n i g g a` and `nigh`. It also blocks explicit sexual terms and sexual-action/body-word combinations without relying on an AI verdict. The rules are in `shared/safety.ts`. With an OpenAI key, moderation additionally checks for threats, sexual content, bullying and self-harm, including attempts the English word check stopped. Grammar help requires a positive clean safety verdict; blocked or unchecked text is never sent to the grammar model. These checks reduce risk but cannot guarantee that every harmful message is identified.
 
-When OpenAI cannot check a message (no key, an error or a timeout), it still posts after the blocked words and the harm check, marked *moderation unavailable* in the chat log. Private messages to the teacher remain available for asking for help.
+When OpenAI cannot check a message (an error or a timeout), it still posts after the blocked words and the harm check, marked *moderation unavailable* in the chat log. Without a key, Teacher controls shows **⚠ Chat not checked by OpenAI**. Private messages to the teacher remain available for asking for help.
 
 Each one is a **🚨 incident** at the top of **Needs you**, grouped per student and kind with a count and their latest words, with a higher double beep and 🚨 on the student's face. Nothing happens to the student unless you act: reply privately, **🤐** mute their chat, or **✓** mark it seen. Self-harm also says to check on the student in person.
 

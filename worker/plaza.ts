@@ -2363,8 +2363,8 @@ export class PlazaRoom extends DurableObject<Env> {
             note = [note, `Activity rule — Who am I?: ${activityProblem}`].filter(Boolean).join('\n');
         }
         // Nothing waits for the teacher: a message the checks did not stop posts at once, a witness exchange too, and
-        // the teacher can take it down afterwards. Without OpenAI (no key, or it is down) the blocked words and the
-        // local harm check still apply, and the message is marked "moderation unavailable" for the teacher.
+        // the teacher can take it down afterwards. Without OpenAI the blocked words and the local harm check still apply;
+        // when OpenAI is down, the message is marked "moderation unavailable" for the teacher.
         const posts = !problem;
         // A message for everyone keeps no place: where the sender stood decides nothing.
         const currentNames = this.rosterNames(seat.game); // Names may change while moderation is in flight.

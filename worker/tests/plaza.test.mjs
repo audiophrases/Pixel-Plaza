@@ -1348,7 +1348,7 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         assert.equal(alexLocation.zone, null); // the path between the cafe and park
         assert.equal(status.entries[0].status, 'approved');
         assert.equal(status.entries[0].studentKey, 'stu_a');
-        assert.equal(status.entries[0].flag, 'moderation unavailable', 'without an OpenAI key the teacher sees it was not checked');
+        assert.deepEqual([status.entries[0].flag, status.moderation], [null, false], 'without an OpenAI key the whole chat is shown as not checked, not each message');
         assert.equal('mode' in status, false, 'there is no approval mode');
         assert.equal((await api(base, '/api/teacher/review', { session, body: { id: status.entries[0].id, approve: true } })).status, 400, 'nothing to approve');
 
@@ -2177,7 +2177,7 @@ test('random names: a made-up name to keep, hidden from classmates, known to the
         assert.equal((await alex.next(message => message.t === 'alias', 'still the same')).name, another.name);
         await pause(1600);
         alex.send({ t: 'chat', text: 'Hello there' });
-        assert.match((await alex.next(message => message.t === 'notice', 'sent')).text, /approval|posted/i);
+        await alex.next(message => message.t === 'chat' && message.text === 'Hello there', 'posted');
 
         // The teacher sees the made-up name with the real one beside it.
         const status = (await api(base, '/api/teacher/status', { session })).body;
