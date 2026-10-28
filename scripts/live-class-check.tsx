@@ -213,7 +213,38 @@ try {
   props = { ...props, open: false };
   await render();
   assert.equal(document.querySelector('.live-clear')?.textContent, 'The class is closed.');
-  console.log('Live class UI checks pass: Needs you in order of urgency, one line each with its quickest answer, one open at a time, replies that count as helping, a fix that finishes a check-in, faces in order of need that open a student, a phrase heard in the room traced to the devices that played it, the class sound switch, and what the plaza repeats offered for blocking.');
+  // The live name switch is in the full teacher header, not hidden in new-game settings.
+  Object.assign(global, { localStorage: dom.window.localStorage, sessionStorage: dom.window.sessionStorage });
+  sessionStorage.setItem('pixel-plaza-teacher-session', 'teacher-test');
+  const { MemoryRouter } = await import('react-router-dom');
+  const { default: Teacher } = await import('../src/pages/Teacher');
+  let status = { open: true, game: { id: 'live-game', name: '4B', randomNames: true, vision: 450 }, pin: '123456',
+    games: [], entries: [], online: [], realNames: {}, muted: [], mode: 'approve', moderation: false,
+    campaign: null, campaigns: [], warmup: null, support: { alerts: [], students: [] } };
+  const nameCalls: { path: string; body: any }[] = [];
+  let finishChange: ((response: Response) => void) | null = null;
+  global.fetch = async (url: string, init: RequestInit) => {
+    assert.equal((init.headers as Record<string, string>)['x-teacher-session'], 'teacher-test');
+    if (url.endsWith('/status')) return Response.json(status);
+    nameCalls.push({ path: url, body: JSON.parse(init.body as string) });
+    return new Promise<Response>(resolve => { finishChange = resolve; });
+  };
+  await act(async () => root.render(<MemoryRouter><Teacher /></MemoryRouter>));
+  const nameButton = () => document.querySelector('.teacher-live-names button') as HTMLButtonElement | null;
+  assert.equal(nameButton()?.textContent, 'Use real names');
+  assert.ok(nameButton()?.closest('.teacher-bar'));
+  await act(async () => nameButton()!.click());
+  assert.deepEqual(nameCalls, [{ path: '/api/teacher/real-names', body: { gameId: 'live-game' } }]);
+  assert.ok(nameButton()?.disabled, 'disable while the live change is in flight');
+  await act(async () => finishChange!(Response.json({ error: 'Try again.' }, { status: 503 })));
+  assert.equal(nameButton()?.disabled, false); assert.match(document.querySelector('.teacher-error')?.textContent ?? '', /Try again/);
+  await act(async () => nameButton()!.click());
+  status = { ...status, game: { ...status.game, randomNames: false } };
+  await act(async () => finishChange!(Response.json(status)));
+  assert.equal(nameButton(), null);
+  assert.equal(document.querySelector('.teacher-live-names')?.textContent, 'Real first names');
+  assert.equal(document.querySelector('.teacher-error'), null);
+  console.log('Live class UI checks pass, including the teacher header name switch, game-scoped request, loading state, retry and updated name mode.');
 } finally {
   await act(async () => root.unmount());
   dom.window.close();

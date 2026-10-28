@@ -197,10 +197,10 @@ Studio's original tools remain available: draw or move **blocks** (rectangles, o
 
 Each game is created with **Random names** on (the default) or off:
 
-- **On:** a student is given a made-up name such as *Happy Plato* or *Brave Hypatia*, drawn from PinPlay's random-names lists with unkind adjectives left out. They can ask for **Another name** until they **Keep** one, which they keep for the whole game; until then they cannot chat. Classmates never see real names, and the teacher controls show the real name beside each made-up one.
+- **On:** a student is given a made-up name such as *Happy Plato* or *Brave Hypatia*, drawn from PinPlay's random-names lists with unkind adjectives left out. They can ask for **Another name** until they **Keep** one; until then they cannot chat. While random names are enabled, classmates see these names and teacher controls show the real name beside each made-up one.
 - **Off:** students are shown by first name, plus the first letter of their surname when two students of the game share a first name (*Roger L*, *Roger C*). Whoever was already there is renamed on every screen when a namesake joins.
 
-The choice is made when the game is created and applies to that game only.
+During an open session, click **Use real names** beside **Random names** in the top bar of Teacher controls. Everyone switches immediately to real first names, with surname letters when needed. Students stay connected and keep their positions, chat, warm-up and mission progress. Chat labels and activity partner names update, and anyone still choosing a random name can continue. The setting is saved for that game, including reconnects and later lessons. New games still offer the original Random names choice.
 
 ## Safety incidents
 
