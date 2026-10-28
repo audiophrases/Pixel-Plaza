@@ -62,7 +62,6 @@ const PLAYS_SHOWN = 300;
 const REPEAT_WINDOW_MS = 5 * 60 * 1000; // what the whole plaza wrote lately, to find what everyone is repeating
 const REPEAT_SHARE = 0.2; // of the students here (three at least) writing the same thing to everyone
 const BLOCKED_NOTICE = 'Not sent: your teacher blocked that for this lesson.';
-const SAFETY_RETRY = 'Safety check unavailable. Your message was not sent. Please try again in a moment.';
 
 // Why an exchange with the online server stopped, as the laptop reports it.
 class SyncStopped extends Error {
@@ -79,10 +78,6 @@ const CLOSE_CLASS_CLOSED = 4002; // the teacher closed the game
 // room hibernating between messages.
 type Seat = { id: string; game: string; themeId?: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; style?: Style; x: number; y: number; lastChat: number; lastCheck?: number; lastTyping?: number; lastReroll?: number; movedAt?: number; left?: boolean; frozenUntil?: number; downUntil?: number };
 
-// 'approve': every message waits for the teacher. 'review': chat that OpenAI cleared
-// posts at once and the teacher reviews afterwards; witness exchanges still wait.
-export type ChatMode = 'approve' | 'review';
-
 export type TeacherAction =
     | { kind: 'magic'; power: 'freeze' | 'thaw' | 'lightning' | 'teleport' | 'rain'; studentKey?: string; x?: number; y?: number }
     | { kind: 'status' }
@@ -95,9 +90,7 @@ export type TeacherAction =
     | { kind: 'campaign'; op: 'start' | 'next' | 'reveal' | 'reset'; campaign?: string; confirm?: boolean }
     | { kind: 'questRelease'; objective: string }
     | { kind: 'questPlace'; objective: string; studentKey: string }
-    | { kind: 'review'; id: string; approve: boolean } // approve = false also takes down a message already posted
-    | { kind: 'approveAll' }
-    | { kind: 'mode'; mode: ChatMode }
+    | { kind: 'remove'; id: string } // takes down a message that posted
     | { kind: 'mute'; studentKey: string; muted: boolean }
     | { kind: 'incident'; id: string } // the teacher has seen a safety incident
     | { kind: 'block'; words: string[] } // words or phrases no message may say this lesson; what already says them comes down
@@ -141,8 +134,7 @@ export type TeacherStatus = {
     pin: string | null; // the open game's PIN, which students type to join
     // `target` is the classmate a whisper is for; `everyone` marks a message for the whole plaza.
     entries: { id: string; studentKey: string; sender: string; target: string | null; everyone: boolean; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred: boolean }[];
-    mode: ChatMode;
-    moderation: boolean; // an OpenAI key is set, so 'review' mode can post anything
+    moderation: boolean; // an OpenAI key is set, so OpenAI checks every message before it posts
     muted: string[];
     // Every clip a device read aloud lately, newest first, so a phrase heard in the room leads to the speakers
     // it came from. `id` is the chat message (null for a voice sample); `now` is the server's clock, to age them by.
@@ -282,6 +274,10 @@ export class PlazaRoom extends DurableObject<Env> {
         this.participation.initialize();
         this.liveMissions = new LiveMissions(this.sql);
         this.liveMissions.initialize();
+        // Messages once waited for the teacher's approval; nothing does now. Any still waiting from then are not posted.
+        this.sql.exec("UPDATE interviews SET question_status = 'rejected' WHERE question_status = 'pending'");
+        this.sql.exec("UPDATE interviews SET answer_status = 'rejected' WHERE answer_status = 'pending'");
+        for (const row of this.sql.exec<{ id: string }>("UPDATE chat SET status = 'rejected' WHERE status = 'pending' RETURNING id").toArray()) this.assistance.chatStatus(row.id, 'rejected');
         // Keepalive pings are answered without waking the room.
         ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     }
@@ -579,18 +575,11 @@ export class PlazaRoom extends DurableObject<Env> {
             if (action.themeId !== undefined && !hasTheme(action.themeId)) return { error: 'Choose an available map.', status: 400 };
             this.setOpen(true, this.createGame(name, action.randomNames !== false, action.vision ?? DEFAULT_VISION, action.themeId));
         }
-        if (action.kind === 'review' && !this.review(action.id, action.approve)) {
-            return { error: 'That message is no longer pending.', status: 400 };
-        }
-        if (action.kind === 'approveAll') {
-            const pending = this.sql.exec<{ id: string }>("SELECT id FROM chat WHERE status = 'pending' AND game_id IS ? ORDER BY ts", this.activeGame()).toArray();
-            for (const { id } of pending) this.review(id, true);
-        }
+        if (action.kind === 'remove' && !this.remove(action.id)) return { error: 'Only a message that posted can be taken down.', status: 400 };
         if (action.kind === 'xp') {
             const failed = this.teacherStar(action);
             if (failed) return { error: failed, status: 400 };
         }
-        if (action.kind === 'mode') this.saveSetting('mode', action.mode);
         if (action.kind === 'magic') {
             if (!this.isOpen()) return { error: 'Open the class first.', status: 400 };
             if (action.power === 'rain') this.broadcast({ t: 'rain', until: Date.now() + 15000 });
@@ -672,12 +661,9 @@ export class PlazaRoom extends DurableObject<Env> {
                 .map(game => ({ ...game, randomNames: game.randomNames === 1, open: this.isOpen() && game.id === current?.id })),
             pin: this.classPin(),
             entries: this.sql.exec<Omit<TeacherStatus['entries'][number], 'starred' | 'everyone'> & { everyone: number }>(`SELECT id, student_key AS studentKey, sender, target_name AS target,
-                (target_key IS NULL AND x IS NULL) AS everyone, flag, note, text, ts AS timestamp, status FROM (
-                    SELECT * FROM chat WHERE status = 'pending' AND game_id IS ?
-                    UNION SELECT * FROM (SELECT * FROM chat WHERE game_id IS ? ORDER BY ts DESC LIMIT ?))
-                ORDER BY ts DESC`, current?.id ?? null, current?.id ?? null, STATUS_HISTORY).toArray()
+                (target_key IS NULL AND x IS NULL) AS everyone, flag, note, text, ts AS timestamp, status FROM chat
+                WHERE game_id IS ? ORDER BY ts DESC LIMIT ?`, current?.id ?? null, STATUS_HISTORY).toArray()
                 .map(entry => ({ ...entry, everyone: entry.everyone === 1, starred: this.starred(entry.studentKey, `teacher:${entry.id}`) })),
-            mode: this.mode(),
             moderation: !!this.env.OPENAI_API_KEY,
             muted: this.sql.exec<{ student_key: string }>('SELECT student_key FROM mutes').toArray().map(row => row.student_key),
             sound: {
@@ -1496,7 +1482,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (objective.activity || objective.conversation) {
             const conversation = this.conversation(seat.game, seat.studentKey, objective);
             if (conversation.completed < conversation.required) {
-                ws.send(JSON.stringify({ t: 'notice', level: 'warning', text: `Exchange evidence with ${conversation.required} witness${conversation.required === 1 ? '' : 'es'} before submitting this conclusion. Teacher approval is required.` }));
+                ws.send(JSON.stringify({ t: 'notice', level: 'warning', text: `Exchange evidence with ${conversation.required} witness${conversation.required === 1 ? '' : 'es'} before submitting this conclusion.` }));
                 return reply(false, true);
             }
         }
@@ -1664,12 +1650,6 @@ export class PlazaRoom extends DurableObject<Env> {
         };
     }
 
-    // With an OpenAI key, nearby chat that OpenAI cleared posts at once and the teacher reviews afterwards,
-    // unless the teacher chose to approve everything first. Without a key every message waits.
-    private mode(): ChatMode {
-        return this.setting('mode') !== 'approve' && this.env.OPENAI_API_KEY ? 'review' : 'approve';
-    }
-
     private isOpen(): boolean {
         return this.setting('open') === '1';
     }
@@ -1705,8 +1685,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!this.isRandom(game)) return;
         this.sql.exec('UPDATE games SET random_names = 0 WHERE id = ?', game);
         const names = this.rosterNames(game);
-        // Keep displayed chat labels consistent, including messages awaiting approval
-        // and classmates who are offline. Student IDs and activity state stay intact.
+        // Keep displayed chat labels consistent, including for classmates who are offline. Student IDs and activity state stay intact.
         for (const [studentKey, name] of names) {
             this.sql.exec('UPDATE chat SET sender = ? WHERE game_id = ? AND student_key = ?', name, game, studentKey);
             this.sql.exec('UPDATE chat SET target_name = ? WHERE game_id = ? AND target_key = ?', name, game, studentKey);
@@ -2248,11 +2227,10 @@ export class PlazaRoom extends DurableObject<Env> {
         const perTerm = new Map<string, number>();
         const perStudent = new Map<string, number>();
         for (const row of this.sql.exec<{ id: string; student_key: string; text: string; status: string }>(
-            "SELECT id, student_key, text, status FROM chat WHERE game_id = ? AND ts >= ? AND status IN ('approved', 'pending') ORDER BY ts", game, this.lessonStart(game)).toArray()) {
+            "SELECT id, student_key, text, status FROM chat WHERE game_id = ? AND ts >= ? AND status = 'approved' ORDER BY ts", game, this.lessonStart(game)).toArray()) {
             const term = blockedIn(row.text, terms, accepted);
             if (!term) continue;
             perTerm.set(term.key, (perTerm.get(term.key) ?? 0) + 1);
-            if (row.status === 'pending') { this.review(row.id, false); continue; }
             this.retract(row.id);
             perStudent.set(row.student_key, (perStudent.get(row.student_key) ?? 0) + 1);
         }
@@ -2364,14 +2342,11 @@ export class PlazaRoom extends DurableObject<Env> {
         let activityProblem = this.identityChatProblem(seat.game, seat.studentKey, value);
         let problem = term ? BLOCKED_NOTICE : chatProblem(value) ?? activityProblem;
         let flag: string | null = null;
-        let safetyFailure = 'not configured';
-        let cleared = false; // OpenAI looked at it and found nothing
         let harm: Harm | null = localHarm(value);
         if (!problem) {
             const verdict = await this.moderated(value);
-            cleared = verdict.result === 'clean';
             if (verdict.result === 'flagged') { problem = 'That message cannot be sent. Please rewrite it.'; flag = verdict.categories.join(', '); harm = harmFrom(verdict.categories); }
-            else if (verdict.result === 'unchecked') { flag = 'moderation unavailable'; safetyFailure = verdict.reason; }
+            else if (verdict.result === 'unchecked') flag = 'moderation unavailable';
             // The teacher may have blocked a word it says while OpenAI looked at it.
             term = await this.blockedTerm(seat.game, value);
             if (term) problem = BLOCKED_NOTICE;
@@ -2381,21 +2356,16 @@ export class PlazaRoom extends DurableObject<Env> {
         const blockedReason = term && `Blocked for this lesson: “${term.words}”`;
         if (blockedReason) note = [note, blockedReason].filter(Boolean).join('\n');
         // Assignments can change while moderation is in flight. Check durable state
-        // again before either automatic delivery or the teacher's queue.
+        // again before the message posts.
         activityProblem = this.identityChatProblem(seat.game, seat.studentKey, value);
         if (activityProblem && !term) {
             problem = activityProblem;
             note = [note, `Activity rule — Who am I?: ${activityProblem}`].filter(Boolean).join('\n');
         }
-        // Automatic mode must not turn an outage into an approval queue. Keep
-        // the audited attempt, return the draft to its writer and ask for retry.
-        if (!problem && !cleared && !valid && this.mode() === 'review') {
-            refused(`${SAFETY_RETRY} (${safetyFailure})`, 'not-sent');
-            return reply('warning', SAFETY_RETRY);
-        }
-        // Review mode posts what OpenAI cleared, nearby, for everyone or whisper. A witness exchange (the only caller
-        // that passes `valid`) always waits: the teacher's approval is part of that activity.
-        const posts = !problem && cleared && !valid && this.mode() === 'review';
+        // Nothing waits for the teacher: a message the checks did not stop posts at once, a witness exchange too, and
+        // the teacher can take it down afterwards. Without OpenAI (no key, or it is down) the blocked words and the
+        // local harm check still apply, and the message is marked "moderation unavailable" for the teacher.
+        const posts = !problem;
         // A message for everyone keeps no place: where the sender stood decides nothing.
         const currentNames = this.rosterNames(seat.game); // Names may change while moderation is in flight.
         const entry = { id: crypto.randomUUID(), game_id: seat.game, student_key: seat.studentKey, sender: currentNames.get(seat.studentKey) ?? seat.name, text: value.trim().slice(0, 200),
@@ -2422,52 +2392,17 @@ export class PlazaRoom extends DurableObject<Env> {
             this.deliver(entry);
             if (cid) ws.send(JSON.stringify({ t: 'result', cid, id: entry.id })); // posted at once: nothing else to say
         }
-        // A message waiting for the teacher is named, so the page can show it waiting in its conversation.
         // A blocked word empties the box: the student is told, not handed the words back to try another spelling.
-        else if (problem) reply(term ? 'info' : 'warning', problem);
-        else reply('info', 'Sent to your teacher for approval.', entry.id);
+        else reply(term ? 'info' : 'warning', problem!);
         return { id: entry.id, status: problem ? 'blocked' : posts ? 'approved' : 'pending' };
     }
 
-    private review(id: string, approve: boolean): boolean {
-        const entry = this.sql.exec<{ id: string; student_key: string; sender: string; text: string; status: string;
-            target_key: string | null; x: number | null; y: number | null; marks: string | null; game_id: string | null; voice: string | null; note: string | null }>(
-            'SELECT id, student_key, sender, text, status, target_key, x, y, marks, game_id, voice, note FROM chat WHERE id = ?', id).toArray()[0];
-        if (!entry) return false;
-
-        if (entry.status === 'approved' && !approve) {
-            this.retract(id);
-            this.notify(entry.student_key, 'warning', 'Your teacher removed one of your messages.', id);
-            return true;
-        }
-        if (entry.status !== 'pending') return false;
-
-        // A message queued before this warm-up began may now reveal its sender's
-        // assigned identity. Approval and approve-all must enforce the current rule.
-        const activityProblem = approve && this.isOpen() ? this.identityChatProblem(entry.game_id, entry.student_key, entry.text) : null;
-        if (activityProblem) {
-            this.sql.exec("UPDATE chat SET status = 'blocked', note = ? WHERE id = ?", [entry.note, `Activity rule — Who am I?: ${activityProblem}`].filter(Boolean).join('\n'), id);
-            this.assistance.chatStatus(id, 'blocked', activityProblem);
-            if (entry.game_id) this.assistance.signal(entry.game_id, entry.student_key, entry.sender, `Activity rule: ${activityProblem}`, entry.text, 'other');
-            if (this.interviews.review(id, 'rejected') && entry.game_id) this.sendQuestToAll(entry.game_id);
-            this.notify(entry.student_key, 'info', 'Your message was not posted.', id);
-            this.notify(entry.student_key, 'warning', activityProblem);
-            return true;
-        }
-
-        const approved = approve && this.isOpen();
-        this.sql.exec('UPDATE chat SET status = ? WHERE id = ?', approved ? 'approved' : 'rejected', id);
-        this.assistance.chatStatus(id, approved ? 'approved' : 'rejected');
-        if (this.interviews.review(id, approved ? 'approved' : 'rejected')) {
-            const game = this.activeGame(); if (game) this.sendQuestToAll(game);
-        }
-        if (!approved) {
-            this.notify(entry.student_key, 'info', 'Your message was not posted.', id);
-            return true;
-        }
-        const delivered = this.deliver(entry);
-        this.notify(entry.student_key, delivered ? 'info' : 'warning',
-            delivered ? 'Your message was approved.' : 'Your message was approved, but that student has left the Plaza.', id);
+    // The teacher takes down a message that posted. A witness exchange it belonged to no longer counts.
+    private remove(id: string): boolean {
+        const entry = this.sql.exec<{ student_key: string; status: string }>('SELECT student_key, status FROM chat WHERE id = ?', id).toArray()[0];
+        if (entry?.status !== 'approved') return false;
+        this.retract(id);
+        this.notify(entry.student_key, 'warning', 'Your teacher removed one of your messages.', id);
         return true;
     }
 
@@ -2623,14 +2558,6 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     private closeRoom(): void {
-        this.sql.exec("UPDATE interviews SET question_status = 'rejected' WHERE question_status = 'pending'");
-        this.sql.exec("UPDATE interviews SET answer_status = 'rejected' WHERE answer_status = 'pending'");
-        const rejected = this.sql.exec<{ id: string; student_key: string }>(
-            "UPDATE chat SET status = 'rejected' WHERE status = 'pending' RETURNING id, student_key").toArray();
-        for (const row of rejected) this.assistance.chatStatus(row.id, 'rejected');
-        for (const studentKey of new Set(rejected.map(row => row.student_key))) {
-            this.notify(studentKey, 'info', 'Your message was not posted.');
-        }
         for (const ws of this.ctx.getWebSockets()) {
             this.leave(ws, false);
             try { ws.close(CLOSE_CLASS_CLOSED, 'The class is closed.'); } catch { /* already closing */ }

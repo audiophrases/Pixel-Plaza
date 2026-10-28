@@ -57,8 +57,8 @@ Configure PinPlay's roster policy (**PinPlay → Students**) for the intended cl
 
 1. Open `/teacher`, sign in with the teacher password, and press **Open class**. The page shows a new 6-digit class PIN for this lesson; write it on the board.
 2. Students open the site, type the class PIN, and sign in with their school Google account (once per device; the session lasts as long as PinPlay's).
-3. During class the top of the page is the class as it happens. The bar at the top stays in reach: the class, its PIN (click it to copy the join link), **Open/Close class**, how chat is checked (**✋ Approve first** or **⚡ Post, then review**), the search box and **⋯** for the other pages and signing out. **Needs you** lists what waits on you, most urgent first: 🚨 safety incidents, 🙋 students asking for help or writing to you privately, chat to approve (oldest first: ✓ or ✕, or **A** and **R** for the oldest, **✓ Approve all** for the lot), then 💡 students who may be stuck. Each is one line with its quickest answer (👀 you are helping, ✓ done); click it for the rest: what was written, a box to answer in place (answering marks it as helping) and, for a student stuck, **✏️ Fix** to send a correction. **Class** shows every student as their avatar's face, whoever needs you first. Click a face, or a name anywhere on the page, to open that student beside the class: their conversations, one tab for each person or place they wrote to, including what did not send; a private message; **🤐 Mute** (they cannot write), **🔇 Sound off** (their device reads nothing aloud) and the spells. Mute and sound off follow the student across reconnects and lessons until you turn them back. What is running (the warm-up, the campaign chapter) sits above, with its next step. Everything else is one tab away below, one open at a time: **Chat log** (All, Nearby, Everyone, Private, Blocked; ☆ stars a message, 🗑 takes it down from every student's chat), **Map & spells**, **Warm-up**, **Campaign**, **Message history**, **Games**, **Vision** and **Class report**. A beep and the tab title count what is waiting.
-   With an OpenAI key (see *AI moderation*), the switch starts on **⚡ Post, then review**: messages OpenAI cleared appear at once, nearby, to everyone or whisper, and you review afterwards. Witness exchanges, flagged messages and anything it could not check still wait for you. **✋ Approve first** makes every message wait. Without a key, every message waits.
+3. During class the top of the page is the class as it happens. The bar at the top stays in reach: the class, its PIN (click it to copy the join link), **Open/Close class**, whether chat is checked by OpenAI, the search box and **⋯** for the other pages and signing out. **Needs you** lists what waits on you, most urgent first: 🚨 safety incidents, 🙋 students asking for help or writing to you privately, what the whole plaza is repeating, then 💡 students who may be stuck. Each is one line with its quickest answer (👀 you are helping, ✓ done); click it for the rest: what was written, a box to answer in place (answering marks it as helping) and, for a student stuck, **✏️ Fix** to send a correction. **Class** shows every student as their avatar's face, whoever needs you first. Click a face, or a name anywhere on the page, to open that student beside the class: their conversations, one tab for each person or place they wrote to, including what did not send; a private message; **🤐 Mute** (they cannot write), **🔇 Sound off** (their device reads nothing aloud) and the spells. Mute and sound off follow the student across reconnects and lessons until you turn them back. What is running (the warm-up, the campaign chapter) sits above, with its next step. Everything else is one tab away below, one open at a time: **Chat log** (All, Nearby, Everyone, Private, Blocked; ☆ stars a message, 🗑 takes it down from every student's chat), **Map & spells**, **Warm-up**, **Campaign**, **Message history**, **Games**, **Vision** and **Class report**. A beep and the tab title count what needs you.
+   Nothing waits for your approval. A message posts as soon as it passes the checks: blocked words, the harm check and, with an OpenAI key (see *AI moderation*), OpenAI. That holds for witness exchanges and partner quests too. Take any message down afterwards with 🗑 in the **Chat log**; an exchange you take down stops counting.
 4. **Close class** at the end. Pending chat is rejected and nobody new can join.
 5. For a report on the lesson, open the **Class report** tab, press **Build the prompt**, copy it and paste it into an AI chat such as ChatGPT, Claude or Gemini. It lists what each student wrote, answered and asked for, with how each message ended (posted, stopped by the word check, rejected...), and asks the AI who is doing well, who needs help, who is not doing much, and for the common errors. Choose *this lesson* (since the class was opened) or *the whole game*, and the class level. **Hide names** (on by default) puts Student 1, Student 2... in the prompt, also inside messages, and keeps the key on your screen. The prompt contains students' writing, so use an AI service your school allows.
 
@@ -72,7 +72,7 @@ The chat box lists conversations down its left side, as faces: **Nearby** (every
 - A private message opens its conversation by itself when the student is not writing anything and the chat they have open has been quiet for 20 seconds. Otherwise it shows as a banner at the top of the chat until they tap it. Each face counts its new messages, and a folded chat shows the newest on its handle.
 - Three dots show who is writing a message that will reach you, in the chat and over their head on the map. What someone says shows over their head for a few seconds (🔒 a whisper, 📢 for everyone), and only to those who received it.
 - Clicking a classmate on the map, or a name in a group chat, opens a private chat with them; **＋** lists everyone, nearest first.
-- A reloaded page or a dropped connection gets this lesson's chat back, and a whisper approved while its reader was away waits for them.
+- A reloaded page or a dropped connection gets this lesson's chat back.
 - Messages for everyone are read aloud only while the Everyone conversation is open; nearby and private ones always are.
 
 A dropped connection (a closed lid, Wi-Fi roaming) reconnects by itself. Opening the plaza in a second tab moves the student's avatar there and tells the first tab why.
@@ -87,7 +87,7 @@ The class can play on the teacher's laptop instead, over the school network. Stu
 
 1. Install Node.js (nodejs.org) and Git, then `git clone https://github.com/audiophrases/Pixel-Plaza.git`. To update later, run `git pull` in that folder.
 2. Double-click `classroom.bat`. The first time it asks for the teacher password. **Use the same password as the online site** (the online site only accepts the link from a laptop that knows it), and it saves a hash in `.dev.vars`. Allow Windows to let it through the firewall on private networks.
-3. Add your OpenAI key to `.dev.vars` as a line `OPENAI_API_KEY=sk-...` (the key is a secret, so it is not in git). Without it chat still works, but every message waits for you and there are no grammar hints. `PINPLAY_API_URL` is already written there by the setup.
+3. Add your OpenAI key to `.dev.vars` as a line `OPENAI_API_KEY=sk-...` (the key is a secret, so it is not in git). Without it chat still works, checked only by the blocked words and the harm check, and there are no grammar hints. `PINPLAY_API_URL` is already written there by the setup.
 4. Progress (games, avatars, chat) is kept on that laptop in `.wrangler/classroom`, and is not in git, so it does not move to another laptop by itself. Missions and side quests come from the online site when you sign in (see *Missions live online*).
 
 ### Each lesson
@@ -121,8 +121,8 @@ In **Who am I?**, the server blocks students from writing their own assigned sec
 
 Students earn experience (XP) and levels, shown as a green bar at the bottom of the screen, as in Minecraft. Experience is kept for good, across games and lessons, and only unlocks looks, never an advantage in play:
 
-- **Your star:** ☆ on an approved message in the **Chat log**, or **⭐ +5 XP** on a report in the **Campaign** tab. Once per message or report; the student sees which sentence earned it.
-- **First message:** +1 for their first approved message that reaches a classmate, even a greeting. Once per student across all games, with no AI check required.
+- **Your star:** ☆ on a message in the **Chat log**, or **⭐ +5 XP** on a report in the **Campaign** tab. Once per message or report; the student sees which sentence earned it.
+- **First message:** +1 for their first message that reaches a classmate, even a greeting. Once per student across all games, with no AI check required.
 - **Automatic, once each:** a right journal answer (+2), a partner quest (+5), and finding everyone in a warm-up (+3). Writing more messages earns nothing by itself.
 - **Participation:** useful, varied questions and replies to classmates can earn +1, up to 8 per lesson when AI checks are enabled. See [Participation XP](#participation-xp-optional).
 
@@ -173,7 +173,7 @@ Under **AI help & files**, **Create with an AI prompt** builds instructions to c
 
 Mission Studio also supports **all/any prerequisites** and an optional **quest board**. Choose **Partner interview** or **Compare information**, set audience roles, minimum online students, and whether both investigators must finish the main mystery first. Students accept each quest once and get an assigned classmate. They exchange a quest-linked question, reply and private evidence through teacher moderation before submitting a short report. They can find another partner if the assigned student leaves. Exchanges, assignments, reports and completed quests survive reopening and restarts. These events verify participation; the teacher assesses language and reasoning.
 
-Choose **Castanyada: Witness Investigations** (`castanyada-investigations`) to require approved evidence exchanges before each main conclusion as well. Identifying the thief requires two distinct witnesses. Mission Studio can set one or two witnesses for individual questions. See the [witness investigations guide](docs/witness-investigations.md) for the journal flow and teacher transcript controls.
+Choose **Castanyada: Witness Investigations** (`castanyada-investigations`) to require evidence exchanges with classmates before each main conclusion as well. Identifying the thief requires two distinct witnesses. Mission Studio can set one or two witnesses for individual questions. See the [witness investigations guide](docs/witness-investigations.md) for the journal flow and teacher transcript controls.
 
 **Hide until I release it in Teacher controls** prepares a quest for later: use **Release quest** in Teacher controls to make it available without resetting progress. This releases content already in the game's published revision; it does not apply new Studio edits to a running game. Try the separate **Castanyada: Side Mysteries** template for two Chapter 1 social quests. Version 1 imports and existing games remain supported; exports using the new mechanics use schema version 2.
 
@@ -206,7 +206,7 @@ During an open session, click **Use real names** beside **Random names** in the 
 
 The local filter catches listed slurs about race, origin, sexuality, gender and disability in English, Spanish and Catalan, including disguises such as `n1gga`, `n i g g a` and `nigh`. It also blocks explicit sexual terms and sexual-action/body-word combinations without relying on an AI verdict. The rules are in `shared/safety.ts`. With an OpenAI key, moderation additionally checks for threats, sexual content, bullying and self-harm, including attempts the English word check stopped. Grammar help requires a positive clean safety verdict; blocked or unchecked text is never sent to the grammar model. These checks reduce risk but cannot guarantee that every harmful message is identified.
 
-In **Post, then review**, a failed or timed-out safety check leaves the message unsent and asks the student to retry; it does not add it to your approval queue. The attempt and failure reason remain in the student's history. **Approve first** continues to queue messages for teacher review. Private messages to the teacher remain available for asking for help.
+When OpenAI cannot check a message (no key, an error or a timeout), it still posts after the blocked words and the harm check, marked *moderation unavailable* in the chat log. Private messages to the teacher remain available for asking for help.
 
 Each one is a **🚨 incident** at the top of **Needs you**, grouped per student and kind with a count and their latest words, with a higher double beep and 🚨 on the student's face. Nothing happens to the student unless you act: reply privately, **🤐** mute their chat, or **✓** mark it seen. Self-harm also says to check on the student in person.
 
@@ -221,13 +221,13 @@ When the class turns to something off task, such as everyone writing *free andre
 
 ## AI moderation (optional)
 
-With an OpenAI API key, every message, nearby, to everyone or whisper, is checked by OpenAI's moderation endpoint (`omni-moderation-latest`, free to use) after the word filter and before it reaches the teacher.
+With an OpenAI API key, every message, nearby, to everyone or whisper, is checked by OpenAI's moderation endpoint (`omni-moderation-latest`, free to use) after the word filter and before it posts.
 
 - **Flagged:** the student is asked to rewrite it. The teacher sees it as *blocked*, with the categories OpenAI gave, such as `harassment`.
-- **Clean:** goes to the teacher as before. Approval is still required.
-- **OpenAI not answering** (3 second limit): the message still goes to the teacher, marked *not checked by moderation*, so a bad connection never stops the class.
+- **Clean:** posts at once.
+- **OpenAI not answering** (3 second limit): the message still posts, marked *moderation unavailable* for you, so a bad connection never stops the class.
 
-Online: `npx wrangler secret put OPENAI_API_KEY`. On the teacher's laptop, add `OPENAI_API_KEY=...` to `.dev.vars`. Without a key nothing changes. Messages are sent to OpenAI to be checked, so mention it in your school's data notice.
+Online: `npx wrangler secret put OPENAI_API_KEY`. On the teacher's laptop, add `OPENAI_API_KEY=...` to `.dev.vars`. Without a key, messages are checked only by the blocked words and the harm check. Messages are sent to OpenAI to be checked, so mention it in your school's data notice.
 
 ## English only
 
@@ -250,7 +250,7 @@ Each hint is one small API call (one message, a few hundred tokens), and a stude
 
 ## Participation XP (optional)
 
-A student's first approved message delivered to a classmate earns **+1 XP** immediately, including a simple greeting. This welcome bonus works without an OpenAI key, is awarded once per student across all games and lessons, and survives reconnects, server restarts and game deletion. The same message skips the AI participation check, so it earns one point and costs no participation API call. Later messages use the rules below; repeating greetings cannot earn the welcome bonus again.
+A student's first message delivered to a classmate earns **+1 XP** immediately, including a simple greeting. This welcome bonus works without an OpenAI key, is awarded once per student across all games and lessons, and survives reconnects, server restarts and game deletion. The same message skips the AI participation check, so it earns one point and costs no participation API call. Later messages use the rules below; repeating greetings cannot earn the welcome bonus again.
 
 With `OPENAI_API_KEY`, students can earn **+1 XP** for a useful question, relevant answer, shared idea or helpful contribution to classmates. Understandable learner English is enough, including a short follow-up question. A message must be approved and reach another student before it is considered. Messages to the teacher, rejected messages and messages sent to an empty plaza do not qualify. The rewards menu explains this alongside the existing teacher stars and quest rewards.
 
@@ -284,13 +284,13 @@ node scripts/check-chat.mjs
 node scripts/check-student-support.mjs
 ```
 
-`npm test` builds the app, runs the unit tests, then starts `wrangler dev` with a fake PinPlay for a full lesson: PIN and identity checks, moving, chat approval, mutes, a second window, and a restart that must keep every student's avatar and position.
+`npm test` builds the app, runs the unit tests, then starts `wrangler dev` with a fake PinPlay for a full lesson: PIN and identity checks, moving, chat, mutes, a second window, and a restart that must keep every student's avatar and position.
 
 ## Current limits
 
 - The PIN is shared by the class and changes each lesson. PinPlay supplies each student's verified Google identity; this app depends on PinPlay's login and roster policy.
 - There is one plaza. Every class shares it, so open it for one class at a time.
-- The word and phrase filter catches only a small set of obvious cases. Teacher approval is the moderation gate. With an `OPENAI_API_KEY` set, every message also goes through OpenAI's moderation first (see below); the server-side English check runs only on the teacher's laptop.
+- The word and phrase filter catches only a small set of obvious cases, and nothing waits for the teacher: set an `OPENAI_API_KEY` so every message also goes through OpenAI's moderation first (see below); the server-side English check runs only on the teacher's laptop.
 - Chat is nearby (heard by students within 350 map pixels of where the sender stood), for everyone in the plaza, or a whisper to one classmate; the chat box starts on nearby. All of it waits for teacher approval unless review mode posts it, and the teacher sees whispers too. Room decoration, items, and building interiors are not implemented.
 - On the map each avatar is a paper doll made from the same eight parts as the portrait: the head turns the way the student walks (the back of the head when walking away), the torso takes the shirt, and arms and legs swing as they walk. Pants and shoes are derived from the shirt choice, so the saved avatar format is unchanged. See `src/game/AvatarFigure.ts`.
 - Browser controls cannot reliably stop screenshots or external translation tools.

@@ -9,7 +9,7 @@ import type { AvatarConfig } from '../utils/AvatarRenderer';
 import Face from './Face';
 import Correction from './Correction';
 import { correctionParts, correctionText } from '../../shared/diff';
-import { ago, scope } from './liveFormat';
+import { ago } from './liveFormat';
 import './LiveClass.css';
 
 // The class as it happens, on one screen: everything that needs the teacher in one list, most urgent first, and the
@@ -22,7 +22,6 @@ export type LivePlay = { at: number; studentKey: string; id: string | null; send
 export type LiveSound = { allOff?: boolean; off: string[]; now: number; plays: LivePlay[] };
 type Props = {
   gameId: string;
-  entries: LiveEntry[];
   alerts: HelpAlert[];
   incidents: Incident[]; // harmful things students tried to send: first in To do
   repeats: BlockedStatus['repeats']; // what many students are all writing to everyone, to block or leave
@@ -74,7 +73,7 @@ function heardAloud(plays: LivePlay[]): Heard[] {
   return [...heard.values()];
 }
 
-export default function LiveClass({ gameId, entries, alerts, incidents, repeats, online, known, muted, sound, open, who, action, selected, onSelect }: Props) {
+export default function LiveClass({ gameId, alerts, incidents, repeats, online, known, muted, sound, open, who, action, selected, onSelect }: Props) {
   const [replies, setReplies] = useState<Record<string, string>>({}); // drafts, by student
   const [sent, setSent] = useState<string | null>(null); // the student a private message just went to
   const [busy, setBusy] = useState(false);
@@ -82,13 +81,12 @@ export default function LiveClass({ gameId, entries, alerts, incidents, repeats,
   const [soundBusy, setSoundBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null); // the one item opened to its details
 
-  const waiting = entries.filter(entry => entry.status === 'pending').sort((a, b) => a.timestamp - b.timestamp);
   const needing = alerts.filter(alert => alert.status !== 'resolved');
-  // Most urgent first: harm, what the whole plaza is repeating, a student asking, a message waiting (oldest first),
+  // Most urgent first: harm, what the whole plaza is repeating, a student asking,
   // then a student who may be stuck.
   const asking = needing.filter(alert => alert.kind === 'requested').sort((a, b) => a.timestamp - b.timestamp);
   const stuck = needing.filter(alert => alert.kind === 'suggested').sort((a, b) => a.timestamp - b.timestamp);
-  const total = incidents.length + repeats.length + asking.length + waiting.length + stuck.length;
+  const total = incidents.length + repeats.length + asking.length + stuck.length;
   const lookOf = (studentKey: string) => online.find(student => student.studentKey === studentKey)?.look;
   const nameOf = (studentKey: string) => online.find(student => student.studentKey === studentKey)?.name ?? known.find(student => student.studentKey === studentKey)?.name ?? 'Student';
 
@@ -176,9 +174,8 @@ export default function LiveClass({ gameId, entries, alerts, incidents, repeats,
 
   // Students: whoever needs the teacher first, then everyone else by name.
   const helpFor = (studentKey: string) => needing.find(alert => alert.studentKey === studentKey);
-  const waitingFrom = (studentKey: string) => waiting.filter(entry => entry.studentKey === studentKey).length;
   const incidentOf = (studentKey: string) => incidents.find(incident => incident.studentKey === studentKey);
-  const urgency = (studentKey: string) => (incidentOf(studentKey) ? 3 : 0) + (helpFor(studentKey)?.status === 'open' ? 2 : helpFor(studentKey) ? 1 : 0) + (waitingFrom(studentKey) ? 0.5 : 0);
+  const urgency = (studentKey: string) => (incidentOf(studentKey) ? 3 : 0) + (helpFor(studentKey)?.status === 'open' ? 2 : helpFor(studentKey) ? 1 : 0);
   const tiles: LiveStudent[] = [...online, ...needing.filter(alert => !online.some(student => student.studentKey === alert.studentKey))
     .map(alert => ({ studentKey: alert.studentKey, name: alert.name, zone: null }))];
   tiles.sort((a, b) => urgency(b.studentKey) - urgency(a.studentKey) || who(a.studentKey, a.name).localeCompare(who(b.studentKey, b.name)));
@@ -241,7 +238,6 @@ export default function LiveClass({ gameId, entries, alerts, incidents, repeats,
     <div className="live-column">
       <div className="live-heading">
         <h2>Needs you {total > 0 && <span className="live-count">{total}</span>}</h2>
-        {waiting.length > 1 && <button className="btn btn-primary btn-sm" onClick={() => void action('approve-all', {})} title="Post every waiting message">✓ Approve all {waiting.length}</button>}
       </div>
       {total === 0 && <p className="live-clear">{open ? '✓ All caught up' : 'The class is closed.'}</p>}
       <ol className="live-todo">
@@ -283,20 +279,6 @@ export default function LiveClass({ gameId, entries, alerts, incidents, repeats,
           </li>;
         })}
         {asking.map(helpItem)}
-        {waiting.map((entry, index) => <li key={entry.id} className={`live-item live-chat${index === 0 ? ' live-first' : ''}`}>
-          <div className="live-row">
-            {person(entry.studentKey, entry.sender)}
-            <span className="live-scope">→ {entry.note?.startsWith('Investigation:') ? '🔎 witness' : scope(entry)}</span>
-            <span className="live-snippet live-snippet-full">{tidy(entry.text)}
-              {entry.flag && <span className="live-tag live-tag-warn"> ⚠ not checked: {entry.flag}</span>}
-              {entry.note && !entry.note.startsWith('Investigation:') && <span className="live-tag"> 💡 {entry.note}</span>}</span>
-            <small>{ago(entry.timestamp)}</small>
-            <span className="live-row-buttons">
-              <button className="live-yes" onClick={() => void action('review', { id: entry.id, approve: true })} title={index === 0 ? 'Post it (A)' : 'Post it'} aria-label="Approve">✓</button>
-              <button className="live-no" onClick={() => void action('review', { id: entry.id, approve: false })} title={index === 0 ? 'Do not post it (R)' : 'Do not post it'} aria-label="Reject">✕</button>
-            </span>
-          </div>
-        </li>)}
         {stuck.map(helpItem)}
       </ol>
     </div>
@@ -328,7 +310,6 @@ export default function LiveClass({ gameId, entries, alerts, incidents, repeats,
       {tiles.length === 0 && <p className="live-clear">Nobody in the plaza yet.</p>}
       <div className="live-tiles">{tiles.map(student => {
         const help = helpFor(student.studentKey);
-        const count = waitingFrom(student.studentKey);
         const away = !online.some(item => item.studentKey === student.studentKey);
         return <button key={student.studentKey} type="button" aria-pressed={selected === student.studentKey}
           className={`live-tile${help?.status === 'open' || incidentOf(student.studentKey) ? ' live-tile-help' : ''}${away ? ' live-tile-away' : ''}`}
@@ -337,7 +318,6 @@ export default function LiveClass({ gameId, entries, alerts, incidents, repeats,
           <span className="live-tile-name">{student.name}</span>
           {incidentOf(student.studentKey) ? <span className="live-tile-flag" title={`🚨 ${HARM_LABEL[incidentOf(student.studentKey)!.harm]}`}>🚨</span>
             : help && <span className="live-tile-flag" title={help.kind === 'requested' ? 'Asks for help' : 'May need help'}>{help.kind === 'requested' ? '🙋' : '💡'}</span>}
-          {count > 0 && <span className="live-tile-count" title={`${count} waiting for you`}>{count}</span>}
           {muted.includes(student.studentKey) && <span className="live-tile-muted" title="Chat muted">🤐</span>}
           {silenced(student.studentKey) ? <span className="live-tile-sound" title="Sound off">🔇</span>
             : playing.has(student.studentKey) && <span className="live-tile-sound live-tile-playing" title="Reading a message aloud">🔊</span>}

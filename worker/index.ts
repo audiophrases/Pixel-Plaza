@@ -115,10 +115,8 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     }
     if (path === '/api/teacher/quest-release' && typeof body?.objective === 'string') return { kind: 'questRelease', objective: body.objective };
     if (path === '/api/teacher/quest-place' && typeof body?.objective === 'string' && typeof body?.studentKey === 'string') return { kind: 'questPlace', objective: body.objective, studentKey: body.studentKey };
-    if (path === '/api/teacher/review' && typeof body?.id === 'string' && typeof body?.approve === 'boolean') {
-        return { kind: 'review', id: body.id, approve: body.approve };
-    }
-    if (path === '/api/teacher/approve-all') return { kind: 'approveAll' };
+    // Nothing waits for the teacher's approval; a message that posted can be taken down.
+    if (path === '/api/teacher/remove' && typeof body?.id === 'string') return { kind: 'remove', id: body.id };
     if (path === '/api/teacher/xp' && (typeof body?.chatId === 'string' || (typeof body?.report?.studentKey === 'string' && typeof body?.report?.objective === 'string'))) {
         return { kind: 'xp', ...(typeof body.chatId === 'string' ? { chatId: body.chatId } : { report: { studentKey: body.report.studentKey, objective: body.report.objective } }) };
     }
@@ -130,7 +128,6 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     if (path === '/api/teacher/let-through' && typeof body?.key === 'string' && body.key.length <= 200 && typeof body?.words === 'string') {
         return { kind: 'letThrough', key: body.key, words: body.words };
     }
-    if (path === '/api/teacher/mode' && (body?.mode === 'approve' || body?.mode === 'review')) return { kind: 'mode', mode: body.mode };
     if (path === '/api/teacher/mute' && typeof body?.studentKey === 'string' && typeof body?.muted === 'boolean') {
         return { kind: 'mute', studentKey: body.studentKey, muted: body.muted };
     }

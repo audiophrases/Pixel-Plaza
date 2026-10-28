@@ -8,7 +8,7 @@ export type ActivityAnnouncement = {
     eyebrow: string; title: string; sections: ActivityInstruction[]; next: string;
 };
 const key = (...parts: unknown[]) => JSON.stringify(parts);
-const witnessText = (count: number) => `In the Journal, use Choose a witness to exchange evidence with ${count === 1 ? 'one classmate' : `${count} different classmates`}. Your teacher approves the question and reply. Then submit your answer in the Journal.`;
+const witnessText = (count: number) => `In the Journal, use Choose a witness to exchange evidence with ${count === 1 ? 'one classmate' : `${count} different classmates`}. When they have replied, submit your answer in the Journal.`;
 const taskInstructions = (objective: QuestView['objectives'][number]): ActivityInstruction[] => [
     { label: objective.optional ? 'Optional task' : 'Your task', text: objective.text },
     ...(objective.conversation ? [{ label: 'Talk before answering', text: witnessText(objective.conversation.required) }] : []),

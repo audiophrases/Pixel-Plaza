@@ -9,11 +9,7 @@
 .teacher-pin strong { font-size: 1.35rem; letter-spacing: .1em; color: var(--text-dark); }
 .teacher-pin span { color: #6b7480; font-size: .78rem; }
 .teacher-pin:hover { border-color: #c9ced8; background: #f4f6fa; }
-.teacher-review { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
-.teacher-review button { padding: .3rem .65rem; border: 0; background: #fff; color: #4c5360; font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
-.teacher-review button + button { border-left: 1px solid var(--line); }
-.teacher-review button[aria-pressed="true"] { background: var(--secondary); color: #fff; }
-.teacher-review button:disabled { opacity: .45; cursor: default; }
+.teacher-review { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: .3rem .65rem; background: #fff; color: #4c5360; font-size: .8rem; font-weight: 600; }
 .teacher-search { display: inline-flex; align-items: center; gap: .75rem; padding: .35rem .45rem .35rem .65rem; border: 1px solid #cfd5de; border-radius: .6rem; background: #f6f7f9; color: #5f6b7a; font: inherit; font-size: .85rem; cursor: pointer; }
 .teacher-search:hover { border-color: #aab3c1; background: #fff; }
 .teacher-search kbd { font-size: .72rem; }

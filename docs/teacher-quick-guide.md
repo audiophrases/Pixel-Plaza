@@ -25,7 +25,7 @@ The app derives these instructions from the actual published mission, including 
 
 A chosen witness and an assigned partner work differently. A main witness question lets the investigator choose an online classmate in their Journal. A partner quest starts with accepting it on the quest board; the app assigns the partner. The guide states any role restrictions, different-role requirement, teacher release and requirement to finish the main mystery first.
 
-The exchange is: ask about the task and attach a private clue → teacher approves the question → witness replies with their own private clue → teacher approves the reply → investigator compares the evidence and submits their answer. Two witnesses require two such exchanges with different classmates for that question, and at least three students online. The investigator's own Journal task is separate from replying as somebody else's witness.
+The exchange is: ask about the task and attach a private clue → the witness sees it and replies with their own private clue → investigator compares the evidence and submits their answer. Two witnesses require two such exchanges with different classmates for that question, and at least three students online. The investigator's own Journal task is separate from replying as somebody else's witness.
 
 Reports require at least five words after any required exchange. The app records participation and the written attempt; the teacher assesses the explanation and English. Partner exchanges ask students to compare contributions and agree on a response, then submit their own reports.
 

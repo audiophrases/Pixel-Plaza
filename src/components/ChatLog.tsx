@@ -44,7 +44,7 @@ export default function ChatLog({ entries, filter, onFilter, who, action, onSele
           <span title={label}>{icon}</span>
           {entry.status === 'approved' && (entry.starred ? <span title="Starred">⭐</span>
             : <button type="button" title={`Give ${XP.teacher} XP for good English`} onClick={() => void action('xp', { chatId: entry.id })}>☆</button>)}
-          {entry.status === 'approved' && <button type="button" title="Take it down from every screen" onClick={() => void action('review', { id: entry.id, approve: false })}>🗑</button>}
+          {entry.status === 'approved' && <button type="button" title="Take it down from every screen" onClick={() => void action('remove', { id: entry.id })}>🗑</button>}
         </span>
       </li>;
     })}</ol>

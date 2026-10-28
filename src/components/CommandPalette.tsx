@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import './CommandPalette.css';
 
 // Ctrl+K: one box for everything on the teacher page. Type a student's name for what can be done with them,
-// "ana: try this" to send Ana a private message at once, or an action ("approve all", "everyone chat",
+// "ana: try this" to send Ana a private message at once, or an action ("everyone chat",
 // "end warm-up"). Each command shows its keyboard key when it has one, so using the box teaches the keys.
 export type Command = {
   id: string;

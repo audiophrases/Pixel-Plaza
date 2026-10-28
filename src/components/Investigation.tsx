@@ -19,7 +19,7 @@ function EvidenceMessage({ clues, onSend, label, disabled = false }: Props & { o
       {privateClues.map(c => <option key={c.id} value={c.id}>{c.text}</option>)}
     </select></label>
     <label>{label}<textarea maxLength={200} rows={3} value={text} onChange={event => setText(event.target.value)} required /></label>
-    <button type="submit" disabled={disabled || !chosen || !text.trim()}>Send for teacher approval</button>
+    <button type="submit" disabled={disabled || !chosen || !text.trim()}>Send</button>
   </form>;
 }
 
@@ -43,7 +43,7 @@ export function Investigation({ objective, conversation, interviews, clues, onTu
   const selected = peers.some(p => p.id === witness) ? witness : peers[0]?.id ?? '';
   return <div className="journal-investigation">
     <p><strong>Witness evidence: {conversation.completed} of {conversation.required}</strong></p>
-    <p>Ask about this question and compare your private clues. Your teacher approves the question and reply before you can submit a conclusion.</p>
+    <p>Ask about this question and compare your private clues. When your witness has replied, you can submit a conclusion. Your teacher can see every exchange.</p>
     {records.map(interview => <Transcript key={interview.id} interview={interview} />)}
     {conversation.completed < conversation.required && <>
       {peers.length ? <>
@@ -52,7 +52,7 @@ export function Investigation({ objective, conversation, interviews, clues, onTu
         </select></label>
         <EvidenceMessage key={selected} clues={clues} label="Your question about this mystery" disabled={!onTurn}
           onSend={(clue, text) => onTurn?.({ t: 'interview-ask', objective, witness: selected, clue, text })} />
-      </> : <p>Waiting for a classmate or an approved reply. You can help by answering questions below.</p>}
+      </> : <p>Waiting for a classmate or a reply. You can help by answering questions below.</p>}
     </>}
   </div>;
 }

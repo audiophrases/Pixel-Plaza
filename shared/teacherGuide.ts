@@ -31,7 +31,7 @@ export function buildGuide(campaign: Campaign, context: GuideContext = {}): Pick
     const summary = [
         `${campaign.chapters.length} ${campaign.chapters.length === 1 ? 'chapter' : 'chapters'}.`,
         witnesses === 0 ? 'Students share clues in chat and answer in their Journal.'
-            : `${witnesses === main.length ? 'Every main answer needs' : 'Marked questions need'} an approved witness exchange in the Journal.`,
+            : `${witnesses === main.length ? 'Every main answer needs' : 'Marked questions need'} a witness exchange in the Journal.`,
         objectives.some(o => o.activity) ? 'Partner quests add an assigned-partner exchange and a report.' : '',
     ].filter(Boolean).join(' ');
     const roleName = (id: string) => campaign.roles.find(r => r.id === id)?.name ?? id;
@@ -83,7 +83,7 @@ export function buildGuide(campaign: Campaign, context: GuideContext = {}): Pick
         };
         const play = requiredWitnesses.length ? [
             'Read private clues and open the question in the Journal.',
-            `${requiredWitnesses.length === compulsory.length ? 'For each main question' : 'For questions marked Witness'}: choose a witness → ask and attach a clue → you approve → witness replies with a clue → you approve.`,
+            `${requiredWitnesses.length === compulsory.length ? 'For each main question' : 'For questions marked Witness'}: choose a witness → ask and attach a clue → the witness replies with a clue → the answer opens. You can take down a message afterwards.`,
             'Compare the evidence, then submit the answer.' + (compulsory.some(o => o.conversation?.witnesses === 2) ? ' The task marked “2 witnesses” needs two different classmates.' : ''),
         ] : ['Read the private role clue → ask classmates in chat → combine what they know → answer in the Journal.',
             ...(compulsory.some(o => o.rewards) ? ['Correct answers unlock more private clues; students share those to solve the next question.'] : [])];

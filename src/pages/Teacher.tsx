@@ -44,7 +44,7 @@ type Status = {
   warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
   incidents?: Incident[];
   blocked?: BlockedStatus;
-  open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number; themeId?: string } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; mode: 'approve' | 'review'; moderation: boolean; muted: string[]; sound?: LiveSound; online: LiveStudent[];
+  open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number; themeId?: string } | null; realNames: Record<string, string>; games: Game[]; pin: string | null; entries: Entry[]; moderation: boolean; muted: string[]; sound?: LiveSound; online: LiveStudent[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
   support: Support;
 };
@@ -175,10 +175,6 @@ export default function Teacher() {
     return real && real !== shown ? `${shown} (${real})` : shown;
   };
 
-  // Oldest waiting message first, like a queue.
-  const waiting = status ? status.entries.filter(entry => entry.status === 'pending').sort((a, b) => a.timestamp - b.timestamp) : [];
-  const oldest = waiting[0];
-  const waitingBefore = useRef(0);
   const helpBefore = useRef<Set<string>>(new Set());
   const openHelp = status?.support?.alerts.filter(alert => alert.status === 'open') ?? [];
   const helpSignature = openHelp.map(alert => alert.id).join(',');
@@ -206,14 +202,14 @@ export default function Teacher() {
     incidentsBefore.current = incidentSignature;
   }, [incidentSignature]);
 
-  // A soft beep and the tab title tell the teacher something is waiting, even from another window.
+  // A soft beep and the tab title tell the teacher something needs them, even from another window.
   const repeatCount = status?.blocked?.repeats.length ?? 0;
   useEffect(() => {
     const helpIds = helpSignature ? helpSignature.split(',') : [];
     const incidentCount = incidentSignature ? incidentSignature.split(',').length : 0;
-    const count = waiting.length + helpIds.length + incidentCount + repeatCount;
+    const count = helpIds.length + incidentCount + repeatCount;
     document.title = count ? `(${count}) ${incidentCount ? '🚨 ' : ''}Teacher controls${helpIds.length ? ' · help needed' : ''}` : 'Teacher controls';
-    if (waiting.length > waitingBefore.current || helpIds.some(id => !helpBefore.current.has(id))) {
+    if (helpIds.some(id => !helpBefore.current.has(id))) {
       try {
         const audio = new AudioContext();
         const tone = audio.createOscillator();
@@ -226,9 +222,8 @@ export default function Teacher() {
         tone.onended = () => { void audio.close(); };
       } catch { /* sound is optional */ }
     }
-    waitingBefore.current = waiting.length;
     helpBefore.current = new Set(helpIds);
-  }, [waiting.length, helpSignature, incidentSignature, repeatCount]);
+  }, [helpSignature, incidentSignature, repeatCount]);
 
   const action = async (path: string, body: object) => {
     try {
@@ -252,17 +247,6 @@ export default function Teacher() {
   }
   const isOnline = (studentKey: string) => !!status?.online.some(student => student.studentKey === studentKey);
 
-  // A approves and R rejects the oldest waiting message.
-  useEffect(() => {
-    if (!oldest) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.ctrlKey || event.metaKey || event.altKey || (event.target as HTMLElement | null)?.closest('input, textarea, select')) return;
-      const key = event.key.toLowerCase();
-      if (key === 'a' || key === 'r') void action('review', { id: oldest.id, approve: key === 'a' });
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
 
   // Ctrl+K (or / when nothing is being typed) opens the search box; Ctrl+K again closes it.
   useEffect(() => {
@@ -320,18 +304,10 @@ export default function Teacher() {
 
   // Ctrl+K: everything the page can do, in the order it is offered with nothing typed (after the recent ones).
   const commands: Command[] = !status ? [] : [
-    ...(waiting.length > 1 ? [{ id: 'approve-all', icon: '✓', label: `Approve all ${waiting.length} waiting messages`, keywords: 'post queue pending', run: () => action('approve-all', {}) }] : []),
-    ...(oldest ? [
-      { id: 'approve', icon: '✓', label: `Post ${oldest.sender}: “${oldest.text}”`, hint: 'A', keywords: 'approve oldest waiting', run: () => action('review', { id: oldest.id, approve: true }) },
-      { id: 'reject', icon: '✕', label: `Do not post ${oldest.sender}: “${oldest.text}”`, hint: 'R', keywords: 'reject oldest waiting', run: () => action('review', { id: oldest.id, approve: false }) },
-    ] : []),
     ...(status.game ? CHAT_VIEWS.map(([filter, icon, label]) => ({ id: `chat:${filter}`, icon, label, hint: 'Chat log', keywords: 'chat log messages see read group what they say',
       run: () => { setChatFilter(filter); openTab('chat'); } })) : []),
     ...(status.blocked?.repeats ?? []).map(repeat => ({ id: `block:${repeat.key}`, icon: '🚫', label: `Block “${repeat.words}” for this lesson`,
       hint: `${repeat.students.length} students`, keywords: 'block ban stop word phrase repeat everyone', run: () => action('block', { words: [repeat.words] }) })),
-    ...(status.moderation || status.mode === 'review' ? [{ id: 'mode', icon: status.mode === 'approve' ? '⚡' : '✋',
-      label: status.mode === 'approve' ? 'Post chat after OpenAI checks it, and review afterwards' : 'Approve every message first', keywords: 'moderation mode review approve check',
-      run: () => action('mode', { mode: status.mode === 'approve' ? 'review' : 'approve' }) }] : []),
     ...(status.game ? [{ id: 'class', icon: status.open ? '🔒' : '🔓', label: status.open ? 'Close the class' : 'Open the class', keywords: 'class lesson open close start stop',
       run: () => action('class', { open: !status.open }) }] : []),
     ...(status.pin ? [{ id: 'link', icon: '🔗', label: 'Copy the join link', hint: `PIN ${status.pin}`, keywords: 'pin join link copy', run: () => copyLink(status.pin!) }] : []),
@@ -417,13 +393,10 @@ export default function Teacher() {
             onClick={async () => { setChangingNames(true); await action('real-names', { gameId: status.game!.id }); setChangingNames(false); }}>
             {changingNames ? 'Changing names…' : 'Use real names'}</button>}
         </div>}
-        {status.game && <div className="teacher-review" role="group" aria-label="How chat is checked">
-          <button type="button" aria-pressed={status.mode === 'approve'} onClick={() => void action('mode', { mode: 'approve' })} title="Every message waits for you">✋ Approve first</button>
-          <button type="button" aria-pressed={status.mode === 'review'} disabled={!status.moderation} onClick={() => void action('mode', { mode: 'review' })}
-            title={status.moderation
-              ? 'Only messages OpenAI clears post at once: nearby, to everyone or a whisper. Witness exchanges, flagged messages and anything it could not check still wait for you.'
-              : 'Needs an OPENAI_API_KEY (see the README)'}>⚡ Post, then review</button>
-        </div>}
+        {status.game && <span className="teacher-review" title={status.moderation
+          ? 'Every message posts once the checks pass: blocked words, the harm check and OpenAI. Take any down in the chat log.'
+          : 'No OPENAI_API_KEY (see the README): messages post after the blocked words and the harm check only. Take any down in the chat log.'}>
+          {status.moderation ? '🛡 Chat checked by OpenAI' : '⚠ Chat not checked by OpenAI'}</span>}
         <button type="button" className="teacher-search" onClick={() => setPaletteOpen(true)} title="Find a student or an action, or write “name: message”">
           <span>🔍 Search or do…</span><kbd>Ctrl K</kbd></button>
         <div className="teacher-more" ref={menu}>
@@ -444,7 +417,7 @@ export default function Teacher() {
           <button className="btn btn-secondary btn-sm" onClick={() => { if (window.confirm(`${nextStep(campaign)}?`)) void action('campaign', { op: 'next' }); }}>
             {campaign.chapter + 1 < campaign.chapters ? '▶ Next chapter' : '🏁 End campaign'}</button></span>}
       </section>}
-      {status.game && <LiveClass gameId={status.game.id} entries={status.entries} alerts={status.support?.alerts ?? []} incidents={status.incidents ?? []}
+      {status.game && <LiveClass gameId={status.game.id} alerts={status.support?.alerts ?? []} incidents={status.incidents ?? []}
         repeats={status.blocked?.repeats ?? []} online={status.online.map(s => ({ ...s, zone: placeName(s.zone) }))}
         known={[...supportStudents.values()]} muted={status.muted} sound={status.sound ?? { off: [], now: Date.now(), plays: [] }} open={status.open}
         who={who} action={action} selected={selectedStudent} onSelect={setSelectedStudent} />}
@@ -555,7 +528,7 @@ export default function Teacher() {
             </li>)}</ul>
           </>}
           {!!campaign.interviews?.length && <details className="teacher-interviews"><summary>Witness exchanges ({campaign.interviews.length})</summary>
-            <p>Review questions and replies in Needs you. These records verify participation; you assess the language and reasoning.</p>
+            <p>Questions and replies post as soon as they pass the checks; remove one here and it stops counting. These records show participation; you assess the language and reasoning.</p>
             {campaign.interviews.map(interview => <article key={interview.id} className="teacher-entry">
               <strong>{who(interview.studentKey, campaign.players.find(p => p.studentKey === interview.studentKey)?.name ?? 'Student')} → {who(interview.witnessKey, interview.name)}</strong>
               <p>{interview.task}</p>
@@ -564,16 +537,8 @@ export default function Teacher() {
               {interview.answer && <p>Reply ({interview.answerStatus}): {interview.answer}</p>}
               {interview.evidence && <p>Witness evidence: {interview.evidence}</p>}
               <div className="teacher-actions">
-                {interview.questionStatus === 'pending' && <>
-                  <button className="btn btn-sm btn-primary" onClick={() => void action('review', { id: interview.questionId, approve: true })}>Approve question</button>
-                  <button className="btn btn-sm" onClick={() => void action('review', { id: interview.questionId, approve: false })}>Reject question</button>
-                </>}
-                {interview.answerStatus === 'pending' && <>
-                  <button className="btn btn-sm btn-primary" onClick={() => void action('review', { id: interview.answerId, approve: true })}>Approve reply</button>
-                  <button className="btn btn-sm" onClick={() => void action('review', { id: interview.answerId, approve: false })}>Reject reply</button>
-                </>}
-                {interview.questionStatus === 'approved' && <button className="btn btn-sm" onClick={() => void action('review', { id: interview.questionId, approve: false })}>Remove question</button>}
-                {interview.answerStatus === 'approved' && <button className="btn btn-sm" onClick={() => void action('review', { id: interview.answerId, approve: false })}>Remove reply</button>}
+                {interview.questionStatus === 'approved' && <button className="btn btn-sm" onClick={() => void action('remove', { id: interview.questionId })}>Remove question</button>}
+                {interview.answerStatus === 'approved' && <button className="btn btn-sm" onClick={() => void action('remove', { id: interview.answerId })}>Remove reply</button>}
               </div>
             </article>)}
           </details>}

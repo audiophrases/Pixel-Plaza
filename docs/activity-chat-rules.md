@@ -22,6 +22,6 @@ The app already stores who holds each secret identity. It checks the sender's id
 
 Checks recognize case, accents, ordinary punctuation, invisible formatting, stretched letters and elementary spelling-out. This is a direct-name rule, not a semantic judge of every indirect hint.
 
-The server applies the rule without an AI key, before posting or queueing a message. It checks again after asynchronous moderation and before teacher approval, including Approve all. Blocked messages and reasons stay in the teacher's history. Rules come from persisted assignments, survive reconnects/restarts and continue when a student finishes their guessing task: they may still be helping others. Ending the warm-up releases the restriction.
+The server applies the rule without an AI key, before posting a message. It checks again after asynchronous moderation, just before the message posts. Blocked messages and reasons stay in the teacher's history. Rules come from persisted assignments, survive reconnects/restarts and continue when a student finishes their guessing task: they may still be helping others. Ending the warm-up releases the restriction.
 
 For student-chosen secrets, automatic blocking would first require a private setup step recording the secret, forbidden words, clue-giver and guessers for each round. Those library activities currently provide reminders and teacher review; they do not claim automatic blocking. Mission Studio's prompt tells an external authoring AI to preserve this distinction.

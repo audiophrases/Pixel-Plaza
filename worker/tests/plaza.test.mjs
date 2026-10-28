@@ -13,7 +13,7 @@ import { sha256Hex } from '../rules.ts';
 import { voiceFor } from '../../shared/voices.ts';
 import { castanyada, castanyadaComplete, castanyadaInvestigations, library, missions, sideQuests } from './fixtures/season-1.mjs';
 import { FACTS } from '../../shared/warmup.ts';
-import { IDENTITIES, identityById } from '../../shared/warmupKinds.ts';
+import { identityById } from '../../shared/warmupKinds.ts';
 import { defaultWarmup, validateWarmup } from '../../shared/warmupConfig.ts';
 import { missionEnvelope } from '../../shared/missionSchema.ts';
 import { legalMove } from '../../shared/plazaMap.ts';
@@ -147,25 +147,22 @@ async function enter(base, token, avatar) {
     return { ...socket, welcome, me: welcome.players.find(player => player.id === welcome.id) };
 }
 
+// A witness exchange: the question and the reply each post at once (nothing waits for the teacher), and the exchange
+// counts once the reply has posted. `teacher` finds the two messages in the chat log.
 async function exchangeEvidence(teacher, investigator, witness, objective) {
     await new Promise(resolve => setTimeout(resolve, 1550)); // same rate limit as ordinary chat
     const clue = investigator.state.quest.clues.filter(c => c.from === 'job' || c.from === 'reward').at(-1).id;
     investigator.send({ t: 'interview-ask', objective, witness: witness.me.id, clue, text: 'What does your evidence tell us about this mystery?' });
-    await investigator.next(m => m.t === 'notice' && /Sent to your teacher/.test(m.text), 'question submitted');
-    const question = (await teacher('status')).body.entries.find(e => e.status === 'pending' && e.sender === investigator.me.name && e.note?.startsWith('Investigation:'));
-    assert.ok(question, 'the question uses the moderation queue');
-    await teacher('review', { id: question.id, approve: true });
     const received = (await witness.next(m => m.t === 'quest' && m.quest?.interviews?.some(i => i.incoming && i.objective === objective && i.questionStatus === 'approved' && !i.answerStatus), 'witness question')).quest.interviews.find(i => i.incoming && i.objective === objective && !i.answerStatus);
+    const question = (await teacher('status')).body.entries.find(e => e.status === 'approved' && e.sender === investigator.me.name && e.note?.startsWith('Investigation:') && e.text === 'What does your evidence tell us about this mystery?');
+    assert.ok(question, 'the question posted, with its investigation note');
     await new Promise(resolve => setTimeout(resolve, 1550));
     witness.send({ t: 'interview-reply', id: received.id, clue: witness.state.quest.clues.filter(c => c.from === 'job' || c.from === 'reward').at(-1).id,
         text: 'My evidence helps explain what happened in the town.' });
-    await witness.next(m => m.t === 'notice' && /Sent to your teacher/.test(m.text), 'reply submitted');
-    const reply = (await teacher('status')).body.entries.find(e => e.status === 'pending' && e.sender === witness.me.name && e.note?.startsWith('Investigation:'));
-    assert.ok(reply, 'the reply uses the moderation queue');
-    const pending = (await investigator.next(m => m.t === 'quest' && m.quest?.interviews?.some(i => i.id === received.id && i.answerStatus === 'pending'), 'pending witness reply')).quest.interviews.find(i => i.id === received.id);
-    assert.equal(pending.answer, null); assert.equal(pending.evidence, null, 'unapproved evidence stays private');
-    await teacher('review', { id: reply.id, approve: true });
-    await investigator.next(m => m.t === 'quest' && m.quest?.interviews?.some(i => i.id === received.id && i.answerStatus === 'approved'), 'approved evidence exchange');
+    const done = (await investigator.next(m => m.t === 'quest' && m.quest?.interviews?.some(i => i.id === received.id && i.answerStatus === 'approved'), 'evidence exchange')).quest.interviews.find(i => i.id === received.id);
+    assert.equal(done.answer, 'My evidence helps explain what happened in the town.'); assert.ok(done.evidence, 'the witness evidence reaches the investigator');
+    const reply = (await teacher('status')).body.entries.find(e => e.status === 'approved' && e.sender === witness.me.name && e.note?.startsWith('Investigation:') && e.text === done.answer);
+    assert.ok(reply, 'the reply posted');
     return { id: received.id, questionId: question.id, replyId: reply.id };
 }
 
@@ -296,15 +293,13 @@ test('chat speech uses persisted sender voices and only synthesizes messages del
         });
         const preview = voice => api(base, '/api/plaza/voice-preview', { token: 'signed-b', body: { voice } });
         const text = 'The basket is near the cellar.';
+        assert.equal((await speech('no-such-message')).status, 404, 'only a posted message can be voiced');
         alex.send({ t: 'chat', text });
-        await alex.next(m => m.t === 'notice' && /approval/.test(m.text));
-        const id = (await teacher('status')).body.entries.find(e => e.text === text).id;
-        assert.equal((await speech(id)).status, 404, 'pending text cannot be voiced');
+        const delivered = await sam.next(m => m.t === 'chat' && m.text === text);
+        const id = delivered.id;
         assert.equal((await speech(id, 'forged')).status, 401);
         assert.equal((await preview('not-an-English-voice')).status, 400);
         assert.equal(requests.length, 0, 'denied calls never reach the speech service');
-        await teacher('review', { id, approve: true });
-        const delivered = await sam.next(m => m.t === 'chat' && m.id === id);
         assert.equal(delivered.voice, chosen);
         sam.send({ t: 'move', x: 100, y: 100 });
         chris.send({ t: 'move', x: alex.me.x, y: alex.me.y });
@@ -368,7 +363,7 @@ test('chat speech uses persisted sender voices and only synthesizes messages del
         holdResponse = () => { entered(); return bridgeRelease; };
         const inFlight = speech(id);
         await bridgeEntered;
-        assert.equal((await teacher('review', { id, approve: false })).status, 200);
+        assert.equal((await teacher('remove', { id })).status, 200);
         release();
         assert.equal((await inFlight).status, 404, 'withdrawal during synthesis prevents returning the generated clip');
         const before = requests.length;
@@ -444,9 +439,7 @@ test('mute all student sound stops every player, blocks in-flight speech and per
         assert.equal((await teacher('status')).body.sound.allOff, true);
         assert.equal((await alex.next(m => m.t === 'sound')).off, true); assert.equal((await sam.next(m => m.t === 'sound')).off, true);
         alex.send({ t: 'chat', text: 'We can still chat.', to: sam.me.id });
-        const notice = await alex.next(m => m.t === 'notice' && /approval/.test(m.text));
-        await teacher('review', { id: notice.id, approve: true });
-        assert.equal((await sam.next(m => m.t === 'chat' && m.id === notice.id)).text, 'We can still chat.');
+        assert.equal((await sam.next(m => m.t === 'chat' && m.text === 'We can still chat.')).whisper, true);
         const restored = (await teacher('sound-all', { off: false })).body.sound;
         assert.equal(restored.allOff, false); assert.deepEqual(restored.off, ['stu_b']);
         assert.equal((await alex.next(m => m.t === 'sound')).off, false); assert.equal((await sam.next(m => m.t === 'sound')).off, true, 'individual sound lock stays in place');
@@ -509,11 +502,10 @@ test('student assistance: blocked submissions, help requests, private replies an
         await alex.next(m => m.t === 'attempt-recorded' && m.id === 'stale-class', 'stale queue acknowledged');
         assert.ok(!(await teacher('attempts?studentKey=stu_a')).body.attempts.some(a => a.text === 'An old class draft must not enter a new class.'));
         alex.send({ t: 'chat', cid: 'first-chat', text: 'Hello class!' });
-        await alex.next(m => m.t === 'notice' && m.cid === 'first-chat' && /approval/.test(m.text));
+        await alex.next(m => m.t === 'result' && m.cid === 'first-chat');
         const chat = (await teacher('status')).body.entries.find(e => e.text === 'Hello class!');
-        await teacher('review', { id: chat.id, approve: true });
-        assert.equal((await teacher('attempts?studentKey=stu_a')).body.attempts.find(a => a.chatId === chat.id).status, 'approved');
-        await teacher('review', { id: chat.id, approve: false });
+        assert.equal((await teacher('attempts?studentKey=stu_a')).body.attempts.find(a => a.chatId === chat.id).status, 'approved', 'posted at once');
+        await teacher('remove', { id: chat.id });
         assert.equal((await teacher('attempts?studentKey=stu_a')).body.attempts.find(a => a.chatId === chat.id).status, 'removed');
         alex.send({ t: 'chat', cid: 'too-soon', text: 'Please help me with this sentence.' });
         await alex.next(m => m.t === 'notice' && m.cid === 'too-soon' && /wait/.test(m.text));
@@ -569,7 +561,6 @@ test('moderation in flight stays in its original game and retains the refused su
         const first = (await teacher('game', { name: 'Original class', randomNames: false })).body;
         PIN = first.pin;
         const alex = await enter(base, 'signed-a', null); sockets.push(alex);
-        await teacher('mode', { mode: 'review' });
         alex.send({ t: 'chat', text: 'This message belongs to the original class.', cid: 'held-message' });
         await checking;
         const nextGame = (await teacher('game', { name: 'Other class', randomNames: false })).body;
@@ -614,10 +605,8 @@ test('witness investigations block guesses and unrelated chat, keep evidence pri
         const answer = async () => { alex.send({ t: 'answer', objective: 'where', text: 'park' }); return alex.next(m => m.t === 'answered' && m.objective === 'where'); };
         assert.equal((await answer()).correct, false, 'guessing the right answer cannot bypass witnesses');
         alex.send({ t: 'chat', text: 'The blue box is in the park.' });
-        await alex.next(m => m.t === 'notice' && /Sent to your teacher/.test(m.text));
-        const unrelated = (await teacher('status')).body.entries.find(e => e.status === 'pending');
-        await teacher('review', { id: unrelated.id, approve: true });
-        assert.equal((await answer()).correct, false, 'an approved ordinary chat message does not count');
+        await sam.next(m => m.t === 'chat' && m.text === 'The blue box is in the park.', 'ordinary chat posts');
+        assert.equal((await answer()).correct, false, 'an ordinary chat message does not count');
         alex.send({ t: 'interview-ask', objective: 'where', witness: alex.me.id, clue: 'made-up', text: 'What did you see?' });
         assert.match((await alex.next(m => m.t === 'notice' && /Choose a classmate/.test(m.text))).text, /classmate/);
         alex.send({ t: 'interview-ask', objective: 'where', witness: sam.me.id, clue: 'made-up', text: 'What did you see?' });
@@ -627,15 +616,13 @@ test('witness investigations block guesses and unrelated chat, keep evidence pri
         assert.ok(!chris.state.quest.interviews.some(i => i.id === first.id), 'bystanders cannot read the transcript');
         chris.send({ t: 'interview-reply', id: first.id, clue: chris.state.quest.clues[0].id, text: 'I want to impersonate the witness.' });
         await chris.next(m => m.t === 'notice' && /not ready/.test(m.text), 'forged reply rejected');
-        await teacher('review', { id: first.replyId, approve: false });
+        await teacher('remove', { id: first.replyId });
         await alex.next(m => m.t === 'quest' && m.quest?.objectives.find(o => o.id === 'where')?.conversation.completed === 0, 'removed reply revokes participation');
         assert.equal((await answer()).correct, false);
         // The assigned witness can revise a removed reply, using their own server-known evidence.
         await new Promise(resolve => setTimeout(resolve, 1550));
         sam.send({ t: 'interview-reply', id: first.id, clue: sam.state.quest.clues[0].id, text: 'This is my corrected account of the delivery.' });
-        await sam.next(m => m.t === 'notice' && /Sent to your teacher/.test(m.text));
-        const corrected = (await teacher('status')).body.entries.find(e => e.status === 'pending' && e.sender === sam.me.name);
-        await teacher('review', { id: corrected.id, approve: true });
+        await alex.next(m => m.t === 'quest' && m.quest?.objectives.find(o => o.id === 'where')?.conversation.completed === 1, 'the revised reply counts at once');
         await exchangeEvidence(teacher, alex, chris, 'where');
         assert.equal(alex.state.quest.objectives.find(o => o.id === 'where').conversation.completed, 2);
         for (const socket of sockets) socket.ws.close(); await plaza.stop();
@@ -1349,22 +1336,21 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         alex.send({ t: 'move', x: 1100, y: 740 });
         assert.deepEqual([(await moved).x, (await moved).y], [1100, 740]);
 
-        // Chat waits for the teacher.
+        // Chat posts at once: nothing waits for the teacher, who sees it in the chat log.
         sam.send({ t: 'move', x: 920, y: 810 });
         await new Promise(resolve => setTimeout(resolve, 300));
         alex.send({ t: 'chat', text: 'Hello class!' });
-        assert.match((await alex.next(message => message.t === 'notice', 'pending notice')).text, /approval/);
+        assert.equal((await sam.next(message => message.t === 'chat' && message.sender === 'Alex', 'posted chat')).text, 'Hello class!');
         let status = (await api(base, '/api/teacher/status', { session })).body;
         assert.deepEqual(status.online.map(student => student.name).sort(), ['Alex', 'Sam']);
         const alexLocation = status.online.find(student => student.studentKey === 'stu_a');
         assert.deepEqual([alexLocation.x, alexLocation.y], [1100, 740]);
         assert.equal(alexLocation.zone, null); // the path between the cafe and park
-        assert.equal(status.entries[0].status, 'pending');
+        assert.equal(status.entries[0].status, 'approved');
         assert.equal(status.entries[0].studentKey, 'stu_a');
-        assert.equal(sam.inbox.some(message => message.t === 'chat' && message.text === 'Hello class!'), false);
-        await api(base, '/api/teacher/review', { session, body: { id: status.entries[0].id, approve: true } });
-        assert.equal((await sam.next(message => message.t === 'chat' && message.sender === 'Alex', 'approved chat')).text, 'Hello class!');
-        assert.match((await alex.next(message => message.t === 'notice', 'decision')).text, /approved/);
+        assert.equal(status.entries[0].flag, 'moderation unavailable', 'without an OpenAI key the teacher sees it was not checked');
+        assert.equal('mode' in status, false, 'there is no approval mode');
+        assert.equal((await api(base, '/api/teacher/review', { session, body: { id: status.entries[0].id, approve: true } })).status, 400, 'nothing to approve');
 
         // Nearby chat stops at earshot; a whisper reaches only its target, and the teacher sees both.
         const chris = await enter(base, 'signed-c', null);
@@ -1373,21 +1359,17 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         await new Promise(resolve => setTimeout(resolve, 300));
         await new Promise(resolve => setTimeout(resolve, 1600)); // chat rate limit
         alex.send({ t: 'chat', text: 'Only people near me' });
-        await alex.next(message => message.t === 'notice' && /approval/.test(message.text), 'nearby pending');
         await new Promise(resolve => setTimeout(resolve, 1600));
         alex.send({ t: 'chat', text: 'Secret for Chris', to: chris.welcome.id });
-        await alex.next(message => message.t === 'notice' && /approval/.test(message.text), 'whisper pending');
+        await alex.next(message => message.t === 'chat' && message.text === 'Secret for Chris', 'whisper posted');
         status = (await api(base, '/api/teacher/status', { session })).body;
         const nearby = status.entries.find(entry => entry.text === 'Only people near me');
         const whisper = status.entries.find(entry => entry.text === 'Secret for Chris');
         assert.equal(nearby.target, null);
         assert.equal(whisper.target, 'Chris');
-        await api(base, '/api/teacher/review', { session, body: { id: nearby.id, approve: true } });
-        await api(base, '/api/teacher/review', { session, body: { id: whisper.id, approve: true } });
         assert.equal((await sam.next(message => message.t === 'chat' && message.sender === 'Alex' && !message.whisper, 'near chat')).text, 'Only people near me');
         const heard = await chris.next(message => message.t === 'chat' && message.sender === 'Alex', 'whisper');
         assert.deepEqual([heard.text, heard.whisper, heard.to], ['Secret for Chris', true, 'Chris']);
-        assert.equal((await alex.next(message => message.t === 'chat' && message.whisper, 'own whisper')).text, 'Secret for Chris');
         assert.equal(chris.inbox.some(message => message.text === 'Only people near me'), false);
         assert.equal(sam.inbox.some(message => message.text === 'Secret for Chris'), false);
         chris.ws.close();
@@ -1525,7 +1507,7 @@ test("the class plays on the teacher's laptop; students sign in online and are s
         assert.equal(refused.level, 'warning');
         assert.match(refused.text, /English words only: Hola, recieve/);
         alex.send({ t: 'chat', text: 'Hello friends, I receive it' });
-        assert.match((await alex.next(message => message.t === 'notice', 'accepted')).text, /approval/);
+        await alex.next(message => message.t === 'chat' && message.text === 'Hello friends, I receive it', 'accepted');
         alex.ws.close();
         await alex.closed;
 
@@ -1566,16 +1548,14 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
         const { base } = plaza;
         const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
         PIN = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body.pin;
-        // With an OpenAI key the default is to post what it clears; these first steps want the teacher as the gate.
-        assert.equal((await api(base, '/api/teacher/status', { session })).body.mode, 'review');
-        assert.equal((await api(base, '/api/teacher/mode', { session, body: { mode: 'approve' } })).body.mode, 'approve');
+        // Nothing waits for the teacher: there is no approval mode to choose.
+        assert.equal((await api(base, '/api/teacher/mode', { session, body: { mode: 'approve' } })).status, 400);
         alex = await enter(base, 'signed-a', null);
         const entries = async () => (await api(base, '/api/teacher/status', { session })).body.entries;
-        const send = async text => {
-            await new Promise(resolve => setTimeout(resolve, 1600)); // chat rate limit
-            alex.send({ t: 'chat', text });
-            return alex.next(message => message.t === 'notice', `reply to "${text}"`);
-        };
+        const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+        const say = async text => { await pause(1600); alex.send({ t: 'chat', text }); }; // chat rate limit
+        const send = async text => { await say(text); return alex.next(message => message.t === 'notice', `reply to "${text}"`); };
+        const posts = async text => { await say(text); return alex.next(message => message.t === 'chat' && message.text === text, `"${text}" posts`); };
 
         // Flagged by OpenAI: the student is told to rewrite it, the teacher sees why.
         const refused = await send('I hate you all');
@@ -1584,15 +1564,16 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
         let entry = (await entries()).find(e => e.text === 'I hate you all');
         assert.deepEqual([entry.status, entry.flag], ['blocked', 'harassment']);
 
-        // Clean: goes to the teacher as before, with no flag.
-        assert.match((await send('Nice to meet you')).text, /approval/);
+        // Clean: posts at once, with no flag and no teacher click.
+        const posted = [await posts('Nice to meet you')];
         entry = (await entries()).find(e => e.text === 'Nice to meet you');
-        assert.deepEqual([entry.status, entry.flag], ['pending', null]);
+        assert.deepEqual([entry.status, entry.flag], ['approved', null]);
 
-        // OpenAI down: the teacher is still the gate, and is told the check did not happen.
-        assert.match((await send('outage please')).text, /approval/);
+        // OpenAI down: the message still posts, and the teacher is told the check did not happen.
+        posted.push(await posts('outage please'));
         entry = (await entries()).find(e => e.text === 'outage please');
-        assert.deepEqual([entry.status, entry.flag], ['pending', 'moderation unavailable']);
+        assert.deepEqual([entry.status, entry.flag], ['approved', 'moderation unavailable']);
+        assert.ok(posted.every(m => typeof m.id === 'string'));
 
         // The local word filter still runs first, so OpenAI is not asked about it.
         const before = seen.length;
@@ -1600,16 +1581,6 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
         assert.equal(seen.length, before);
         assert.ok(seen.every(call => call.url === '/v1/moderations' && call.auth === 'Bearer test-key'));
 
-        // "Approve all" posts everything waiting, oldest first.
-        const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-        await api(base, '/api/teacher/approve-all', { session, body: {} });
-        const posted = [await alex.next(m => m.t === 'chat' && m.sender === 'Alex', 'first approved'),
-            await alex.next(m => m.t === 'chat' && m.sender === 'Alex', 'second approved')];
-        assert.deepEqual(posted.map(m => m.text), ['Nice to meet you', 'outage please']);
-        assert.ok(posted.every(m => typeof m.id === 'string'));
-        await alex.next(m => m.t === 'notice' && /approved/.test(m.text), 'approval notice');
-        await alex.next(m => m.t === 'notice' && /approved/.test(m.text), 'approval notice');
-        assert.equal((await entries()).filter(e => e.status === 'pending').length, 0);
 
         // Levels: the teacher stars a good message, once; the student sees the experience arrive, with why.
         const star = body => api(base, '/api/teacher/xp', { session, body });
@@ -1647,10 +1618,8 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
         assert.deepEqual([nice.source, nice.status, nice.starred], ['chat', 'approved', true]);
         assert.equal((await fetch(`${base}/api/teacher/report`)).status, 401, 'teachers only');
 
-        // Review mode: what OpenAI cleared posts at once, with no teacher click.
-        const status = (await api(base, '/api/teacher/status', { session })).body;
-        assert.deepEqual([status.mode, status.moderation], ['approve', true]);
-        assert.equal((await api(base, '/api/teacher/mode', { session, body: { mode: 'review' } })).body.mode, 'review');
+        // What OpenAI cleared posts at once for everyone near, with no teacher click.
+        assert.equal((await api(base, '/api/teacher/status', { session })).body.moderation, true);
         sam = await enter(base, 'signed-b', null);
         await pause(1600);
         alex.send({ t: 'chat', text: 'Good morning everyone' });
@@ -1665,17 +1634,11 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
         assert.deepEqual([whispered.whisper, whispered.to], [true, 'Sam']);
         assert.equal((await entries()).find(e => e.text === 'Psst, a whisper').status, 'approved');
 
-        // An outage returns the draft for retry instead of creating an approval queue.
-        await pause(1600);
-        assert.match((await send('outage again')).text, /not sent.*try again/i);
-        const waiting = (await entries()).filter(e => e.status === 'pending').map(e => e.text).sort();
-        assert.deepEqual(waiting, []);
-        assert.equal((await entries()).some(e => e.text === 'outage again'), false);
-        const attempts = (await api(base, '/api/teacher/attempts?studentKey=stu_a', { session })).body.attempts;
-        assert.ok(attempts.some(a => a.text === 'outage again' && a.status === 'not-sent' && /HTTP 500/.test(a.reason)));
+        // Nothing is ever left waiting for the teacher.
+        assert.equal((await entries()).some(e => e.status === 'pending'), false);
 
         // The teacher can take a posted message down; it leaves every screen.
-        await api(base, '/api/teacher/review', { session, body: { id: live.id, approve: false } });
+        await api(base, '/api/teacher/remove', { session, body: { id: live.id } });
         assert.equal((await alex.next(m => m.t === 'retract', 'retract')).id, live.id);
         assert.equal((await sam.next(m => m.t === 'retract', 'retract')).id, live.id);
         assert.equal((await entries()).find(e => e.text === 'Good morning everyone').status, 'removed');
@@ -1707,20 +1670,13 @@ test('first-message XP rewards a greeting once, after approval, across restarts 
         await alex.next(m => m.t === 'result' && m.cid === 'help');
         assert.equal(alex.inbox.some(m => m.t === 'xp' && m.gained), false, 'teacher help does not use the welcome bonus');
 
+        // A message to a classmate posts at once, so the first one earns the bonus.
         const submit = async text => {
             alex.send({ t: 'chat', text, to: sam.me.id });
-            await alex.next(m => m.t === 'notice' && /approval/.test(m.text));
-            return (await teacher('status')).body.entries.find(e => e.text === text && e.status === 'pending');
+            return sam.next(m => m.t === 'chat' && m.text === text, `"${text}" reaches Sam`);
         };
-        const rejected = await submit('Hi');
-        assert.equal(alex.inbox.some(m => m.t === 'xp' && m.gained), false, 'pending messages earn nothing');
-        await teacher('review', { id: rejected.id, approve: false });
-        await alex.next(m => m.t === 'notice' && /not posted/.test(m.text));
-        assert.equal(alex.inbox.some(m => m.t === 'xp' && m.gained), false, 'a rejected message does not use the bonus');
         await new Promise(resolve => setTimeout(resolve, 1550));
-        const first = await submit('Hello');
-        await teacher('review', { id: first.id, approve: true });
-        await sam.next(m => m.t === 'chat' && m.id === first.id);
+        await submit('Hello');
         const gained = await alex.next(m => m.t === 'xp' && m.gained);
         assert.deepEqual([gained.xp, gained.gained], [1, 1]);
         assert.match(gained.reason, /first message/i);
@@ -1729,9 +1685,7 @@ test('first-message XP rewards a greeting once, after approval, across restarts 
         plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); base = plaza.base;
         alex = await enter(base, 'signed-a', null); sam = await enter(base, 'signed-b', null);
         assert.equal((await alex.next(m => m.t === 'xp')).xp, 1, 'the bonus persists after a server restart');
-        const repeated = await submit('Hi again');
-        await teacher('review', { id: repeated.id, approve: true });
-        await sam.next(m => m.t === 'chat' && m.id === repeated.id);
+        await submit('Hi again');
 
         const next = (await teacher('game', { name: 'Another lesson', randomNames: false })).body;
         PIN = next.pin;
@@ -1739,9 +1693,7 @@ test('first-message XP rewards a greeting once, after approval, across restarts 
         await teacher('game/delete', { game: firstGame, confirm: true });
         alex = await enter(base, 'signed-a', null); sam = await enter(base, 'signed-b', null);
         assert.equal((await alex.next(m => m.t === 'xp')).xp, 1, 'changing games and deleting old history cannot reset the bonus');
-        const later = await submit('Hello again');
-        await teacher('review', { id: later.id, approve: true });
-        await sam.next(m => m.t === 'chat' && m.id === later.id);
+        await submit('Hello again');
         alex.ws.close(); await alex.closed;
         alex = await enter(base, 'signed-a', null);
         assert.equal((await alex.next(m => m.t === 'xp')).xp, 1, 'the next game cannot grant another welcome bonus');
@@ -1751,7 +1703,7 @@ test('first-message XP rewards a greeting once, after approval, across restarts 
     }
 });
 
-test('small participation XP follows approved delivery, keeps durable limits and ignores removed messages', { timeout: 120000 }, async () => {
+test('small participation XP follows delivery, keeps durable limits and ignores removed messages', { timeout: 120000 }, async () => {
     const decisions = []; let releaseDecision, startedDecision;
     const ai = http.createServer(async (req, res) => {
         let body = ''; for await (const chunk of req) body += chunk;
@@ -1797,21 +1749,14 @@ test('small participation XP follows approved delivery, keeps durable limits and
         assert.deepEqual([alexFirst.xp, alexFirst.gained], [1, 1]);
         assert.equal(decisions.length, 0, 'greeting loops are filtered locally');
 
-        await teacher('mode', { mode: 'approve' });
         await pause(1550);
         alex.send({ t: 'chat', text: 'What did you find near the fountain?', to: sam.me.id });
-        await alex.next(m => m.t === 'notice' && /approval/.test(m.text));
-        let entry = (await teacher('status')).body.entries.find(e => e.text === 'What did you find near the fountain?');
-        assert.equal(decisions.length, 0, 'pending messages cost no participation check');
-        await teacher('review', { id: entry.id, approve: true });
-        await sam.next(m => m.t === 'chat' && m.id === entry.id);
+        await sam.next(m => m.t === 'chat' && m.text === 'What did you find near the fountain?');
         const gained = await alex.next(m => m.t === 'xp' && m.gained);
         assert.deepEqual([gained.xp, gained.gained], [2, 1], 'a genuine question needs no answer yet');
         assert.equal(decisions.length, 1);
         assert.ok(decisions[0].previous.includes('Where is the hotel?'), 'history crosses recipient choices');
         assert.ok(decisions[0].conversation.some(line => !line.self), 'only delivered chat supplies peer context');
-        await teacher('review', { id: entry.id, approve: true });
-        assert.equal(decisions.length, 1, 'reviewing twice cannot reward twice');
 
         // Restart the real Worker and reconnect: XP and the API cooldown both persist.
         alex.ws.close(); sam.ws.close(); await pause(100);
@@ -1820,7 +1765,6 @@ test('small participation XP follows approved delivery, keeps durable limits and
         alex = await enter(base, 'signed-a', null); sam = await enter(base, 'signed-b', null);
         assert.equal((await alex.next(m => m.t === 'xp')).xp, 2);
         await sam.next(m => m.t === 'xp');
-        await teacher('mode', { mode: 'review' });
         alex.send({ t: 'chat', text: 'Do you enjoy playing football?', to: sam.me.id });
         await sam.next(m => m.t === 'chat' && m.text === 'Do you enjoy playing football?');
         assert.equal(decisions.length, 1, 'reconnecting cannot reset the cooldown');
@@ -1829,7 +1773,7 @@ test('small participation XP follows approved delivery, keeps durable limits and
         sam.send({ t: 'chat', text: 'Could you explain the clue about the box?', to: alex.me.id });
         const posted = await alex.next(m => m.t === 'chat' && m.text.startsWith('Could'));
         await started;
-        await teacher('review', { id: posted.id, approve: false });
+        await teacher('remove', { id: posted.id });
         releaseDecision(); releaseDecision = null;
         await sam.next(m => m.t === 'retract' && m.id === posted.id);
         await pause(200);
@@ -1913,13 +1857,13 @@ test('grammar hints advise, never block, and the teacher sees what the student c
         // The message is sent either way; the teacher is told which the student chose.
         await pause(1600);
         alex.send({ t: 'chat', text: 'She go to school every day', better: 'She goes to school every day' });
-        assert.match((await alex.next(message => message.t === 'notice', 'kept')).text, /approval/);
+        const shown = await alex.next(message => message.t === 'chat' && message.text === 'She go to school every day', 'kept message shown');
         await pause(1600);
         alex.send({ t: 'chat', text: 'She goes to school every day', was: 'She go to school every day' });
-        assert.match((await alex.next(message => message.t === 'notice', 'used')).text, /approval/);
+        const clean = await alex.next(message => message.t === 'chat' && message.text === 'She goes to school every day', 'corrected message shown');
         await pause(1600);
         alex.send({ t: 'chat', text: 'No hint was involved here' });
-        await alex.next(message => message.t === 'notice', 'plain');
+        await alex.next(message => message.t === 'chat' && message.text === 'No hint was involved here', 'plain');
         const entries = (await api(base, '/api/teacher/status', { session })).body.entries;
         const note = text => entries.find(entry => entry.text === text).note;
         assert.equal(note('She go to school every day'), 'Kept their own words. Suggested: "She goes to school every day"');
@@ -1927,13 +1871,7 @@ test('grammar hints advise, never block, and the teacher sees what the student c
         assert.equal(note('No hint was involved here'), null);
 
         // A message kept with its mistake reaches everyone with the wrong word marked; the corrected one has none.
-        const kept = entries.find(entry => entry.text === 'She go to school every day');
-        const used = entries.find(entry => entry.text === 'She goes to school every day');
-        await api(base, '/api/teacher/review', { session, body: { id: kept.id, approve: true } });
-        const shown = await alex.next(message => message.t === 'chat' && message.text === kept.text, 'kept message shown');
         assert.deepEqual(shown.marks, [[4, 6]]);
-        await api(base, '/api/teacher/review', { session, body: { id: used.id, approve: true } });
-        const clean = await alex.next(message => message.t === 'chat' && message.text === used.text, 'corrected message shown');
         assert.equal(clean.marks, undefined);
         // One original attempt counts once even when its checker toggles between results.
         const nextGame = (await api(base, '/api/teacher/game', { session, body: { name: 'Grammar assistance', randomNames: false } })).body;
@@ -1950,11 +1888,11 @@ test('grammar hints advise, never block, and the teacher sees what the student c
         assert.equal((await hint('repeat-hint', 'She go to school every day', 'hint-attempt-2')).ok, false);
         assert.equal((await api(base, '/api/teacher/status', { session })).body.support.alerts.length, 0, 'replaying a hint does not count again after resolution');
         alex.send({ t: 'chat', text: 'She goes to school every day', was: 'She go to school every day', attemptId: 'hint-attempt-2', cid: 'corrected-assistance' });
-        await alex.next(m => m.t === 'notice' && m.cid === 'corrected-assistance');
+        await alex.next(m => m.t === 'result' && m.cid === 'corrected-assistance');
         const audit = (await api(base, '/api/teacher/attempts?studentKey=stu_a', { session })).body.attempts;
         const corrected = audit.find(a => a.finalText === 'She goes to school every day');
         assert.equal(corrected.text, 'She go to school every day'); assert.equal(corrected.correction, 'She goes to school every day');
-        assert.equal(corrected.status, 'pending');
+        assert.equal(corrected.status, 'approved');
         await api(base, '/api/teacher/campaign', { session, body: { op: 'start', campaign: 'castanyada' } });
         for (let index = 0; index < 3; index++) {
             if (index) await pause(3100);
@@ -2287,8 +2225,9 @@ test('a live game switches to real names without losing chat, warm-up or mission
         await teacher('warmup', { op: 'start', type: 'facts' });
         const round = (await alex.next(m => m.t === 'warmup' && m.warmup)).warmup;
         alex.send({ t: 'chat', text: 'Hello, can you help me?', to: sam.me.id, cid: 'before-names' });
-        const pending = await alex.next(m => m.t === 'notice' && m.cid === 'before-names');
-        assert.ok(pending.id, 'a message awaits teacher approval');
+        const sent = await alex.next(m => m.t === 'result' && m.cid === 'before-names');
+        assert.ok(sent.id, 'the message posted at once');
+        await sam.next(m => m.t === 'chat' && m.id === sent.id, 'Sam has it before the names change');
         away.ws.close(); await away.closed; await pause(100);
         const before = (await teacher('status')).body;
         for (const socket of [alex, sam, roger]) socket.inbox.splice(0);
@@ -2300,8 +2239,8 @@ test('a live game switches to real names without losing chat, warm-up or mission
         assert.equal(after.game.randomNames, false); assert.equal(after.open, true); assert.equal(after.pin, PIN);
         assert.deepEqual(after.online.map(s => [s.studentKey, s.id, s.x, s.y]), before.online.map(s => [s.studentKey, s.id, s.x, s.y]), 'students stay connected in place');
         assert.deepEqual(after.online.map(s => s.name).sort(), ['Alex', 'Roger L', 'Sam']);
-        assert.equal(after.entries.find(e => e.id === pending.id).sender, 'Alex');
-        assert.equal(after.entries.find(e => e.id === pending.id).target, 'Sam');
+        assert.equal(after.entries.find(e => e.id === sent.id).sender, 'Alex', 'the chat log shows the real name');
+        assert.equal(after.entries.find(e => e.id === sent.id).target, 'Sam');
         assert.deepEqual(after.campaign.players.map(({ name, ...p }) => p), before.campaign.players.map(({ name, ...p }) => p));
         assert.deepEqual(after.warmup.players.map(({ name, ...p }) => p), before.warmup.players.map(({ name, ...p }) => p));
         const updated = await alex.next(m => m.t === 'names');
@@ -2310,9 +2249,6 @@ test('a live game switches to real names without losing chat, warm-up or mission
         const refreshed = (await alex.next(m => m.t === 'warmup' && m.warmup)).warmup;
         assert.equal(refreshed.runId, round.runId); assert.equal(refreshed.task, round.task);
         assert.ok((await alex.next(m => m.t === 'quest' && m.quest)).quest.objectives.find(o => o.id === firstTask.id)?.done);
-        await teacher('review', { id: pending.id, approve: true });
-        const delivered = await sam.next(m => m.t === 'chat' && m.id === pending.id);
-        assert.equal(delivered.sender, 'Alex'); assert.equal(delivered.to, 'Sam');
         const wanted = FACTS.find(fact => `Find someone who ${fact.find}.` === refreshed.task);
         const holder = after.warmup.players.find(p => p.studentKey !== 'stu_a' && p.fact === wanted.mine);
         assert.ok(holder);
@@ -2872,14 +2808,14 @@ test('warm-up editor saves private content, pins running rounds and keeps custom
         assert.equal((await teacher('status')).body.warmup.title, definition.title, 'saving does not rewrite the current round');
         const send = async (who, text, to, cid) => {
             await pause(1550); who.send({ t: 'chat', text, to, cid });
-            return who.next(m => m.t === 'notice' && m.cid === cid);
+            return who.next(m => (m.t === 'notice' || m.t === 'result') && m.cid === cid); // a notice when refused, the result when posted
         };
         const rejected = await send(alex, `I am ${secretA}.`, sam.me.id, 'custom-reveal');
         assert.match(rejected.text, /Keep your secret identity hidden/, 'custom names pass the English dictionary and reach the identity rule');
         const question = await send(sam, `Are you ${secretA}?`, alex.me.id, 'custom-guess');
-        assert.equal(question.level, 'info'); await teacher('review', { id: question.id, approve: true });
+        assert.equal(question.t, 'result');
         assert.equal((await alex.next(m => m.t === 'chat' && m.id === question.id)).text, `Are you ${secretA}?`);
-        const yes = await send(alex, 'Yes!', sam.me.id, 'custom-yes'); assert.equal(yes.level, 'info');
+        const yes = await send(alex, 'Yes!', sam.me.id, 'custom-yes'); assert.equal(yes.t, 'result');
         const chris = await enter(plaza.base, 'signed-c', null); sockets.push(chris);
         const late = await view(chris, definition.title);
         assert.ok(![secretA, name(b)].includes(name(late)), 'late arrival uses the remaining original identity, not the edited template');
@@ -2901,7 +2837,7 @@ test('warm-up editor saves private content, pins running rounds and keeps custom
         await teacher('warmup', { op: 'end' });
         const ended = await alex.next(m => m.t === 'warmup' && m.warmup === null);
         assert.ok(ended.vocabulary.includes('Zorvax the sailor'), 'custom proper names remain available to the word checker after the round');
-        assert.equal((await send(alex, 'Zorvax the sailor', sam.me.id, 'after-custom-end')).level, 'info');
+        assert.equal((await send(alex, 'Zorvax the sailor', sam.me.id, 'after-custom-end')).t, 'result');
         const facts = { ...defaultWarmup('facts'), title: 'Travel facts', rounds: 1, facts: [
             { id: 'compass', mine: 'You have a compass.', find: 'has a compass' }, { id: 'map', mine: 'You have a map.', find: 'has a map' },
         ] };
@@ -2936,44 +2872,25 @@ test('Who am I chat protects the helper, permits guesses and yes/no, and survive
         const send = async (who, text, to, cid) => {
             await pause(1550);
             who.send({ t: 'chat', text, to, cid });
-            return who.next(m => m.t === 'notice' && m.cid === cid, cid);
+            return who.next(m => (m.t === 'notice' || m.t === 'result') && m.cid === cid, cid); // a notice when refused, the result when posted
         };
-        // Queue names before the round. Which one becomes a secret is intentionally random.
-        const batches = [''];
-        for (const identity of IDENTITIES) {
-            const alias = [...identity.accept].sort((a, b) => a.length - b.length)[0];
-            if (batches.at(-1).length + alias.length + 2 > 180) batches.push('');
-            batches[batches.length - 1] += `${batches.at(-1) ? ', ' : ''}${alias}`;
-        }
-        for (const [i, text] of batches.entries()) assert.equal((await send(helper, text, guesser.me.id, `before-${i}`)).level, 'info');
         const start = await teacher('warmup', { op: 'start', type: 'identity' }); assert.equal(start.status, 200);
         const view = async who => (await who.next(m => m.t === 'warmup' && m.warmup?.kind === 'identity')).warmup;
         const helperCard = await view(helper), guesserCard = await view(guesser);
         const name = card => card.fact.match(/^You are (.+?)\. Do not say/)[1];
         const secret = name(helperCard), guesserSecret = name(guesserCard);
         assert.notEqual(secret, guesserSecret);
-        const identity = IDENTITIES.find(i => i.name === secret);
-        const before = (await teacher('status')).body.entries;
-        const queued = before.find(e => identity.accept.some(alias => e.text.split(', ').includes(alias)));
-        assert.ok(queued);
-        await teacher('approve-all', {});
-        const protectedEntry = (await teacher('status')).body.entries.find(e => e.id === queued.id);
-        assert.equal(protectedEntry.status, 'blocked', 'approve-all rechecks names queued before the activity');
-        assert.match(protectedEntry.note, /Activity rule/);
-        assert.equal(guesser.inbox.some(m => m.t === 'chat' && m.id === queued.id), false);
         for (const [i, to] of [guesser.me.id, undefined, 'everyone'].entries()) {
             const rejected = await send(helper, `I am ${secret}.`, to, `reveal-${i}`);
             assert.equal(rejected.level, 'warning'); assert.match(rejected.text, /Keep your secret identity hidden/);
         }
         const blocked = (await teacher('status')).body.entries.find(e => e.text === `I am ${secret}.`);
         assert.equal(blocked.status, 'blocked'); assert.match(blocked.note, /Who am I/);
-        assert.equal((await teacher('review', { id: blocked.id, approve: true })).status, 400, 'a blocked reveal cannot be approved');
+        assert.equal(guesser.inbox.some(m => m.t === 'chat' && m.id === blocked.id), false, 'a blocked reveal never reaches the guesser');
         const question = `Are you ${secret}?`;
-        const questionNotice = await send(guesser, question, helper.me.id, 'guess'); assert.equal(questionNotice.level, 'info');
-        await teacher('review', { id: questionNotice.id, approve: true });
-        assert.equal((await helper.next(m => m.t === 'chat' && m.id === questionNotice.id)).text, question);
-        const yes = await send(helper, 'Yes!', guesser.me.id, 'confirm'); assert.equal(yes.level, 'info');
-        await teacher('review', { id: yes.id, approve: true });
+        const asked = await send(guesser, question, helper.me.id, 'guess'); assert.equal(asked.t, 'result');
+        assert.equal((await helper.next(m => m.t === 'chat' && m.id === asked.id)).text, question);
+        const yes = await send(helper, 'Yes!', guesser.me.id, 'confirm'); assert.equal(yes.t, 'result');
         assert.equal((await guesser.next(m => m.t === 'chat' && m.id === yes.id)).text, 'Yes!');
         guesser.send({ t: 'warmup-answer', text: secret });
         assert.equal((await guesser.next(m => m.t === 'warmup-answered')).correct, true, 'private final answer is never blocked');
@@ -2987,11 +2904,10 @@ test('Who am I chat protects the helper, permits guesses and yes/no, and survive
         helper = await enter(plaza.base, 'signed-a', null); guesser = await enter(plaza.base, 'signed-b', null); sockets.push(helper, guesser);
         assert.equal((await send(helper, secret, 'everyone', 'after-restart')).level, 'warning');
         await teacher('warmup', { op: 'end' });
-        const after = await send(helper, secret, guesser.me.id, 'after-end'); assert.equal(after.level, 'info', 'ending the warm-up removes its restriction');
-        await teacher('review', { id: after.id, approve: true });
+        const after = await send(helper, secret, guesser.me.id, 'after-end'); assert.equal(after.t, 'result', 'ending the warm-up removes its restriction');
         assert.equal((await guesser.next(m => m.t === 'chat' && m.id === after.id)).text, secret);
         const history = (await teacher('status')).body.entries;
-        assert.ok(history.some(e => e.id === queued.id && e.status === 'blocked'), 'teacher audit survives restart');
+        assert.ok(history.some(e => e.id === blocked.id && e.status === 'blocked'), 'teacher audit survives restart');
     } finally {
         for (const socket of sockets) socket.ws.close(); await plaza.stop();
         await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
@@ -3196,26 +3112,22 @@ test('chat for everyone, who heard it, "is writing", and the lesson\'s chat back
         alex.send({ t: 'move', x: 1100, y: 740 }); sam.send({ t: 'move', x: 920, y: 810 }); chris.send({ t: 'move', x: 100, y: 100 });
         await pause(400);
 
-        // Waiting for the teacher, a message is named, so the page can show it waiting where it was written.
+        // A message posts at once, and the page learns its name.
         alex.send({ t: 'chat', cid: 'near', text: 'Hello near me' });
-        const near = await alex.next(m => m.t === 'notice' && m.cid === 'near', 'pending notice');
-        assert.match(near.text, /approval/);
-        assert.ok(near.id, 'the waiting message is named');
-        await teacher('review', { id: near.id, approve: true });
+        const near = await alex.next(m => m.t === 'result' && m.cid === 'near', 'posted');
+        assert.ok(near.id, 'the posted message is named');
         const own = await alex.next(m => m.t === 'chat' && m.id === near.id, 'own copy');
         assert.deepEqual([own.heard, own.all], [1, undefined], 'only Sam was near enough to hear it');
         assert.equal((await sam.next(m => m.t === 'chat' && m.id === near.id, 'nearby chat')).heard, undefined, 'only the sender learns who heard it');
-        assert.equal((await alex.next(m => m.t === 'notice' && m.id === near.id, 'decision')).level, 'info', 'the decision names the message');
         assert.equal(chris.inbox.some(m => m.id === near.id), false);
 
         // A message for everyone reaches the whole plaza, however far, and the teacher sees who it was for.
         await pause(1600);
         alex.send({ t: 'chat', cid: 'all', text: 'Hello everyone', to: 'everyone' });
-        const shout = await alex.next(m => m.t === 'notice' && m.cid === 'all', 'pending shout');
+        const shout = await alex.next(m => m.t === 'result' && m.cid === 'all', 'posted shout');
         const entries = (await teacher('status')).body.entries;
         assert.deepEqual([entries.find(e => e.id === shout.id).everyone, entries.find(e => e.id === shout.id).target], [true, null]);
         assert.equal(entries.find(e => e.id === near.id).everyone, false);
-        await teacher('review', { id: shout.id, approve: true });
         assert.equal((await chris.next(m => m.t === 'chat' && m.id === shout.id, 'shout far away')).all, true);
         assert.equal((await alex.next(m => m.t === 'chat' && m.id === shout.id, 'own shout')).heard, 2);
         const report = await fetch(`${base}/api/teacher/report?scope=lesson`, { headers: { 'x-teacher-session': session } }).then(r => r.json());
@@ -3223,16 +3135,16 @@ test('chat for everyone, who heard it, "is writing", and the lesson\'s chat back
 
         // Nobody near: delivered to nobody, and the sender is told.
         chris.send({ t: 'chat', cid: 'alone', text: 'Is anybody there?' });
-        const alone = await chris.next(m => m.t === 'notice' && m.cid === 'alone', 'pending alone');
-        await teacher('review', { id: alone.id, approve: true });
+        const alone = await chris.next(m => m.t === 'result' && m.cid === 'alone', 'posted alone');
         assert.equal((await chris.next(m => m.t === 'chat' && m.id === alone.id, 'own lonely message')).heard, 0);
 
-        // A message the teacher does not post is named too.
+        // A message the teacher takes down leaves every screen, and its writer is told which one.
         await pause(1600);
         sam.send({ t: 'chat', cid: 'no', text: 'Not this one' });
-        const refused = await sam.next(m => m.t === 'notice' && m.cid === 'no', 'pending refused');
-        await teacher('review', { id: refused.id, approve: false });
-        assert.match((await sam.next(m => m.t === 'notice' && m.id === refused.id, 'not posted')).text, /not posted/);
+        const refused = await sam.next(m => m.t === 'result' && m.cid === 'no', 'posted, then taken down');
+        await teacher('remove', { id: refused.id });
+        assert.equal((await alex.next(m => m.t === 'retract' && m.id === refused.id, 'gone for Alex')).id, refused.id);
+        assert.match((await sam.next(m => m.t === 'notice' && m.id === refused.id, 'removed')).text, /removed/);
 
         // "Is writing" carries no words and reaches whoever the message would reach, and only them.
         const writingFrom = (socket, from) => socket.inbox.filter(m => m.t === 'typing' && m.id === from.me.id);
@@ -3261,28 +3173,27 @@ test('chat for everyone, who heard it, "is writing", and the lesson\'s chat back
         const help = await alex.next(m => m.t === 'result' && m.cid === 'help', 'teacher message taken');
         assert.ok(help.id);
 
-        // A whisper approved while Sam was away waits for Sam to come back.
+        // A whisper reaches Sam at once.
         await pause(1600);
         alex.send({ t: 'chat', cid: 'psst', text: 'Psst, Sam', to: sam.me.id });
-        const psst = await alex.next(m => m.t === 'notice' && m.cid === 'psst', 'pending whisper');
+        const psst = await alex.next(m => m.t === 'result' && m.cid === 'psst', 'posted whisper');
+        await sam.next(m => m.t === 'chat' && m.id === psst.id, 'whisper heard');
         sam.ws.close(); await sam.closed;
         await pause(200);
-        await teacher('review', { id: psst.id, approve: true });
-        assert.equal((await alex.next(m => m.t === 'notice' && m.id === psst.id, 'approved while away')).level, 'warning');
 
-        // A reload brings back the lesson's chat: what reached Sam as history (shown, not read aloud), the whisper that
-        // came while Sam was away as new, and nothing Sam was never meant to have.
+        // A reload brings back the lesson's chat as history (shown, not read aloud), and nothing Sam was never meant
+        // to have or that was taken down.
         sam = await enter(base, 'signed-b', null);
         const back = (id, what) => sam.next(m => m.t === 'chat' && m.id === id, what);
         assert.equal((await back(near.id, 'nearby again')).history, true);
         assert.equal((await back(shout.id, 'shout again')).all, true);
         const missed = await back(psst.id, 'whisper back');
-        assert.deepEqual([missed.whisper, missed.to, missed.sender, missed.history], [true, 'Sam', 'Alex', undefined], 'a whisper that came while away is new');
+        assert.deepEqual([missed.whisper, missed.to, missed.sender, missed.history], [true, 'Sam', 'Alex', true], 'the whisper comes back as history');
         await pause(200);
         assert.equal(sam.inbox.some(m => m.id === refused.id || m.id === alone.id || m.id === help.id), false, 'nothing that was not posted to Sam comes back');
         const speech = await fetch(`${base}/api/plaza/speech`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-student-token': 'signed-b' },
             body: JSON.stringify({ id: psst.id }) });
-        assert.equal(speech.status, 503, 'Sam may now listen to the whisper that waited');
+        assert.equal(speech.status, 503, 'Sam may listen to the whisper again');
 
         alex.ws.close(); await alex.closed;
         alex = await enter(base, 'signed-a', null);
@@ -3447,7 +3358,7 @@ test('teacher guides are private and follow published previews, pinned games, li
     }
 });
 
-test('automatic chat safety: local blocks survive missed API flags, outages ask for retry, and normal chat posts without approval', { timeout: 120000 }, async () => {
+test('automatic chat safety: local blocks survive missed API flags, outages still post marked unchecked, and normal chat posts without approval', { timeout: 120000 }, async () => {
     const calls = []; let recovered = false;
     const openai = http.createServer(async (req, res) => {
         let raw = ''; for await (const chunk of req) raw += chunk;
@@ -3475,7 +3386,7 @@ test('automatic chat safety: local blocks survive missed API flags, outages ask 
         const session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
         const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
         PIN = (await teacher('class', { open: true })).body.pin;
-        assert.equal((await teacher('status')).body.mode, 'review');
+        assert.equal((await teacher('status')).body.moderation, true);
         alex = await enter(base, 'signed-a', null); sam = await enter(base, 'signed-b', null);
         const pause = () => new Promise(resolve => setTimeout(resolve, 1600));
         const attempt = async (id, text, to) => {
@@ -3503,20 +3414,15 @@ test('automatic chat safety: local blocks survive missed API flags, outages ask 
         const before = calls.filter(call => call.url === '/v1/chat/completions').length;
         assert.equal((await attempt('outage-check', outage)).ok, true, 'no hint without a safety clearance');
         assert.equal(calls.filter(call => call.url === '/v1/chat/completions').length, before);
+        // An outage does not stop the class: the message posts after the local checks, marked unchecked for the teacher.
         alex.send({ t: 'chat', cid: 'outage-send', text: outage, attemptId: 'outage-check', to: sam.me.id });
-        const refusal = await alex.next(m => m.t === 'notice' && m.cid === 'outage-send');
-        assert.equal(refusal.level, 'warning'); assert.match(refusal.text, /not sent.*try again/i);
-        let status = (await teacher('status')).body;
-        assert.equal(status.entries.some(e => e.status === 'pending' || e.text === outage), false, 'no approval queue is created');
-        assert.equal(sam.inbox.some(m => m.t === 'chat' && m.text === outage), false);
-        const audit = (await teacher('attempts?studentKey=stu_a')).body.attempts.find(a => a.text === outage);
-        assert.equal(audit.status, 'not-sent'); assert.match(audit.reason, /HTTP 500/);
-
-        // The student can retry the same draft after recovery without any teacher action.
-        recovered = true; await pause();
-        alex.send({ t: 'chat', cid: 'retry', text: outage, to: sam.me.id });
+        await alex.next(m => m.t === 'result' && m.cid === 'outage-send');
         assert.equal((await sam.next(m => m.t === 'chat' && m.text === outage)).text, outage);
-        await alex.next(m => m.t === 'result' && m.cid === 'retry');
+        let status = (await teacher('status')).body;
+        const unchecked = status.entries.find(e => e.text === outage);
+        assert.deepEqual([unchecked.status, unchecked.flag], ['approved', 'moderation unavailable']);
+        assert.equal((await teacher('attempts?studentKey=stu_a')).body.attempts.find(a => a.text === outage).status, 'approved');
+        recovered = true;
 
         await pause();
         const ordinary = 'She go to the park today';
@@ -3656,28 +3562,28 @@ test("a student's conversations for the teacher: one thread per person or place,
 
         // Alex writes nearby, to everyone, to Sam (once stopped by the word check) and to the teacher; Sam whispers back.
         alex.send({ t: 'chat', cid: 'near', text: 'Hello near me' });
-        await alex.next(m => m.t === 'notice' && m.cid === 'near', 'nearby message waiting');
+        await alex.next(m => m.t === 'result' && m.cid === 'near', 'nearby message posted');
         await pause(1600);
         alex.send({ t: 'chat', cid: 'all', text: 'Hello everyone', to: 'everyone' });
-        await alex.next(m => m.t === 'notice' && m.cid === 'all', 'message for everyone waiting');
+        await alex.next(m => m.t === 'result' && m.cid === 'all', 'message for everyone posted');
         await pause(1600);
         alex.send({ t: 'chat', cid: 'whisper', text: 'Hello Sam', to: sam.me.id });
-        await alex.next(m => m.t === 'notice' && m.cid === 'whisper', 'whisper waiting');
+        await alex.next(m => m.t === 'result' && m.cid === 'whisper', 'whisper posted');
         alex.send({ t: 'attempt', id: 'word-block', text: 'Quero ir contigo', source: 'chat', to: sam.me.id });
         alex.send({ t: 'attempt-outcome', id: 'word-block', status: 'language-blocked', reason: 'Quero was not recognised as an English word.' });
         await alex.next(m => m.t === 'attempt-recorded' && m.id === 'word-block' && m.kind === 'attempt-outcome', 'stopped attempt');
         alex.send({ t: 'chat', cid: 'teacher', to: 'teacher', text: 'I need help with my sentence.' });
         await alex.next(m => m.t === 'result' && m.cid === 'teacher', 'message to the teacher');
         sam.send({ t: 'chat', cid: 'back', text: 'Hi Alex', to: alex.me.id });
-        await sam.next(m => m.t === 'notice' && m.cid === 'back', 'reply waiting');
+        await sam.next(m => m.t === 'result' && m.cid === 'back', 'reply posted');
         await teacher('help-message', { gameId: opened.game.id, studentKey: 'stu_a', text: 'Try: I want to go with you.' });
 
         const { status, body } = await teacher('conversations?studentKey=stu_a');
         assert.equal(status, 200);
         const thread = key => body.lines.filter(line => line.thread === key).map(line => [line.mine, line.text, line.status]);
-        assert.deepEqual(thread('nearby'), [[true, 'Hello near me', 'pending']]);
-        assert.deepEqual(thread('everyone'), [[true, 'Hello everyone', 'pending']], 'a message for everyone is not a private one');
-        assert.deepEqual(thread('p:stu_b'), [[true, 'Hello Sam', 'pending'], [true, 'Quero ir contigo', 'language-blocked'], [false, 'Hi Alex', 'pending']],
+        assert.deepEqual(thread('nearby'), [[true, 'Hello near me', 'approved']]);
+        assert.deepEqual(thread('everyone'), [[true, 'Hello everyone', 'approved']], 'a message for everyone is not a private one');
+        assert.deepEqual(thread('p:stu_b'), [[true, 'Hello Sam', 'approved'], [true, 'Quero ir contigo', 'language-blocked'], [false, 'Hi Alex', 'approved']],
             'what Alex sent Sam, or tried to, and what Sam sent back');
         assert.deepEqual(thread('teacher'), [[true, 'I need help with my sentence.', 'teacher-inbox'], [false, 'Try: I want to go with you.', 'sent']]);
         assert.equal(new Set(body.lines.map(line => line.thread)).size, 4);
@@ -3813,8 +3719,7 @@ test('blocked words: what the class keeps writing is offered for blocking, then 
         alex = await enter(base, 'signed-a', null); sam = await enter(base, 'signed-b', null); chris = await enter(base, 'signed-c', null);
         const say = (student, cid, text, to = 'everyone') => { student.send({ t: 'chat', cid, text, ...(to ? { to } : {}) }); return student.next(m => m.cid === cid, cid); };
         const wave = async (cid, texts) => {
-            for (const [index, student] of [alex, sam, chris].entries()) assert.match((await say(student, `${cid}-${index}`, texts[index])).text, /approval/);
-            await teacher('approve-all', {});
+            for (const [index, student] of [alex, sam, chris].entries()) assert.equal((await say(student, `${cid}-${index}`, texts[index])).t, 'result', 'posted at once');
         };
 
         // The whole class writes the same thing to everyone: the teacher is offered to block it.
@@ -3845,15 +3750,16 @@ test('blocked words: what the class keeps writing is offered for blocking, then 
         await pause(1600);
         assert.ok((await say(alex, 'to-teacher', 'free sam please', 'teacher')).id, 'a message to the teacher always gets there');
 
-        // A message still waiting for the teacher is not posted once it says a newly blocked word; unblocked, it can be said.
-        const waiting = await say(chris, 'cake', 'I like cake', null);
-        assert.match(waiting.text, /approval/);
+        // A message that posted comes down once it says a newly blocked word; unblocked, it can be said again.
+        const cake = await say(chris, 'cake', 'I like cake', null);
+        assert.equal(cake.t, 'result');
         blocked = (await teacher('block', { words: ['cake'] })).body.blocked;
-        assert.equal((await chris.next(m => m.t === 'notice' && m.id === waiting.id, 'not posted')).text, 'Your message was not posted.');
+        assert.equal((await alex.next(m => m.t === 'retract' && m.id === cake.id, 'taken down')).id, cake.id);
+        assert.equal((await chris.next(m => m.t === 'notice' && /removed one/.test(m.text), 'told')).text, 'Your teacher removed one of your messages.');
         assert.deepEqual(blocked.words.map(word => [word.words, word.removed]), [['free sam', 3], ['cake', 1]]);
         await teacher('unblock', { key: 'cake' });
         await pause(1600);
-        assert.match((await say(chris, 'cake-2', 'cake please', null)).text, /approval/);
+        assert.equal((await say(chris, 'cake-2', 'cake please', null)).t, 'result');
 
         // Something else the class repeats that the teacher is happy with: left alone, it is not offered again.
         await pause(1600);

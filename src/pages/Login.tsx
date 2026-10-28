@@ -143,7 +143,7 @@ export default function Login() {
                 onClick={() => setStep('avatar')}>Change my character</button>}
             </form>
           ) : <AvatarEditor initialConfig={savedAvatar ?? undefined} onSave={enter} onCancel={() => setStep('details')} />}
-          <p className="login-notice">Your teacher can review every message. Messages appear after teacher approval.</p>
+          <p className="login-notice">Your teacher can see every message and remove any of them.</p>
           <Link className="teacher-link" to="/teacher">Teacher controls</Link>
         </div>
       </main>

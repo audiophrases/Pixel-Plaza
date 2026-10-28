@@ -7,7 +7,7 @@ export type Interview = {
 };
 
 // Transcript status is saved separately from the bounded chat history, so a busy lesson
-// and a server restart cannot erase participation. Only teacher-approved turns count.
+// and a server restart cannot erase participation. Only turns that posted count; one the teacher takes down stops counting.
 export class Interviews {
     private sql: SqlStorage;
     constructor(sql: SqlStorage) { this.sql = sql; }
