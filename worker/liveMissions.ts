@@ -2,7 +2,6 @@ import { prerequisiteIds, type Campaign, type Objective } from '../shared/campai
 import { liveMissionCandidate } from '../shared/missionLive.ts';
 import type { LiveMissionInspection, LiveMissionPreview, LiveMissionTarget } from '../shared/missionTypes.ts';
 import type { MissionIssue } from '../shared/missionSchema.ts';
-import { SIDE_QUEST_SOURCE } from '../shared/sideQuests.ts';
 
 export type LiveMissionResult = { target: LiveMissionTarget | null; preview?: LiveMissionPreview; inspection?: LiveMissionInspection; released?: string[]; withdrawn?: string; closed?: string } | { error: string; status: number; errors?: MissionIssue[] };
 export const LIVE_PER_CHAPTER = 40;
@@ -38,11 +37,6 @@ export class LiveMissions {
         const campaign = structuredClone(base);
         for (const row of rows) campaign.chapters.find(c => c.id === row.chapter_id)?.objectives.push(JSON.parse(row.content));
         return campaign;
-    }
-    // The quests added to this game from the side quest library: they follow the side quest rules (shared/campaign.ts,
-    // sideQuestWait), which the quests themselves do not carry.
-    sideQuestIds(game: string): Set<string> {
-        return new Set(this.rows(game).filter(row => row.source_id === SIDE_QUEST_SOURCE && !row.withdrawn).map(row => row.objective_id));
     }
     closedIds(game: string): Set<string> {
         return new Set(this.rows(game).filter(row => row.closed && !row.withdrawn).map(row => row.objective_id));

@@ -35,6 +35,7 @@ Every quest card shows its kind (**Story** in orange, **Generic** in blue), its 
 
 ## How students play them
 
+- These rules hold for every quest on the board: library quests, quests released from Mission Studio, and the partner quests written in a mission (such as the Castanyada interviews, which keep their assigned witness and the teacher-approved exchange).
 - **After the main work.** A student sees the side quests once they have finished the chapter's main questions (in Plaza Free Play, the check-in) and, while a warm-up runs, their warm-up task. Until then the Journal says what is left and how many side quests are waiting.
 - **Choose one.** When a student is free, a *Choose a side quest* message appears and the Journal opens at the quest board. They accept one quest.
 - **One at a time.** While a student does a side quest, the others are out of sight. **Leave this quest and choose another** in the Journal gives it up and brings the choice back. After finishing one, they choose the next.

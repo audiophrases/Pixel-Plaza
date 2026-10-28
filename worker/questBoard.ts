@@ -138,9 +138,9 @@ export class QuestBoard {
         return open ? { state: 'choose', reason: null, waiting: open }
             : { state: 'empty', reason: left.length ? 'The side quests here wait for more classmates or for a later question.' : 'Your teacher will add side quests soon.', waiting: 0 };
     }
-    summary(game: string, chapter: Chapter, sideQuests: ReadonlySet<string>): { id: string; text: string; released: boolean; teacherReleased: boolean; sideQuest: boolean; accepted: number; completed: number }[] {
+    summary(game: string, chapter: Chapter): { id: string; text: string; released: boolean; teacherReleased: boolean; accepted: number; completed: number }[] {
         const players = this.sql.exec<{ done: string }>('SELECT done FROM campaign_players WHERE game_id = ?', game).toArray().map(p => JSON.parse(p.done) as string[]);
-        return chapter.objectives.filter(o => o.board).map(o => ({ id: o.id, text: o.text, released: this.released(game, o.id), teacherReleased: !!o.board?.teacherReleased, sideQuest: sideQuests.has(o.id),
+        return chapter.objectives.filter(o => o.board).map(o => ({ id: o.id, text: o.text, released: this.released(game, o.id), teacherReleased: !!o.board?.teacherReleased,
             accepted: this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM quest_assignments WHERE game_id = ? AND objective = ?', game, o.id).one().n,
             completed: players.filter(done => done.includes(o.id)).length }));
     }

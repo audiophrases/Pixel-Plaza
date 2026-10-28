@@ -18,7 +18,7 @@ The morning theft leads into late-afternoon preparation. Rehearsal is at 5:30 an
 
 There are ten social board quests, two per chapter. Students earn private notes for both activities when they finish that chapter's main mystery. The first quest is an interview; completing its report unlocks the second, an exchange with an agreed outcome. Each quest can be completed once by each investigator.
 
-Both assigned investigators must be online, have finished their main mystery, and hold different roles. Students who are still working are not recruited as helpers. A quest waits when no eligible partner is available. A disconnected partner remains assigned and can be replaced through the existing journal control.
+Like every quest-board quest, they open for a student once their main mystery is done, and a student does one board quest at a time (including side quests the teacher adds from the library). Both assigned investigators must be online, have finished their main mystery, and hold different roles. Students who are still working are not recruited as helpers. A quest waits when no eligible partner is available. A disconnected partner remains assigned and can be replaced through the existing journal control.
 
 Each role contributes different evidence or a practical need. Prompts ask students to explain their note, ask a follow-up question, compare alternatives and record a finding or compromise. English sentence starters support asking, checking evidence and negotiating. Reports use a multiline box with a 1,000-character limit; ordinary short answers retain their 80-character limit.
 

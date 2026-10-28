@@ -31,7 +31,7 @@ type CampaignInfo = {
   reveals: { shown: number; total: number; next: string | null };
   reports: { studentKey: string; objective: string; text: string; partner?: string; starred?: boolean }[];
   interviews?: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
-  board?: { id: string; text: string; teacherReleased: boolean; released: boolean; sideQuest?: boolean; accepted: number; completed: number }[];
+  board?: { id: string; text: string; teacherReleased: boolean; released: boolean; accepted: number; completed: number }[];
   sideQuests?: { free: { studentKey: string; name: string }[]; doing: { studentKey: string; name: string; quest: string }[]; busy: number; quests: number;
     groups?: { id: string; quest: string; members: string[]; size: number; state: 'open' | 'playing' }[]; open?: { id: string; title: string }[] };
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];

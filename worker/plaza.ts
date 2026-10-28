@@ -422,15 +422,15 @@ export class PlazaRoom extends DurableObject<Env> {
             objectiveIds: campaign.chapters.flatMap(c => c.objectives.map(o => o.id)), additions: this.liveMissions.additions(game.id, chapter.id)
         } : null;
     }
-    // How many students could accept each previewed quest right now: a snapshot for the teacher. Side quests also need
-    // the student's main work done and no other side quest under way.
-    private countEligible(target: LiveMissionTarget, campaign: Campaign, quests: Objective[], preview: { quests: { eligibleNow: number }[] }, sideQuests = false): void {
+    // How many students could accept each previewed quest right now: a snapshot for the teacher. A board quest also
+    // needs the student's main work done and no other side quest under way.
+    private countEligible(target: LiveMissionTarget, campaign: Campaign, quests: Objective[], preview: { quests: { eligibleNow: number }[] }): void {
         const chapter = { ...campaign.chapters[target.chapter.index], objectives: [...campaign.chapters[target.chapter.index].objectives, ...quests] };
         const players = this.campaignPlayers(target.game.id);
         for (const [i, objective] of quests.entries()) preview.quests[i].eligibleNow = players.filter(p => {
             const ctx = this.boardContext(target.game.id, p.student_key)!;
             return ctx.online.has(p.student_key) && !boardWait(objective, chapter, p.role_id, p.done, true, ctx.online.size)
-                && (!sideQuests || (!sideQuestWait(chapter, p.done, ctx.warmupLeft) && !this.questBoard.activeSideQuest(ctx)))
+                && !sideQuestWait(chapter, p.done, ctx.warmupLeft) && !this.questBoard.activeSideQuest(ctx)
                 && (!objective.activity || this.questBoard.partners({ ...ctx, chapter }, objective).length > 0);
         }).length;
     }
@@ -475,7 +475,7 @@ export class PlazaRoom extends DurableObject<Env> {
             source.chapters[target.chapter.index].objectives.push(...chosen.map(quest => questObjective(quest!)).filter(quest => !campaign.chapters[target.chapter.index].objectives.some(o => o.id === quest.id)));
             const result = this.liveMissions.preview(token, target, campaign, source, libraryVersion(library), ids);
             if ('error' in result) return result;
-            this.countEligible(target, campaign, result.quests, result.preview, true);
+            this.countEligible(target, campaign, result.quests, result.preview);
             return { target, preview: result.preview };
         }
         if (op === 'live-release') {
@@ -496,7 +496,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (op === 'live-close') {
             // A started side quest takes nobody new; those doing it can finish.
             if (b.gameId !== target.game.id || b.targetEpoch !== target.epoch) return { error: 'The running game changed. Refresh before closing a quest.', status: 409 };
-            if (typeof b.objectiveId !== 'string' || !this.liveMissions.sideQuestIds(target.game.id).has(b.objectiveId) || !target.additions.some(a => a.id === b.objectiveId)) return { error: 'Choose a side quest in the current chapter.', status: 400 };
+            if (typeof b.objectiveId !== 'string' || !target.additions.some(a => a.id === b.objectiveId)) return { error: 'Choose a side quest in the current chapter.', status: 400 };
             const error = this.liveMissions.close(target.game.id, b.objectiveId);
             return error ? { error, status: 409 } : { target: this.liveTarget(), closed: b.objectiveId };
         }
@@ -1327,7 +1327,8 @@ export class PlazaRoom extends DurableObject<Env> {
         const kept = this.isRandom(game) ? new Set(this.sql.exec<{ student_key: string }>('SELECT student_key FROM aliases WHERE game_id = ? AND kept = 1', game).toArray().map(r => r.student_key)) : null;
         return row && chapter && player ? { game, chapterIndex: row.chapter, chapter, status: row.status, player, players,
             online: new Set(this.seats().filter(s => s.game === game && (!kept || kept.has(s.studentKey))).map(s => s.studentKey)), names: this.rosterNames(game),
-            sideQuests: this.liveMissions.sideQuestIds(game), closed: this.liveMissions.closedIds(game), warmupLeft: this.warmupLeft(game, studentKey) } : null;
+            // Every quest on the board follows the side quest rules: from the library, a live release or the mission itself.
+            sideQuests: new Set(chapter.objectives.filter(o => o.board).map(o => o.id)), closed: this.liveMissions.closedIds(game), warmupLeft: this.warmupLeft(game, studentKey) } : null;
     }
     // True while the student still has a warm-up task: side quests wait until it is done.
     private warmupLeft(game: string, studentKey: string): boolean {
@@ -1354,7 +1355,7 @@ export class PlazaRoom extends DurableObject<Env> {
     }
     // After a student joins or leaves a side quest: everyone, when a pair or group changed; otherwise only them.
     private sendBoardChange(game: string, studentKey: string, quest: Objective): void {
-        if (this.liveMissions.sideQuestIds(game).has(quest.id) && groupSize(quest) > 1) this.sendQuestToAll(game);
+        if (quest.board && (groupSize(quest) > 1 || quest.activity)) this.sendQuestToAll(game);
         else for (const socket of this.ctx.getWebSockets(studentKey)) this.sendQuest(socket, game, studentKey);
     }
     // A group's member starts it with who is there, or a free student who has not chosen asks to be placed.
@@ -1485,9 +1486,8 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!player || player.done.includes(objective.id) || !isUnlocked(objective, player.done)) return unavailable('That question is finished or not unlocked yet.');
         // Board answers require a persisted assignment; clients cannot skip role or release gates.
         if (objective.board && !this.questBoard.assignment(seat.game, objective.id, seat.studentKey)) return unavailable('Accept this quest before answering.');
-        const sideQuest = this.liveMissions.sideQuestIds(seat.game).has(objective.id);
-        const group = sideQuest && groupSize(objective) > 1 ? this.questBoard.groupOf(seat.game, objective.id, seat.studentKey) : undefined;
-        if (sideQuest && groupSize(objective) > 1 && group?.state !== 'playing') return unavailable('Wait until your group is complete.');
+        const group = objective.board && groupSize(objective) > 1 ? this.questBoard.groupOf(seat.game, objective.id, seat.studentKey) : undefined;
+        if (objective.board && groupSize(objective) > 1 && group?.state !== 'playing') return unavailable('Wait until your group is complete.');
         const reply = (correct: boolean, wait = false) => {
             this.attemptStatus(audit, correct ? 'correct' : wait ? 'waiting' : 'incorrect', correct ? undefined : wait ? 'Wait or complete the required witness exchange.' : 'The answer was not accepted.');
             if (!correct && !wait) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Answer not accepted: ${objective.text}`, typed, 'instructions');
@@ -1530,7 +1530,7 @@ export class PlazaRoom extends DurableObject<Env> {
             JSON.stringify([...player.done, objective.id]), seat.game, seat.studentKey);
         reply(true);
         this.award(seat.studentKey, `answer:${seat.game}:${objective.id}`, objective.board ? XP.quest : XP.answer,
-            !objective.board ? 'Right answer in your journal' : sideQuest ? 'Side quest completed' : 'Partner quest completed', seat.game);
+            !objective.board ? 'Right answer in your journal' : objective.activity ? 'Partner quest completed' : 'Side quest completed', seat.game);
         // One answer finishes a group's quest for every member, with XP for each.
         if (group) {
             for (const member of group.members.filter(key => key !== seat.studentKey)) {
@@ -1643,7 +1643,7 @@ export class PlazaRoom extends DurableObject<Env> {
                 role: campaign.roles.find(role => role.id === item.role_id)?.name ?? item.role_id, clues: item.clues.length, done: item.done,
                 thief: thieves.includes(item.student_key)
             })),
-            ...(campaign.chapters[row.chapter].objectives.some(o => o.board) ? { board: this.questBoard.summary(game, campaign.chapters[row.chapter], this.liveMissions.sideQuestIds(game)) } : {}),
+            ...(campaign.chapters[row.chapter].objectives.some(o => o.board) ? { board: this.questBoard.summary(game, campaign.chapters[row.chapter]) } : {}),
             ...(row.status !== 'campaign_complete' && players.length ? { sideQuests: this.sideQuestStatus(game, players[0].student_key, names) } : {}),
             interviews: this.interviews.rows(game, row.chapter).map(i => ({
                 id: i.id, objective: i.objective, task: campaign.chapters[row.chapter].objectives.find(o => o.id === i.objective)?.text ?? i.objective,

@@ -99,8 +99,10 @@ export function newQuestId(title: string, taken: (id: string) => boolean): strin
     return `${stem}-${n}`;
 }
 // How many students do a side quest together, from the quest as a game has it: a pair (2) or a small group (3) plays
-// as one; solo quests and mingles (4 online, done alone) are done by each student.
-export const groupSize = (objective: Pick<Objective, 'board'>): number => objective.board?.minPlayers === 2 || objective.board?.minPlayers === 3 ? objective.board.minPlayers : 1;
+// as one; solo quests and mingles (4 online, done alone) are done by each student. A mission's interview or exchange
+// brings its own partner (a witness the game assigns), so it is never a group.
+export const groupSize = (objective: Pick<Objective, 'board' | 'activity'>): number =>
+    !objective.activity && (objective.board?.minPlayers === 2 || objective.board?.minPlayers === 3) ? objective.board.minPlayers : 1;
 // A free student who has not chosen within this time is placed by the game: in a pair or group that is waiting, or
 // else in a quest of their own. A group that has waited this long can start with the members it has.
 export const AUTO_PICK_MS = 60_000;

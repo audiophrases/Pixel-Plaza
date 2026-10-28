@@ -647,6 +647,12 @@ test('witness investigations block guesses and unrelated chat, keep evidence pri
         const evidence = (await teacher('status')).body.campaign.interviews;
         assert.equal(evidence.length, 2); assert.ok(evidence.every(i => i.questionStatus === 'approved' && i.answerStatus === 'approved' && i.shared && i.evidence));
         sam = await enter(base, 'signed-b', null); chris = await enter(base, 'signed-c', null); sockets.push(sam, chris);
+        // Board quests open once the main questions are done, each after its own witness.
+        for (const [objective, text] of [['when', '9 30'], ['keys', 'two']]) {
+            await exchangeEvidence(teacher, alex, sam, objective);
+            alex.send({ t: 'answer', objective, text });
+            assert.equal((await alex.next(m => m.t === 'answered' && m.objective === objective)).correct, true, objective);
+        }
         alex.send({ t: 'quest-accept', objective: 'paper-check' });
         await alex.next(m => m.t === 'quest' && m.quest?.board?.some(o => o.id === 'paper-check' && o.state === 'active'));
         assert.equal(alex.state.quest.board.find(o => o.id === 'paper-check').conversation.completed, 0, 'a board quest cannot reuse main-objective exchanges');
@@ -679,7 +685,10 @@ test('Live missions: reviewed additions preserve progress, enforce conflicts and
         const game = (await teacher('status')).body.game.id;
         const solver = await enter(base, 'signed-a', null); const other = await enter(base, 'signed-b', null); sockets.push(solver, other);
         await teacher('campaign', { op: 'start', campaign: 'castanyada' });
-        solver.send({ t: 'answer', objective: 'where', text: 'park' }); assert.equal((await solver.next(m => m.t === 'answered')).correct, true);
+        // The solver finishes the main questions, so board quests are open to them.
+        for (const [objective, text] of [['where', 'park'], ['when', '9 30'], ['keys', 'two']]) {
+            solver.send({ t: 'answer', objective, text }); assert.equal((await solver.next(m => m.t === 'answered' && m.objective === objective)).correct, true);
+        }
         const before = (await teacher('status')).body.campaign;
         const roleName = before.players.find(p => p.studentKey === 'stu_a').role;
         const roleId = castanyada.roles.find(r => r.name === roleName).id;
@@ -812,13 +821,14 @@ test('Side quest library: quests added to Castanyada and Plaza Free Play open af
         assert.equal((await review([riddle.id])).status, 400, 'a library quest joins a game once');
 
         // In a story, side quests wait for the main questions, out of sight.
-        const locked = (await alex.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'locked' && m.quest.sideQuests.waiting === 3, 'side quests waiting')).quest;
+        // The mission's own two partner quests and the three added: all wait for the main questions.
+        const locked = (await alex.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'locked' && m.quest.sideQuests.waiting === 5, 'side quests waiting')).quest;
         assert.match(locked.sideQuests.reason, /main questions/);
         assert.ok(!locked.board?.some(q => q.id === riddle.id));
         alex.send({ t: 'quest-accept', objective: riddle.id });
         assert.match((await alex.next(m => m.t === 'notice' && /Side quests open/.test(m.text), 'refused')).text, /main questions/);
         let sideStatus = (await teacher('status')).body.campaign.sideQuests;
-        assert.deepEqual([sideStatus.free, sideStatus.doing, sideStatus.busy, sideStatus.quests], [[], [], 2, 3]);
+        assert.deepEqual([sideStatus.free, sideStatus.doing, sideStatus.busy, sideStatus.quests], [[], [], 2, 5]);
 
         // Between chapters, or any day: Plaza Free Play has no mystery, only a check-in and side quests.
         await teacher('game', { name: 'Free play', randomNames: false });
@@ -1071,12 +1081,14 @@ test('Quest board: eligibility, release, assignments, partner replacement and re
         assert.equal((await api(base, '/api/teacher/quest-release', { body: { objective: 'interview' } })).status, 401);
         assert.equal((await teacher('quest-release', { objective: 'location' })).status, 400, 'main questions cannot be released as quests');
         assert.equal((await teacher('quest-release', { objective: 'interview' })).status, 200);
-        const released = await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.state === 'waiting'));
-        assert.match(released.board.find(o => o.id === 'interview').reason, /main mystery/);
+        // Board quests from the mission follow the side quest rules too: out of sight until the main questions are done.
+        const released = await view(solver.studentKey, q => q.sideQuests?.state === 'locked' && q.sideQuests.waiting === 2);
+        assert.match(released.sideQuests.reason, /main questions/);
+        assert.ok(!released.board.some(o => o.id === 'interview'));
         const witnessView = await view(partner.studentKey, q => q.board);
         assert.ok(!witnessView.board.some(o => o.id === 'interview'), 'role-limited content stays hidden');
         byKey[partner.studentKey].send({ t: 'quest-accept', objective: 'interview' });
-        assert.match((await byKey[partner.studentKey].next(m => m.t === 'notice')).text, /another role/);
+        assert.match((await byKey[partner.studentKey].next(m => m.t === 'notice')).text, /main questions/);
         assert.equal((await answer(solver.studentKey, 'location', 'hotel')).correct, true);
         assert.equal((await answer(solver.studentKey, 'time', 'nine')).correct, true);
         const waiting = await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.reason?.includes('another investigator')));
