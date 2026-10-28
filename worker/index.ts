@@ -152,9 +152,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // an import on the library page; a map from the theme studio.
     const content = path === '/api/missions/sync' ? 3_000_000 : path === '/api/content' ? 8_000_000 : questStudio ? 4_000_000 : themeStudio ? 300_000 : 0;
 
-    // A map picture from the theme studio: raw bytes, not JSON, bounded before they are buffered.
-    if (path === '/api/teacher/theme-asset' && post) {
-        if (!request.headers.get('x-teacher-session')) return json({ error: 'Please sign in again.' }, 401);
+    // A map picture: raw bytes, not JSON, bounded before they are buffered. From the theme studio, or online from the
+    // teacher's laptop, sending the pictures of its maps before the maps.
+    const pictureFrom = path === '/api/teacher/theme-asset' ? 'x-teacher-session' : path === '/api/missions/sync-picture' ? 'x-laptop-lease' : null;
+    if (pictureFrom && post) {
+        const secret = request.headers.get(pictureFrom);
+        if (!secret) return json({ error: 'Please sign in again.' }, 401);
         const reader = request.body?.getReader();
         if (!reader) return json({ error: 'Send a picture.' }, 400);
         let size = 0; const chunks: Uint8Array[] = [];
@@ -167,7 +170,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         }
         const bytes = new Uint8Array(size); let offset = 0;
         for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
-        const result = await plaza(env).themeAsset(request.headers.get('x-teacher-session') || '', bytes);
+        const result = pictureFrom === 'x-teacher-session' ? await plaza(env).themeAsset(secret, bytes) : await plaza(env).syncPictureServe(secret, bytes);
         return 'error' in result ? json({ error: result.error }, result.status) : json(result);
     }
     // A map picture, by its SHA-256: it never changes, so browsers keep it.

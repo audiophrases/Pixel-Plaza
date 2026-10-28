@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
+import type { MissionSync } from '../../shared/missionTypes';
 import { COMMONS_LAYOUT } from '../../shared/commons';
 import { isBackgroundBrief, SCENERY_PRESETS, sceneryTheme, type SceneryPreset } from '../../shared/scenery';
 import { layoutGuide } from '../../shared/artTemplate';
@@ -16,6 +17,17 @@ import './Studio.css';
 
 // A map on the server, as the studio sees it: what games play, the unpublished draft, and how many saved games use it.
 type StudioMap = { id: string; theme: Theme; draft: Theme | null; version: number; published: boolean; deleted: boolean; updated: number; games: number };
+// How the laptop's maps stand with the online Pixel Plaza, where they live (nothing to say on the online site).
+function syncText(sync: MissionSync): string {
+  const waiting = sync.waiting === 1 ? '1 change waits' : `${sync.waiting} changes wait`;
+  if (sync.mapsKeptBoth?.length) return `Changed online too, so both versions are kept. Yours is now “${sync.mapsKeptBoth.map(item => item.title).join('”, “')}”.`;
+  if (sync.maps === 'outdated') return `The online Pixel Plaza does not keep maps yet: it needs updating.${sync.waiting ? ` ${waiting} on this laptop until then.` : ''}`;
+  if (sync.state === 'synced') return '✓ Saved online: this laptop has the same maps as the online Pixel Plaza.';
+  if (sync.state === 'signin') return `Not linked to the online Pixel Plaza: sign in to Teacher controls again on this laptop.${sync.waiting ? ` ${waiting} on this laptop to upload.` : ''}`;
+  if (sync.state === 'outdated') return `The online Pixel Plaza does not keep maps yet: it needs updating.${sync.waiting ? ` ${waiting} on this laptop until then.` : ''}`;
+  return sync.waiting ? `No internet: ${waiting} on this laptop and go online when the connection is back.` : 'No internet: showing the maps this laptop has.';
+}
+
 type Tool = 'select' | 'block' | 'bellipse' | 'bpoly' | 'zone' | 'ellipse' | 'poly' | 'spawn';
 type Selection = { kind: 'block' | 'shape' | 'behind' | 'zone'; index: number } | { kind: 'spawn' } | null;
 type Corner = 'nw' | 'ne' | 'sw' | 'se';
@@ -77,6 +89,7 @@ export default function Studio() {
   const [stored, setStored] = useState<StudioMap | null>(null);
   const [saved, setSaved] = useState('');
   const [busy, setBusy] = useState(false);
+  const [sync, setSync] = useState<MissionSync | null>(null);
   const [sheetUrl, setSheetUrl] = useState<string | undefined>();
   const [direction, setDirection] = useState('A welcoming, colorful world with generous space for a class to gather.');
   const [sceneryPreset, setSceneryPreset] = useState<SceneryPreset>('custom');
@@ -398,12 +411,12 @@ export default function Studio() {
   };
 
   // ---------- the server ----------
-  const call = async (op: string, body?: object, by = token): Promise<{ maps: StudioMap[]; map?: StudioMap }> => {
+  const call = async (op: string, body?: object, by = token): Promise<{ maps: StudioMap[]; map?: StudioMap; sync?: MissionSync }> => {
     const response = await fetch(`/api/teacher/themes/${op}`, { method: body ? 'POST' : 'GET', headers: { 'x-teacher-session': by, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
     const result = await response.json();
     if (response.status === 401) { storeTeacherSession(''); setToken(''); }
     if (!response.ok) throw new Error([result.error, ...(result.errors ?? [])].filter(Boolean).join(' '));
-    setMaps(result.maps);
+    setMaps(result.maps); setSync(result.sync ?? null);
     return result;
   };
   const run = async (work: () => Promise<void>) => {
@@ -455,12 +468,16 @@ export default function Studio() {
     if (imageUrl.startsWith('blob:')) next.image = await upload(imageUrl);
     if (sheetUrl?.startsWith('blob:')) { const url = await upload(sheetUrl); next.layers = next.layers?.map(layer => ({ ...layer, image: url })); }
     const result = await call('save', onServer ? { theme: next, version: stored!.version } : { theme: next, create: true });
+    // Changed online too: both versions are kept, and this one goes on as the copy marked "(laptop)".
+    if (result.map!.id !== next.id) { openMap(result.map!); return result.map!; }
     setTheme(next); setImageUrl(next.image); setSheetUrl(undefined); setStored(result.map!); setSaved(JSON.stringify(next));
     return result.map!;
   };
   const publish = () => run(async () => {
     const map = dirty ? await saveDraft() : stored!;
+    if (map.id !== theme.id) return; // kept as a copy: the teacher chooses what to publish
     const result = await call('publish', { id: map.id, version: map.version });
+    if (result.map!.id !== map.id) { openMap(result.map!); return; }
     setStored(result.map!); setSaved(JSON.stringify(result.map!.theme));
     const games = result.map!.games;
     setMessage(`Published. ${games ? `The ${games} saved game${games === 1 ? '' : 's'} on this map play${games === 1 ? 's' : ''} it now; students in a new wall are moved to the start.` : 'New games can be played on it.'}`);
@@ -478,7 +495,7 @@ export default function Studio() {
   };
   const toTrash = () => {
     if (!stored || !window.confirm(`Move “${stored.theme.name}” to Trash? New games cannot use it; games already on it keep it. You can restore it.`)) return;
-    void run(async () => { const result = await call('delete', { id: stored.id, version: stored.version }); setStored(result.map!); setMessage('Moved to Trash. Restore it below whenever you need it.'); });
+    void run(async () => { const result = await call('delete', { id: stored.id, version: stored.version }); if (result.map!.id === stored.id) setStored(result.map!); else openMap(result.map!); setMessage('Moved to Trash. Restore it below whenever you need it.'); });
   };
   const restore = (map: StudioMap) => run(async () => { const result = await call('restore', { id: map.id, version: map.version }); openMap(result.map!); setMessage(`“${map.theme.name}” is back.`); });
   const serverState = !onServer ? 'Not saved on the server yet.' : stored!.deleted ? 'In Trash: restore it to edit or publish it.'
@@ -755,6 +772,7 @@ export default function Studio() {
         <button className="primary" disabled={busy}>Sign in</button>
       </form> : <>
         <p className="studio-hint" role="status">{serverState}</p>
+        {sync && sync.state !== 'home' && <p className={`studio-sync studio-sync-${sync.maps ?? sync.state}`}>{syncText(sync)}</p>}
         <div className="studio-row">
           <button disabled={busy || !dirty || problems.errors.length > 0 || (onServer && stored!.deleted)} onClick={() => void run(async () => { await saveDraft(); setMessage('Saved as a draft. Games keep the published map until you publish.'); })}>Save draft</button>
           <button className="primary" disabled={busy || problems.errors.length > 0 || (backgroundBrief && !hasBackground) || (onServer && (stored!.deleted || (stored!.published && !stored!.draft && !dirty)))} onClick={() => void publish()}>Publish to games</button>

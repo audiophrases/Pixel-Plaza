@@ -3913,6 +3913,95 @@ test('missions live online: the laptop sends every change at once, fetches what 
     }
 });
 
+test('maps live online too: the laptop sends each map after its pictures, fetches what changed online and never overwrites', { timeout: 240000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const pinPlayUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    const dirs = [0, 1].map(() => fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-maps-sync-')));
+    const onlinePort = await freePort();
+    let online = await startPlaza(pinPlayUrl, dirs[0], {}, { content: false, port: onlinePort });
+    let laptop; const sockets = [];
+    try {
+        const onlineSession = (await api(online.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const thereMaps = (op, body) => api(online.base, `/api/teacher/themes/${op}`, { session: onlineSession, body });
+        const png = fill => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(1_500_000, fill)]);
+        const upload = async (base, session, bytes) => (await fetch(`${base}/api/teacher/theme-asset`, { method: 'POST', headers: { 'x-teacher-session': session }, body: bytes })).json();
+        const find = (maps, id) => maps.find(map => map.id === id);
+        const names = maps => maps.map(map => [map.id, (map.draft ?? map.theme).name, map.published, map.deleted]);
+        const edit = async (call, id, change) => {
+            const map = find((await call('list')).body.maps, id);
+            return (await call('save', { theme: change(structuredClone(map.draft ?? map.theme)), version: map.version })).body;
+        };
+
+        // Before the laptop ever synced, Garden Commons changes online. The laptop's untouched copy takes it, with no duplicate.
+        let saved = await edit(thereMaps, 'commons-garden', theme => ({ ...theme, name: 'Garden Commons, online edit' }));
+        await thereMaps('publish', { id: 'commons-garden', version: saved.map.version });
+        assert.equal((await fetch(`${online.base}/api/missions/sync-picture`, { method: 'POST', headers: { 'x-laptop-lease': 'forged' }, body: png(1) })).status, 401, 'only the linked laptop sends pictures');
+        laptop = await startPlaza(pinPlayUrl, dirs[1], { LAN_URL: 'http://192.168.1.20:8787', CLOUD_URL: online.base });
+        const laptopSession = (await api(laptop.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const hereMaps = (op, body) => api(laptop.base, `/api/teacher/themes/${op}`, { session: laptopSession, body });
+        let listed = (await hereMaps('list')).body;
+        assert.deepEqual(listed.sync, { state: 'synced', waiting: 0, keptBoth: [] });
+        assert.deepEqual(names(listed.maps), [['plaza', 'Pixel Plaza', true, false], ['commons-garden', 'Garden Commons, online edit', true, false], ['commons-autumn', 'Autumn Commons', true, false]]);
+        assert.deepEqual(names((await thereMaps('list')).body.maps), names(listed.maps), 'the same maps in both places');
+        assert.equal((await thereMaps('list')).body.sync.state, 'home', 'the online server is where maps live');
+
+        // A map made and published on the laptop, with a new picture, is online at once, picture first.
+        const winterPicture = png(3);
+        const stored = await upload(laptop.base, laptopSession, winterPicture);
+        const autumn = find(listed.maps, 'commons-autumn');
+        const created = (await hereMaps('save', { theme: { ...autumn.theme, id: 'commons-winter', name: 'Winter Commons', image: stored.url }, create: true })).body;
+        assert.deepEqual(created.sync, { state: 'synced', waiting: 0, keptBoth: [] });
+        assert.equal(find((await thereMaps('list')).body.maps, 'commons-winter').published, false, 'a draft online too');
+        const live = (await hereMaps('publish', { id: 'commons-winter', version: created.map.version })).body;
+        assert.deepEqual([live.sync.state, live.map.published], ['synced', true]);
+        const winterOnline = find((await thereMaps('list')).body.maps, 'commons-winter');
+        assert.deepEqual([winterOnline.published, winterOnline.theme.image], [true, stored.url]);
+        assert.ok(Buffer.from(await (await fetch(online.base + stored.url)).arrayBuffer()).equals(winterPicture), 'the picture is online');
+        assert.ok((await api(online.base, '/api/themes')).body.themes.some(theme => theme.id === 'commons-winter'), 'offered for new games online');
+
+        // Published online, a map reaches the laptop, and a game there on it draws it at once.
+        PIN = (await api(laptop.base, '/api/teacher/game', { session: laptopSession, body: { name: 'Laptop class', randomNames: false, themeId: 'commons-autumn' } })).body.pin;
+        const alex = await enter(laptop.base, 'signed-a', null); sockets.push(alex);
+        saved = await edit(thereMaps, 'commons-autumn', theme => ({ ...theme, name: 'Autumn Commons, online edit' }));
+        await thereMaps('publish', { id: 'commons-autumn', version: saved.map.version });
+        assert.equal(find((await hereMaps('list')).body.maps, 'commons-autumn').theme.name, 'Autumn Commons, online edit');
+        assert.equal((await alex.next(m => m.t === 'theme', 'the map from online')).theme.name, 'Autumn Commons, online edit');
+
+        // A picture uploaded online comes down to the laptop with its map.
+        const plazaPicture = png(9);
+        const online2 = await upload(online.base, onlineSession, plazaPicture);
+        saved = await edit(thereMaps, 'plaza', theme => ({ ...theme, image: online2.url }));
+        await thereMaps('publish', { id: 'plaza', version: saved.map.version });
+        listed = (await hereMaps('list')).body;
+        assert.equal(find(listed.maps, 'plaza').theme.image, online2.url);
+        assert.ok(Buffer.from(await (await fetch(laptop.base + online2.url)).arrayBuffer()).equals(plazaPicture), 'the picture is on the laptop');
+
+        // Moved to Trash on the laptop, it is in Trash online.
+        const trashed = (await hereMaps('delete', { id: 'commons-winter', version: find(listed.maps, 'commons-winter').version })).body;
+        assert.equal(trashed.sync.state, 'synced');
+        assert.equal(find((await thereMaps('list')).body.maps, 'commons-winter').deleted, true);
+
+        // No internet: the laptop keeps working and says what waits.
+        await online.stop();
+        const offline = await edit(hereMaps, 'plaza', theme => ({ ...theme, name: 'Pixel Plaza, offline edit' }));
+        assert.deepEqual(offline.sync, { state: 'offline', waiting: 1, keptBoth: [] });
+        assert.equal(offline.map.draft.name, 'Pixel Plaza, offline edit');
+
+        // Meanwhile the same map changes online. Back online, both are kept, the same in both places.
+        online = await startPlaza(pinPlayUrl, dirs[0], {}, { content: false, port: onlinePort });
+        await edit(thereMaps, 'plaza', theme => ({ ...theme, name: 'Pixel Plaza, online edit' }));
+        listed = (await hereMaps('list')).body;
+        assert.deepEqual(listed.sync, { state: 'synced', waiting: 0, keptBoth: [], mapsKeptBoth: [{ id: 'plaza', copy: 'plaza-laptop', title: 'Pixel Plaza, offline edit (laptop)' }] });
+        const there = (await thereMaps('list')).body.maps;
+        assert.deepEqual([find(there, 'plaza').draft.name, find(there, 'plaza-laptop').draft.name, find(there, 'plaza-laptop').theme.image], ['Pixel Plaza, online edit', 'Pixel Plaza, offline edit (laptop)', online2.url]);
+        assert.deepEqual(names(listed.maps), names(there), 'nothing lost, and the same everywhere');
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await laptop?.stop(); await online.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); for (const dir of dirs) removeTemp(dir);
+    }
+});
+
 test('blocked words: what the class keeps writing is offered for blocking, then stopped however it is spelt, for one lesson', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay();
     const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-blocked-'));

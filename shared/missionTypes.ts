@@ -13,13 +13,16 @@ export type MissionCopy = {
 // What the online server made of a laptop's copy: kept as the mission ("saved"), or, when the mission had changed
 // online too, kept beside it as a new mission marked "(laptop)" ("kept-both").
 export type MissionPushResult = { outcome: 'saved' | 'kept-both'; version: number; publishedRevision: string | null; copy?: { id: string; content: string; deleted?: boolean } };
-// How the laptop's missions stand with the online server. "home": this is the online server. "signin": the laptop has
-// no valid link (sign in on it again). "outdated": the online server does not keep missions yet (deploy it).
+// How the laptop's missions, side quests and maps stand with the online server. "home": this is the online server.
+// "signin": the laptop has no valid link (sign in on it again). "outdated": the online server does not keep missions
+// yet (deploy it).
 export type MissionSync = {
     state: 'home' | 'synced' | 'offline' | 'signin' | 'outdated';
-    waiting: number; // missions and side quests changed here and not uploaded yet
+    waiting: number; // missions, side quests and maps changed here and not uploaded yet
     keptBoth: { id: string; copy: string; title: string }[];
     questsKeptBoth?: { id: string; copy: string; title: string }[]; // side quests, likewise; left out when there are none
+    mapsKeptBoth?: { id: string; copy: string; title: string }[]; // maps, likewise
+    maps?: 'outdated'; // the online server does not keep maps yet: they wait on the laptop
 };
 export type LiveMissionTarget = {
     game: { id: string; name: string }; campaign: { id: string; title: string; revision: string };

@@ -7,10 +7,18 @@ type World = ReturnType<typeof makeWorld>;
 // how many saved games are on it.
 export type StudioMap = { id: string; theme: Theme; draft: Theme | null; version: number; published: boolean; deleted: boolean; updated: number; games: number };
 export type ThemeResult = { maps: StudioMap[]; map?: StudioMap; published?: string } | { error: string; status: number; errors?: string[] };
+// A map as the laptop and the online server send it to each other: the whole record.
+export type MapCopy = { id: string; content: string; draft: string | null; published: boolean; deleted: boolean; version: number; updated: number; created: number };
+export type MapPushResult = { outcome: 'saved' | 'kept-both' | 'theirs'; version: number; copy?: MapCopy } | { outcome: 'refused'; error: string };
 
 const THEME_MAX_BYTES = 200_000;
 // Pictures come from the app's own map folder or from the server's picture store; never from another site.
 const ownPicture = (url: string) => /^\/assets\/maps\/[\w.-]+$/.test(url) || /^\/api\/theme-assets\/[0-9a-f]{64}$/.test(url);
+const UPLOADED = '/api/theme-assets/';
+// The pictures of a map that were uploaded to a server's picture store, by their SHA-256.
+export const uploadedPictures = (theme: Theme): string[] => [theme.image, ...(theme.layers ?? []).map(layer => layer.image)].filter(url => url.startsWith(UPLOADED)).map(url => url.slice(UPLOADED.length));
+// The uploaded pictures a map copy needs, published version and draft.
+export const copyPictures = (copy: MapCopy): string[] => [...new Set([copy.content, copy.draft].flatMap(json => json ? uploadedPictures(JSON.parse(json) as Theme) : []))];
 
 // A map from the theme studio, a file or the other server: the shape the game relies on and the studio's own checks,
 // or what is wrong with it.
@@ -100,7 +108,7 @@ export class ThemeStore {
         const checked = checkMap(value);
         if ('error' in checked) return checked;
         const theme = checked.theme;
-        const missing = [theme.image, ...(theme.layers ?? []).map(layer => layer.image)].some(url => url.startsWith('/api/theme-assets/') && !this.hasPicture(url.slice('/api/theme-assets/'.length)));
+        const missing = uploadedPictures(theme).some(hash => !this.hasPicture(hash));
         return missing ? { error: 'The map is not ready to save.', errors: ['A picture of this map is not on the server. Open it again and save.'] } : checked;
     }
 
@@ -147,5 +155,101 @@ export class ThemeStore {
             return this.listing(here.theme_id);
         }
         return { error: 'Unknown theme studio action.', status: 400 };
+    }
+
+    // ---------- In step with the online server ----------
+    // Like missions and side quests, maps live online; the teacher's laptop keeps a copy that PlazaRoom.syncMissions
+    // keeps in step with these methods. A map changed in both places is kept twice, never overwritten.
+
+    private copyOf(row: ThemeRow): MapCopy {
+        return { id: row.theme_id, content: row.content, draft: row.draft, published: !!row.published, deleted: !!row.deleted, version: row.version, updated: row.updated, created: row.created };
+    }
+    // The published map of a record, if it has one: to tell when games on it must draw it again.
+    published(id: string): string | null {
+        const row = this.row(id);
+        return row?.published ? row.content : null;
+    }
+    // A map from the other server: the shape it must have, and a map the studio here would accept, pictures included.
+    readCopy(value: unknown): MapCopy | { error: string } {
+        const v = value as Partial<MapCopy> | null;
+        if (!v || typeof v !== 'object' || typeof v.id !== 'string' || typeof v.content !== 'string' || (v.draft !== null && typeof v.draft !== 'string')
+            || typeof v.published !== 'boolean' || typeof v.deleted !== 'boolean' || !Number.isInteger(v.version) || !Number.isInteger(v.updated) || !Number.isInteger(v.created)) return { error: 'That map is not valid.' };
+        if (v.content.length > THEME_MAX_BYTES || (v.draft?.length ?? 0) > THEME_MAX_BYTES) return { error: 'The map is too big.' };
+        const read = (json: string) => { try { return this.check(JSON.parse(json)); } catch { return { error: 'That map is not valid.' }; } };
+        const content = read(v.content); const draft = v.draft === null ? null : read(v.draft);
+        for (const checked of [content, draft]) {
+            if (checked && 'error' in checked) return { error: [checked.error, ...('errors' in checked ? checked.errors ?? [] : [])].join(' ') };
+            if (checked && checked.theme.id !== v.id) return { error: 'That map is not valid.' };
+        }
+        // Kept as sent, so the same map is the same text on both servers.
+        return { id: v.id, content: v.content, draft: v.draft ?? null, published: v.published, deleted: v.deleted, version: v.version!, updated: v.updated!, created: v.created! };
+    }
+    private put(copy: MapCopy, version: number, synced: number | null): void {
+        this.write(`INSERT INTO themes (theme_id, content, draft, version, updated, created, synced, deleted, published) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (theme_id) DO UPDATE SET content = excluded.content, draft = excluded.draft, version = excluded.version, updated = excluded.updated,
+            created = excluded.created, synced = excluded.synced, deleted = excluded.deleted, published = excluded.published`,
+            copy.id, copy.content, copy.draft, version, copy.updated, copy.created, synced, copy.deleted ? 1 : 0, copy.published ? 1 : 0);
+    }
+    // Online: the laptop's copy of a map, edited from this server's version `base` (null: never uploaded). It replaces
+    // this server's when nothing changed here since, or when nobody ever edited this one. A starter map nobody edited
+    // on the laptop takes this server's ("theirs"). When both changed, both are kept: the laptop's becomes a new map
+    // marked "(laptop)".
+    receive(copy: MapCopy, base: number | null): MapPushResult {
+        const here = this.row(copy.id);
+        if (here && here.content === copy.content && here.draft === copy.draft && !!here.published === copy.published && !!here.deleted === copy.deleted) return { outcome: 'saved', version: here.version };
+        if (here && base === null && copy.updated === 0) return { outcome: 'theirs', version: here.version };
+        if (!here || (base === null ? here.updated === 0 : base === here.version)) {
+            const version = here ? Math.max(copy.version, here.version + 1) : copy.version;
+            this.put({ ...copy, created: here?.created ?? copy.created }, version, null);
+            return { outcome: 'saved', version };
+        }
+        let id = `${copy.id.slice(0, 57)}-laptop`;
+        for (let n = 2; this.row(id); n++) id = `${copy.id.slice(0, 55)}-laptop-${n}`;
+        const renamed = (json: string | null) => { if (!json) return null; const theme = JSON.parse(json) as Theme; return JSON.stringify({ ...theme, id, name: `${theme.name.slice(0, 111)} (laptop)` }); };
+        const kept: MapCopy = { ...copy, id, content: renamed(copy.content)!, draft: renamed(copy.draft), version: 1, updated: Date.now(), created: this.nextOrder() };
+        this.put(kept, 1, null);
+        return { outcome: 'kept-both', version: here.version, copy: kept };
+    }
+    // Online: what the laptop is missing. `have` is the version of each map it holds.
+    changes(have: Record<string, number>): MapCopy[] {
+        return this.sql.exec<ThemeRow>('SELECT * FROM themes ORDER BY created, theme_id').toArray().filter(row => have[row.theme_id] !== row.version).map(row => this.copyOf(row));
+    }
+
+    // On the laptop: the maps to upload: changed here since the last sync, or never uploaded.
+    outbox(): { copy: MapCopy; base: number | null }[] {
+        return this.sql.exec<ThemeRow>('SELECT * FROM themes WHERE synced IS NULL OR synced <> version ORDER BY created, theme_id').toArray()
+            .map(row => ({ copy: this.copyOf(row), base: row.synced }));
+    }
+    waiting(): number {
+        return this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM themes WHERE synced IS NULL OR synced <> version').one().n;
+    }
+    // On the laptop: what the online server made of an upload. A map edited again while it travelled stays waiting.
+    uploaded(sent: MapCopy, result: MapPushResult): void {
+        const here = this.row(sent.id);
+        if (!here || result.outcome === 'refused') return;
+        if (result.outcome === 'kept-both' && result.copy) {
+            // The online server kept its own version under this id; this laptop's lives on as the copy, and the
+            // online version arrives with the next download.
+            if (here.version !== sent.version) return;
+            this.write('DELETE FROM themes WHERE theme_id = ?', sent.id);
+            this.put(result.copy, 1, 1);
+            return;
+        }
+        // An unedited starter map: version 0 asks for the online server's at the next download.
+        if (result.outcome === 'theirs') { this.write('UPDATE themes SET version = 0, synced = 0 WHERE theme_id = ? AND version = ?', sent.id, sent.version); return; }
+        if (here.version === sent.version) this.write('UPDATE themes SET version = ?, synced = ? WHERE theme_id = ?', result.version, result.version, sent.id);
+        else if (result.version === sent.version) this.write('UPDATE themes SET synced = ? WHERE theme_id = ?', result.version, sent.id);
+    }
+    // On the laptop: what it holds, to ask the online server only for what changed.
+    known(): Record<string, number> {
+        return Object.fromEntries(this.sql.exec<{ id: string; synced: number }>('SELECT theme_id AS id, synced FROM themes WHERE synced IS NOT NULL').toArray().map(row => [row.id, row.synced]));
+    }
+    // On the laptop: maps from the online server. One changed here and not uploaded yet waits for its upload.
+    downloaded(copies: readonly MapCopy[]): void {
+        for (const copy of copies) {
+            const here = this.row(copy.id);
+            if (here && (here.synced === null || here.synced !== here.version)) continue;
+            this.put(copy, copy.version, copy.version);
+        }
     }
 }

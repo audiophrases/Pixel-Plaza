@@ -55,3 +55,5 @@
 .file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .studio-trash { margin: 0.4rem 0; font-size: 0.8rem; }
 .studio-trash p { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; margin: 0.3rem 0; }
+.studio-sync { margin: 0.3rem 0; font-size: 0.8rem; font-weight: 600; color: #1e6b34; }
+.studio-sync-offline, .studio-sync-signin, .studio-sync-outdated { color: #9a4510; }

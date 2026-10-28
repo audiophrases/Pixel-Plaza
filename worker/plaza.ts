@@ -30,7 +30,7 @@ import { fillThiefClue, lookOf, thiefCount } from '../shared/thief.ts';
 import { assignLateJoiner, assignWarmup, factById, type WarmupView } from '../shared/warmup.ts';
 import { IDENTITY_NAMES, assignIdentities, assignLateIdentity, assignLatePair, assignPairs, identityById, isWarmupKind, type WarmupKind } from '../shared/warmupKinds.ts';
 import { randomName } from '../shared/randomNames.ts';
-import { ThemeStore, type ThemeResult } from './themeStore.ts';
+import { ThemeStore, copyPictures, type MapCopy, type MapPushResult, type StudioMap, type ThemeResult } from './themeStore.ts';
 import { ThemeAssets } from './themeAssets.ts';
 import type { Theme } from '../shared/theme.ts';
 import { XP, checkStyle, emotesFor, levelOf, readStyle, type Style } from '../shared/levels.ts';
@@ -47,6 +47,8 @@ const TICKET_MS = 60_000;
 const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
 const MISSION_SYNC_EVERY_MS = 5 * 60 * 1000; // how often the laptop checks with the online server while the teacher page is open
 const QUEST_PUSH_BATCH = 100; // side quests the laptop uploads in one request
+const MAP_PUSH_BATCH = 5; // maps the laptop uploads in one request: each up to 200 KB, and its draft as much again
+const PICTURE_ASK_LIMIT = 200; // pictures the laptop asks about in one request
 const CHAT_KEEP = 500;
 const STATUS_HISTORY = 100;
 const CHAT_GAP_MS = 1500;
@@ -67,8 +69,8 @@ const BLOCKED_NOTICE = 'Not sent: your teacher blocked that for this lesson.';
 
 // Why an exchange with the online server stopped, as the laptop reports it.
 class SyncStopped extends Error {
-    state: MissionSync['state'];
-    constructor(state: MissionSync['state']) { super(state); this.state = state; }
+    state: MissionSync['state']; status: number;
+    constructor(state: MissionSync['state'], status = 0) { super(state); this.state = state; this.status = status; }
 }
 
 // Close codes the client acts on.
@@ -354,15 +356,33 @@ export class PlazaRoom extends DurableObject<Env> {
         return { themes: this.themes.list(), trash: this.themes.trash(), version: this.themes.version() };
     }
 
-    // The theme studio: the maps with their drafts, and saving, publishing, discarding, deleting and restoring them.
-    themeStudio(token: string, op: string, body: unknown): ThemeResult {
+    // The theme studio: the maps with their drafts, and saving, publishing, discarding, deleting and restoring them. On
+    // the laptop, like Mission Studio, they are brought up to date before they are read, and every change goes online at once.
+    async themeStudio(token: string, op: string, body: unknown): Promise<ThemeResult & { sync?: MissionSync }> {
         if (!this.teacherSignedIn(token)) return { error: 'Please sign in again.', status: 401 };
+        if (op === 'list') {
+            const sync = await this.syncMissions();
+            return { ...this.themes.execute('list', {}), sync };
+        }
         const result = this.ctx.storage.transactionSync(() => this.themes.execute(op, body));
-        if (!('error' in result) && result.published) this.mapPublished(result.published);
-        return result;
+        if ('error' in result) return result;
+        if (result.published) this.mapPublished(result.published);
+        const sync = await this.syncMissions();
+        // The upload may have kept the map as a copy, when it had changed online too: the page goes on with the
+        // teacher's own version.
+        const id = result.map && (sync.mapsKeptBoth?.find(item => item.id === result.map!.id)?.copy ?? result.map.id);
+        const listing = this.themes.execute('list', {}) as { maps: StudioMap[] };
+        const map = listing.maps.find(item => item.id === id);
+        return { ...listing, ...(map ? { map } : {}), ...(result.published ? { published: result.published } : {}), sync };
     }
     async themeAsset(token: string, bytes: Uint8Array): Promise<{ url: string; hash: string } | { error: string; status: number }> {
         if (!this.teacherSignedIn(token)) return { error: 'Please sign in again.', status: 401 };
+        return this.themeAssets.put(bytes);
+    }
+    // Online: a picture of one of the laptop's maps, sent before the map.
+    async syncPictureServe(lease: string, bytes: Uint8Array): Promise<{ url: string; hash: string } | { error: string; status: number }> {
+        const laptop = this.laptop();
+        if (!laptop || !secretsMatch(lease, laptop.lease)) return { error: 'Sign in again on the laptop.', status: 401 };
         return this.themeAssets.put(bytes);
     }
     themeAssetFile(hash: string): { type: string; bytes: Uint8Array } | null {
@@ -790,15 +810,26 @@ export class PlazaRoom extends DurableObject<Env> {
 
     private async exchangeMissions(): Promise<MissionSync> {
         const keptBoth: MissionSync['keptBoth'] = []; const questsKeptBoth: MissionSync['keptBoth'] = [];
-        const status = (state: MissionSync['state']): MissionSync => ({ state, waiting: this.missions.waiting() + this.sideQuests.waiting(), keptBoth, ...(questsKeptBoth.length ? { questsKeptBoth } : {}) });
+        const mapsKeptBoth: MissionSync['keptBoth'] = []; let mapsOutdated = false;
+        const status = (state: MissionSync['state']): MissionSync => ({ state, waiting: this.missions.waiting() + this.sideQuests.waiting() + this.themes.waiting(), keptBoth,
+            ...(questsKeptBoth.length ? { questsKeptBoth } : {}), ...(mapsKeptBoth.length ? { mapsKeptBoth } : {}), ...(mapsOutdated ? { maps: 'outdated' as const } : {}) });
         const lease = this.setting('cloud_lease');
         if (!lease) return status('signin');
         const call = async <T>(body: object): Promise<T> => {
             const response = await fetch(new URL('/api/missions/sync', this.env.CLOUD_URL!), {
                 method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lease, ...body }), signal: AbortSignal.timeout(10_000)
             });
-            if (!response.ok) throw new SyncStopped(response.status === 401 ? 'signin' : response.status === 404 ? 'outdated' : 'offline');
+            if (!response.ok) throw new SyncStopped(response.status === 401 ? 'signin' : response.status === 404 ? 'outdated' : 'offline', response.status);
             return await response.json() as T;
+        };
+        // A picture of a map, before the map: the online server refuses a map whose pictures it does not have.
+        const sendPicture = async (hash: string) => {
+            const file = this.themeAssets.get(hash);
+            if (!file) return;
+            const response = await fetch(new URL('/api/missions/sync-picture', this.env.CLOUD_URL!), {
+                method: 'POST', headers: { 'x-laptop-lease': lease, 'content-type': file.type }, body: file.bytes, signal: AbortSignal.timeout(30_000)
+            });
+            if (!response.ok) throw new SyncStopped(response.status === 401 ? 'signin' : 'offline', response.status);
         };
         try {
             for (const { copy, base } of this.missions.outbox()) {
@@ -816,15 +847,54 @@ export class PlazaRoom extends DurableObject<Env> {
                     if (copied) questsKeptBoth.push({ id: copy.id, copy: copied.id, title: (JSON.parse(copied.content) as SideQuest).title });
                 });
             }
-            const changes = await call<{ missions: MissionCopy[]; quests?: SideQuestCopy[] }>({ op: 'pull', ...this.missions.known(), quests: this.sideQuests.known() });
+            // Maps, each after its pictures. An online server that does not keep maps yet refuses them; missions and
+            // side quests still sync, and the maps wait.
+            try {
+                const maps = this.themes.outbox();
+                for (let start = 0; start < maps.length; start += MAP_PUSH_BATCH) {
+                    const pushes = maps.slice(start, start + MAP_PUSH_BATCH);
+                    const pictures = [...new Set(pushes.flatMap(({ copy }) => copyPictures(copy)))];
+                    for (let first = 0; first < pictures.length; first += PICTURE_ASK_LIMIT) {
+                        const asked = pictures.slice(first, first + PICTURE_ASK_LIMIT);
+                        const { missing } = await call<{ missing: string[] }>({ op: 'missing-pictures', hashes: asked });
+                        for (const hash of missing.filter(hash => asked.includes(hash))) await sendPicture(hash);
+                    }
+                    const { results } = await call<{ results: MapPushResult[] }>({ op: 'push-maps', pushes });
+                    this.ctx.storage.transactionSync(() => pushes.forEach(({ copy }, n) => { if (results[n]) this.themes.uploaded(copy, results[n]); }));
+                    pushes.forEach(({ copy }, n) => {
+                        const result = results[n];
+                        if (result?.outcome === 'kept-both' && result.copy) mapsKeptBoth.push({ id: copy.id, copy: result.copy.id, title: (JSON.parse(result.copy.draft ?? result.copy.content) as Theme).name });
+                    });
+                }
+            } catch (cause) {
+                if (!(cause instanceof SyncStopped && cause.status === 400)) throw cause;
+                mapsOutdated = true;
+            }
+            const changes = await call<{ missions: MissionCopy[]; quests?: SideQuestCopy[]; maps?: MapCopy[] }>({ op: 'pull', ...this.missions.known(), quests: this.sideQuests.known(), maps: this.themes.known() });
             this.ctx.storage.transactionSync(() => {
                 this.missions.downloaded(changes.missions);
                 if (changes.quests) this.sideQuests.downloaded(changes.quests);
             });
+            if (changes.maps) await this.mapsDownloaded(changes.maps);
             return status('synced');
         } catch (cause) {
             return status(cause instanceof SyncStopped ? cause.state : 'offline');
         }
+    }
+
+    // On the laptop: maps from the online server, after the pictures they need. A map whose pictures did not arrive
+    // stays out, and comes with the next download. Games on a map that changed draw it again.
+    private async mapsDownloaded(copies: MapCopy[]): Promise<void> {
+        for (const hash of [...new Set(copies.flatMap(copy => { try { return copyPictures(copy); } catch { return []; } }))].filter(hash => !this.themeAssets.has(hash))) {
+            try {
+                const response = await fetch(new URL(`/api/theme-assets/${hash}`, this.env.CLOUD_URL!), { signal: AbortSignal.timeout(30_000) });
+                if (response.ok) await this.themeAssets.put(new Uint8Array(await response.arrayBuffer()));
+            } catch { /* the map waits for the next download */ }
+        }
+        const checked = copies.map(copy => this.themes.readCopy(copy)).filter((copy): copy is MapCopy => !('error' in copy));
+        const before = new Map(checked.map(copy => [copy.id, this.themes.published(copy.id)]));
+        this.ctx.storage.transactionSync(() => this.themes.downloaded(checked));
+        for (const [id, was] of before) if (this.themes.published(id) && this.themes.published(id) !== was) this.mapPublished(id);
     }
 
     // Online: a request from the teacher's laptop, which proves itself with the lease it got when the teacher signed in
@@ -844,13 +914,28 @@ export class PlazaRoom extends DurableObject<Env> {
             if (!pushes || pushes.some(push => !push.copy || push.base === undefined)) return { error: 'Those quests are not valid.', status: 400 };
             return { results: this.ctx.storage.transactionSync(() => pushes.map(push => this.sideQuests.receive(push.copy!, push.base!))) };
         }
+        if (body.op === 'missing-pictures') {
+            const hashes = Array.isArray(body.hashes) && body.hashes.length <= PICTURE_ASK_LIMIT ? body.hashes.filter((hash): hash is string => typeof hash === 'string' && /^[0-9a-f]{64}$/.test(hash)) : null;
+            if (!hashes) return { error: 'That request is not valid.', status: 400 };
+            return { missing: hashes.filter(hash => !this.themeAssets.has(hash)) };
+        }
+        if (body.op === 'push-maps') {
+            const pushes = Array.isArray(body.pushes) && body.pushes.length <= MAP_PUSH_BATCH ? (body.pushes as { copy?: unknown; base?: unknown }[]).map(push => ({
+                copy: this.themes.readCopy(push?.copy), base: push?.base === null || Number.isInteger(push?.base) ? push.base as number | null : undefined })) : null;
+            if (!pushes || pushes.some(push => push.base === undefined)) return { error: 'Those maps are not valid.', status: 400 };
+            const before = new Map(pushes.flatMap(({ copy }) => 'error' in copy ? [] : [[copy.id, this.themes.published(copy.id)] as const]));
+            const results = this.ctx.storage.transactionSync(() => pushes.map(({ copy, base }): MapPushResult => 'error' in copy ? { outcome: 'refused', error: copy.error } : this.themes.receive(copy, base!)));
+            for (const [id, was] of before) if (this.themes.published(id) && this.themes.published(id) !== was) this.mapPublished(id);
+            return { results };
+        }
         // A laptop from before quests had a record each sends its whole library. It is not taken: the laptop keeps its
         // copy, and sends the quests one by one once it is updated.
         if (body.op === 'push-library') return { version: null };
         if (body.op === 'pull') {
             const versions = (value: unknown) => value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, version]) => Number.isInteger(version))) as Record<string, number> : {};
             const revisions = Array.isArray(body.revisions) ? body.revisions.filter((id): id is string => typeof id === 'string') : [];
-            return { missions: this.missions.changes(versions(body.have), revisions), ...(body.quests && typeof body.quests === 'object' ? { quests: this.sideQuests.changes(versions(body.quests)) } : {}) };
+            return { missions: this.missions.changes(versions(body.have), revisions), ...(body.quests && typeof body.quests === 'object' ? { quests: this.sideQuests.changes(versions(body.quests)) } : {}),
+                ...(body.maps && typeof body.maps === 'object' ? { maps: this.themes.changes(versions(body.maps)) } : {}) };
         }
         return { error: 'That request is not valid.', status: 400 };
     }
