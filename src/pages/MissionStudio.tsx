@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { getTheme, themes } from '../../shared/themeCatalog';
+import type { Theme } from '../../shared/theme';
 import type { Campaign } from '../../shared/campaign';
 import { missionEnvelope, missionJson, MISSION_MAX_BYTES, validateMission } from '../../shared/missionSchema';
 import { importMission, type MissionImport } from '../../shared/missionImport';
@@ -35,7 +35,12 @@ function download(text: string, filename: string, type = 'application/json') {
 
 export default function MissionStudio() {
     const [params] = useSearchParams();
-    const [promptThemeId, setPromptThemeId] = useState(() => getTheme(params.get('theme') ?? undefined).id);
+    // The maps are on the server: the one chosen here gives the editor its places and the AI prompt its place names.
+    const [maps, setMaps] = useState<{ themes: Theme[]; trash: Theme[]; default: string }>({ themes: [], trash: [], default: '' });
+    const [promptThemeId, setPromptThemeId] = useState(() => params.get('theme') ?? '');
+    const promptTheme = maps.themes.find(theme => theme.id === promptThemeId) ?? maps.themes.find(theme => theme.id === maps.default) ?? maps.themes[0];
+    // A map clue can be in a place on any of the maps, as the server checks when the mission is published.
+    const zones = maps.themes.length ? new Set([...maps.themes, ...maps.trash].flatMap(theme => theme.zones.map(zone => zone.id))) : undefined;
     const [token, setToken] = useState(readTeacherSession); const [password, setPassword] = useState('');
     const [library, setLibrary] = useState<MissionSummary[]>([]); const [draft, setDraft] = useState<MissionDraft | null>(null);
     const [trash, setTrash] = useState<MissionSummary[]>([]);
@@ -52,7 +57,7 @@ export default function MissionStudio() {
     const [importText, setImportText] = useState(''); const [importMode, setImportMode] = useState<'append' | 'replace' | 'extend'>('extend'); const [candidate, setCandidate] = useState<MissionImport | null>(null);
     const [brief, setBrief] = useState(''); const [level, setLevel] = useState('A2'); const [promptMode, setPromptMode] = useState<'create' | 'extend' | 'quests'>('quests'); const [prompt, setPrompt] = useState('');
     const dirty = !!campaign && !!draft && JSON.stringify(campaign) !== JSON.stringify(draft.campaign);
-    const checked = campaign ? validateMission(missionEnvelope(campaign)) : null;
+    const checked = campaign ? validateMission(missionEnvelope(campaign), 'publish', zones) : null;
     const failed = useCallback((cause: unknown) => {
         setError(cause instanceof Error ? cause.message : 'Connection failed.');
         if ((cause as { status?: number }).status === 401) { storeTeacherSession(''); setToken(''); }
@@ -76,6 +81,13 @@ export default function MissionStudio() {
         return () => { active = false; };
     }, [token]);
     useEffect(() => {
+        let active = true;
+        fetch('/api/themes').then(response => response.json()).then(body => {
+            if (active && Array.isArray(body.themes)) setMaps({ themes: body.themes, trash: Array.isArray(body.trash) ? body.trash : [], default: typeof body.default === 'string' ? body.default : '' });
+        }).catch(() => { /* the editor offers the places the mission already uses */ });
+        return () => { active = false; };
+    }, []);
+    useEffect(() => {
         if (!dirty) return;
         const prevent = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
         window.addEventListener('beforeunload', prevent); return () => window.removeEventListener('beforeunload', prevent);
@@ -97,7 +109,7 @@ export default function MissionStudio() {
             if (!result.campaign) { setCandidate({ ...result, changes }); return; }
             working = result.campaign;
         }
-        setCandidate({ ...validateMission(missionEnvelope(working)), changes });
+        setCandidate({ ...validateMission(missionEnvelope(working), 'publish', zones), changes });
     };
     const openMission = (id: string) => { if (!id || !mayLeave()) return; void run(async () => { const result = await call<{ draft: MissionDraft }>(`get?id=${encodeURIComponent(id)}`); if (result.draft.deleted) { const latest = await call<{ library: MissionSummary[] }>('list'); setLibrary(latest.library); setShowLibrary(true); setNotice('This mission is in Trash. Restore it below to edit it.'); return; } applyDraft(result.draft); setNotice(''); }); };
     const selectChapter = (index: number) => { setChapterIndex(index); setSelectedId(null); setCandidate(null); setPrompt(''); };
@@ -139,7 +151,7 @@ export default function MissionStudio() {
                 <div className="mission-utility-nav"><button className="mission-button" aria-pressed={view === 'tools'} onClick={() => setView('tools')}>AI help &amp; files</button><button className="mission-button" aria-pressed={view === 'live'} onClick={() => setView('live')}>Add to a running game</button><button className="mission-button danger" onClick={() => askDelete({ id: campaign.id, title: campaign.title, version: draft.version, publishedRevision: draft.publishedRevision, updated: draft.updated })}>Delete mission</button></div>
                 {view === 'map' && campaign.chapters[chapterIndex] && <MissionPlayGuide campaign={campaign} chapter={campaign.chapters[chapterIndex]} canLeave={mayLeave} />}
                 {view === 'map' && <MissionStoryMap campaign={campaign} chapterIndex={chapterIndex} onChapter={selectChapter} onEdit={id => { setSelectedId(id ?? null); setView('build'); setEditorNavigation(n => n + 1); setIssueTarget({ path: id ? `chapters[${chapterIndex}].objectives[${campaign.chapters[chapterIndex].objectives.findIndex(o => o.id === id)}].text` : `chapters[${chapterIndex}].title` }); }} onSetup={() => { setView('setup'); setIssueTarget({ path: 'roles[0].name' }); }} onPreview={() => { setView('review'); window.requestAnimationFrame(() => document.querySelector('.mission-preview')?.scrollIntoView({ block: 'start' })); }} />}
-                <div hidden={view !== 'setup' && view !== 'build'}><MissionEditor key={campaign.id} navigationKey={editorNavigation} view={view === 'setup' ? 'setup' : 'build'} campaign={campaign} theme={getTheme(promptThemeId)} chapterIndex={chapterIndex} selectedId={selectedId} setSelectedId={setSelectedId} setChapterIndex={selectChapter} onChange={edit} /></div>
+                <div hidden={view !== 'setup' && view !== 'build'}><MissionEditor key={campaign.id} navigationKey={editorNavigation} view={view === 'setup' ? 'setup' : 'build'} campaign={campaign} theme={promptTheme} chapterIndex={chapterIndex} selectedId={selectedId} setSelectedId={setSelectedId} setChapterIndex={selectChapter} onChange={edit} /></div>
                 {view === 'review' && <><section className="mission-card mission-validation"><p className="mission-eyebrow">CHECK BEFORE YOU SHARE</p><h2>{checked?.errors.length ? `${checked.errors.length} things to finish` : 'Your mission is ready to publish'}</h2><p className="mission-muted">{campaign.chapters.length} chapters · {campaign.chapters.reduce((n, c) => n + c.objectives.length, 0)} steps · {campaign.roles.length} roles. You can save an unfinished draft at any time.</p>
                     {!!checked?.errors.length && <ul className="mission-issue-list">{checked.errors.map((item, i) => { const location = issueLocation(campaign, item); return <li key={i}><div><strong>{location.label}</strong><p>{missionIssueText(item)}</p></div><button className="mission-button" onClick={() => { if (location.chapterIndex >= 0) { selectChapter(location.chapterIndex); setSelectedId(location.stepId ?? null); setView('build'); setEditorNavigation(n => n + 1); } else setView('setup'); setIssueTarget({ path: item.path }); }}>Go to fix</button></li>; })}</ul>}
                     {!!checked?.warnings.length && <details className="mission-details"><summary>Teaching tips to review ({checked.warnings.length})</summary><ul>{checked.warnings.map((item, i) => <li key={i}>{item.message}</li>)}</ul></details>}
@@ -152,11 +164,11 @@ export default function MissionStudio() {
                 <div hidden={view !== 'live'}><section className="mission-card"><h2>Extra quests for your current class</h2><p>Choose the chapter that matches the running game, then review the optional quests to release.</p><label className="mission-field"><span>Chapter for live quests</span><select value={chapterIndex} onChange={e => selectChapter(Number(e.target.value))}>{campaign.chapters.map((c, i) => <option key={c.id} value={i}>{i + 1}. {c.title}</option>)}</select></label></section><LiveMissionPanel token={token} campaign={campaign} chapter={campaign.chapters[chapterIndex]} version={draft.version} dirty={dirty} onError={failed} /></div>
                 <div hidden={view !== 'tools'}><section className="mission-card"><h2>A little help with your next idea</h2><p>These tools are optional. Write and edit your mission in Build steps, or use your own AI and import its response here.</p><button className="mission-button" onClick={() => download(missionJson(campaign), `${campaign.id}.json`)}>Download mission backup</button><label className="mission-field"><span>Chapter for AI &amp; imports</span><select value={chapterIndex} onChange={e => selectChapter(Number(e.target.value))}>{campaign.chapters.map((c, i) => <option key={c.id} value={i}>{i + 1}. {c.title}</option>)}</select></label></section>
                 <details className="mission-card"><summary>Create with an AI prompt</summary><p>Describe your idea, copy or download the prompt, then import the AI's JSON response below.</p>
-                    <label className="mission-field"><span>Story scenery</span><select aria-label="Story scenery" value={promptThemeId} onChange={e => { setPromptThemeId(e.target.value); setPrompt(''); }}>{Object.values(themes).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
-                    <p className="mission-muted">The prompt uses this map's place names. Existing chapters and answers keep their wording. For uninstalled scenery, paste story-context.md from its art kit into your brief.</p>
+                    <label className="mission-field"><span>Story scenery</span><select aria-label="Story scenery" value={promptTheme?.id ?? ''} onChange={e => { setPromptThemeId(e.target.value); setPrompt(''); }}>{maps.themes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+                    <p className="mission-muted">The prompt uses this map's place names. Existing chapters and answers keep their wording. For scenery that is not a map on the server yet, paste story-context.md from its art kit into your brief.</p>
                     <div className="mission-two-columns"><label className="mission-field"><span>Language level</span><select value={level} onChange={e => { setLevel(e.target.value); setPrompt(''); }}>{['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map(l => <option key={l}>{l}</option>)}</select></label><label className="mission-field"><span>Task</span><select value={promptMode} onChange={e => { setPromptMode(e.target.value as 'create' | 'extend' | 'quests'); setPrompt(''); }}><option value="quests">Add quests to the selected chapter</option><option value="extend">Extend this campaign with chapters</option><option value="create">Create a new campaign</option></select></label></div>
                     <MissionField label="Your mission brief" value={brief} multiline onChange={text => { setBrief(text); setPrompt(''); }} />
-                    <button className="mission-button" disabled={!brief.trim() || (promptMode === 'quests' && !campaign.chapters[chapterIndex])} onClick={() => setPrompt(buildMissionPrompt(campaign, brief, level, promptMode, campaign.chapters[chapterIndex]?.id, getTheme(promptThemeId)))}>Build prompt</button>
+                    <button className="mission-button" disabled={!brief.trim() || (promptMode === 'quests' && !campaign.chapters[chapterIndex])} onClick={() => setPrompt(buildMissionPrompt(campaign, brief, level, promptMode, campaign.chapters[chapterIndex]?.id, promptTheme))}>Build prompt</button>
                     {prompt && <><label className="mission-field"><span>Prompt to give your AI</span><textarea readOnly rows={10} value={prompt} /></label><div className="mission-toolbar"><button className="mission-button" onClick={() => void run(async () => {
                         try { await navigator.clipboard.writeText(prompt); setNotice('Prompt copied.'); } catch { download(prompt, `${campaign.id}-prompt.md`, 'text/markdown'); setNotice('Clipboard unavailable. Prompt downloaded.'); }
                     })}>Copy prompt</button><button className="mission-button" onClick={() => download(prompt, `${campaign.id}-prompt.md`, 'text/markdown')}>Download prompt</button></div></>}

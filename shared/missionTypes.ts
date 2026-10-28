@@ -2,7 +2,7 @@ import type { Campaign, Objective } from './campaign.ts';
 import type { MissionOverview } from './missionOverview.ts';
 export type MissionDraft = { campaign: Campaign; version: number; publishedRevision: string | null; updated: number; deleted?: boolean };
 // A campaign the teacher can start, with enough to choose between them: its chapters in order and what is special about it.
-export type CampaignChoice = { id: string; title: string; chapters: string[]; mystery: boolean; partnerQuests: boolean; witnesses: boolean; revision?: string };
+export type CampaignChoice = { id: string; title: string; chapters: string[]; zones: string[]; mystery: boolean; partnerQuests: boolean; witnesses: boolean; revision?: string };
 export type MissionSummary = { id: string; title: string; version: number; publishedRevision: string | null; updated: number; overview?: MissionOverview };
 // A mission as it travels between the teacher's laptop and the online server: the draft as stored (content is its
 // JSON), and the published version new games start from. `updated` 0 means nobody has edited it since it arrived.

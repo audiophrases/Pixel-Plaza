@@ -6,7 +6,7 @@ type World = ReturnType<typeof makeWorld>;
 // A map as the theme studio sees it: what games play (`theme`, once published), the work in progress (`draft`), and
 // how many saved games are on it.
 export type StudioMap = { id: string; theme: Theme; draft: Theme | null; version: number; published: boolean; deleted: boolean; updated: number; games: number };
-export type ThemeResult = { maps: StudioMap[]; map?: StudioMap; published?: string } | { error: string; status: number; errors?: string[] };
+export type ThemeResult = { maps: StudioMap[]; default: string; map?: StudioMap; published?: string } | { error: string; status: number; errors?: string[] };
 // A map as the laptop and the online server send it to each other: the whole record.
 export type MapCopy = { id: string; content: string; draft: string | null; published: boolean; deleted: boolean; version: number; updated: number; created: number };
 export type MapPushResult = { outcome: 'saved' | 'kept-both' | 'theirs'; version: number; copy?: MapCopy } | { outcome: 'refused'; error: string };
@@ -40,7 +40,7 @@ export function checkMap(value: unknown): { theme: Theme } | { error: string; er
 // next start. A map the server already has is never overwritten.
 export class ThemeStore {
     private sql: SqlStorage;
-    private cached: { themes: Map<string, Theme>; worlds: Map<string, World>; order: string[]; trash: string[] } | null = null;
+    private cached: { themes: Map<string, Theme>; worlds: Map<string, World>; order: string[]; trash: string[]; chosen: string | null } | null = null;
     // `hasPicture` tells whether the picture store holds an uploaded picture, so a map cannot point at one it lacks.
     private hasPicture: (hash: string) => boolean;
     constructor(sql: SqlStorage, hasPicture: (hash: string) => boolean = () => true) { this.sql = sql; this.hasPicture = hasPicture; }
@@ -66,7 +66,8 @@ export class ThemeStore {
         if (this.cached) return this.cached;
         const rows = this.sql.exec<ThemeRow>('SELECT * FROM themes WHERE published = 1 ORDER BY created, theme_id').toArray();
         this.cached = { themes: new Map(rows.map(row => [row.theme_id, JSON.parse(row.content) as Theme])), worlds: new Map(),
-            order: rows.filter(row => !row.deleted).map(row => row.theme_id), trash: rows.filter(row => row.deleted).map(row => row.theme_id) };
+            order: rows.filter(row => !row.deleted).map(row => row.theme_id), trash: rows.filter(row => row.deleted).map(row => row.theme_id),
+            chosen: this.sql.exec<{ value: string }>("SELECT value FROM settings WHERE key = 'default_map'").toArray()[0]?.value ?? null };
         return this.cached;
     }
 
@@ -76,8 +77,13 @@ export class ThemeStore {
     trash(): Theme[] { const { themes, trash } = this.load(); return trash.map(id => themes.get(id)!); }
     // A map that can be chosen for a new game.
     has(id: unknown): id is string { return typeof id === 'string' && this.load().order.includes(id); }
-    // The map a new game gets when none is chosen: the first one.
-    defaultId(): string { return this.load().order[0] ?? this.load().themes.keys().next().value ?? 'plaza'; }
+    // The map new games start on: the one chosen in the theme studio, or the first one. Each server keeps its own choice.
+    defaultId(): string {
+        const { order, themes, chosen } = this.load();
+        return (chosen && order.includes(chosen) ? chosen : order[0]) ?? themes.keys().next().value ?? 'plaza';
+    }
+    // The places a mission's map clues can be in: the zones of the published maps, Trash included.
+    zones(): Set<string> { return new Set([...this.list(), ...this.trash()].flatMap(theme => theme.zones.map(zone => zone.id))); }
     // The map of a game, also when it is in Trash; a game whose map is gone plays on the default one.
     theme(id?: string | null): Theme {
         const { themes } = this.load();
@@ -89,8 +95,9 @@ export class ThemeStore {
         if (!world) { world = makeWorld(theme); worlds.set(theme.id, world); }
         return world;
     }
-    // Changes whenever a map is added, changed or deleted, so a page knows to fetch the maps again.
-    version(): number { return this.sql.exec<{ n: number }>('SELECT COALESCE(SUM(version), 0) + COUNT(*) AS n FROM themes').one().n; }
+    // Changes whenever a map is added, changed or deleted, or new games start on another, so a page knows to fetch the
+    // maps again.
+    version(): string { return `${this.sql.exec<{ n: number }>('SELECT COALESCE(SUM(version), 0) + COUNT(*) AS n FROM themes').one().n}.${this.defaultId()}`; }
 
     // ---------- The theme studio ----------
 
@@ -101,7 +108,7 @@ export class ThemeStore {
     }
     private listing(id?: string): ThemeResult {
         const maps = this.sql.exec<ThemeRow>('SELECT * FROM themes ORDER BY created, theme_id').toArray().map(row => this.studioMap(row));
-        return { maps, ...(id ? { map: maps.find(map => map.id === id) } : {}) };
+        return { maps, default: this.defaultId(), ...(id ? { map: maps.find(map => map.id === id) } : {}) };
     }
 
     private check(value: unknown): ReturnType<typeof checkMap> {
@@ -147,6 +154,12 @@ export class ThemeStore {
         if (op === 'discard') {
             if (!here.published) return { error: 'This map has never been published: move it to Trash instead.', status: 409 };
             this.write('UPDATE themes SET draft = NULL, version = version + 1, updated = ? WHERE theme_id = ?', Date.now(), here.theme_id);
+            return this.listing(here.theme_id);
+        }
+        // New games start on this map, which must be one they can be played on.
+        if (op === 'default') {
+            if (!here.published || here.deleted) return { error: 'Publish the map first; a map in Trash cannot start new games.', status: 409 };
+            this.write("INSERT INTO settings (key, value) VALUES ('default_map', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", here.theme_id);
             return this.listing(here.theme_id);
         }
         if (op === 'delete' || op === 'restore') {

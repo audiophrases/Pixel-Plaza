@@ -29,7 +29,7 @@ export type Objective = {
     board?: { roles?: string[]; afterMain?: boolean; minPlayers?: number; teacherReleased?: boolean; partnerRole?: string; differentRole?: boolean };
     rewards?: Record<string, string>; // the new clue each role earns by answering, by role id
 };
-// A clue everyone finds by standing in a named place (see `zones` in plazaMap.ts).
+// A clue everyone finds by standing in a named place: a zone of the game's map.
 export type Discovery = { id: string; zone: string; text: string };
 export type Chapter = {
     id: string; title: string;

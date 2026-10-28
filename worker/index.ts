@@ -298,7 +298,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     if (themeStudio) {
         const op = path.slice('/api/teacher/themes/'.length);
-        if (!(get && op === 'list') && !(post && ['save', 'publish', 'discard', 'delete', 'restore'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
+        if (!(get && op === 'list') && !(post && ['save', 'publish', 'discard', 'default', 'delete', 'restore'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
         const result = await plaza(env).themeStudio(request.headers.get('x-teacher-session') || '', op, get ? {} : body);
         return 'error' in result ? json({ error: result.error, ...(result.errors ? { errors: result.errors } : {}) }, result.status) : json(result);
     }

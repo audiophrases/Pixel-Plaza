@@ -47,7 +47,7 @@ The installer validates the map and walking access, copies the background into `
 
 ## Missions and existing maps
 
-Use `story-context.md` when asking for matching missions. After installing the map with `npm run theme`, Mission Studio's **Story scenery** selector includes its setting and visible place names in the mission prompt. For an uninstalled brief, paste the context into the mission brief. Saved campaigns retain their original story text and answers.
+Use `story-context.md` when asking for matching missions. Once the map is published, Mission Studio's **Story scenery** selector includes its setting and visible place names in the mission prompt, and its places can hold map clues. For a brief that is not a map on the server yet, paste the context into the mission brief. Saved campaigns retain their original story text and answers.
 
 Pixel Plaza remains Season 1, with its existing collision and hiding work. Garden/Autumn Commons and the older four-cell art-sheet import remain available for existing treatments. The new **background brief** is the default workflow.
 

@@ -27,7 +27,7 @@ import type { AvatarConfig } from '../utils/AvatarRenderer';
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; everyone?: boolean; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred?: boolean };
 type CampaignInfo = {
   guideVersion?: string;
-  id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string; chapterTitles?: string[];
+  id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string; chapterTitles?: string[]; zones?: string[];
   reveals: { shown: number; total: number; next: string | null };
   reports: { studentKey: string; objective: string; text: string; partner?: string; starred?: boolean }[];
   interviews?: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
@@ -44,7 +44,7 @@ type Status = {
   warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
   incidents?: Incident[];
   blocked?: BlockedStatus;
-  open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number; themeId?: string } | null; realNames: Record<string, string>; themesVersion?: number; games: Game[]; pin: string | null; entries: Entry[]; moderation: boolean; muted: string[]; sound?: LiveSound; online: LiveStudent[];
+  open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number; themeId?: string } | null; realNames: Record<string, string>; themesVersion?: string; games: Game[]; pin: string | null; entries: Entry[]; moderation: boolean; muted: string[]; sound?: LiveSound; online: LiveStudent[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
   support: Support;
 };
@@ -76,22 +76,26 @@ export default function Teacher() {
   // A problem sending students to this laptop, from sign-in or opening the class.
   const [notice, setNotice] = useState('');
   const [newGameName, setNewGameName] = useState('');
-  const [newThemeId, setNewThemeId] = useState('commons-garden');
+  const [newThemeId, setNewThemeId] = useState(''); // '' until the teacher chooses: the map new games start on
   // The maps are data on the server: fetched once, and again whenever one is added, changed or deleted.
   const [themes, setThemes] = useState<Theme[]>([]);
   const [retired, setRetired] = useState<Theme[]>([]); // maps in Trash, for the games still on them
+  const [defaultMap, setDefaultMap] = useState(''); // chosen in the theme studio
   const themesVersion = status?.themesVersion;
   useEffect(() => {
     if (themesVersion === undefined) return;
     let active = true;
-    fetch('/api/themes').then(response => response.json()).then(body => { if (active && Array.isArray(body.themes)) { setThemes(body.themes); setRetired(Array.isArray(body.trash) ? body.trash : []); } }).catch(() => { /* the next status tries again */ });
+    fetch('/api/themes').then(response => response.json()).then(body => { if (active && Array.isArray(body.themes)) { setThemes(body.themes); setRetired(Array.isArray(body.trash) ? body.trash : []); setDefaultMap(typeof body.default === 'string' ? body.default : ''); } }).catch(() => { /* the next status tries again */ });
     return () => { active = false; };
   }, [themesVersion]);
   const themeOf = (id?: string | null): Theme | undefined => themes.find(theme => theme.id === id) ?? retired.find(theme => theme.id === id) ?? themes[0];
   const plazaMap = themeOf(status?.game?.themeId);
   const placeName = (id: string | null) => plazaMap?.zones.find(z => z.id === id)?.name ?? id ?? plazaMap?.name ?? '';
   const MAP_SIZE = plazaMap?.world ?? 2048;
-  const newTheme = themeOf(newThemeId);
+  const newTheme = themeOf(newThemeId || defaultMap);
+  // Map clues in places the open game's map does not have: students could not find them there.
+  const notOnMap = (zones?: string[]) => plazaMap && zones ? zones.filter(zone => !plazaMap.zones.some(item => item.id === zone)) : [];
+  const mapWarning = (zones?: string[]) => { const missing = notOnMap(zones); return missing.length > 0 && <p className="teacher-flag">⚠ Not on {plazaMap!.name}: {missing.join(', ')}. Students cannot find the map clues there; choose a map with these places for this game.</p>; };
   const [warmupKind, setWarmupKind] = useState<WarmupKind>('facts');
   const [copyNote, setCopyNote] = useState(''); // shown when the browser would not copy
   const [copied, setCopied] = useState(''); // the PIN whose link was just copied
@@ -501,6 +505,7 @@ export default function Teacher() {
               <strong>{choice.title}</strong>
               <small>{choice.chapters.length} {choice.chapters.length === 1 ? 'chapter' : 'chapters'} · {features(choice)}</small>
               <ol className="teacher-chapter-line">{chapterPreview(choice.chapters).map(([number, title]) => <li key={title}>{number > 0 && <span>{number}.</span>}{title}</li>)}</ol>
+              {mapWarning(choice.zones)}
             </div>
             <button className="btn btn-primary btn-sm" onClick={() => void action('campaign', { op: 'start', campaign: choice.id })}>Start</button>
             <TeacherMissionGuide token={token} campaignId={choice.id} refreshKey={choice.revision} />
@@ -508,6 +513,7 @@ export default function Teacher() {
           <p className="teacher-muted">Change these chapters or write your own campaign in <Link to="/mission-studio">Mission Studio</Link>.</p>
         </> : <>
           <p><strong>{campaign.title}</strong> · {{ active: 'in progress', chapter_complete: 'ready for the next chapter: students can keep working', campaign_complete: 'finished' }[campaign.status]}</p>
+          {mapWarning(campaign.zones)}
           <ol className="teacher-chapter-steps">{(campaign.chapterTitles ?? []).map((title, index) => {
             const state = campaign.status === 'campaign_complete' || index < campaign.chapter ? 'done' : index === campaign.chapter ? 'now' : 'next';
             return <li key={index} className={`teacher-step-${state}`} aria-current={state === 'now' ? 'step' : undefined}>

@@ -3419,6 +3419,64 @@ test('the theme studio: drafts, publishing to live games, Trash, and pictures ke
     }
 });
 
+test('the maps on the server decide where map clues can be, warn about a game\'s missing places, and set the map new games start on', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-map-places-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    try {
+        const base = plaza.base;
+        const session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (op, body) => api(base, `/api/teacher/${op}`, { session, body });
+        const studio = (op, body) => api(base, `/api/teacher/themes/${op}`, { session, body });
+        const mission = (op, body) => api(base, `/api/teacher/missions/${op}`, { session, body });
+        let maps = (await studio('list')).body.maps;
+        assert.equal((await studio('list')).body.default, 'plaza', 'the first map until another is chosen');
+
+        // A map clue at the pier: no map has a pier, so the mission cannot be published.
+        const created = (await mission('create', { id: 'harbour-mystery', source: 'castanyada' })).body.draft;
+        const content = created.campaign; content.title = 'Harbour mystery';
+        content.chapters[0].discoveries.push({ id: 'pier-clue', zone: 'pier', text: 'Wet footprints lead away from the pier.' });
+        const saved = (await mission('save', { id: 'harbour-mystery', version: created.version, envelope: missionEnvelope(content) })).body.draft;
+        const refused = await mission('publish', { id: 'harbour-mystery', version: saved.version });
+        assert.equal(refused.status, 400);
+        assert.deepEqual(refused.body.errors, [{ path: `chapters[0].discoveries[${content.chapters[0].discoveries.length - 1}].zone`, message: 'Choose a place that is on one of the maps.' }]);
+
+        // A harbour map with a pier, published from the theme studio: now the mission can be.
+        const plazaMap = maps.find(map => map.id === 'plaza').theme;
+        const harbour = { ...plazaMap, id: 'harbour', name: 'Harbour', zones: plazaMap.zones.map((zone, n) => n === plazaMap.zones.length - 1 ? { ...zone, id: 'pier', name: 'Pier' } : zone) };
+        const made = (await studio('save', { theme: harbour, create: true })).body.map;
+        assert.equal((await studio('publish', { id: 'harbour', version: made.version })).status, 200);
+        const published = await mission('publish', { id: 'harbour-mystery', version: saved.version });
+        assert.equal(published.status, 200, JSON.stringify(published.body));
+        const choice = (await teacher('status')).body.campaigns.find(item => item.id === 'harbour-mystery');
+        assert.ok(choice.zones.includes('pier') && choice.zones.includes(content.chapters[0].discoveries[0].zone), 'Teacher controls know where the map clues are');
+
+        // In a game on Pixel Plaza, Teacher controls can tell the pier is missing.
+        PIN = (await teacher('game', { name: 'Plaza class', randomNames: false, themeId: 'plaza' })).body.pin;
+        assert.equal((await teacher('campaign', { op: 'start', campaign: 'harbour-mystery' })).status, 200);
+        let status = (await teacher('status')).body;
+        assert.ok(status.campaign.zones.includes('pier'));
+        assert.equal(maps.find(map => map.id === 'plaza').theme.zones.some(zone => zone.id === 'pier'), false, 'not on Pixel Plaza');
+
+        // New games start on the map chosen in the studio; Teacher controls and other pages fetch the maps again.
+        const before = status.themesVersion;
+        maps = (await studio('list')).body.maps;
+        const unpublished = (await studio('save', { theme: { ...harbour, id: 'harbour-draft', name: 'Harbour draft' }, create: true })).body.map;
+        assert.equal((await studio('default', { id: 'harbour-draft', version: unpublished.version })).status, 409, 'only a map games can be played on');
+        const chosen = await studio('default', { id: 'harbour', version: maps.find(map => map.id === 'harbour').version });
+        assert.deepEqual([chosen.status, chosen.body.default], [200, 'harbour']);
+        assert.equal((await api(base, '/api/themes')).body.default, 'harbour');
+        status = (await teacher('status')).body;
+        assert.notEqual(status.themesVersion, before);
+        await teacher('game', { name: 'Harbour class', randomNames: false });
+        assert.equal((await teacher('status')).body.game.themeId, 'harbour', 'a new game with no map chosen');
+        // In Trash, it no longer starts new games: the first map does again.
+        const harbourNow = (await studio('list')).body.maps.find(map => map.id === 'harbour');
+        assert.equal((await studio('delete', { id: 'harbour', version: harbourNow.version })).body.default, 'plaza');
+    } finally {
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('saved games keep their maps, authoritative geometry and positions across switches and restart', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay();
     const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-themes-'));

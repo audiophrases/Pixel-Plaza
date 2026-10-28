@@ -25,11 +25,14 @@ export default function Login() {
     return readStudentSession();
   });
   const [config, setConfig] = useState<StudentConfig | null>(null);
-  // The background is the first map on the server, which keeps every map.
+  // The background is the map new games start on, from the server, which keeps every map.
   const [backdrop, setBackdrop] = useState('');
   useEffect(() => {
     let active = true;
-    fetch('/api/themes').then(response => response.json()).then(body => { if (active && typeof body.themes?.[0]?.image === 'string') setBackdrop(body.themes[0].image); }).catch(() => { /* a plain background */ });
+    fetch('/api/themes').then(response => response.json()).then(body => {
+      const map = Array.isArray(body.themes) ? body.themes.find((theme: { id: string }) => theme.id === body.default) ?? body.themes[0] : undefined;
+      if (active && typeof map?.image === 'string') setBackdrop(map.image);
+    }).catch(() => { /* a plain background */ });
     return () => { active = false; };
   }, []);
   // Saved in the plaza: a returning student walks straight in looking the same.

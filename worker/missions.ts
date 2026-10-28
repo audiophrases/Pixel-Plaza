@@ -1,6 +1,6 @@
 import type { Campaign } from '../shared/campaign.ts';
 import { missionOverview } from '../shared/missionOverview.ts';
-import { MISSION_MAX_BYTES, missionEnvelope, missionId, validateMission, type MissionIssue } from '../shared/missionSchema.ts';
+import { MISSION_MAX_BYTES, clueZones, missionEnvelope, missionId, validateMission, type MissionIssue } from '../shared/missionSchema.ts';
 import type { CampaignChoice, MissionCopy, MissionDraft, MissionPushResult, MissionSummary } from '../shared/missionTypes.ts';
 
 export type MissionResult = { library?: MissionSummary[]; trash?: MissionSummary[]; draft?: MissionDraft; revision?: string; errors?: MissionIssue[]; warnings?: MissionIssue[] } | { error: string; status: number; errors?: MissionIssue[] };
@@ -29,7 +29,9 @@ export function readCopy(value: unknown): MissionCopy | null {
 export class MissionRepository {
     private sql: SqlStorage;
     private revisions = new Map<string, Campaign>();
-    constructor(sql: SqlStorage) { this.sql = sql; }
+    // `zones` gives the places map clues can be in (the maps' zones), checked when a mission is published.
+    private zones?: () => ReadonlySet<string>;
+    constructor(sql: SqlStorage, zones?: () => ReadonlySet<string>) { this.sql = sql; this.zones = zones; }
 
     initialize(): void {
         this.sql.exec(`CREATE TABLE IF NOT EXISTS mission_drafts (
@@ -86,7 +88,7 @@ export class MissionRepository {
                 const campaign = this.revision(revision);
                 if (!campaign) return [];
                 const objectives = campaign.chapters.flatMap(chapter => chapter.objectives);
-                return [{ id: campaign.id, title: campaign.title, revision, chapters: campaign.chapters.map(chapter => chapter.title),
+                return [{ id: campaign.id, title: campaign.title, revision, chapters: campaign.chapters.map(chapter => chapter.title), zones: clueZones(campaign),
                     mystery: objectives.some(objective => objective.answerThief), partnerQuests: objectives.some(objective => objective.board),
                     witnesses: objectives.some(objective => objective.conversation) }];
             });
@@ -132,7 +134,7 @@ export class MissionRepository {
             this.sql.exec('UPDATE mission_drafts SET content = ?, version = version + 1, updated = ? WHERE campaign_id = ? AND version = ?', JSON.stringify(checked.campaign), Date.now(), id, existing.version);
             return { draft: this.draft(id)!, library: this.list() };
         }
-        const checked = validateMission(missionEnvelope(existing.campaign));
+        const checked = validateMission(missionEnvelope(existing.campaign), 'publish', this.zones?.());
         if (!checked.campaign) return { error: 'Fix validation errors before publishing.', errors: checked.errors, status: 400 };
         const revision = crypto.randomUUID();
         this.sql.exec('INSERT INTO mission_revisions (revision_id, campaign_id, content, published) VALUES (?, ?, ?, ?)', revision, id, JSON.stringify(checked.campaign), Date.now());

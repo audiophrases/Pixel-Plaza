@@ -90,6 +90,7 @@ export default function Studio() {
   const [saved, setSaved] = useState('');
   const [busy, setBusy] = useState(false);
   const [sync, setSync] = useState<MissionSync | null>(null);
+  const [defaultMap, setDefaultMap] = useState(''); // the map new games start on
   const [sheetUrl, setSheetUrl] = useState<string | undefined>();
   const [direction, setDirection] = useState('A welcoming, colorful world with generous space for a class to gather.');
   const [sceneryPreset, setSceneryPreset] = useState<SceneryPreset>('custom');
@@ -411,12 +412,12 @@ export default function Studio() {
   };
 
   // ---------- the server ----------
-  const call = async (op: string, body?: object, by = token): Promise<{ maps: StudioMap[]; map?: StudioMap; sync?: MissionSync }> => {
+  const call = async (op: string, body?: object, by = token): Promise<{ maps: StudioMap[]; default: string; map?: StudioMap; sync?: MissionSync }> => {
     const response = await fetch(`/api/teacher/themes/${op}`, { method: body ? 'POST' : 'GET', headers: { 'x-teacher-session': by, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
     const result = await response.json();
     if (response.status === 401) { storeTeacherSession(''); setToken(''); }
     if (!response.ok) throw new Error([result.error, ...(result.errors ?? [])].filter(Boolean).join(' '));
-    setMaps(result.maps); setSync(result.sync ?? null);
+    setMaps(result.maps); setDefaultMap(result.default); setSync(result.sync ?? null);
     return result;
   };
   const run = async (work: () => Promise<void>) => {
@@ -433,7 +434,7 @@ export default function Studio() {
       if (!listed) {
         const body = await (await fetch('/api/themes')).json();
         listed = (body.themes as Theme[]).map(theme => ({ id: theme.id, theme, draft: null, version: 0, published: true, deleted: false, updated: 0, games: 0 }));
-        if (active) setMaps(listed);
+        if (active) { setMaps(listed); setDefaultMap(body.default ?? ''); }
       }
       const wanted = listed.find(map => map.id === params.get('theme') && !map.deleted);
       if (active && wanted) openMap(wanted);
@@ -497,6 +498,7 @@ export default function Studio() {
     if (!stored || !window.confirm(`Move “${stored.theme.name}” to Trash? New games cannot use it; games already on it keep it. You can restore it.`)) return;
     void run(async () => { const result = await call('delete', { id: stored.id, version: stored.version }); if (result.map!.id === stored.id) setStored(result.map!); else openMap(result.map!); setMessage('Moved to Trash. Restore it below whenever you need it.'); });
   };
+  const startNewGames = () => run(async () => { await call('default', { id: stored!.id, version: stored!.version }); setMessage(`New games now start on “${stored!.theme.name}”. Teacher controls can still choose another for each game.`); });
   const restore = (map: StudioMap) => run(async () => { const result = await call('restore', { id: map.id, version: map.version }); openMap(result.map!); setMessage(`“${map.theme.name}” is back.`); });
   const serverState = !onServer ? 'Not saved on the server yet.' : stored!.deleted ? 'In Trash: restore it to edit or publish it.'
     : !stored!.published ? 'Saved, not published: no game can use it yet.'
@@ -782,6 +784,8 @@ export default function Studio() {
           <button disabled={busy} onClick={duplicate}>Duplicate</button>
           {onServer && !stored!.deleted && <button disabled={busy} onClick={toTrash}>Move to Trash</button>}
         </div>
+        {onServer && stored!.published && !stored!.deleted && (stored!.id === defaultMap ? <p className="studio-hint">✓ New games start on this map.</p>
+          : <div className="studio-row"><button disabled={busy} onClick={() => void startNewGames()}>Start new games on this map</button></div>)}
         {maps.some(map => map.deleted) && <details className="studio-trash"><summary>Trash ({maps.filter(map => map.deleted).length})</summary>
           {maps.filter(map => map.deleted).map(map => <p key={map.id}>{map.theme.name}{map.games ? ` · ${map.games} saved game${map.games === 1 ? '' : 's'} still on it` : ''} <button disabled={busy} onClick={() => void restore(map)}>Restore</button></p>)}
         </details>}

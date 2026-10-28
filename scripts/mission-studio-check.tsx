@@ -8,6 +8,7 @@ import { missionEnvelope, missionId, missionJson, validateMission } from '../sha
 import type { MissionDraft } from '../shared/missionTypes';
 import type { LiveMissionTarget } from '../shared/missionTypes';
 import { missionOverview } from '../shared/missionOverview';
+import { themes } from '../shared/themeCatalog';
 
 const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true, url: 'http://localhost/mission-studio' });
 const g = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean };
@@ -23,6 +24,8 @@ let failSave = false;
 g.fetch = async (url, init) => {
     const route = String(url); const body = init?.body ? JSON.parse(String(init.body)) : {};
     if (route === '/api/teacher/login') return Response.json({ token: 'teacher-test' });
+    // The maps on the server, as any page reads them: here, the starter maps.
+    if (route === '/api/themes') return Response.json({ themes: Object.values(themes), trash: [], default: 'plaza', version: '1.plaza' });
     assert.equal((init?.headers as Record<string, string> | undefined)?.['x-teacher-session'], 'teacher-test');
     if (route.endsWith('/list')) return Response.json({ library: saved.deleted ? [] : [summary()], trash: saved.deleted ? [summary()] : [] });
     if (route.endsWith('/live')) return Response.json({ target: liveTarget });

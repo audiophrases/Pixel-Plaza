@@ -41,7 +41,7 @@ import { identityRevealProblem } from '../shared/activityChat.ts';
 import { defaultWarmup, validateWarmup, warmupVocabulary, type SavedWarmup, type WarmupDefinition } from '../shared/warmupConfig.ts';
 import { VOICE_SAMPLE } from './speech.ts';
 import { buildGuide, type TeacherGuide } from '../shared/teacherGuide.ts';
-import { missionId } from '../shared/missionSchema.ts';
+import { clueZones, missionId } from '../shared/missionSchema.ts';
 
 const TICKET_MS = 60_000;
 const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
@@ -112,6 +112,7 @@ export type GameSummary = { id: string; name: string; pin: string; lastOpened: n
 export type CampaignStatus = {
     guideVersion: string;
     id: string; title: string; status: QuestView['status']; chapter: number; chapters: number; chapterTitle: string; chapterTitles: string[];
+    zones: string[]; // where the map clues are, to tell the teacher when the game's map lacks one
     reveals: { shown: number; total: number; next: string | null }; // prepared news the teacher can release
     players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
     reports: { studentKey: string; objective: string; text: string; partner?: string; starred: boolean }[]; // what students wrote for the written questions
@@ -134,7 +135,7 @@ export type TeacherStatus = {
     open: boolean;
     game: { id: string; name: string; randomNames: boolean; vision: number; themeId: string } | null; // the open game, or the one last played
     realNames: Record<string, string>; // every student's real name, since the plaza may show made-up ones
-    themesVersion: number; // changes when a map is added, changed or deleted: the page then fetches /api/themes again
+    themesVersion: string; // changes when a map is added, changed or deleted, or new games start on another: the page then fetches /api/themes again
     games: GameSummary[];                      // every saved game, most recently played first
     pin: string | null; // the open game's PIN, which students type to join
     // `target` is the classmate a whisper is for; `everyone` marks a message for the whole plaza.
@@ -261,7 +262,8 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('games')").toArray().some(row => row.name === 'theme_id')) {
             this.sql.exec("ALTER TABLE games ADD COLUMN theme_id TEXT NOT NULL DEFAULT 'plaza'");
         }
-        this.missions = new MissionRepository(this.sql);
+        // A mission is published only when its map clues are in places some map has.
+        this.missions = new MissionRepository(this.sql, () => this.themes.zones());
         this.missions.initialize();
         this.sideQuests = new SideQuestStore(this.sql);
         this.sideQuests.initialize();
@@ -352,8 +354,8 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // The maps a game can be played on, for any page: pages fetch them instead of carrying their own copies. Maps in
     // Trash are listed apart, for the games still on them.
-    themeList(): { themes: Theme[]; trash: Theme[]; version: number } {
-        return { themes: this.themes.list(), trash: this.themes.trash(), version: this.themes.version() };
+    themeList(): { themes: Theme[]; trash: Theme[]; default: string; version: string } {
+        return { themes: this.themes.list(), trash: this.themes.trash(), default: this.themes.defaultId(), version: this.themes.version() };
     }
 
     // The theme studio: the maps with their drafts, and saving, publishing, discarding, deleting and restoring them. On
@@ -371,7 +373,7 @@ export class PlazaRoom extends DurableObject<Env> {
         // The upload may have kept the map as a copy, when it had changed online too: the page goes on with the
         // teacher's own version.
         const id = result.map && (sync.mapsKeptBoth?.find(item => item.id === result.map!.id)?.copy ?? result.map.id);
-        const listing = this.themes.execute('list', {}) as { maps: StudioMap[] };
+        const listing = this.themes.execute('list', {}) as { maps: StudioMap[]; default: string };
         const map = listing.maps.find(item => item.id === id);
         return { ...listing, ...(map ? { map } : {}), ...(result.published ? { published: result.published } : {}), sync };
     }
@@ -1763,7 +1765,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const thieves = this.chapterThieves(game, campaign, row.chapter);
         return {
             guideVersion: JSON.stringify([row.revision_id, row.live_epoch, row.live_version, row.chapter, [...names], players.map(player => [player.student_key, player.role_id]), thieves.map(key => [key, this.avatarOf(key)])]),
-            id: campaign.id, title: campaign.title, status: row.status, chapter: row.chapter, chapters: campaign.chapters.length,
+            id: campaign.id, title: campaign.title, status: row.status, chapter: row.chapter, chapters: campaign.chapters.length, zones: clueZones(campaign),
             chapterTitle: campaign.chapters[Math.min(row.chapter, campaign.chapters.length - 1)].title,
             chapterTitles: campaign.chapters.map(chapter => chapter.title),
             reveals: (() => {

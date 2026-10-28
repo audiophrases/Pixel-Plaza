@@ -1,6 +1,5 @@
 import type { Campaign } from './campaign.ts';
-import { missionEnvelope, missionJson } from './missionSchema.ts';
-import { plazaMap } from './plazaMap.ts';
+import { clueZones, missionEnvelope, missionJson } from './missionSchema.ts';
 import type { Theme } from './theme.ts';
 import { sceneryPrompts } from './sceneryPrompts.ts';
 
@@ -24,7 +23,7 @@ export function buildMissionPrompt(campaign: Campaign, brief: string, level: str
         'For main or optional non-partner objectives, conversation:{witnesses:1|2} requires that many distinct classmates to answer quest-linked questions with private evidence before the conclusion is accepted. Two witnesses require at least three students. Choose questions for which exchanging conflicting or complementary evidence serves the mystery. Assigned-partner board activities support one witness only.',
         'Use one answer mode: typed accepted phrases, classmate-by-role, culprit name, or report. Dynamic names/reports require accept:[]. Reports count at five words and are read by the teacher; they are not automatically graded.',
         'IDs start with a lowercase letter and contain lowercase letters, digits or hyphens, up to 64 characters. Item IDs are unique across the whole campaign. Prerequisites are acyclic. Every chapter has a main starting objective.',
-        `Available discovery zones: ${(theme ?? plazaMap).zones.map(z => z.id).join(', ')}. Discoveries use {id,zone,text}. Teacher news uses {id,text}.`,
+        `Available discovery zones: ${theme ? theme.zones.map(z => z.id).join(', ') : clueZones(campaign).join(', ') || 'those of the map chosen for the game'}. Discoveries use {id,zone,text}. Teacher news uses {id,text}.`,
         ...(theme?.scenery ? [sceneryPrompts(theme, '').context, mode === 'create' ? 'Use this scenery for the new story. The example below demonstrates the schema only; replace its hotel references with the selected setting.' : 'Preserve the existing campaign and answers. Use the scenery only where it fits the existing story; changing a map does not rewrite saved chapters.'] : []),
         'Clues needed for an answer must arrive BEFORE that question is solved. Thieves receive earned reward clues. Missing role holders have town-notice fallbacks, released at the original reward stage for each investigator. Provide teacher news for other information gaps. Optional quests never gate the main story.',
         'Design conversations and distinct optional investigations. Do not offer inventory, deliveries, world effects, automatic AI game control or live content editing: these mechanics are not implemented.',

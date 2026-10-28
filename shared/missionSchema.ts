@@ -1,5 +1,4 @@
 import { isUnlocked, prerequisiteIds, type Campaign, type Chapter, type Objective, type Role } from './campaign.ts';
-import { plazaMap } from './plazaMap.ts';
 
 export const MISSION_MAX_BYTES = 512_000;
 export type MissionEnvelope = { format: 'pixel-plaza-campaign'; schemaVersion: 1 | 2; campaign: Campaign };
@@ -10,8 +9,12 @@ export const missionJson = (campaign: Campaign) => JSON.stringify(missionEnvelop
 export const missionId = (value: string) => /^[a-z][a-z0-9-]{0,63}$/.test(value);
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 
-// Build a canonical object from unknown input. Drafts may be incomplete, but never malformed.
-export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'publish'): MissionValidation {
+// The places a mission's map clues are in.
+export const clueZones = (campaign: Campaign): string[] => [...new Set(campaign.chapters.flatMap(chapter => chapter.discoveries.map(discovery => discovery.zone)))];
+
+// Build a canonical object from unknown input. Drafts may be incomplete, but never malformed. `zones`, when given, are
+// the places a map clue can be in: the zones of the maps on the server.
+export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'publish', zones?: ReadonlySet<string>): MissionValidation {
     const errors: MissionIssue[] = [];
     const warnings: MissionIssue[] = [];
     const fail = (path: string, message: string) => { errors.push({ path, message }); };
@@ -132,7 +135,6 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
     if (!roles.length) content('roles', 'Add at least one role.');
     if (!chapters.length) content('chapters', 'Add at least one chapter.');
     const roleIds = new Set(roles.map(r => r.id));
-    const zones = new Set(plazaMap.zones.map(z => z.id));
     chapters.forEach((c, i) => {
         const path = `chapters[${i}]`; const byId = new Map(c.objectives.map(o => [o.id, o]));
         if (!c.objectives.some(o => !o.optional)) content(`${path}.objectives`, 'Add at least one main objective.');
@@ -173,7 +175,7 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
             for (const role of Object.keys(o.rewards ?? {})) if (!roleIds.has(role)) content(`${p}.rewards.${role}`, 'Role does not exist.');
         }
         for (const role of Object.keys(c.roleClues ?? {})) if (!roleIds.has(role)) content(`${path}.roleClues.${role}`, 'Role does not exist.');
-        c.discoveries.forEach((d, j) => { if (!zones.has(d.zone)) content(`${path}.discoveries[${j}].zone`, 'Choose a zone on the current map.'); });
+        if (zones) c.discoveries.forEach((d, j) => { if (!zones.has(d.zone)) content(`${path}.discoveries[${j}].zone`, 'Choose a place that is on one of the maps.'); });
         if (c.thieves?.carry && (i === 0 || !chapters[i - 1].thieves)) content(`${path}.thieves.carry`, 'Carry requires a preceding thief chapter.');
     });
     warnings.push({ path: 'roles', message: `This campaign uses ${roles.length} roles. Check clue coverage for small groups and absences; prose clues cannot be verified automatically.` });
