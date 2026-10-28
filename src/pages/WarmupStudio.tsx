@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { WARMUP_KINDS, isWarmupKind, type WarmupKind } from '../../shared/warmupKinds';
-import { defaultWarmup, validateWarmup, WARMUP_LEVELS, WARMUP_MAX_BYTES, WARMUP_MAX_IDENTITIES, type SavedWarmup, type WarmupDefinition } from '../../shared/warmupConfig';
+import { defaultWarmup, validateWarmup, WARMUP_LEVELS, WARMUP_MAX_BYTES, type SavedWarmup, type WarmupDefinition } from '../../shared/warmupConfig';
 import { parseWarmupImport, previewWarmupImport, warmupEntryCount, type WarmupImportMode } from '../../shared/warmupImport';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import { downloadFile } from '../themeFiles';
@@ -89,7 +89,7 @@ export default function WarmupStudio() {
                             {input(`Aliases ${i + 1} (comma separated)`, identity.accept.join(','), value => edit({ ...draft, identities: draft.identities.map((row, n) => n === i ? { ...row, accept: value ? value.split(',') : [] } : row) }), 1600)}
                             <button className="mission-button danger" aria-label={`Remove identity ${i + 1}`} onClick={() => edit({ ...draft, identities: draft.identities.filter((_, n) => n !== i) })}>Remove</button>
                         </div>)}
-                        <button className="mission-button" disabled={draft.identities.length >= WARMUP_MAX_IDENTITIES} onClick={() => edit({ ...draft, identities: [...draft.identities, { id: freshId(), name: '', accept: [] }] })}>Add identity</button>
+                        <button className="mission-button" onClick={() => edit({ ...draft, identities: [...draft.identities, { id: freshId(), name: '', accept: [] }] })}>Add identity</button>
                     </>}
                     {draft.kind === 'facts' && <><h2>Facts ({draft.facts.length})</h2><label className="mission-field"><span>Facts to find per student (up to)</span><input aria-label="Facts to find" type="number" min={1} max={10} value={draft.rounds} onChange={e => edit({ ...draft, rounds: Number(e.target.value) })} /></label>
                         <p>Write a made-up fact for the student's card and its matching “Find someone who…” phrase. Only facts held by classmates will be assigned.</p>
@@ -114,7 +114,7 @@ export default function WarmupStudio() {
                     <p className="mission-muted">Each student gets their own assignment when you start the activity.</p>
                 </section>
                 <section className="mission-card" aria-label="Backup and restore"><h2>Backup and restore</h2>
-                    <p id="warmup-import-limits">Up to {draft.kind === 'identity' ? `${WARMUP_MAX_IDENTITIES} identities` : draft.kind === 'facts' ? '80 facts' : '40 pairs'} and 64 KB (64,000 bytes) per file. Choose a file to preview changes before applying them.</p>
+                    <p id="warmup-import-limits">{draft.kind === 'identity' ? 'No identity-count limit.' : draft.kind === 'facts' ? 'Up to 80 facts.' : 'Up to 40 pairs.'} Files can be up to 64 KB (64,000 bytes). Choose a file to preview changes before applying them.</p>
                     <div className="mission-toolbar">
                     <button className="mission-button" onClick={() => downloadFile(`${kind}-warmup.json`, JSON.stringify({ format: 'pixel-plaza-warmup', schemaVersion: 1, definition: draft }, null, 2), 'application/json')}>Export JSON</button>
                     <label className="mission-file">Import JSON<input type="file" accept=".json,application/json" aria-describedby="warmup-import-limits" onChange={event => {

@@ -2800,7 +2800,7 @@ test('chapter 3: the thief hides the chestnuts, and the class opens the cellar w
     }
 });
 
-test('warm-up editor saves all 110 imported identities and enforces the 200-entry cap after restart', { timeout: 120000 }, async () => {
+test('warm-up editor saves imported identities across restarts and supports collections over 200', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay();
     const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-warmup-import-'));
     const pinUrl = `http://127.0.0.1:${pinPlay.address().port}`;
@@ -2824,12 +2824,12 @@ test('warm-up editor saves all 110 imported identities and enforces the 200-entr
         const card = (await alex.next(message => message.t === 'warmup' && message.warmup?.title === expected.title)).warmup;
         for (const identity of expected.identities) assert.ok(card.vocabulary.includes(identity.name));
         assert.ok(expected.identities.some(identity => card.fact.includes(identity.name)));
-        const atLimit = { ...expected, identities: Array.from({ length: 200 }, (_, i) => ({ id: `person-${i}`, name: `Person ${i.toString(36).split('').join(' ')}`, accept: [] })) };
-        assert.equal((await config({ version: 1, definition: atLimit })).status, 200);
-        const overLimit = { ...atLimit, identities: [...atLimit.identities, { id: 'extra', name: 'Extra Person', accept: [] }] };
-        const rejected = await config({ version: 2, definition: overLimit });
-        assert.equal(rejected.status, 400); assert.match(rejected.body.error, /found 201 entries; the maximum is 200/);
-        assert.equal((await config()).body.definition.identities.length, 200, 'rejected writes keep the saved definition');
+        const largeCollection = { ...expected, identities: Array.from({ length: 201 }, (_, i) => ({ id: `person-${i}`, name: `Person ${i.toString(36).split('').join(' ')}`, accept: [] })) };
+        assert.equal((await config({ version: 1, definition: largeCollection })).status, 200);
+        assert.equal((await config()).body.definition.identities.length, 201);
+        const oversized = { ...largeCollection, instructions: 'x'.repeat(70_000) };
+        assert.equal((await config({ version: 2, definition: oversized })).status, 413);
+        assert.equal((await config()).body.definition.identities.length, 201, 'oversized writes keep the saved definition');
     } finally {
         for (const socket of sockets) socket.ws.close(); await plaza.stop();
         await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);

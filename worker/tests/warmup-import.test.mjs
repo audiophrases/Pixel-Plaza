@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { defaultWarmup, validateWarmup, WARMUP_MAX_IDENTITIES, WARMUP_MAX_BYTES } from '../../shared/warmupConfig.ts';
+import { defaultWarmup, validateWarmup, WARMUP_MAX_BYTES } from '../../shared/warmupConfig.ts';
 import { parseWarmupImport, previewWarmupImport } from '../../shared/warmupImport.ts';
 
 const source = fs.readFileSync(new URL('./fixtures/who-am-i-110.json', import.meta.url), 'utf8');
@@ -27,13 +27,12 @@ test('the reported 110-identity file imports intact and appends 77 new identitie
     assert.equal(repeated.added, 0); assert.equal(repeated.skipped, 110); assert.equal(repeated.total, 110);
 });
 
-test('identity limits accept 200 and reject 201, including combined append totals', () => {
-    assert.equal(WARMUP_MAX_IDENTITIES, 200);
-    assert.equal(parseWarmupImport(envelope(collection(200)), 'identity').identities.length, 200);
-    assert.throws(() => parseWarmupImport(envelope(collection(201)), 'identity'), /found 201 entries; the maximum is 200/);
+test('identity imports and appends have no entry-count ceiling within the byte limit', () => {
+    for (const count of [201, 500]) assert.equal(parseWarmupImport(envelope(collection(count)), 'identity').identities.length, count);
     const extra = { ...collection(2), identities: [{ id: 'extra', name: 'Extra Person', accept: [] }, collection(1).identities[0]] };
-    const result = previewWarmupImport(collection(200), extra, 'append');
-    assert.equal(result.definition, null); assert.match(result.errors.join(' '), /found 201/);
+    const result = previewWarmupImport(collection(500), extra, 'append');
+    assert.deepEqual(result.errors, []); assert.equal(result.definition.identities.length, 501);
+    assert.equal(result.added, 1); assert.equal(result.skipped, 1);
 });
 
 test('append keeps metadata and duplicates, but blocks ID and alias conflicts', () => {
@@ -59,7 +58,9 @@ test('imports reject malformed JSON, the wrong format, version, type and invalid
     assert.throws(() => parseWarmupImport(source, 'facts'), /matching warm-up type/);
     const duplicate = collection(2); duplicate.identities[1].id = duplicate.identities[0].id;
     assert.throws(() => parseWarmupImport(envelope(duplicate), 'identity'), /unique lowercase ID/);
-    assert.throws(() => parseWarmupImport(envelope({ ...collection(2), identities: [] }), 'identity'), /2–200/);
+    for (const identities of [[], collection(1).identities, null]) {
+        assert.throws(() => parseWarmupImport(envelope({ ...collection(2), identities }), 'identity'), /at least 2 entries/);
+    }
     for (const kind of ['facts', 'pairs']) assert.equal(parseWarmupImport(envelope(defaultWarmup(kind)), kind).kind, kind);
 });
 

@@ -105,10 +105,10 @@ await upload(JSON.stringify(identityFile)); await edit('Import action', 'append'
 assert.ok(backup().textContent?.includes('Add 0 new identities; skip 110 duplicates'));
 await click('Cancel import'); assert.ok(!backup().textContent?.includes('Import preview'));
 
-const tooMany = { ...identityFile.definition, identities: Array.from({ length: 201 }, (_, i) => ({ id: `person-${i}`, name: `Person ${i.toString(36).split('').join(' ')}`, accept: [] })) };
+const largeCollection = { ...identityFile.definition, identities: Array.from({ length: 201 }, (_, i) => ({ id: `person-${i}`, name: `Person ${i.toString(36).split('').join(' ')}`, accept: [] })) };
 for (const [text, size, failRead] of [
     ['{', undefined, false], ['{}', undefined, false], [envelope(defaultWarmup('facts')), undefined, false],
-    [envelope(tooMany), undefined, false], [JSON.stringify(identityFile), 64_001, false], [JSON.stringify(identityFile), undefined, true],
+    [envelope({ ...identityFile.definition, identities: [] }), undefined, false], [JSON.stringify(identityFile), 64_001, false], [JSON.stringify(identityFile), undefined, true],
 ] as [string, number | undefined, boolean][]) {
     await upload(text, size, failRead);
     const alert = backup().querySelector('[role="alert"]'); assert.ok(alert);
@@ -132,11 +132,16 @@ assert.ok(document.activeElement?.textContent?.includes('Imported 110 entries'))
 await click('Save warm-up'); await click('Reload saved version');
 assert.equal(field('Title').value, 'Who am I?'); assert.ok(document.body.textContent?.includes('Secret identities (110)'));
 
-await upload(envelope({ ...tooMany, identities: tooMany.identities.slice(0, 200) })); await click('Apply import');
-assert.equal(button('Add identity').disabled, true, 'editor and validator share the 200-identity cap');
+await upload(envelope(largeCollection)); await click('Apply import');
+await click('Save warm-up'); await click('Reload saved version');
+assert.ok(document.body.textContent?.includes('Secret identities (201)'), 'collections above 200 can be imported and saved');
+assert.equal(button('Add identity').disabled, false, 'manual additions have no count ceiling');
+await click('Add identity'); await edit('Identity 202', 'Extra Person');
+await click('Save warm-up'); await click('Reload saved version');
+assert.ok(document.body.textContent?.includes('Secret identities (202)'));
 await upload(JSON.stringify(identityFile)); await edit('Title', 'Edit after preview');
 assert.ok(!backup().textContent?.includes('Import preview'), 'editing a draft cancels a stale import preview');
-assert.equal(writes, 6);
+assert.equal(writes, 8);
 await act(async () => root.unmount()); dom.window.close();
 console.log('Warm-up editor UI: 110-identity replace/append, duplicates, limits, focused errors, save/reload, all three modes and conflicts pass.');
 process.exit(0);
