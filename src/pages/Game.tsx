@@ -238,6 +238,8 @@ export default function Game() {
   // A click on a classmate on the map opens a private chat with them.
   const pick = useRef<(id: string) => void>(() => {});
   const onPick = useCallback((id: string) => pick.current(id), []);
+  // The game chooses a side quest for a student who has not chosen in time (the Journal keeps the time).
+  const autoPick = useCallback(() => connection?.send({ t: 'quest-auto' }), [connection]);
 
   // Enter jumps to the chat box from the map, and Escape leaves it, so a student never needs the mouse.
   useEffect(() => {
@@ -695,6 +697,8 @@ export default function Game() {
           }}
           onAccept={(objective, changePartner) => connection?.send({ t: 'quest-accept', objective, changePartner })}
           onLeave={objective => connection?.send({ t: 'quest-leave', objective })}
+          onStart={objective => connection?.send({ t: 'quest-start', objective })}
+          onAuto={autoPick}
           onAnswer={(objective, text) => {
             const plaza = plazaRef.current;
             if (!plaza) return;

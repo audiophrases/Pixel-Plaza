@@ -4,9 +4,9 @@ import type { LiveMissionInspection, LiveMissionPreview, LiveMissionTarget } fro
 import type { MissionIssue } from '../shared/missionSchema.ts';
 import { SIDE_QUEST_SOURCE } from '../shared/sideQuests.ts';
 
-export type LiveMissionResult = { target: LiveMissionTarget | null; preview?: LiveMissionPreview; inspection?: LiveMissionInspection; released?: string[]; withdrawn?: string } | { error: string; status: number; errors?: MissionIssue[] };
+export type LiveMissionResult = { target: LiveMissionTarget | null; preview?: LiveMissionPreview; inspection?: LiveMissionInspection; released?: string[]; withdrawn?: string; closed?: string } | { error: string; status: number; errors?: MissionIssue[] };
 export const LIVE_PER_CHAPTER = 40;
-type LiveRow = { objective_id: string; chapter_id: string; content: string; source_id: string; withdrawn: number };
+type LiveRow = { objective_id: string; chapter_id: string; content: string; source_id: string; withdrawn: number; closed: number };
 export type StoredPreview = { preview_id: string; game_id: string; revision_id: string; chapter_id: string; source_id: string; source_version: number; base_version: number; content: string; expires: number };
 
 export class LiveMissions {
@@ -21,11 +21,13 @@ export class LiveMissions {
             preview_id TEXT PRIMARY KEY, teacher_token TEXT NOT NULL, game_id TEXT NOT NULL, revision_id TEXT NOT NULL,
             chapter_id TEXT NOT NULL, source_id TEXT NOT NULL, source_version INTEGER NOT NULL,
             base_version INTEGER NOT NULL, content TEXT NOT NULL, expires INTEGER NOT NULL);`);
+        // A closed quest takes nobody new; those who have it can finish.
+        if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('mission_live_quests')").toArray().some(c => c.name === 'closed')) this.sql.exec('ALTER TABLE mission_live_quests ADD COLUMN closed INTEGER NOT NULL DEFAULT 0');
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaigns')").toArray().some(c => c.name === 'live_version')) this.sql.exec('ALTER TABLE campaigns ADD COLUMN live_version INTEGER NOT NULL DEFAULT 0');
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaigns')").toArray().some(c => c.name === 'live_epoch')) this.sql.exec('ALTER TABLE campaigns ADD COLUMN live_epoch TEXT');
         for (const row of this.sql.exec<{ game_id: string }>('SELECT game_id FROM campaigns WHERE live_epoch IS NULL').toArray()) this.sql.exec('UPDATE campaigns SET live_epoch = ? WHERE game_id = ?', crypto.randomUUID(), row.game_id);
     }
-    rows(game: string): LiveRow[] { return this.sql.exec<LiveRow>('SELECT objective_id, chapter_id, content, source_id, withdrawn FROM mission_live_quests WHERE game_id = ? ORDER BY created, rowid', game).toArray(); } // released together: in the order the teacher chose
+    rows(game: string): LiveRow[] { return this.sql.exec<LiveRow>('SELECT objective_id, chapter_id, content, source_id, withdrawn, closed FROM mission_live_quests WHERE game_id = ? ORDER BY created, rowid', game).toArray(); } // released together: in the order the teacher chose
     inspect(game: string, id: string): LiveMissionInspection | null {
         const row = this.sql.exec<{ content: string; source_id: string; source_version: number; created: number; withdrawn: number }>('SELECT content, source_id, source_version, created, withdrawn FROM mission_live_quests WHERE game_id = ? AND objective_id = ?', game, id).toArray()[0];
         return row ? { id, definition: JSON.parse(row.content), sourceId: row.source_id, sourceVersion: row.source_version, created: row.created, withdrawn: !!row.withdrawn } : null;
@@ -42,8 +44,19 @@ export class LiveMissions {
     sideQuestIds(game: string): Set<string> {
         return new Set(this.rows(game).filter(row => row.source_id === SIDE_QUEST_SOURCE && !row.withdrawn).map(row => row.objective_id));
     }
+    closedIds(game: string): Set<string> {
+        return new Set(this.rows(game).filter(row => row.closed && !row.withdrawn).map(row => row.objective_id));
+    }
+    close(game: string, id: string): string | null {
+        const row = this.rows(game).find(r => r.objective_id === id && !r.withdrawn);
+        if (!row) return 'That live quest is no longer available.';
+        if (row.closed) return 'That quest is already closed.';
+        this.sql.exec('UPDATE mission_live_quests SET closed = 1 WHERE game_id = ? AND objective_id = ?', game, id);
+        this.sql.exec('UPDATE campaigns SET live_version = live_version + 1 WHERE game_id = ?', game);
+        return null;
+    }
     additions(game: string, chapterId: string): LiveMissionTarget['additions'] {
-        return this.rows(game).filter(row => row.chapter_id === chapterId).map(row => ({ id: row.objective_id, text: (JSON.parse(row.content) as Objective).text, withdrawn: !!row.withdrawn,
+        return this.rows(game).filter(row => row.chapter_id === chapterId).map(row => ({ id: row.objective_id, text: (JSON.parse(row.content) as Objective).text, withdrawn: !!row.withdrawn, closed: !!row.closed,
             started: this.sql.exec('SELECT 1 FROM quest_assignments WHERE game_id = ? AND objective = ? LIMIT 1', game, row.objective_id).toArray().length > 0 }));
     }
     preview(token: string, target: LiveMissionTarget, base: Campaign, source: Campaign, sourceVersion: number, ids: string[]): { preview: LiveMissionPreview; quests: Objective[] } | { error: string; status: number; errors?: MissionIssue[] } {

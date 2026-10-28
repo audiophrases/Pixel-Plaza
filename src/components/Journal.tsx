@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { QuestView } from '../../shared/campaign';
 import { REPORT_MAX_LENGTH } from '../../shared/campaign';
+import { AUTO_PICK_MS } from '../../shared/sideQuests';
 import './Journal.css';
 import { Investigation, WitnessInbox, type InvestigationTurn } from './Investigation';
 
@@ -11,6 +12,8 @@ type Props = {
   onAnswer: (objective: string, text: string) => void;
   onAccept?: (objective: string, changePartner?: boolean) => void;
   onLeave?: (objective: string) => void;
+  onStart?: (objective: string) => void; // a waiting group starts with who is there
+  onAuto?: () => void; // the game chooses a side quest for a student who has not
   onTurn?: (turn: InvestigationTurn) => void;
 };
 
@@ -45,7 +48,7 @@ function Question({ objective, feedback, onAnswer, closed = false, quest, onTurn
 
 // The student's side of the campaign, in short labelled blocks: the task, who you are, what
 // you know, and the questions. It shows only what the server sent this student.
-export default function Journal({ quest, feedback, onAnswer, onAccept, onLeave, onTurn }: Props) {
+export default function Journal({ quest, feedback, onAnswer, onAccept, onLeave, onStart, onAuto, onTurn }: Props) {
   const [open, setOpen] = useState(() => window.innerHeight >= 700); // shut at first on a short screen, where it would cover the map
   const [fresh, setFresh] = useState(false); // something changed while the journal was shut
   const [recapSeen, setRecapSeen] = useState(false);
@@ -65,6 +68,24 @@ export default function Journal({ quest, feedback, onAnswer, onAccept, onLeave, 
   const bonus = quest.objectives.filter(item => item.optional);
   const side = quest.sideQuests;
   const otherBoard = (quest.board ?? []).some(item => !item.sideQuest);
+  // Classmates waiting for a partner come first.
+  const joinable = (item: NonNullable<QuestView['board']>[number]) => Number(item.state === 'available' && !!item.joining?.length);
+  const board = [...(quest.board ?? [])].sort((a, b) => joinable(b) - joinable(a));
+
+  // A free student who has not chosen in a minute is placed by the game.
+  useEffect(() => {
+    if (!choosing) return;
+    const timer = window.setTimeout(() => onAuto?.(), AUTO_PICK_MS);
+    return () => window.clearTimeout(timer);
+  }, [choosing, onAuto]);
+  // A waiting group may start with who is there from `startAt`: show the button when that time comes.
+  const [now, setNow] = useState(() => Date.now());
+  const nextStart = (quest.board ?? []).map(item => item.group?.state === 'open' ? item.group.startAt : null).filter((at): at is number => at !== null && at > now).sort((a, b) => a - b)[0];
+  useEffect(() => {
+    if (nextStart === undefined) return;
+    const timer = window.setTimeout(() => setNow(Date.now()), Math.max(0, nextStart - Date.now()) + 100);
+    return () => window.clearTimeout(timer);
+  }, [nextStart]);
 
   return <aside className="journal glass-panel">
     <button type="button" className="journal-toggle" onClick={() => { setOpen(value => !value); setFresh(false); }}>
@@ -131,18 +152,22 @@ export default function Journal({ quest, feedback, onAnswer, onAccept, onLeave, 
       {(quest.status !== 'campaign_complete' || !!quest.board?.length) && <section className={`journal-block journal-board${choosing ? ' journal-choosing' : ''}`}><h3>Quest board</h3>
         <p>Side quests open when you finish your main questions. Do one at a time; each is yours to do once.</p>
         {side?.state === 'locked' && <p className="journal-board-card">{side.reason}{side.waiting ? ` ${side.waiting === 1 ? 'One side quest is' : `${side.waiting} side quests are`} waiting for you.` : ''}</p>}
-        {choosing && <p className="journal-board-card journal-choose"><strong>Choose a side quest.</strong> You finished your main work. Accept one quest below.</p>}
+        {choosing && <p className="journal-board-card journal-choose"><strong>Choose a side quest.</strong> You finished your main work. Accept one quest below; classmates waiting for a partner come first. If you have not chosen in a minute, the game chooses for you.</p>}
         {side?.state === 'empty' && !otherBoard && <p className="journal-board-card">{side.reason} You can help classmates while you wait.</p>}
         {!quest.board?.length && !side && <p className="journal-board-card">No optional quests are available right now. Your teacher can add activities. You can continue any tasks above while you wait.</p>}
-        {(quest.board ?? []).map(item => <article key={item.id} className="journal-board-card">
+        {board.map(item => <article key={item.id} className="journal-board-card">
           {item.state === 'active' || item.state === 'done' ? <>
             {item.partner && <p className="journal-partner">Your partner: <strong>{item.partner.name}</strong>{!item.partner.online && ' · away from the plaza'}
               {!item.partner.online && item.state === 'active' && quest.status !== 'campaign_complete' && <button className="journal-choice" onClick={() => onAccept?.(item.id, true)}>Find another partner</button>}</p>}
             {item.activity && <p>Exchange evidence with your partner, then write what you learned. Your teacher will read the report.</p>}
-            <Question objective={{ id: item.id, text: item.text, kind: item.kind, optional: true, done: item.state === 'done', conversation: item.conversation }} feedback={feedback} onAnswer={onAnswer} closed={quest.status === 'campaign_complete'} quest={quest} onTurn={onTurn} heading={item.sideQuest ? 'Side quest' : undefined} />
+            {item.group && <p className="journal-partner">Your {item.group.size === 2 ? 'pair' : 'group'}: <strong>{item.group.members.join(', ')}</strong>
+              {item.group.state === 'open' ? ` · waiting for ${item.group.size - item.group.members.length} more` : '. One answer counts for everyone; work it out together.'}
+              {item.group.state === 'open' && item.group.startAt !== null && item.group.startAt <= now && <button className="journal-choice" onClick={() => onStart?.(item.id)}>Start with who&rsquo;s here</button>}</p>}
+            {item.group?.state === 'open' && item.state === 'active' ? <p className="journal-ask">{item.text}</p>
+              : <Question objective={{ id: item.id, text: item.text, kind: item.kind, optional: true, done: item.state === 'done', conversation: item.conversation }} feedback={feedback} onAnswer={onAnswer} closed={quest.status === 'campaign_complete'} quest={quest} onTurn={onTurn} heading={item.sideQuest ? 'Side quest' : undefined} />}
             {item.sideQuest && item.state === 'active' && quest.status !== 'campaign_complete' && <button type="button" className="journal-dismiss" onClick={() => onLeave?.(item.id)}>Leave this quest and choose another</button>}
           </> : <><p className="journal-ask">{item.text}</p>{item.activity && <p>{item.activity === 'interview' ? 'Interview a classmate' : 'Exchange information with a classmate'}</p>}
-            {item.reason && <p>{item.reason}</p>}<button className="journal-choice" disabled={item.state !== 'available'} onClick={() => onAccept?.(item.id)}>Accept quest</button></>}
+            {item.reason && <p>{item.reason}</p>}<button className="journal-choice" disabled={item.state !== 'available'} onClick={() => onAccept?.(item.id)}>{item.joining?.length ? `Join ${item.joining.join(', ')}` : 'Accept quest'}</button></>}
         </article>)}
       </section>}
       {quest.finale && <section className="journal-block journal-ending"><p>{quest.finale}</p></section>}

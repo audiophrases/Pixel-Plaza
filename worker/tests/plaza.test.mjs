@@ -881,6 +881,83 @@ test('Side quest library: quests added to Castanyada and Plaza Free Play open af
     }
 });
 
+test('Side quest groups: the game forms pairs and groups, one answer counts for all, free students are placed, quests close', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-groups-'));
+    // A group may start with who is there at once, instead of after three minutes.
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, { GROUP_START_MS: '0' }); const sockets = [];
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+        const live = (op, body) => teacher(`missions/${op}`, body);
+        const pair = sideQuests.find(q => !q.chapter && q.format === 'pair' && q.answer === 'text');
+        const group = sideQuests.find(q => !q.chapter && q.format === 'group' && q.answer === 'report');
+        const solo = sideQuests.find(q => !q.chapter && q.format === 'solo' && q.answer === 'text');
+        PIN = (await teacher('game', { name: 'Groups', randomNames: false })).body.pin;
+        const [alex, sam, chris, roger] = [await enter(base, 'signed-a', null), await enter(base, 'signed-b', null), await enter(base, 'signed-c', null), await enter(base, 'roger-1', null)];
+        sockets.push(alex, sam, chris, roger);
+        await teacher('campaign', { op: 'start', campaign: 'plaza-free-play' });
+        let target = (await live('live')).body.target;
+        const reviewed = await live('library-preview', { gameId: target.game.id, targetVersion: target.version, targetEpoch: target.epoch, chapterId: target.chapter.id, questIds: [pair.id, group.id, solo.id] });
+        assert.equal((await live('live-release', { previewId: reviewed.body.preview.id })).status, 200);
+        const checkIn = (await alex.next(m => m.t === 'quest' && m.quest, 'journal')).quest.objectives[0].id;
+        for (const student of [alex, sam, chris, roger]) {
+            student.send({ t: 'answer', objective: checkIn, text: 'Hello, I am ready to play today.' });
+            assert.equal((await student.next(m => m.t === 'answered' && m.objective === checkIn)).correct, true);
+        }
+        const card = (student, id, check) => student.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === id && check(q)), `${id} card`).then(m => m.quest.board.find(q => q.id === id));
+
+        // A pair: Alex waits alone; Sam is offered to join him, and the pair starts once it is full.
+        alex.send({ t: 'quest-accept', objective: pair.id });
+        assert.deepEqual((await card(alex, pair.id, q => q.state === 'active')).group, { members: ['Alex'], size: 2, state: 'open', startAt: null });
+        assert.deepEqual((await card(sam, pair.id, q => q.joining)).joining, ['Alex'], 'Sam sees who is waiting');
+        sam.send({ t: 'quest-accept', objective: pair.id });
+        assert.deepEqual((await card(alex, pair.id, q => q.group?.state === 'playing')).group.members, ['Alex', 'Sam']);
+        // One answer, from Sam, finishes it for both.
+        sam.send({ t: 'answer', objective: pair.id, text: `It is ${pair.accept[0]}` });
+        assert.equal((await sam.next(m => m.t === 'answered' && m.objective === pair.id)).correct, true);
+        await card(alex, pair.id, q => q.state === 'done');
+
+        // A small group of three starts with who is there: two are enough, one is not.
+        chris.send({ t: 'quest-accept', objective: group.id });
+        await card(chris, group.id, q => q.group?.members.length === 1);
+        chris.send({ t: 'quest-start', objective: group.id });
+        assert.match((await chris.next(m => m.t === 'notice' && /one more/.test(m.text), 'too few')).text, /one more/);
+        roger.send({ t: 'quest-accept', objective: group.id });
+        const waiting = await card(chris, group.id, q => q.group?.members.length === 2);
+        assert.equal(waiting.group.state, 'open'); assert.ok(waiting.group.startAt <= Date.now(), 'they may start now');
+        chris.send({ t: 'quest-start', objective: group.id });
+        await card(roger, group.id, q => q.group?.state === 'playing');
+        roger.send({ t: 'answer', objective: group.id, text: 'We chose the park because it is quiet and green.' });
+        assert.equal((await roger.next(m => m.t === 'answered' && m.objective === group.id)).correct, true);
+        await card(chris, group.id, q => q.state === 'done');
+        let status = (await teacher('status')).body.campaign;
+        assert.ok(status.players.find(p => p.name === 'Chris').done.includes(group.id), 'done for every member');
+        assert.equal(status.reports.find(r => r.objective === group.id).partner, 'Chris', 'the teacher sees who else was in the group');
+
+        // A student who has not chosen is placed: in a group that is waiting before a quest of their own.
+        sam.send({ t: 'quest-accept', objective: group.id });
+        await card(sam, group.id, q => q.state === 'active');
+        alex.send({ t: 'quest-auto' });
+        assert.deepEqual((await card(alex, group.id, q => q.state === 'active')).group.members, ['Sam', 'Alex']);
+        status = (await teacher('status')).body.campaign.sideQuests;
+        assert.deepEqual(status.groups.map(g => [g.members, g.size, g.state]), [[['Sam', 'Alex'], 3, 'open']]);
+
+        // Closed: nobody new takes the solo quest. The teacher places Chris in the pair quest instead.
+        target = (await live('live')).body.target;
+        chris.inbox.length = 0; // only what comes after the quest is closed
+        assert.equal((await live('live-close', { gameId: target.game.id, targetEpoch: target.epoch, objectiveId: solo.id })).status, 200);
+        const closed = (await chris.next(m => m.t === 'quest' && m.quest.board && !m.quest.board.some(q => q.id === solo.id), 'solo closed')).quest;
+        assert.ok(closed.board.some(q => q.id === pair.id && q.state === 'available'));
+        assert.ok((await live('live')).body.target.additions.find(a => a.id === solo.id).closed);
+        assert.equal((await teacher('quest-place', { studentKey: students['signed-c'].studentKey, objective: solo.id })).status, 409, 'not into a closed quest');
+        assert.equal((await teacher('quest-place', { studentKey: students['signed-c'].studentKey, objective: pair.id })).status, 200);
+        assert.deepEqual((await card(chris, pair.id, q => q.state === 'active')).group, { members: ['Chris'], size: 2, state: 'open', startAt: null });
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('Side quest library: teachers write, change, delete, restore and import quests, and an old library becomes records', { timeout: 120000 }, async () => {
     const { DatabaseSync } = await import('node:sqlite');
     const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-quest-editor-'));

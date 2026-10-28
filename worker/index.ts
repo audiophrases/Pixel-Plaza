@@ -21,6 +21,7 @@ export interface Env {
     OPENAI_GRAMMAR_MODEL?: string; // which chat model gives grammar hints; a small, cheap one by default
     OPENAI_PARTICIPATION?: string; // '0' disables small automatic conversation XP rewards
     MOVEMENT_CHECK?: string; // '0' turns off the check that moves do not go through walls or too fast (tests only)
+    GROUP_START_MS?: string; // how long a side quest group waits before it may start with who is there (tests only)
     OPENAI_GRAMMAR_GATE?: string; // '0' skips the quick Decisions check that decides whether a hint is worth asking for
     // Set only on the teacher's laptop (npm run classroom): its address on the
     // school network, and the online Pixel Plaza where students sign in.
@@ -113,6 +114,7 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
         return { kind: 'campaign', op: body.op, ...(typeof body.campaign === 'string' ? { campaign: body.campaign } : {}), confirm: body.confirm === true };
     }
     if (path === '/api/teacher/quest-release' && typeof body?.objective === 'string') return { kind: 'questRelease', objective: body.objective };
+    if (path === '/api/teacher/quest-place' && typeof body?.objective === 'string' && typeof body?.studentKey === 'string') return { kind: 'questPlace', objective: body.objective, studentKey: body.studentKey };
     if (path === '/api/teacher/review' && typeof body?.id === 'string' && typeof body?.approve === 'boolean') {
         return { kind: 'review', id: body.id, approve: body.approve };
     }
@@ -246,7 +248,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     if (studio) {
         const op = path.slice('/api/teacher/missions/'.length);
-        if (!(get && ['list', 'get', 'live', 'live-inspect'].includes(op)) && !(post && ['create', 'save', 'publish', 'delete', 'restore', 'live-preview', 'library-preview', 'live-release', 'live-withdraw', 'live-cancel'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
+        if (!(get && ['list', 'get', 'live', 'live-inspect'].includes(op)) && !(post && ['create', 'save', 'publish', 'delete', 'restore', 'live-preview', 'library-preview', 'live-release', 'live-withdraw', 'live-close', 'live-cancel'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
         const args = get ? { id: new URL(request.url).searchParams.get('id') } : body;
         const result = await plaza(env).missionStudioSynced(request.headers.get('x-teacher-session') || '', op, args);
         return 'error' in result ? json(result, result.status) : json(result);

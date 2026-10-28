@@ -32,7 +32,8 @@ type CampaignInfo = {
   reports: { studentKey: string; objective: string; text: string; partner?: string; starred?: boolean }[];
   interviews?: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
   board?: { id: string; text: string; teacherReleased: boolean; released: boolean; sideQuest?: boolean; accepted: number; completed: number }[];
-  sideQuests?: { free: { studentKey: string; name: string }[]; doing: { studentKey: string; name: string; quest: string }[]; busy: number; quests: number };
+  sideQuests?: { free: { studentKey: string; name: string }[]; doing: { studentKey: string; name: string; quest: string }[]; busy: number; quests: number;
+    groups?: { id: string; quest: string; members: string[]; size: number; state: 'open' | 'playing' }[]; open?: { id: string; title: string }[] };
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
 };
 type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean; themeId?: string };
@@ -579,7 +580,11 @@ export default function Teacher() {
           {campaign.sideQuests && (campaign.sideQuests.quests > 0 || campaign.sideQuests.free.length > 0) && <><h3>Side quests</h3>
             <p>{campaign.sideQuests.free.length} free to choose · {campaign.sideQuests.doing.length} doing one · {campaign.sideQuests.busy} still on their main work · {campaign.sideQuests.quests} side quest{campaign.sideQuests.quests === 1 ? '' : 's'} in this chapter</p>
             {campaign.sideQuests.free.length > 0 && campaign.sideQuests.quests === 0 && <p className="teacher-error">{campaign.sideQuests.free.length === 1 ? '1 student has' : `${campaign.sideQuests.free.length} students have`} finished and there are no side quests to choose. <Link to="/quest-library">Add some from the library</Link>.</p>}
-            {campaign.sideQuests.free.length > 0 && <p className="teacher-muted">Free: {campaign.sideQuests.free.map(item => who(item.studentKey, item.name)).join(', ')}</p>}
+            {campaign.sideQuests.free.length > 0 && <ul>{campaign.sideQuests.free.map(item => <li key={item.studentKey}><span><strong>{who(item.studentKey, item.name)}</strong> · free</span>
+              {!!campaign.sideQuests?.open?.length && <select aria-label={`Place ${item.name} in a side quest`} value="" onChange={event => { if (event.target.value) void action('quest-place', { studentKey: item.studentKey, objective: event.target.value }); }}>
+                <option value="">Place in a side quest…</option>{campaign.sideQuests.open.map(quest => <option key={quest.id} value={quest.id}>{quest.title}</option>)}</select>}</li>)}</ul>}
+            {!!campaign.sideQuests.groups?.length && <ul>{campaign.sideQuests.groups.map(group => <li key={group.id}><span>{group.size === 2 ? 'Pair' : 'Group'} · <strong>{group.quest}</strong>: {group.members.join(', ')}
+              {group.state === 'open' ? ` · waiting for ${group.size - group.members.length} more` : ' · playing'}</span></li>)}</ul>}
             {campaign.sideQuests.doing.length > 0 && <ul>{campaign.sideQuests.doing.map(item => <li key={item.studentKey}><span><strong>{who(item.studentKey, item.name)}</strong> · {item.quest}</span></li>)}</ul>}</>}
           <p className="teacher-muted">Students finished early, or a short session between chapters? <Link to="/quest-library">Add side quests from the library</Link>: story quests for this chapter or generic ones for any game.
             Change chapters in <Link to="/mission-studio">Mission Studio</Link>.</p>

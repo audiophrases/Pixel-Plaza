@@ -2,7 +2,7 @@
 // quests are data on the server, one record each; these tests use the frozen copy in fixtures/.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FORMATS, LEVELS, THEMES, checkQuest, checkQuestFile, findQuest, matchesFilters, newQuestId, questFacets, questFit, questObjective, searchQuests, storyChapters as chaptersOf } from '../../shared/sideQuests.ts';
+import { FORMATS, LEVELS, THEMES, checkQuest, checkQuestFile, findQuest, groupSize, matchesFilters, newQuestId, questFacets, questFit, questObjective, searchQuests, storyChapters as chaptersOf } from '../../shared/sideQuests.ts';
 import { answerMatches } from '../../shared/campaign.ts';
 import { castanyada, castanyadaComplete, castanyadaInvestigations, castanyadaSideQuests, library, plazaFreePlay, sideQuests, storyChapters } from './fixtures/season-1.mjs';
 import { missionEnvelope, missionId, validateMission } from '../../shared/missionSchema.ts';
@@ -64,6 +64,8 @@ test('every generic quest is a valid board quest in Plaza Free Play and in every
     }
     const objective = questObjective(generic.find(q => q.format === 'pair'));
     assert.equal(objective.optional, true); assert.equal(objective.board.minPlayers, 2, 'pair quests wait for a second student');
+    const sizes = Object.fromEntries(FORMATS.map(f => [f.id, groupSize(questObjective(generic.find(q => q.format === f.id)))]));
+    assert.deepEqual(sizes, { solo: 1, pair: 2, group: 3, mingle: 1 }, 'pairs and groups play together; a mingle is done alone');
     assert.ok(!('afterMain' in objective.board), 'generic quests do not wait for the main mystery');
 });
 

@@ -14,6 +14,7 @@ import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapt
 import { MissionRepository, readCopy, type MissionResult } from './missions.ts';
 import { SideQuestStore, readQuestCopy, type SideQuestResult } from './sideQuestStore.ts';
 import { QuestBoard, type BoardContext } from './questBoard.ts';
+import { SideQuestGroups } from './sideQuestGroups.ts';
 import { Interviews } from './interviews.ts';
 import { StudentAssistance } from './support.ts';
 import type { AttemptPage, AttemptSource, Conversations, ConversationLine, HelpStatus, HelpTopic, TeacherSupport } from '../shared/support.ts';
@@ -21,7 +22,7 @@ import type { ConversationView, Objective, InterviewView } from '../shared/campa
 import { LiveMissions, type LiveMissionResult } from './liveMissions.ts';
 import type { CampaignChoice, LiveMissionTarget, MissionCopy, MissionPushResult, MissionSync } from '../shared/missionTypes.ts';
 import { boardWait, type Campaign } from '../shared/campaign.ts';
-import { SIDE_QUEST_SOURCE, checkQuestFile, libraryVersion, questFit, questObjective, storyChapters, type SideQuest, type SideQuestCopy, type SideQuestPushResult, type StoryChapter } from '../shared/sideQuests.ts';
+import { SIDE_QUEST_SOURCE, checkQuestFile, groupSize, libraryVersion, questFit, questObjective, storyChapters, type SideQuest, type SideQuestCopy, type SideQuestPushResult, type StoryChapter } from '../shared/sideQuests.ts';
 import { wordDiff } from '../shared/diff.ts';
 import { cleanName, shownNames } from '../shared/names.ts';
 import { isEnglishVoice, normalizeVoice, voiceFor } from '../shared/voices.ts';
@@ -93,6 +94,7 @@ export type TeacherAction =
     | { kind: 'warmup'; op: 'start' | 'end'; type?: WarmupKind } // a get-to-know-you warm-up at the start of a lesson
     | { kind: 'campaign'; op: 'start' | 'next' | 'reveal' | 'reset'; campaign?: string; confirm?: boolean }
     | { kind: 'questRelease'; objective: string }
+    | { kind: 'questPlace'; objective: string; studentKey: string }
     | { kind: 'review'; id: string; approve: boolean } // approve = false also takes down a message already posted
     | { kind: 'approveAll' }
     | { kind: 'mode'; mode: ChatMode }
@@ -120,7 +122,9 @@ export type CampaignStatus = {
     board?: ReturnType<QuestBoard['summary']>;
     // Side quests: students free to choose one (main work done), those doing one, how many are still on their main
     // work, and how many side quests this chapter has.
-    sideQuests?: { free: { studentKey: string; name: string }[]; doing: { studentKey: string; name: string; quest: string }[]; busy: number; quests: number };
+    // `groups`: pairs and groups waiting for members or playing; `open`: the side quests a student can be placed in.
+    sideQuests?: { free: { studentKey: string; name: string }[]; doing: { studentKey: string; name: string; quest: string }[]; busy: number; quests: number;
+        groups: { id: string; quest: string; members: string[]; size: number; state: 'open' | 'playing' }[]; open: { id: string; title: string }[] };
 };
 
 export type TeacherStatus = {
@@ -158,6 +162,7 @@ export class PlazaRoom extends DurableObject<Env> {
     private missionSync: Promise<MissionSync> = Promise.resolve({ state: 'home', waiting: 0, keptBoth: [] });
     private missionSyncAt = 0;
     private questBoard: QuestBoard;
+    private groups: SideQuestGroups;
     private interviews: Interviews;
     private assistance: StudentAssistance;
     private incidents: SafetyIncidents;
@@ -261,7 +266,9 @@ export class PlazaRoom extends DurableObject<Env> {
         this.missions.initialize();
         this.sideQuests = new SideQuestStore(this.sql);
         this.sideQuests.initialize();
-        this.questBoard = new QuestBoard(this.sql);
+        this.groups = new SideQuestGroups(this.sql);
+        this.groups.initialize();
+        this.questBoard = new QuestBoard(this.sql, this.groups, this.env.GROUP_START_MS !== undefined ? Number(this.env.GROUP_START_MS) : undefined);
         this.questBoard.initialize();
         this.interviews = new Interviews(this.sql);
         this.interviews.initialize();
@@ -367,7 +374,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const session = this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray();
         if (!token || session.length === 0) return { error: 'Please sign in again.', status: 401 };
         const result = this.ctx.storage.transactionSync(() => op.startsWith('live') || op === 'library-preview' ? this.liveMissionAction(token, op, body) : this.missions.execute(op, body));
-        if (!('error' in result) && ('released' in result || 'withdrawn' in result)) {
+        if (!('error' in result) && ('released' in result || 'withdrawn' in result || 'closed' in result)) {
             const game = this.activeGame(); if (game) this.sendQuestToAll(game);
         }
         return result;
@@ -486,6 +493,13 @@ export class PlazaRoom extends DurableObject<Env> {
             const error = this.liveMissions.withdraw(target.game.id, b.objectiveId, campaign);
             return error ? { error, status: 409 } : { target: this.liveTarget(), withdrawn: b.objectiveId };
         }
+        if (op === 'live-close') {
+            // A started side quest takes nobody new; those doing it can finish.
+            if (b.gameId !== target.game.id || b.targetEpoch !== target.epoch) return { error: 'The running game changed. Refresh before closing a quest.', status: 409 };
+            if (typeof b.objectiveId !== 'string' || !this.liveMissions.sideQuestIds(target.game.id).has(b.objectiveId) || !target.additions.some(a => a.id === b.objectiveId)) return { error: 'Choose a side quest in the current chapter.', status: 400 };
+            const error = this.liveMissions.close(target.game.id, b.objectiveId);
+            return error ? { error, status: 409 } : { target: this.liveTarget(), closed: b.objectiveId };
+        }
         return { error: 'Unknown live mission action.', status: 400 };
     }
 
@@ -518,6 +532,17 @@ export class PlazaRoom extends DurableObject<Env> {
             const objective = row && this.gameCampaign(game)?.chapters[row.chapter]?.objectives.find(o => o.id === action.objective);
             if (!game || !row || row.status === 'campaign_complete' || !objective?.board?.teacherReleased) return { error: 'That quest cannot be released in this chapter.', status: 400 };
             this.questBoard.release(game, objective.id); this.sendQuestToAll(game);
+        }
+        if (action.kind === 'questPlace') {
+            // The teacher puts a free student into a side quest (a group for it, when it has one), as if they chose it.
+            const game = this.activeGame(); const ctx = game ? this.boardContext(game, action.studentKey) : null;
+            const quest = ctx?.chapter.objectives.find(o => o.id === action.objective);
+            if (!game || !ctx || !quest || !ctx.sideQuests.has(quest.id) || ctx.status === 'campaign_complete') return { error: 'Choose a side quest in this chapter.', status: 400 };
+            if (!ctx.online.has(action.studentKey)) return { error: 'That student is not in the plaza.', status: 400 };
+            const error = this.questBoard.assignment(game, quest.id, action.studentKey) ? 'That student already has this quest.' : this.questBoard.claim(ctx, quest);
+            if (error) return { error, status: 409 };
+            this.notify(action.studentKey, 'info', 'Your teacher chose a side quest for you. It is in your Journal.');
+            this.sendQuestToAll(game);
         }
         if (action.kind === 'warmup') {
             const game = this.activeGame();
@@ -1099,6 +1124,8 @@ export class PlazaRoom extends DurableObject<Env> {
             this.claimQuest(ws, seat, data.objective, data.changePartner === true);
         } else if (data?.t === 'quest-leave' && typeof data.objective === 'string') {
             this.leaveQuest(ws, seat, data.objective);
+        } else if ((data?.t === 'quest-start' && typeof data.objective === 'string') || data?.t === 'quest-auto') {
+            this.groupOrPick(ws, seat, data);
         } else if (data?.t === 'interview-ask' || data?.t === 'interview-reply') {
             await this.interviewTurn(ws, seat, data);
         } else if (data?.t === 'reroll' || data?.t === 'keep') {
@@ -1300,7 +1327,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const kept = this.isRandom(game) ? new Set(this.sql.exec<{ student_key: string }>('SELECT student_key FROM aliases WHERE game_id = ? AND kept = 1', game).toArray().map(r => r.student_key)) : null;
         return row && chapter && player ? { game, chapterIndex: row.chapter, chapter, status: row.status, player, players,
             online: new Set(this.seats().filter(s => s.game === game && (!kept || kept.has(s.studentKey))).map(s => s.studentKey)), names: this.rosterNames(game),
-            sideQuests: this.liveMissions.sideQuestIds(game), warmupLeft: this.warmupLeft(game, studentKey) } : null;
+            sideQuests: this.liveMissions.sideQuestIds(game), closed: this.liveMissions.closedIds(game), warmupLeft: this.warmupLeft(game, studentKey) } : null;
     }
     // True while the student still has a warm-up task: side quests wait until it is done.
     private warmupLeft(game: string, studentKey: string): boolean {
@@ -1314,7 +1341,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!ctx || ctx.status === 'campaign_complete' || !quest) return;
         const error = this.questBoard.leave(ctx, quest);
         if (error) ws.send(JSON.stringify({ t: 'notice', level: 'warning', text: error }));
-        for (const socket of this.ctx.getWebSockets(seat.studentKey)) this.sendQuest(socket, seat.game, seat.studentKey);
+        this.sendBoardChange(seat.game, seat.studentKey, quest);
     }
     private claimQuest(ws: WebSocket, seat: Seat, objective: string, changePartner: boolean): void {
         if (!this.isOpen()) return;
@@ -1323,7 +1350,30 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!ctx.online.has(seat.studentKey)) return;
         const error = this.questBoard.claim(ctx, quest, changePartner);
         if (error) ws.send(JSON.stringify({ t: 'notice', level: 'warning', text: error }));
-        for (const socket of this.ctx.getWebSockets(seat.studentKey)) this.sendQuest(socket, seat.game, seat.studentKey);
+        this.sendBoardChange(seat.game, seat.studentKey, quest);
+    }
+    // After a student joins or leaves a side quest: everyone, when a pair or group changed; otherwise only them.
+    private sendBoardChange(game: string, studentKey: string, quest: Objective): void {
+        if (this.liveMissions.sideQuestIds(game).has(quest.id) && groupSize(quest) > 1) this.sendQuestToAll(game);
+        else for (const socket of this.ctx.getWebSockets(studentKey)) this.sendQuest(socket, game, studentKey);
+    }
+    // A group's member starts it with who is there, or a free student who has not chosen asks to be placed.
+    private groupOrPick(ws: WebSocket, seat: Seat, data: Record<string, unknown>): void {
+        if (!this.isOpen()) return;
+        const ctx = this.boardContext(seat.game, seat.studentKey);
+        if (!ctx || ctx.status === 'campaign_complete' || !ctx.online.has(seat.studentKey)) return;
+        const warn = (text: string) => ws.send(JSON.stringify({ t: 'notice', level: 'warning', text }));
+        if (data.t === 'quest-start') {
+            const quest = ctx.chapter.objectives.find(o => o.id === data.objective);
+            const error = quest ? this.questBoard.start(ctx, quest) : 'That quest was not found.';
+            if (error) return warn(error);
+            return this.sendQuestToAll(seat.game);
+        }
+        if (this.questBoard.sideQuestsView(ctx).state !== 'choose') return;
+        const picked = this.questBoard.autoPick(ctx);
+        if (typeof picked === 'string') return warn(picked);
+        ws.send(JSON.stringify({ t: 'notice', level: 'info', text: 'The game chose a side quest for you. You can leave it in the Journal and choose another.' }));
+        this.sendBoardChange(seat.game, seat.studentKey, picked);
     }
     private refreshBoard(game: string): void {
         // Presence changes both partner eligibility and absent-role clue notices.
@@ -1435,6 +1485,9 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!player || player.done.includes(objective.id) || !isUnlocked(objective, player.done)) return unavailable('That question is finished or not unlocked yet.');
         // Board answers require a persisted assignment; clients cannot skip role or release gates.
         if (objective.board && !this.questBoard.assignment(seat.game, objective.id, seat.studentKey)) return unavailable('Accept this quest before answering.');
+        const sideQuest = this.liveMissions.sideQuestIds(seat.game).has(objective.id);
+        const group = sideQuest && groupSize(objective) > 1 ? this.questBoard.groupOf(seat.game, objective.id, seat.studentKey) : undefined;
+        if (sideQuest && groupSize(objective) > 1 && group?.state !== 'playing') return unavailable('Wait until your group is complete.');
         const reply = (correct: boolean, wait = false) => {
             this.attemptStatus(audit, correct ? 'correct' : wait ? 'waiting' : 'incorrect', correct ? undefined : wait ? 'Wait or complete the required witness exchange.' : 'The answer was not accepted.');
             if (!correct && !wait) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Answer not accepted: ${objective.text}`, typed, 'instructions');
@@ -1477,7 +1530,17 @@ export class PlazaRoom extends DurableObject<Env> {
             JSON.stringify([...player.done, objective.id]), seat.game, seat.studentKey);
         reply(true);
         this.award(seat.studentKey, `answer:${seat.game}:${objective.id}`, objective.board ? XP.quest : XP.answer,
-            !objective.board ? 'Right answer in your journal' : this.liveMissions.sideQuestIds(seat.game).has(objective.id) ? 'Side quest completed' : 'Partner quest completed', seat.game);
+            !objective.board ? 'Right answer in your journal' : sideQuest ? 'Side quest completed' : 'Partner quest completed', seat.game);
+        // One answer finishes a group's quest for every member, with XP for each.
+        if (group) {
+            for (const member of group.members.filter(key => key !== seat.studentKey)) {
+                const other = this.player(seat.game, member, row.campaign_id);
+                if (!other || other.done.includes(objective.id)) continue;
+                this.sql.exec('UPDATE campaign_players SET done = ? WHERE game_id = ? AND student_key = ?', JSON.stringify([...other.done, objective.id]), seat.game, member);
+                this.award(member, `answer:${seat.game}:${objective.id}`, XP.quest, 'Group side quest completed', seat.game);
+            }
+            this.questBoard.finishGroup(group.group_id);
+        }
         const chapter = campaign.chapters[row.chapter];
         if (row.status === 'active' && chapterDone(chapter, this.campaignPlayers(seat.game))) {
             this.sql.exec("UPDATE campaigns SET status = 'chapter_complete' WHERE game_id = ?", seat.game);
@@ -1522,6 +1585,7 @@ export class PlazaRoom extends DurableObject<Env> {
             this.interviews.clear(game);
             this.sql.exec('DELETE FROM campaign_thieves WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM quest_assignments WHERE game_id = ?', game);
+            this.groups.clear(game);
             this.sql.exec('DELETE FROM quest_releases WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM mission_live_quests WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM mission_live_previews WHERE game_id = ?', game);
@@ -1539,12 +1603,19 @@ export class PlazaRoom extends DurableObject<Env> {
     private sideQuestStatus(game: string, anyStudent: string, names: Map<string, string>): CampaignStatus['sideQuests'] {
         const base = this.boardContext(game, anyStudent);
         if (!base) return undefined;
-        const status: NonNullable<CampaignStatus['sideQuests']> = { free: [], doing: [], busy: 0, quests: base.chapter.objectives.filter(o => base.sideQuests.has(o.id)).length };
+        const sideQuests = base.chapter.objectives.filter(o => base.sideQuests.has(o.id));
+        const title = (objective: Objective) => this.sideQuests.quests().find(quest => quest.id === objective.id)?.title ?? objective.text;
+        const status: NonNullable<CampaignStatus['sideQuests']> = { free: [], doing: [], busy: 0, quests: sideQuests.length,
+            groups: this.groups.current(game, base.chapterIndex).flatMap(group => {
+                const objective = sideQuests.find(o => o.id === group.objective);
+                return objective && group.state !== 'done' ? [{ id: group.group_id, quest: title(objective), members: this.groups.members(group.group_id).map(key => names.get(key) ?? 'Student'), size: group.size, state: group.state }] : [];
+            }),
+            open: sideQuests.filter(o => !base.closed.has(o.id)).map(o => ({ id: o.id, title: title(o) })) };
         for (const player of base.players) {
             const ctx = { ...base, player, warmupLeft: this.warmupLeft(game, player.student_key) };
             const name = names.get(player.student_key) ?? 'Student';
             const active = this.questBoard.activeSideQuest(ctx);
-            if (active) status.doing.push({ studentKey: player.student_key, name, quest: this.sideQuests.quests().find(quest => quest.id === active.id)?.title ?? active.text });
+            if (active) status.doing.push({ studentKey: player.student_key, name, quest: title(active) });
             else if (sideQuestWait(ctx.chapter, player.done, ctx.warmupLeft)) status.busy++;
             else status.free.push({ studentKey: player.student_key, name });
         }
@@ -1583,9 +1654,13 @@ export class PlazaRoom extends DurableObject<Env> {
                 `SELECT r.student_key, r.objective, r.text, a.partner_key FROM campaign_reports r
                 LEFT JOIN quest_assignments a ON r.game_id = a.game_id AND r.student_key = a.student_key AND r.objective = a.objective
                 WHERE r.game_id = ? ORDER BY r.ts DESC LIMIT 100`, game).toArray()
-                .map(report => ({ studentKey: report.student_key, objective: report.objective, text: report.text,
-                    starred: this.starred(report.student_key, `report:${game}:${report.objective}`),
-                    ...(report.partner_key ? { partner: names.get(report.partner_key) ?? 'Classmate' } : {}) }))
+                .map(report => {
+                    // A group's report was written for every member: the teacher sees who else was in it.
+                    const others = this.questBoard.groupOf(game, report.objective, report.student_key)?.members.filter(key => key !== report.student_key) ?? [];
+                    return { studentKey: report.student_key, objective: report.objective, text: report.text,
+                        starred: this.starred(report.student_key, `report:${game}:${report.objective}`),
+                        ...(report.partner_key ? { partner: names.get(report.partner_key) ?? 'Classmate' } : others.length ? { partner: others.map(key => names.get(key) ?? 'Classmate').join(', ') } : {}) };
+                })
         };
     }
 
@@ -1705,7 +1780,7 @@ export class PlazaRoom extends DurableObject<Env> {
         this.participation.clear(game);
         this.incidents.forget(game);
         this.blockedWords.forget(game);
-        for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'warmups', 'warmup_players', 'speech_plays']) {
+        for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'side_quest_groups', 'side_quest_members', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'warmups', 'warmup_players', 'speech_plays']) {
             this.sql.exec(`DELETE FROM ${table} WHERE game_id = ?`, game);
         }
         this.sql.exec('DELETE FROM games WHERE id = ?', game);

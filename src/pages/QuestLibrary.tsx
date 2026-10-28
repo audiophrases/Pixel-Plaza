@@ -157,6 +157,12 @@ export default function QuestLibrary() {
         apply(await request<Listing>(token, 'side-quests/restore', { id: quest.id, version: versions[quest.id] }));
         setNotice(`“${quest.title}” is back in the library.`);
     });
+    // Closing or withdrawing a quest already in the running game.
+    const live = (op: 'live-close' | 'live-withdraw', objectiveId: string) => run(async () => {
+        const result = await request<{ target: LiveMissionTarget }>(token, `missions/${op}`, { gameId: target!.game.id, targetVersion: target!.version, targetEpoch: target!.epoch, objectiveId });
+        setTarget(result.target);
+        setNotice(op === 'live-close' ? 'Closed: nobody new can take it.' : 'Withdrawn from the game.');
+    });
     const importFile = (file: File) => run(async () => {
         let quests: unknown;
         try { quests = JSON.parse(await file.text()); } catch { throw new Error('That file is not a side quest file (JSON).'); }
@@ -281,12 +287,16 @@ export default function QuestLibrary() {
                     <button type="button" className="mission-button" disabled={busy} onClick={() => void run(async () => { await request(token, 'missions/live-cancel', { previewId: preview.id }); setPreview(null); })}>Cancel</button></div>
                 </div>}
                 {!!target?.additions.length && <details className="ql-added"><summary>Added to this chapter ({target.additions.length})</summary>
-                    <ul>{target.additions.map(item => <li key={item.id}>{quests.find(q => q.id === item.id)?.title ?? item.text}{item.withdrawn ? ' · withdrawn' : item.started ? ' · started' : ''}</li>)}</ul>
-                    <p className="mission-muted">Withdraw unstarted quests in Mission Studio.</p></details>}
+                    <ul className="ql-added-list">{target.additions.map(item => <li key={item.id}><span>{quests.find(q => q.id === item.id)?.title ?? item.text}<small>{item.withdrawn ? ' · withdrawn' : `${item.closed ? ' · closed' : ''}${item.started ? ' · started' : ''}`}</small></span>
+                        {!item.withdrawn && <span className="ql-edit-row">
+                            {!item.closed && <button type="button" disabled={busy} title="Nobody new can take it; those doing it can finish" onClick={() => void live('live-close', item.id)}>Close</button>}
+                            {!item.started && <button type="button" className="danger" disabled={busy} title="Take it off the board" onClick={() => void live('live-withdraw', item.id)}>Withdraw</button>}
+                        </span>}</li>)}</ul>
+                    <p className="mission-muted"><strong>Close</strong> stops new students taking a quest; those doing it can finish. <strong>Withdraw</strong> takes off a quest nobody has started.</p></details>}
                 <details className="ql-help"><summary>How it works</summary>
                     <p><strong>Story quests</strong> use one chapter of a story mission and can be added while that chapter runs. <strong>Generic quests</strong> work in any game, also in a free-play mission between chapters.</p>
                     <p>Levels: {LEVELS.map(l => `${l.id} ${l.name}: ${l.description}`).join(' ')}</p>
-                    <p>Students see the side quests once they finish their main questions (and their warm-up task), then choose and do one at a time on their quest board. Typed answers are checked by the game; written reports count once a student writes a real attempt, and you read them in Teacher controls.</p>
+                    <p>Students see the side quests once they finish their main questions (and their warm-up task), then choose and do one at a time on their quest board. The game forms pairs and groups; one answer counts for the whole group. Typed answers are checked by the game; written reports count once a student writes a real attempt, and you read them in Teacher controls.</p>
                     <p>Every quest is yours to change: <strong>Edit</strong> it, <strong>Duplicate</strong> it to make a variant, or <strong>Delete</strong> it (it goes to Trash). <strong>Export</strong> saves quests as a file; <strong>Import file</strong> adds the quests in a file and updates those with the same ID.</p>
                 </details>
             </aside>}

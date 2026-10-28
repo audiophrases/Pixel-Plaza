@@ -77,6 +77,10 @@ export type BoardQuestView = {
     partner: { name: string; online: boolean } | null;
     conversation?: ConversationView;
     sideQuest?: boolean;
+    // A pair or group side quest: the student's own group (names, how many it needs, whether it is still waiting, and
+    // from when its members may start with who is there), or the classmates waiting in the group they would join.
+    group?: { members: string[]; size: number; state: 'open' | 'playing' | 'done'; startAt: number | null };
+    joining?: string[];
 };
 // Where a student stands with the library's side quests. "locked": the main work is not done (`reason` says what is
 // left; `waiting` side quests are ready for later). "choose": free, with `waiting` quests to pick one from. "active":

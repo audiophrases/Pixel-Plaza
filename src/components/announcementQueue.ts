@@ -71,6 +71,11 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
                     ...(item.conversation ? [{ label: 'Exchange evidence', text: witnessText(item.conversation.required) }] : []),
                     ...(item.kind === 'report' ? [{ label: 'Your report', text: 'Write what you learned in the Journal. Your teacher will read your response.' }] : [])], next: 'Your side quest and its answer box are in Journal → Quest board.' }, [key('offer', run, item.id)]);
         }
+        for (const item of quest.board ?? []) if (item.state === 'active' && item.group?.state === 'playing') {
+            add(key('group', run, item.id), { kind: 'board', eyebrow: item.group.size === 2 ? 'YOUR PAIR IS READY' : 'YOUR GROUP IS READY', title: `Work with ${item.group.members.join(', ')}`,
+                sections: [{ label: 'What to do', text: item.text }, { label: 'Together', text: 'Find each other in the plaza and talk. One answer in the Journal counts for everyone.' }],
+                next: 'The quest and its answer box are in Journal → Quest board.' });
+        }
         const news = quest.clues.filter(c => c.from === 'news' && !seen.has(key('news', run, c.id)));
         if (news.length) add(key('news', run, news[0].id), { kind: 'news', eyebrow: 'FROM YOUR TEACHER', title: 'New information for the class', sections: news.map(c => ({ label: 'Teacher announcement', text: c.text })), next: 'You can read this again in your Journal clues.' }, news.slice(1).map(c => key('news', run, c.id)));
     }

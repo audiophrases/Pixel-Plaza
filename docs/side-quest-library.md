@@ -15,7 +15,7 @@ Optional quests for students who finish early, for warm-ups, and for short sessi
 Every quest card shows its kind (**Story** in orange, **Generic** in blue), its theme, a level and a short description of who it involves:
 
 - **Levels:** A1 Starter, A2 Elementary, B1 Intermediate, B2 Advanced. The instructions themselves are written at the level, with sentence frames for A1 and useful phrases from A2.
-- **Who:** solo, pair, small group or mingle (a quest done alone by talking to several classmates, called "whole class" before). Pair, group and mingle quests wait until 2, 3 or 4 students are online.
+- **Who:** solo, pair, small group or mingle (a quest done alone by talking to several classmates, called "whole class" before). A pair (2) or small group (3) plays together, formed by the game; a mingle needs 4 students online.
 - **Answer:** a *typed answer* is checked by the game (riddles, puzzles, story facts); a *written report* counts once the student writes a real attempt, and you read it under "What students wrote" in Teacher controls.
 - **Teacher note:** what to look for, how to adapt the quest, and for typed answers the solution and every accepted variant.
 
@@ -38,10 +38,13 @@ Every quest card shows its kind (**Story** in orange, **Generic** in blue), its 
 - **After the main work.** A student sees the side quests once they have finished the chapter's main questions (in Plaza Free Play, the check-in) and, while a warm-up runs, their warm-up task. Until then the Journal says what is left and how many side quests are waiting.
 - **Choose one.** When a student is free, a *Choose a side quest* message appears and the Journal opens at the quest board. They accept one quest.
 - **One at a time.** While a student does a side quest, the others are out of sight. **Leave this quest and choose another** in the Journal gives it up and brings the choice back. After finishing one, they choose the next.
-- **Teacher controls** shows, under *Side quests*, who is free to choose, who is doing which quest, and how many students are still on their main work. It warns when students are free and the chapter has no side quests.
-- Pair, group and mingle quests still need 2, 3 or 4 students online; each student does and answers their own.
+- **Pairs and groups are real.** Accepting a pair or small-group quest puts the student in the pair or group for it that has waited longest, or opens a new one ("Join Ana" on the card shows who is waiting; those come first). The quest starts once the group is full. After three minutes, a group with at least two members can choose **Start with who's here**. Members find each other in the plaza; **one answer, or one report, counts for everyone in the group**, and each gets the XP. Under *What students wrote* a group report shows who else was in it.
+- **Mingles** (called "whole class" before) are done alone, by talking to several classmates; they need 4 students online.
+- **Nobody waits forever to choose.** A student who has not chosen within a minute is placed by the game: in a pair or group that is waiting, or else in a solo quest or mingle.
+- **Teacher controls** shows, under *Side quests*, who is free to choose, the pairs and groups (waiting or playing), who is doing which quest, and how many students are still on their main work. It warns when students are free and the chapter has no side quests. **Place in a side quest…** next to a free student puts them in a quest (or its waiting group).
+- **Close** (in the library, under *Added to this chapter*) stops new students taking a quest; those doing it can finish. **Withdraw** takes off a quest nobody has started.
 
-The server builds each quest from its own copy of the library, checks that it fits the chapter, and adds it once per game. A chapter can receive up to 40 live additions. In Plaza Free Play, **Start the next chapter** opens a new session with an empty board. Unstarted quests can be withdrawn from Mission Studio.
+The server builds each quest from its own copy of the library, checks that it fits the chapter, and adds it once per game. A chapter can receive up to 40 live additions. In Plaza Free Play, **Start the next chapter** opens a new session with an empty board. Quests can be closed or (unstarted) withdrawn here or in Mission Studio.
 
 **Download for Mission Studio** saves the selection as a campaign file. In Mission Studio, import it with "Extend the selected chapter" to make the quests part of your own campaign draft.
 

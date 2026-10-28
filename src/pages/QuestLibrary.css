@@ -57,6 +57,10 @@
 .ql-actions { border: 0; padding: 0; margin: .8rem 0; display: grid; gap: .5rem; }
 .ql-added, .ql-help { margin-top: 1rem; font-size: .85rem; }
 .ql-tools { display: flex; flex-wrap: wrap; gap: .5rem; }
+.ql-added-list { padding-left: 1.1rem; }
+.ql-added-list li { margin: .35rem 0; }
+.ql-added-list li > span:first-child { display: block; }
+.ql-added-list small { color: #667b84; }
 .ql-card.editing { box-shadow: 0 0 0 3px #d9822b66; }
 .ql-edit-row { display: flex; gap: .9rem; font-size: .8rem; }
 .ql-edit-row button { font: inherit; border: 0; background: none; padding: 0; color: #1d796b; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }

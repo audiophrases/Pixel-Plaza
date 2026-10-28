@@ -24,7 +24,7 @@ export type MissionSync = {
 export type LiveMissionTarget = {
     game: { id: string; name: string }; campaign: { id: string; title: string; revision: string };
     chapter: { id: string; title: string; index: number }; version: number; epoch: string; open: boolean; ended: boolean;
-    objectiveIds: string[]; additions: { id: string; text: string; withdrawn: boolean; started: boolean }[];
+    objectiveIds: string[]; additions: { id: string; text: string; withdrawn: boolean; closed?: boolean; started: boolean }[];
 };
 export type LiveMissionPreview = {
     id: string; game: { id: string; name: string }; chapter: { id: string; title: string }; expires: number;

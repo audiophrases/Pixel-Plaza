@@ -1,14 +1,19 @@
 import { boardWait, mainFinished, sideQuestWait, type BoardQuestView, type Chapter, type Objective, type QuestView, type SideQuestsView } from '../shared/campaign.ts';
+import { GROUP_START_MS, groupSize } from '../shared/sideQuests.ts';
+import type { SideQuestGroups } from './sideQuestGroups.ts';
 
 export type BoardPlayer = { student_key: string; role_id: string; done: string[] };
-// `sideQuests`: the board quests that came from the side quest library. `warmupLeft`: this student still has a warm-up task.
+// `sideQuests`: the board quests that came from the side quest library, and `closed` those of them that take nobody
+// new. `warmupLeft`: this student still has a warm-up task.
 export type BoardContext = { game: string; chapterIndex: number; chapter: Chapter; status: QuestView['status']; player: BoardPlayer; players: BoardPlayer[]; online: Set<string>; names: Map<string, string>;
-    sideQuests: ReadonlySet<string>; warmupLeft: boolean };
+    sideQuests: ReadonlySet<string>; closed: ReadonlySet<string>; warmupLeft: boolean };
 type Assignment = { objective: string; student_key: string; partner_key: string | null; accepted: number };
 
 export class QuestBoard {
     private sql: SqlStorage;
-    constructor(sql: SqlStorage) { this.sql = sql; }
+    private groups: SideQuestGroups;
+    private groupStartMs: number; // how long a group waits before its members may start with who is there
+    constructor(sql: SqlStorage, groups: SideQuestGroups, groupStartMs = GROUP_START_MS) { this.sql = sql; this.groups = groups; this.groupStartMs = groupStartMs; }
     initialize(): void {
         this.sql.exec(`CREATE TABLE IF NOT EXISTS quest_assignments (
             game_id TEXT NOT NULL, chapter INTEGER NOT NULL, objective TEXT NOT NULL, student_key TEXT NOT NULL,
@@ -35,6 +40,7 @@ export class QuestBoard {
     wait(ctx: BoardContext, objective: Objective): string | null {
         if (ctx.status === 'campaign_complete') return 'The campaign has ended.';
         if (ctx.sideQuests.has(objective.id)) {
+            if (ctx.closed.has(objective.id)) return 'Your teacher closed this side quest.';
             const free = sideQuestWait(ctx.chapter, ctx.player.done, ctx.warmupLeft);
             if (free) return free;
             const active = this.activeSideQuest(ctx);
@@ -63,15 +69,43 @@ export class QuestBoard {
         }
         this.sql.exec(`INSERT INTO quest_assignments (game_id, chapter, objective, student_key, partner_key, accepted) VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT (game_id, objective, student_key) DO UPDATE SET partner_key = excluded.partner_key`, ctx.game, ctx.chapterIndex, objective.id, ctx.player.student_key, partner, Date.now());
+        // A pair or group side quest: into the group that has waited longest, or a new one.
+        if (ctx.sideQuests.has(objective.id) && groupSize(objective) > 1) this.groups.join(ctx.game, ctx.chapterIndex, objective.id, groupSize(objective), ctx.player.student_key);
         return null;
     }
-    // A student can leave the side quest they are doing, to choose another.
+    // A student can leave the side quest they are doing, to choose another; their group carries on without them.
     leave(ctx: BoardContext, objective: Objective): string | null {
         if (!ctx.sideQuests.has(objective.id)) return 'Only side quests can be left.';
         if (ctx.player.done.includes(objective.id)) return 'You have already finished this quest.';
         this.sql.exec('DELETE FROM quest_assignments WHERE game_id = ? AND objective = ? AND student_key = ?', ctx.game, objective.id, ctx.player.student_key);
+        this.groups.leave(ctx.game, objective.id, ctx.player.student_key);
         return null;
     }
+    // A group that has waited long enough starts with the members it has, if there are two.
+    start(ctx: BoardContext, objective: Objective): string | null {
+        const group = this.groups.of(ctx.game, objective.id, ctx.player.student_key);
+        if (!group || group.state !== 'open') return 'Your group is not waiting.';
+        if (this.groups.members(group.group_id).length < 2) return 'Wait for at least one more classmate.';
+        if (Date.now() < group.created + this.groupStartMs) return 'Wait a little longer for more classmates.';
+        this.groups.setState(group.group_id, 'playing');
+        return null;
+    }
+    // A free student who has not chosen is placed: in the pair or group that has waited longest, or else in a quest of
+    // their own (a new group when there is nothing else). Returns the quest, or why there was none.
+    autoPick(ctx: BoardContext): Objective | string {
+        const open = ctx.chapter.objectives.filter(o => ctx.sideQuests.has(o.id) && !ctx.player.done.includes(o.id) && (!o.board?.roles?.length || o.board.roles.includes(ctx.player.role_id)) && !this.wait(ctx, o));
+        if (!open.length) return 'There is no side quest to choose now.';
+        const waiting = this.groups.open(ctx.game, ctx.chapterIndex).find(group => open.some(o => o.id === group.objective));
+        const alone = open.filter(o => groupSize(o) === 1);
+        const pick = waiting ? open.find(o => o.id === waiting.objective)! : (alone.length ? alone : open)[Math.floor(Math.random() * (alone.length || open.length))];
+        return this.claim(ctx, pick) ?? pick;
+    }
+    // The members of a student's group, when the quest has one.
+    groupOf(game: string, objective: string, student: string) {
+        const group = this.groups.of(game, objective, student);
+        return group ? { ...group, members: this.groups.members(group.group_id) } : undefined;
+    }
+    finishGroup(group: string): void { this.groups.setState(group, 'done'); }
     view(ctx: BoardContext): BoardQuestView[] {
         // Side quests the student cannot take yet stay out of sight: the main work comes first, then one at a time.
         const busy = !!sideQuestWait(ctx.chapter, ctx.player.done, ctx.warmupLeft) || !!this.activeSideQuest(ctx);
@@ -80,12 +114,18 @@ export class QuestBoard {
             if (o.board?.teacherReleased && !this.released(ctx.game, o.id) && !assignment) return [];
             const done = ctx.player.done.includes(o.id);
             const sideQuest = ctx.sideQuests.has(o.id);
-            if (sideQuest && busy && !assignment && !done) return [];
+            if (sideQuest && (busy || ctx.closed.has(o.id)) && !assignment && !done) return [];
             const reason = !assignment && !done ? this.wait(ctx, o) : null;
+            const name = (key: string) => ctx.names.get(key) ?? 'Classmate';
+            const group = sideQuest && groupSize(o) > 1 ? this.groupOf(ctx.game, o.id, ctx.player.student_key) : undefined;
+            const joining = sideQuest && groupSize(o) > 1 && !assignment && !done ? this.groups.open(ctx.game, ctx.chapterIndex, o.id)[0] : undefined;
             return [{ id: o.id, text: o.text, kind: o.kind === 'report' ? 'report' as const : o.answerRole ? 'name' as const : 'text' as const, activity: o.activity ?? null,
                 state: done ? 'done' as const : assignment ? 'active' as const : reason ? 'waiting' as const : 'available' as const, reason,
-                partner: assignment?.partner_key ? { name: ctx.names.get(assignment.partner_key) ?? 'Classmate', online: ctx.online.has(assignment.partner_key) } : null,
-                ...(sideQuest ? { sideQuest: true } : {}) }];
+                partner: assignment?.partner_key ? { name: name(assignment.partner_key), online: ctx.online.has(assignment.partner_key) } : null,
+                ...(sideQuest ? { sideQuest: true } : {}),
+                ...(group ? { group: { members: group.members.map(name), size: group.size, state: group.state,
+                    startAt: group.state === 'open' && group.members.length >= 2 ? group.created + this.groupStartMs : null } } : {}),
+                ...(joining ? { joining: this.groups.members(joining.group_id).map(name) } : {}) }];
         });
     }
     // Where the student stands with the side quests of this chapter.

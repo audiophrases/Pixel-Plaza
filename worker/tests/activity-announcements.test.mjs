@@ -78,6 +78,12 @@ test('a student free for side quests is asked to choose one, again after each on
     q.board[0].state = 'done'; q.board.push({ id: 'chat', text: 'Chat: ask about hobbies.', kind: 'report', activity: null, state: 'available', reason: null, partner: null, sideQuest: true });
     q.sideQuests = { state: 'choose', reason: null, waiting: 1 };
     assert.equal(activityAnnouncements(q, null, seen)[0].title, 'Choose a side quest', 'asked again once free');
+    acknowledge(seen, activityAnnouncements(q, null, seen)[0]);
+    q.board[1].state = 'active'; q.board[1].group = { members: ['Ana'], size: 2, state: 'open', startAt: null };
+    acknowledge(seen, activityAnnouncements(q, null, seen)[0]);
+    q.board[1].group = { members: ['Ana', 'Ben'], size: 2, state: 'playing', startAt: null };
+    const ready = activityAnnouncements(q, null, seen);
+    assert.equal(ready.length, 1); assert.equal(ready[0].eyebrow, 'YOUR PAIR IS READY'); assert.match(ready[0].title, /Ana, Ben/);
 });
 
 test('warm-up instructions precede chapters; progress, completion and new rounds have distinct acknowledgements', () => {
