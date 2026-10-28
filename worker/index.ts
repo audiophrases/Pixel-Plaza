@@ -146,8 +146,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const studio = path.startsWith('/api/teacher/missions/');
     const speech = path === '/api/plaza/speech' || path === '/api/plaza/voice-preview';
     const warmupEditor = path === '/api/teacher/warmup-editor';
-    // A mission (draft and published version) or the side quest library from the laptop; missions and the library from files.
-    const content = path === '/api/missions/sync' ? 3_000_000 : path === '/api/content' ? 8_000_000 : 0;
+    const questStudio = path.startsWith('/api/teacher/side-quests/');
+    // A mission (draft and published version) or side quests from the laptop; missions and side quests from files or
+    // an import on the library page.
+    const content = path === '/api/missions/sync' ? 3_000_000 : path === '/api/content' ? 8_000_000 : questStudio ? 4_000_000 : 0;
     if (path === '/api/content' && (!env.CONTENT_TOKEN || !secretsMatch(request.headers.get('x-content-token'), env.CONTENT_TOKEN))) return json({ error: 'Not found.' }, 404);
     let body: any = {};
     if (post && (studio || speech || warmupEditor || content)) {
@@ -263,8 +265,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         const result = await plaza(env).campaignGuide(request.headers.get('x-teacher-session') || '', query.get('campaign') ?? undefined, query.get('game') ?? undefined);
         return 'error' in result ? json({ error: result.error }, result.status) : json(result);
     }
-    if (path === '/api/teacher/quest-library' && get) {
-        const result = await plaza(env).questLibraryFor(request.headers.get('x-teacher-session') || '');
+    if (questStudio) {
+        const op = path.slice('/api/teacher/side-quests/'.length);
+        if (!(get && op === 'list') && !(post && ['save', 'delete', 'restore', 'import'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
+        const result = await plaza(env).sideQuestStudio(request.headers.get('x-teacher-session') || '', op, get ? {} : body);
         return 'error' in result ? json({ error: result.error }, result.status) : json(result);
     }
     if (path === '/api/teacher/conversations' && get) {

@@ -12,7 +12,7 @@ import { isGlitch } from '../shared/tidy.ts';
 import { PARTICIPATION, Participation, participationDecision } from './participation.ts';
 import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, pickRole, rewardClues, teamProgress, type QuestView } from '../shared/campaign.ts';
 import { MissionRepository, readCopy, type MissionResult } from './missions.ts';
-import { QuestLibrary } from './questLibrary.ts';
+import { SideQuestStore, readQuestCopy, type SideQuestResult } from './sideQuestStore.ts';
 import { QuestBoard, type BoardContext } from './questBoard.ts';
 import { Interviews } from './interviews.ts';
 import { StudentAssistance } from './support.ts';
@@ -21,7 +21,7 @@ import type { ConversationView, Objective, InterviewView } from '../shared/campa
 import { LiveMissions, type LiveMissionResult } from './liveMissions.ts';
 import type { CampaignChoice, LiveMissionTarget, MissionCopy, MissionPushResult, MissionSync } from '../shared/missionTypes.ts';
 import { boardWait, type Campaign } from '../shared/campaign.ts';
-import { SIDE_QUEST_SOURCE, checkLibrary, findQuest, libraryVersion, questFit, questObjective, type SideQuestLibrary } from '../shared/sideQuests.ts';
+import { SIDE_QUEST_SOURCE, checkQuestFile, libraryVersion, questFit, questObjective, storyChapters, type SideQuest, type SideQuestCopy, type SideQuestPushResult, type StoryChapter } from '../shared/sideQuests.ts';
 import { wordDiff } from '../shared/diff.ts';
 import { cleanName, shownNames } from '../shared/names.ts';
 import { isEnglishVoice, normalizeVoice, voiceFor } from '../shared/voices.ts';
@@ -43,6 +43,7 @@ import { missionId } from '../shared/missionSchema.ts';
 const TICKET_MS = 60_000;
 const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
 const MISSION_SYNC_EVERY_MS = 5 * 60 * 1000; // how often the laptop checks with the online server while the teacher page is open
+const QUEST_PUSH_BATCH = 100; // side quests the laptop uploads in one request
 const CHAT_KEEP = 500;
 const STATUS_HISTORY = 100;
 const CHAT_GAP_MS = 1500;
@@ -150,7 +151,7 @@ const publicSeat = (seat: Seat) => ({ id: seat.id, name: seat.name, x: seat.x, y
 export class PlazaRoom extends DurableObject<Env> {
     private sql: SqlStorage;
     private missions: MissionRepository;
-    private questLibrary: QuestLibrary;
+    private sideQuests: SideQuestStore;
     private missionSync: Promise<MissionSync> = Promise.resolve({ state: 'home', waiting: 0, keptBoth: [] });
     private missionSyncAt = 0;
     private questBoard: QuestBoard;
@@ -255,8 +256,8 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         this.missions = new MissionRepository(this.sql);
         this.missions.initialize();
-        this.questLibrary = new QuestLibrary(this.sql);
-        this.questLibrary.initialize();
+        this.sideQuests = new SideQuestStore(this.sql);
+        this.sideQuests.initialize();
         this.questBoard = new QuestBoard(this.sql);
         this.questBoard.initialize();
         this.interviews = new Interviews(this.sql);
@@ -449,16 +450,17 @@ export class PlazaRoom extends DurableObject<Env> {
             if (b.gameId !== target.game.id || b.targetVersion !== target.version || b.targetEpoch !== target.epoch || b.chapterId !== target.chapter.id) return { error: 'The running game changed. Refresh the live target before reviewing quests.', status: 409 };
             if (!Array.isArray(b.questIds) || b.questIds.some(id => typeof id !== 'string')) return { error: 'Choose quests from the library.', status: 400 };
             const ids = b.questIds as string[];
-            const library = this.questLibrary.get();
-            if (!library) return { error: 'The side quest library is not on this server yet.', status: 409 };
-            const quests = ids.map(id => findQuest(library, id));
-            if (quests.some(quest => !quest)) return { error: 'Choose quests from the library.', status: 400 };
-            for (const quest of quests) {
-                const reason = questFit(quest!, campaign, target.chapter.id, library.chapters);
+            const library = this.sideQuests.quests();
+            if (!library.length) return { error: 'The side quest library is not on this server yet.', status: 409 };
+            const chosen = ids.map(id => library.find(quest => quest.id === id));
+            if (chosen.some(quest => !quest)) return { error: 'Choose quests from the library.', status: 400 };
+            const chapters = this.storyChapters();
+            for (const quest of chosen) {
+                const reason = questFit(quest!, campaign, target.chapter.id, chapters);
                 if (reason) return { error: `${quest!.title}: ${reason}`, status: 400 };
             }
             const source = structuredClone(campaign); source.id = SIDE_QUEST_SOURCE;
-            source.chapters[target.chapter.index].objectives.push(...quests.map(quest => questObjective(quest!)).filter(quest => !campaign.chapters[target.chapter.index].objectives.some(o => o.id === quest.id)));
+            source.chapters[target.chapter.index].objectives.push(...chosen.map(quest => questObjective(quest!)).filter(quest => !campaign.chapters[target.chapter.index].objectives.some(o => o.id === quest.id)));
             const result = this.liveMissions.preview(token, target, campaign, source, libraryVersion(library), ids);
             if ('error' in result) return result;
             this.countEligible(target, campaign, result.quests, result.preview);
@@ -691,16 +693,19 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     // ---------- One home for missions ----------
-    // The online server keeps every mission and the side quest library. A teacher's laptop keeps a copy to play and
-    // edit, sends every change there at once and fetches what changed online. Without internet the laptop carries on
-    // and sends its changes later; a mission changed in both places is kept twice, never overwritten.
+    // The online server keeps every mission and side quest. A teacher's laptop keeps a copy to play and edit, sends
+    // every change there at once and fetches what changed online. Without internet the laptop carries on and sends its
+    // changes later; a mission or quest changed in both places is kept twice, never overwritten.
 
     private teacherSignedIn(token: string): boolean {
         return !!token && this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray().length > 0;
     }
-    private libraryVersionNow(): number | undefined {
-        const library = this.questLibrary.get();
-        return library ? libraryVersion(library) : undefined;
+    private libraryVersionNow(): number {
+        return libraryVersion(this.sideQuests.quests());
+    }
+    // The chapters of the published missions, for story quests.
+    private storyChapters(): StoryChapter[] {
+        return storyChapters(this.missions.published().flatMap(choice => { const campaign = this.missions.revision(choice.revision ?? null); return campaign ? [campaign] : []; }));
     }
 
     // On the laptop: send what changed here, then fetch what changed online. One exchange at a time, each after the last.
@@ -716,8 +721,8 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     private async exchangeMissions(): Promise<MissionSync> {
-        const keptBoth: MissionSync['keptBoth'] = [];
-        const status = (state: MissionSync['state']): MissionSync => ({ state, waiting: this.missions.waiting() + (this.questLibrary.outbox() ? 1 : 0), keptBoth });
+        const keptBoth: MissionSync['keptBoth'] = []; const questsKeptBoth: MissionSync['keptBoth'] = [];
+        const status = (state: MissionSync['state']): MissionSync => ({ state, waiting: this.missions.waiting() + this.sideQuests.waiting(), keptBoth, ...(questsKeptBoth.length ? { questsKeptBoth } : {}) });
         const lease = this.setting('cloud_lease');
         if (!lease) return status('signin');
         const call = async <T>(body: object): Promise<T> => {
@@ -733,12 +738,20 @@ export class PlazaRoom extends DurableObject<Env> {
                 this.ctx.storage.transactionSync(() => this.missions.uploaded(copy, result));
                 if (result.outcome === 'kept-both' && result.copy) keptBoth.push({ id: copy.id, copy: result.copy.id, title: (JSON.parse(result.copy.content) as Campaign).title });
             }
-            const library = this.questLibrary.outbox();
-            if (library) this.questLibrary.uploaded(library.version, (await call<{ version: number | null }>({ op: 'push-library', ...library })).version);
-            const changes = await call<{ missions: MissionCopy[]; library: { content: string; version: number } | null }>({ op: 'pull', ...this.missions.known(), library: this.questLibrary.synced() });
+            const quests = this.sideQuests.outbox();
+            for (let start = 0; start < quests.length; start += QUEST_PUSH_BATCH) {
+                const pushes = quests.slice(start, start + QUEST_PUSH_BATCH);
+                const { results } = await call<{ results: SideQuestPushResult[] }>({ op: 'push-quests', pushes });
+                this.ctx.storage.transactionSync(() => pushes.forEach(({ copy }, n) => { if (results[n]) this.sideQuests.uploaded(copy, results[n]); }));
+                pushes.forEach(({ copy }, n) => {
+                    const copied = results[n]?.outcome === 'kept-both' ? results[n].copy : undefined;
+                    if (copied) questsKeptBoth.push({ id: copy.id, copy: copied.id, title: (JSON.parse(copied.content) as SideQuest).title });
+                });
+            }
+            const changes = await call<{ missions: MissionCopy[]; quests?: SideQuestCopy[] }>({ op: 'pull', ...this.missions.known(), quests: this.sideQuests.known() });
             this.ctx.storage.transactionSync(() => {
                 this.missions.downloaded(changes.missions);
-                if (changes.library) this.questLibrary.downloaded(changes.library.content, changes.library.version);
+                if (changes.quests) this.sideQuests.downloaded(changes.quests);
             });
             return status('synced');
         } catch (cause) {
@@ -757,35 +770,50 @@ export class PlazaRoom extends DurableObject<Env> {
             if (!copy || base === undefined) return { error: 'That mission is not valid.', status: 400 };
             return { result: this.ctx.storage.transactionSync(() => this.missions.receive(copy, base)) };
         }
-        if (body.op === 'push-library') {
-            let checked: ReturnType<typeof checkLibrary> = { error: 'That library is not valid.' };
-            try { if (typeof body.content === 'string') checked = checkLibrary(JSON.parse(body.content)); } catch { /* not JSON */ }
-            if ('error' in checked || !Number.isInteger(body.version) || base === undefined) return { error: 'error' in checked ? checked.error : 'That library is not valid.', status: 400 };
-            return { version: this.questLibrary.receive(body.content as string, body.version as number, base) };
+        if (body.op === 'push-quests') {
+            const pushes = Array.isArray(body.pushes) && body.pushes.length <= QUEST_PUSH_BATCH ? (body.pushes as { copy?: unknown; base?: unknown }[]).map(push => ({
+                copy: readQuestCopy(push?.copy), base: push?.base === null || Number.isInteger(push?.base) ? push.base as number | null : undefined })) : null;
+            if (!pushes || pushes.some(push => !push.copy || push.base === undefined)) return { error: 'Those quests are not valid.', status: 400 };
+            return { results: this.ctx.storage.transactionSync(() => pushes.map(push => this.sideQuests.receive(push.copy!, push.base!))) };
         }
+        // A laptop from before quests had a record each sends its whole library. It is not taken: the laptop keeps its
+        // copy, and sends the quests one by one once it is updated.
+        if (body.op === 'push-library') return { version: null };
         if (body.op === 'pull') {
-            const have = body.have && typeof body.have === 'object' ? Object.fromEntries(Object.entries(body.have).filter(([, version]) => Number.isInteger(version))) as Record<string, number> : {};
+            const versions = (value: unknown) => value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, version]) => Number.isInteger(version))) as Record<string, number> : {};
             const revisions = Array.isArray(body.revisions) ? body.revisions.filter((id): id is string => typeof id === 'string') : [];
-            return { missions: this.missions.changes(have, revisions), library: this.questLibrary.changes(Number.isInteger(body.library) ? body.library as number : null) };
+            return { missions: this.missions.changes(versions(body.have), revisions), ...(body.quests && typeof body.quests === 'object' ? { quests: this.sideQuests.changes(versions(body.quests)) } : {}) };
         }
         return { error: 'That request is not valid.', status: 400 };
     }
 
-    // The side quest library, for the teacher's library page. A laptop without one fetches it first.
-    async questLibraryFor(token: string): Promise<{ library: SideQuestLibrary | null } | { error: string; status: number }> {
+    // The side quest library page: the quests with the chapters story quests can belong to, and what the teacher writes,
+    // changes, deletes, restores and imports. On the laptop, like Mission Studio, it is brought up to date before it is
+    // read, and every change is sent online at once.
+    async sideQuestStudio(token: string, op: string, body: unknown): Promise<(SideQuestResult & { chapters?: StoryChapter[]; sync?: MissionSync }) | { error: string; status: number }> {
         if (!this.teacherSignedIn(token)) return { error: 'Please sign in again.', status: 401 };
-        if (!this.questLibrary.get()) await this.syncMissions();
-        return { library: this.questLibrary.get() };
+        if (op === 'list') {
+            const sync = await this.syncMissions();
+            return { ...this.sideQuests.execute('list', body), chapters: this.storyChapters(), sync };
+        }
+        const result = this.ctx.storage.transactionSync(() => this.sideQuests.execute(op, body));
+        if ('error' in result) return result;
+        const sync = await this.syncMissions();
+        // The upload may have kept the quest as a copy, when it had changed online too: the page goes on with the
+        // teacher's own version.
+        const copy = result.quest && sync.questsKeptBoth?.find(item => item.id === result.quest!.id)?.copy;
+        const quest = copy ? this.sideQuests.quests().find(item => item.id === copy) : result.quest;
+        return { ...this.sideQuests.execute('list', {}), ...(quest ? { quest } : {}), ...(result.imported ? { imported: result.imported } : {}), chapters: this.storyChapters(), sync };
     }
 
-    // Missions and the side quest library loaded from files (/api/content): the tests, or a new server's first content.
+    // Missions and side quests loaded from files (/api/content): the tests, or a new server's first content.
     loadContent(missions: unknown, library: unknown): { missions: string[]; library: boolean } | { error: string; status: number } {
-        const checked = library === undefined ? undefined : checkLibrary(library);
+        const checked = library === undefined ? undefined : checkQuestFile(library);
         if (checked && 'error' in checked) return { error: checked.error, status: 400 };
         return this.ctx.storage.transactionSync(() => {
             const loaded = missions === undefined ? { loaded: [] } : this.missions.load(missions);
             if ('error' in loaded) return { error: loaded.error, status: 400 };
-            return { missions: loaded.loaded, library: checked ? this.questLibrary.load(checked.library) : false };
+            return { missions: loaded.loaded, library: checked ? this.sideQuests.load(checked.quests) > 0 : false };
         });
     }
 

@@ -845,6 +845,79 @@ test('Side quest library: teachers add generic and story quests to Castanyada an
     }
 });
 
+test('Side quest library: teachers write, change, delete, restore and import quests, and an old library becomes records', { timeout: 120000 }, async () => {
+    const { DatabaseSync } = await import('node:sqlite');
+    const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-quest-editor-'));
+    let plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    try {
+        let base = plaza.base;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const quests = (op, body) => api(base, `/api/teacher/side-quests/${op}`, { session, body });
+        assert.equal((await api(base, '/api/teacher/side-quests/list')).status, 401, 'teachers only');
+        assert.equal((await quests('nonsense', {})).status, 400);
+        let listed = (await quests('list')).body;
+        assert.equal(listed.quests.length, sideQuests.length); assert.deepEqual(listed.trash, []);
+        assert.ok(listed.chapters.some(c => c.id === 'missing-chestnuts'), 'story chapters come from the published missions');
+        assert.equal(listed.sync.state, 'home');
+
+        // A new quest gets an ID from its title and goes at the end of the library.
+        const draft = { id: 'sq-icebreakers-01', title: 'Café Order', theme: 'plaza', category: 'Role-plays', chapter: null, level: 'A2', format: 'pair', answer: 'text',
+            minutes: 6, focus: ['ordering food'], tags: ['cafe'], text: 'Order a drink at the café with a partner. What does a hot chocolate cost? Type the price.', accept: ['two euros'], teacherNote: 'The menu says two euros.' };
+        assert.equal((await quests('save', { create: true, quest: { ...draft, accept: [] } })).status, 400, 'a typed answer needs accepted answers');
+        let saved = (await quests('save', { create: true, quest: draft })).body;
+        assert.equal(saved.quest.id, 'sq-cafe-order', 'not the ID the page sent');
+        assert.equal(saved.quests.at(-1).id, 'sq-cafe-order'); assert.equal(saved.quests.length, sideQuests.length + 1);
+        assert.equal(saved.quests.find(q => q.id === 'sq-icebreakers-01').title, sideQuests[0].title, 'the quest it was copied from is unchanged');
+        assert.equal((await quests('save', { create: true, quest: draft })).body.quest.id, 'sq-cafe-order-2', 'a duplicate gets a number');
+
+        // Changing a quest needs the version the page has; another tab's change is not overwritten.
+        const version = saved.versions['sq-cafe-order'];
+        saved = (await quests('save', { quest: { ...saved.quest, title: 'Café Order (A2)' }, version })).body;
+        assert.equal(saved.quest.title, 'Café Order (A2)'); assert.equal(saved.versions['sq-cafe-order'], version + 1);
+        assert.equal((await quests('save', { quest: { ...saved.quest, title: 'Stale' }, version })).status, 409);
+        assert.equal((await quests('save', { quest: { ...saved.quest, id: 'sq-nowhere' }, version: 1 })).status, 404);
+
+        // Delete moves a quest to Trash, out of the library; it can be restored, not edited there.
+        listed = (await quests('delete', { id: 'sq-cafe-order', version: saved.versions['sq-cafe-order'] })).body;
+        assert.ok(!listed.quests.some(q => q.id === 'sq-cafe-order')); assert.deepEqual(listed.trash.map(q => q.id), ['sq-cafe-order']);
+        assert.equal((await quests('save', { quest: { ...saved.quest, title: 'In Trash' }, version: listed.versions['sq-cafe-order'] })).status, 409);
+        listed = (await quests('restore', { id: 'sq-cafe-order', version: listed.versions['sq-cafe-order'] })).body;
+        assert.ok(listed.quests.some(q => q.id === 'sq-cafe-order' && q.title === 'Café Order (A2)')); assert.deepEqual(listed.trash, []);
+
+        // A file adds new quests and updates those with the same ID; a "whole class" quest from before is a mingle.
+        const imported = (await quests('import', { quests: [{ ...sideQuests[1], title: 'Guess What I Like, imported' }, { ...draft, id: 'sq-imported-mingle', title: 'Imported mingle', format: 'class' }, sideQuests[2]] })).body;
+        assert.deepEqual(imported.imported, { added: 1, updated: 1, unchanged: 1 });
+        assert.equal(imported.quests.find(q => q.id === sideQuests[1].id).title, 'Guess What I Like, imported');
+        assert.equal(imported.quests.find(q => q.id === 'sq-imported-mingle').format, 'mingle');
+        assert.equal((await quests('import', { quests: [{ ...draft, level: 'C2' }] })).status, 400, 'nothing from a broken file');
+
+        // Before quests had a record each, the library was one file. On the next start its quests become records, once.
+        await plaza.stop();
+        const files = directory => fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);
+        const pair = sideQuests.find(q => q.format === 'pair'); const mingle = sideQuests.find(q => q.format === 'mingle');
+        let rewound = false;
+        for (const file of files(persistTo).filter(file => file.endsWith('.sqlite'))) {
+            const db = new DatabaseSync(file);
+            try {
+                if (!db.prepare("SELECT name FROM sqlite_master WHERE name = 'side_quests'").get()) continue;
+                const old = { chapters: library.chapters, quests: [pair, { ...mingle, format: 'class' }, { id: 'broken' }] };
+                db.exec(`DROP TABLE side_quests; CREATE TABLE quest_library (id INTEGER PRIMARY KEY CHECK (id = 1), content TEXT NOT NULL, version INTEGER NOT NULL, synced INTEGER, updated INTEGER NOT NULL)`);
+                db.prepare('INSERT INTO quest_library (id, content, version, synced, updated) VALUES (1, ?, 3, NULL, 0)').run(JSON.stringify(old));
+                rewound = true;
+            } finally { db.close(); }
+        }
+        assert.ok(rewound, 'test found the isolated PlazaRoom database');
+        for (let start = 0; start < 2; start++) {
+            plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, {}, { content: false }); base = plaza.base;
+            listed = (await quests('list')).body;
+            assert.deepEqual(listed.quests, [pair, mingle], 'the valid quests, in order, once, a "whole class" quest as a mingle');
+            if (!start) await plaza.stop();
+        }
+    } finally {
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('Quest board: eligibility, release, assignments, partner replacement and restart persistence', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-board-'));
     let plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); const sockets = [];
@@ -3492,7 +3565,20 @@ test('missions live online: the laptop sends every change at once, fetches what 
         assert.deepEqual(await titles(there), await titles(here));
         const onlineStatus = (await api(online.base, '/api/teacher/status', { session: onlineSession })).body;
         assert.deepEqual(onlineStatus.campaigns.map(item => item.id), ['castanyada', 'castanyada-side-quests', 'castanyada-complete', 'castanyada-investigations', 'plaza-free-play'], 'in the same order');
-        assert.equal((await api(online.base, '/api/teacher/quest-library', { session: onlineSession })).body.library.quests.length, library.quests.length);
+        const questStudio = (base, session) => (op, body) => api(base, `/api/teacher/side-quests/${op}`, { session, body });
+        const hereQuests = questStudio(laptop.base, laptopSession); const thereQuests = questStudio(online.base, onlineSession);
+        const questTitles = async call => Object.fromEntries((await call('list')).body.quests.map(quest => [quest.id, quest.title]));
+        assert.equal((await thereQuests('list')).body.quests.length, library.quests.length, 'every side quest went up too');
+
+        // A side quest changed on the laptop is online at once; one changed online reaches the laptop.
+        let questList = (await hereQuests('list')).body;
+        const [hello, guess] = sideQuests;
+        const edited = (await hereQuests('save', { quest: { ...hello, title: 'Hello Tour, laptop edit' }, version: questList.versions[hello.id] })).body;
+        assert.deepEqual(edited.sync, { state: 'synced', waiting: 0, keptBoth: [] });
+        assert.equal((await questTitles(thereQuests))[hello.id], 'Hello Tour, laptop edit');
+        questList = (await thereQuests('list')).body;
+        await thereQuests('save', { quest: { ...guess, title: 'Guess What I Like, online edit' }, version: questList.versions[guess.id] });
+        assert.equal((await questTitles(hereQuests))[guess.id], 'Guess What I Like, online edit');
 
         // A save on the laptop is online at once, at the same version, and so is a publication.
         let saved = await save(here, 'castanyada', campaign => { campaign.title = 'Castanyada, laptop edit'; });
@@ -3516,25 +3602,33 @@ test('missions live online: the laptop sends every change at once, fetches what 
         assert.deepEqual(saved.sync, { state: 'offline', waiting: 1, keptBoth: [] });
         saved = await save(here, 'castanyada-side-quests', campaign => { campaign.title = 'Side mysteries, offline edit'; });
         assert.equal(saved.sync.waiting, 2);
+        questList = (await hereQuests('list')).body;
+        const offlineQuest = (await hereQuests('save', { quest: { ...hello, title: 'Hello Tour, offline edit' }, version: questList.versions[hello.id] })).body;
+        assert.deepEqual(offlineQuest.sync, { state: 'offline', waiting: 3, keptBoth: [] }, 'a side quest waits like a mission');
 
-        // Meanwhile the same mission changes online. Back online, the laptop's other change goes up, and the clash keeps both.
+        // Meanwhile the same mission and quest change online. Back online, the laptop's other change goes up, and each clash keeps both.
         online = await startPlaza(pinPlayUrl, dirs[0], {}, { content: false, port: onlinePort });
         await save(there, 'castanyada', campaign => { campaign.title = 'Castanyada, online edit'; });
+        questList = (await thereQuests('list')).body;
+        await thereQuests('save', { quest: { ...hello, title: 'Hello Tour, online edit' }, version: questList.versions[hello.id] });
         listed = (await here('list')).body;
-        assert.deepEqual(listed.sync, { state: 'synced', waiting: 0, keptBoth: [{ id: 'castanyada', copy: 'castanyada-laptop', title: 'Castanyada, offline edit (laptop)' }] });
+        assert.deepEqual(listed.sync, { state: 'synced', waiting: 0, keptBoth: [{ id: 'castanyada', copy: 'castanyada-laptop', title: 'Castanyada, offline edit (laptop)' }],
+            questsKeptBoth: [{ id: hello.id, copy: `${hello.id}-laptop`, title: 'Hello Tour, offline edit (laptop)' }] });
         const both = await titles(there);
         assert.equal(both.castanyada, 'Castanyada, online edit');
         assert.equal(both['castanyada-laptop'], 'Castanyada, offline edit (laptop)');
         assert.equal(both['castanyada-side-quests'], 'Side mysteries, offline edit');
         assert.deepEqual(await titles(here), both, 'nothing lost, and the same everywhere');
+        const bothQuests = await questTitles(thereQuests);
+        assert.equal(bothQuests[hello.id], 'Hello Tour, online edit'); assert.equal(bothQuests[`${hello.id}-laptop`], 'Hello Tour, offline edit (laptop)');
+        assert.deepEqual(await questTitles(hereQuests), bothQuests, 'no quest lost either');
 
-        // A new library online reaches the laptop.
-        const smaller = { ...library, quests: library.quests.slice(0, 100) };
-        const loaded = await fetch(`${online.base}/api/content`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-content-token': CONTENT_TOKEN }, body: JSON.stringify({ library: smaller }) });
+        // A new quest loaded online from a file reaches the laptop.
+        const fresh = { ...sideQuests[5], id: 'sq-from-a-file', title: 'From a file' };
+        const loaded = await fetch(`${online.base}/api/content`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-content-token': CONTENT_TOKEN }, body: JSON.stringify({ library: { quests: [fresh] } }) });
         assert.equal(loaded.status, 200);
-        await here('list');
-        assert.equal((await api(laptop.base, '/api/teacher/quest-library', { session: laptopSession })).body.library.quests.length, 100);
-        assert.equal((await api(online.base, '/api/content', { body: { library: smaller } })).status, 404, 'files load only with the token');
+        assert.equal((await questTitles(hereQuests))['sq-from-a-file'], 'From a file');
+        assert.equal((await api(online.base, '/api/content', { body: { library: { quests: [fresh] } } })).status, 404, 'files load only with the token');
     } finally {
         await laptop?.stop(); await online.stop();
         await new Promise(resolve => pinPlay.close(resolve)); for (const dir of dirs) removeTemp(dir);

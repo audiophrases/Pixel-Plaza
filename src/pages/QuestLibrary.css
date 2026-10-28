@@ -56,4 +56,21 @@
 .ql-chosen button { border: 0; background: none; font-size: 1.1rem; cursor: pointer; color: #9b2f2f; }
 .ql-actions { border: 0; padding: 0; margin: .8rem 0; display: grid; gap: .5rem; }
 .ql-added, .ql-help { margin-top: 1rem; font-size: .85rem; }
-@media (max-width: 1000px) { .ql-layout { grid-template-columns: 1fr; } .ql-tray { position: static; max-height: none; order: -1; } .ql-filter { grid-template-columns: 1fr; } }
+.ql-tools { display: flex; flex-wrap: wrap; gap: .5rem; }
+.ql-card.editing { box-shadow: 0 0 0 3px #d9822b66; }
+.ql-edit-row { display: flex; gap: .9rem; font-size: .8rem; }
+.ql-edit-row button { font: inherit; border: 0; background: none; padding: 0; color: #1d796b; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.ql-edit-row button.danger { color: #a83434; }
+.ql-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-size: .85rem; font-weight: 600; }
+.ql-layout.ql-editing { grid-template-columns: minmax(0, 1fr) 440px; }
+.ql-editor { display: grid; gap: .8rem; }
+.ql-editor .mission-field { margin: 0; }
+.ql-editor .mission-two-columns { gap: .6rem .8rem; }
+.ql-editor input[type="number"] { width: 100%; box-sizing: border-box; }
+.ql-story-fields { border: 1px solid #f0c58f; border-radius: 10px; padding: .6rem .8rem .8rem; display: grid; gap: .6rem; }
+.ql-story-fields legend { font-size: .75rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #8a4b00; padding: 0 .3rem; }
+.ql-board-preview { background: #f5f9f8; border: 1px dashed #8fb0aa; border-radius: 10px; padding: .7rem .9rem; font-size: .9rem; }
+.ql-board-preview p { margin: 0 0 .3rem; line-height: 1.45; }
+.ql-board-preview small { color: #596b74; }
+@media (min-width: 601px) { .ql-tray .mission-two-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1000px) { .ql-layout, .ql-layout.ql-editing { grid-template-columns: 1fr; } .ql-tray { position: static; max-height: none; order: -1; } .ql-filter { grid-template-columns: 1fr; } }

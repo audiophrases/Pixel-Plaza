@@ -1,16 +1,17 @@
-// The side quest library: ready-made optional quests a teacher can search and add to any running game, for fast
-// finishers, warm-ups and short sessions between chapters. The quests are data on the online server, like missions
-// (worker/questLibrary.ts); this file holds their shape and plain functions, shared by the teacher's library page, the
-// worker (which checks every addition) and the tests.
+// The side quest library: optional quests a teacher can write, search and add to any running game, for fast
+// finishers, warm-ups and short sessions between chapters. Each quest is its own record on the online server, edited
+// on the library page and synced like missions (worker/sideQuestStore.ts); this file holds their shape and plain
+// functions, shared by the teacher's library page, the worker (which checks every quest it keeps) and the tests.
 //
 // Two kinds of quest:
 // - story quests belong to one chapter of a story mission and use its people and clues;
 // - generic quests (social, plaza, puzzle, seasonal) work in any game, including a free-play mission.
 // Each quest becomes an optional quest-board objective with the library ID, so it can be added to a game once.
 import type { Campaign, Objective } from './campaign.ts';
+import { missionId } from './missionSchema.ts';
 
 export type QuestLevel = 'A1' | 'A2' | 'B1' | 'B2';
-export type QuestFormat = 'solo' | 'pair' | 'group' | 'class';
+export type QuestFormat = 'solo' | 'pair' | 'group' | 'mingle';
 export type QuestAnswer = 'report' | 'text';
 export type QuestTheme = 'story' | 'social' | 'plaza' | 'puzzle' | 'seasonal';
 
@@ -27,9 +28,16 @@ export type SideQuest = {
     after?: string;              // story quests that use what a main question reveals
     afterMain?: boolean;         // story quests about the chapter's solution
 };
-// A story chapter the library has quests for, in story order. Its ID is the same in every mission telling that story.
+// A chapter of a published mission that story quests can belong to. Its ID is the same in every mission telling that
+// story, so the server lists each chapter once, under the first mission that has it.
 export type StoryChapter = { id: string; campaign: string; number: number; title: string };
 export type SideQuestLibrary = { chapters: StoryChapter[]; quests: SideQuest[] };
+// A quest as it travels between the teacher's laptop and the online server, like a mission (MissionCopy): the quest as
+// stored (content is its JSON). `updated` 0 means nobody has edited it since it arrived from a file.
+export type SideQuestCopy = { id: string; content: string; version: number; updated: number; created: number; deleted: boolean };
+// What the online server made of a laptop's copy: kept as the quest, or, when it had changed online too, kept beside
+// it as a new quest marked "(laptop)".
+export type SideQuestPushResult = { outcome: 'saved' | 'kept-both'; version: number; copy?: { id: string; content: string; deleted: boolean } };
 
 export const LEVELS: { id: QuestLevel; name: string; description: string }[] = [
     { id: 'A1', name: 'Starter', description: 'Very short instructions, a sentence frame, one simple task.' },
@@ -44,11 +52,13 @@ export const THEMES: { id: QuestTheme; name: string; kind: 'story' | 'generic'; 
     { id: 'puzzle', name: 'Puzzles', kind: 'generic', description: 'Riddles, word games and logic puzzles, most with a typed answer the game checks.' },
     { id: 'seasonal', name: 'Seasonal', kind: 'generic', description: 'Festivals and seasons: autumn, winter holidays, spring and summer.' },
 ];
+// `players`: how many students must be online before the quest can be accepted. A mingle is done alone, by talking
+// to several classmates (it was called "whole class" before).
 export const FORMATS: { id: QuestFormat; name: string; players: number }[] = [
     { id: 'solo', name: 'Solo', players: 1 },
     { id: 'pair', name: 'Pair', players: 2 },
     { id: 'group', name: 'Small group', players: 3 },
-    { id: 'class', name: 'Whole class', players: 4 },
+    { id: 'mingle', name: 'Mingle', players: 4 },
 ];
 export const ANSWERS: { id: QuestAnswer; name: string }[] = [
     { id: 'report', name: 'Written report' },
@@ -58,15 +68,35 @@ export const ANSWERS: { id: QuestAnswer; name: string }[] = [
 export const findQuest = (library: SideQuestLibrary, id: string): SideQuest | undefined => library.quests.find(quest => quest.id === id);
 export const isStoryQuest = (quest: SideQuest) => quest.chapter !== null;
 
-// A short fingerprint of the library, so a reviewed release can tell when the library changed under it.
-const fingerprints = new WeakMap<SideQuestLibrary, number>();
-export function libraryVersion(library: SideQuestLibrary): number {
-    let hash = fingerprints.get(library);
+// A short fingerprint of the quests, so a reviewed release can tell when the library changed under it.
+const fingerprints = new WeakMap<readonly SideQuest[], number>();
+export function libraryVersion(quests: readonly SideQuest[]): number {
+    let hash = fingerprints.get(quests);
     if (hash !== undefined) return hash;
     hash = 0;
-    for (const char of JSON.stringify(library.quests)) hash = (hash * 31 + char.charCodeAt(0)) | 0;
-    fingerprints.set(library, Math.abs(hash));
+    for (const char of JSON.stringify(quests)) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+    fingerprints.set(quests, Math.abs(hash));
     return Math.abs(hash);
+}
+
+// The chapters story quests can belong to: every chapter of the published missions, each once, numbered as in the
+// first mission that has it.
+export function storyChapters(campaigns: readonly Pick<Campaign, 'title' | 'chapters'>[]): StoryChapter[] {
+    const seen = new Map<string, StoryChapter>();
+    for (const campaign of campaigns) campaign.chapters.forEach((chapter, index) => {
+        if (!seen.has(chapter.id)) seen.set(chapter.id, { id: chapter.id, campaign: campaign.title, number: index + 1, title: chapter.title });
+    });
+    return [...seen.values()];
+}
+
+// An ID for a new quest: "sq-" and the title's words, and a number when that is taken.
+export function newQuestId(title: string, taken: (id: string) => boolean): string {
+    const words = title.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+    const stem = `sq-${words || 'quest'}`;
+    if (!taken(stem)) return stem;
+    let n = 2;
+    while (taken(`${stem}-${n}`)) n++;
+    return `${stem}-${n}`;
 }
 // The source a live release records for library quests. The colon keeps it apart from any Mission Studio draft ID.
 export const SIDE_QUEST_SOURCE = 'library:side-quests';
@@ -182,26 +212,48 @@ export const questCategories = (quests: readonly SideQuest[]): { theme: QuestThe
     return [...seen.values()];
 };
 
-// A library loaded from a file: the shape the page and the worker rely on, or what is wrong with it.
-const isText = (value: unknown, max: number) => typeof value === 'string' && value.length > 0 && value.length <= max;
+export const QUEST_LIMIT = 2000; // quests a server keeps, Trash included
+
+// One quest from the editor, a file or the other server: rebuilt with only the fields the game knows, in one order (so
+// the same quest is the same JSON everywhere), or what is wrong with it. A "whole class" quest from before is a mingle.
+const isText = (value: unknown, max: number) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
 const isTexts = (value: unknown) => Array.isArray(value) && value.length <= 40 && value.every(item => typeof item === 'string' && item.length <= 200);
-export function checkLibrary(value: unknown): { library: SideQuestLibrary } | { error: string } {
-    const data = value as Partial<SideQuestLibrary> | null;
-    if (!data || typeof data !== 'object' || !Array.isArray(data.chapters) || !Array.isArray(data.quests)) return { error: 'A library has chapters and quests.' };
-    if (data.quests.length > 2000 || data.chapters.length > 200) return { error: 'The library is too big.' };
-    for (const chapter of data.chapters) {
-        if (!chapter || !isText(chapter.id, 64) || !isText(chapter.campaign, 120) || !isText(chapter.title, 120) || !Number.isInteger(chapter.number)) return { error: 'Every chapter needs an ID, a story, a number and a title.' };
+export function checkQuest(value: unknown): { quest: SideQuest } | { error: string } {
+    const quest = value as Omit<Partial<SideQuest>, 'format'> & { format?: string } | null;
+    const where = typeof quest?.title === 'string' && quest.title.trim() ? `“${quest.title.trim().slice(0, 60)}”` : typeof quest?.id === 'string' ? `Quest ${quest.id}` : 'A quest';
+    if (!quest || typeof quest !== 'object' || typeof quest.id !== 'string' || !missionId(quest.id)) return { error: `${where}: needs an ID of lower-case letters, numbers and dashes.` };
+    if (!isText(quest.title, 120) || !isText(quest.text, 2000) || !isText(quest.category, 120)) return { error: `${where}: needs a title, a category and instructions.` };
+    const format = quest.format === 'class' ? 'mingle' : quest.format;
+    if (!THEMES.some(t => t.id === quest.theme) || !LEVELS.some(l => l.id === quest.level) || !FORMATS.some(f => f.id === format) || !ANSWERS.some(a => a.id === quest.answer)) return { error: `${where}: unknown theme, level, format or answer.` };
+    if (quest.theme === 'story' ? typeof quest.chapter !== 'string' || !missionId(quest.chapter) : quest.chapter !== null && quest.chapter !== undefined) return { error: `${where}: a story quest belongs to one chapter, and only story quests do.` };
+    if (!Number.isInteger(quest.minutes) || quest.minutes! < 1 || quest.minutes! > 60) return { error: `${where}: minutes must be a whole number from 1 to 60.` };
+    if (!isTexts(quest.focus) || !isTexts(quest.tags) || !isTexts(quest.accept) || typeof quest.teacherNote !== 'string' || quest.teacherNote.length > 4000) return { error: `${where}: focus, tags, answers and teacher note are needed.` };
+    const accept = quest.answer === 'text' ? quest.accept!.map(answer => answer.trim()).filter(Boolean) : [];
+    if (quest.answer === 'text' && !accept.length) return { error: `${where}: a typed answer needs accepted answers.` };
+    if ((quest.roles !== undefined && !isTexts(quest.roles)) || (quest.after !== undefined && (typeof quest.after !== 'string' || !missionId(quest.after))) || (quest.afterMain !== undefined && typeof quest.afterMain !== 'boolean')) return { error: `${where}: roles, "after" and "after the main mystery" are not valid.` };
+    const story = quest.theme === 'story';
+    const roles = story ? quest.roles?.map(role => role.trim()).filter(Boolean) : undefined;
+    return { quest: {
+        id: quest.id, title: quest.title!.trim(), theme: quest.theme!, category: quest.category!.trim(), chapter: story ? quest.chapter! : null,
+        level: quest.level!, format: format as QuestFormat, answer: quest.answer!, minutes: quest.minutes!,
+        focus: quest.focus!.map(item => item.trim()).filter(Boolean), tags: quest.tags!.map(tag => tag.trim().toLowerCase()).filter(Boolean),
+        text: quest.text!.trim(), accept, teacherNote: quest.teacherNote.trim(),
+        ...(roles?.length ? { roles } : {}), ...(story && quest.after ? { after: quest.after } : {}), ...(story && quest.afterMain ? { afterMain: true } : {}),
+    } };
+}
+
+// A file of quests (an export from the library page, or a library from before): a list of quests, or an object with
+// one. Every quest must pass, and IDs must be unique.
+export function checkQuestFile(value: unknown): { quests: SideQuest[] } | { error: string } {
+    const list = Array.isArray(value) ? value : value && typeof value === 'object' && Array.isArray((value as { quests?: unknown }).quests) ? (value as { quests: unknown[] }).quests : null;
+    if (!list) return { error: 'A side quest file holds a list of quests.' };
+    if (list.length > QUEST_LIMIT) return { error: `A file can hold at most ${QUEST_LIMIT} quests.` };
+    const quests: SideQuest[] = []; const ids = new Set<string>();
+    for (const item of list) {
+        const checked = checkQuest(item);
+        if ('error' in checked) return checked;
+        if (ids.has(checked.quest.id)) return { error: `Quest ${checked.quest.id}: the ID is used twice.` };
+        ids.add(checked.quest.id); quests.push(checked.quest);
     }
-    const ids = new Set<string>();
-    for (const quest of data.quests) {
-        const where = `Quest ${typeof quest?.id === 'string' ? quest.id : ids.size + 1}`;
-        if (!quest || !isText(quest.id, 64) || !isText(quest.title, 120) || !isText(quest.text, 2000) || !isText(quest.category, 120)) return { error: `${where}: needs an ID, a title, a category and a text.` };
-        if (ids.has(quest.id)) return { error: `${where}: the ID is used twice.` };
-        ids.add(quest.id);
-        if (!THEMES.some(t => t.id === quest.theme) || !LEVELS.some(l => l.id === quest.level) || !FORMATS.some(f => f.id === quest.format) || !ANSWERS.some(a => a.id === quest.answer)) return { error: `${where}: unknown theme, level, format or answer.` };
-        if (quest.chapter !== null && !data.chapters.some(chapter => chapter.id === quest.chapter)) return { error: `${where}: belongs to a chapter the library does not list.` };
-        if (typeof quest.minutes !== 'number' || !isTexts(quest.focus) || !isTexts(quest.tags) || !isTexts(quest.accept) || typeof quest.teacherNote !== 'string') return { error: `${where}: minutes, focus, tags, answers and teacher note are needed.` };
-        if (quest.answer === 'text' && !quest.accept.length) return { error: `${where}: a typed answer needs accepted answers.` };
-    }
-    return { library: data as SideQuestLibrary };
+    return { quests };
 }

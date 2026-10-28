@@ -1,8 +1,8 @@
-// The side quest library: hundreds of optional quests a teacher can search and add to a running game. The library is
-// data on the server; these tests use the frozen copy in fixtures/.
+// The side quest library: hundreds of optional quests a teacher can write, search and add to a running game. The
+// quests are data on the server, one record each; these tests use the frozen copy in fixtures/.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FORMATS, LEVELS, THEMES, checkLibrary, findQuest, matchesFilters, questFacets, questFit, questObjective, searchQuests } from '../../shared/sideQuests.ts';
+import { FORMATS, LEVELS, THEMES, checkQuest, checkQuestFile, findQuest, matchesFilters, newQuestId, questFacets, questFit, questObjective, searchQuests, storyChapters as chaptersOf } from '../../shared/sideQuests.ts';
 import { answerMatches } from '../../shared/campaign.ts';
 import { castanyada, castanyadaComplete, castanyadaInvestigations, castanyadaSideQuests, library, plazaFreePlay, sideQuests, storyChapters } from './fixtures/season-1.mjs';
 import { missionEnvelope, missionId, validateMission } from '../../shared/missionSchema.ts';
@@ -20,7 +20,7 @@ function withQuests(campaign, chapterId, quests) {
 }
 
 test('the library is large, varied and fully labelled', () => {
-    assert.deepEqual(checkLibrary(library), { library }, 'the library check accepts it');
+    assert.deepEqual(checkQuestFile(library), { quests: sideQuests }, 'every quest passes the check unchanged');
     assert.ok(generic.length >= 500, `${generic.length} generic quests`);
     assert.ok(story.length >= 50, `${story.length} story quests`);
     for (const chapter of storyChapters) assert.ok(story.filter(q => q.chapter === chapter.id).length >= 10, `chapter ${chapter.number} has ten story quests`);
@@ -125,12 +125,38 @@ test('search finds quests by words, tags, labels and filters, title matches firs
     assert.equal(findQuest(library, sample.id), sample); assert.equal(findQuest(library, 'nope'), undefined);
 });
 
-test('a library from a file is checked before a server keeps it', () => {
-    const broken = change => { const copy = structuredClone(library); change(copy); return checkLibrary(copy).error; };
-    assert.match(checkLibrary(null).error, /chapters and quests/);
+test('every quest is checked before a server keeps it, from the editor, a file or the other server', () => {
+    const broken = change => { const copy = structuredClone(library); change(copy); return checkQuestFile(copy).error; };
+    assert.match(checkQuestFile(null).error, /list of quests/);
+    assert.deepEqual(checkQuestFile(sideQuests.slice(0, 3)), { quests: sideQuests.slice(0, 3) }, 'a plain list, as an export saves it');
     assert.match(broken(copy => { copy.quests[1].id = copy.quests[0].id; }), /used twice/);
-    assert.match(broken(copy => { copy.quests.find(q => q.chapter).chapter = 'nowhere'; }), /chapter the library does not list/);
-    assert.match(broken(copy => { const q = copy.quests.find(item => item.answer === 'text'); q.accept = []; }), /accepted answers/);
+    assert.match(broken(copy => { copy.quests.find(q => q.chapter).chapter = null; }), /belongs to one chapter/);
+    assert.match(broken(copy => { copy.quests.find(q => !q.chapter).chapter = 'missing-chestnuts'; }), /only story quests/);
+    assert.match(broken(copy => { const q = copy.quests.find(item => item.answer === 'text'); q.accept = [' ']; }), /accepted answers/);
     assert.match(broken(copy => { copy.quests[0].level = 'C2'; }), /unknown theme, level/);
-    assert.match(broken(copy => { delete copy.quests[0].title; }), /needs an ID, a title/);
+    assert.match(broken(copy => { delete copy.quests[0].title; }), /needs a title/);
+    assert.match(broken(copy => { copy.quests[0].id = 'Not An ID'; }), /needs an ID/);
+    assert.match(broken(copy => { copy.quests[0].minutes = 2.5; }), /minutes/);
+
+    // Stored the same way everywhere: known fields only, in one order, tidied; a "whole class" quest is a mingle now.
+    const mingle = sideQuests.find(q => q.format === 'mingle');
+    const old = { ...mingle, teacherNote: ` ${mingle.teacherNote} `, format: 'class', extra: 'dropped', tags: mingle.tags.map(tag => tag.toUpperCase()) };
+    const { quest } = checkQuest(old);
+    assert.deepEqual(quest, mingle); assert.equal(JSON.stringify(checkQuest(structuredClone(mingle)).quest), JSON.stringify(quest), 'the same JSON');
+    const report = sideQuests.find(q => q.answer === 'report' && !q.chapter);
+    assert.deepEqual(checkQuest({ ...report, accept: ['ignored'], roles: ['witness'] }).quest, report, 'reports accept nothing; generic quests have no roles');
+});
+
+test('story chapters come from the published missions, and new quests get an ID of their own', () => {
+    const chapters = chaptersOf([castanyada, castanyadaComplete, plazaFreePlay]);
+    assert.equal(new Set(chapters.map(c => c.id)).size, chapters.length, 'each chapter once');
+    for (const chapter of storyChapters) assert.ok(chapters.some(c => c.id === chapter.id), `${chapter.title} is offered`);
+    const first = chapters.find(c => c.id === castanyada.chapters[0].id);
+    assert.deepEqual(first, { id: castanyada.chapters[0].id, campaign: castanyada.title, number: 1, title: castanyada.chapters[0].title }, 'named after the first mission that has it');
+    assert.ok(chapters.some(c => c.id === plazaFreePlay.chapters[0].id));
+
+    assert.equal(newQuestId('Café Order!', () => false), 'sq-cafe-order');
+    assert.equal(newQuestId('Café Order!', id => id === 'sq-cafe-order' || id === 'sq-cafe-order-2'), 'sq-cafe-order-3');
+    assert.equal(newQuestId('!!!', () => false), 'sq-quest');
+    assert.ok(newQuestId('a'.repeat(100), () => false).length <= 43);
 });

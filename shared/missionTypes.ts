@@ -17,8 +17,9 @@ export type MissionPushResult = { outcome: 'saved' | 'kept-both'; version: numbe
 // no valid link (sign in on it again). "outdated": the online server does not keep missions yet (deploy it).
 export type MissionSync = {
     state: 'home' | 'synced' | 'offline' | 'signin' | 'outdated';
-    waiting: number; // missions (and the library) changed here and not uploaded yet
+    waiting: number; // missions and side quests changed here and not uploaded yet
     keptBoth: { id: string; copy: string; title: string }[];
+    questsKeptBoth?: { id: string; copy: string; title: string }[]; // side quests, likewise; left out when there are none
 };
 export type LiveMissionTarget = {
     game: { id: string; name: string }; campaign: { id: string; title: string; revision: string };
