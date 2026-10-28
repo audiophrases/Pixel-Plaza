@@ -14,7 +14,7 @@ import Correction from '../components/Correction';
 import { firstName } from '../../shared/names';
 import { ALL, NEAR, TEACHER, TYPING_EVERY_MS, TYPING_SHOWN_MS, conversationOf, inEarshot, opensItself, partnerOf, privateChat, renamedTogether } from '../../shared/chat';
 import PhaserGame from '../components/PhaserGame';
-import type { QuestView } from '../../shared/campaign';
+import type { AnswerFeedback, QuestView } from '../../shared/campaign';
 import type { StudentSupport } from '../../shared/support';
 import { PlazaConnection } from '../plaza';
 import { messageId } from '../utils/messageId';
@@ -115,7 +115,7 @@ export default function Game() {
   const [alias, setAlias] = useState<{ name: string; kept: boolean } | null>(null); // set when this game gives made-up names
   const [quest, setQuest] = useState<QuestView | null>(null); // this student's part of the campaign, if one is running
   const [gameId, setGameId] = useState('');
-  const [answered, setAnswered] = useState<{ objective: string; correct: boolean; wait: boolean } | null>(null);
+  const [answered, setAnswered] = useState<AnswerFeedback | null>(null);
   const [sendError, setSendError] = useState(''); // why the last message did not go, shown by the box
   const [support, setSupport] = useState<StudentSupport>({ request: null, messages: [] });
   const teacherMessageIds = useRef(new Set<string>());
@@ -420,7 +420,7 @@ export default function Game() {
       if (event.t === 'alias') { setAlias({ name: event.name, kept: event.kept }); return; }
       if (event.t === 'quest') { setQuest(event.quest); setAnswered(null); return; }
       if (event.t === 'answered') {
-        setAnswered({ objective: event.objective, correct: event.correct, wait: event.wait });
+        setAnswered({ objective: event.objective, correct: event.correct, wait: event.wait, message: typeof event.message === 'string' ? event.message : undefined });
         if (event.correct && !event.wait) audio.goal();
         return;
       }
@@ -678,6 +678,7 @@ export default function Game() {
           onAnswer={text => {
             const plaza = plazaRef.current;
             if (!plaza) return;
+            setWarmupFeedback(null);
             const attemptId = plaza.recordAttempt(text, undefined, 'warmup');
             sendRecorded(plaza, { t: 'warmup-answer', text, attemptId }, attemptId);
           }} />}
@@ -702,6 +703,7 @@ export default function Game() {
           onAnswer={(objective, text) => {
             const plaza = plazaRef.current;
             if (!plaza) return;
+            setAnswered(null);
             const attemptId = plaza.recordAttempt(text, undefined, 'answer', objective);
             sendRecorded(plaza, { t: 'answer', objective, text, attemptId }, attemptId);
           }} />}

@@ -579,6 +579,65 @@ test('moderation in flight stays in its original game and retains the refused su
     }
 });
 
+test('answer feedback explains role rules, incorrect answers, report length and witness requirements', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-answer-feedback-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [], pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        const session = (await api(plaza.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (op, body) => api(plaza.base, `/api/teacher/${op}`, { session, body });
+        const draft = (await teacher('missions/create', { id: 'answer-feedback', source: castanyada.id })).body.draft;
+        const planner = draft.campaign.roles.find(role => role.id === 'planner');
+        draft.campaign.roles = [planner];
+        draft.campaign.chapters = [{ ...draft.campaign.chapters[0], thieves: undefined, roleClues: { planner: 'The box is in the park.' }, discoveries: [], reveals: [], objectives: [
+            { id: 'role-check', text: 'Who is the planner? Type their name.', answerRole: 'planner', accept: [] },
+            { id: 'place-check', text: 'Where is the box?', accept: ['park'], optional: true },
+            { id: 'report-check', text: 'Explain your evidence.', kind: 'report', accept: [], optional: true },
+            { id: 'witness-check', text: 'Check your evidence with a witness.', accept: ['park'], conversation: { witnesses: 1 }, optional: true },
+        ] }];
+        const saved = await teacher('missions/save', { id: draft.campaign.id, version: draft.version, envelope: missionEnvelope(draft.campaign) });
+        assert.equal(saved.status, 200);
+        assert.equal((await teacher('missions/publish', { id: draft.campaign.id, version: saved.body.draft.version })).status, 200);
+        PIN = (await teacher('game', { name: 'Answer feedback', randomNames: false })).body.pin;
+        const alex = await enter(plaza.base, 'signed-a', null); sockets.push(alex);
+        await teacher('campaign', { op: 'start', campaign: draft.campaign.id });
+        await alex.next(m => m.t === 'quest' && m.quest?.campaign.id === draft.campaign.id);
+        assert.match(alex.state.quest.objectives.find(o => o.id === 'role-check').text, /You have this role.*Type the role name \(Festival planner\)/);
+        const answer = async (socket, objective, text) => {
+            socket.send({ t: 'answer', objective, text });
+            return socket.next(m => m.t === 'answered' && m.objective === objective);
+        };
+        const solePlanner = await answer(alex, 'role-check', 'Alex');
+        assert.equal(solePlanner.correct, false);
+        assert.match(solePlanner.message, /You have this role.*Type the role name \(Festival planner\)/);
+        assert.ok(!/Not yet|Ask your classmates/.test(solePlanner.message));
+        const sam = await enter(plaza.base, 'signed-b', null); sockets.push(sam);
+        await alex.next(m => m.t === 'quest' && /Find another student/.test(m.quest?.objectives.find(o => o.id === 'role-check')?.text ?? ''));
+        await pause(3100);
+        const ownName = await answer(alex, 'role-check', 'Alex');
+        assert.equal(ownName.correct, false);
+        assert.match(ownName.message, /You have the role “Festival planner”.*another student/);
+        assert.ok(!ownName.message.includes('Sam'), 'feedback does not reveal which classmate holds a role');
+        const cooldown = await answer(alex, 'role-check', 'Sam');
+        assert.equal(cooldown.wait, true); assert.match(cooldown.message, /wait a few seconds/);
+        await pause(3100);
+        assert.equal((await answer(alex, 'role-check', 'Sam')).correct, true);
+        const wrong = await answer(alex, 'place-check', 'hotel');
+        assert.equal(wrong.correct, false); assert.equal(wrong.wait, false);
+        assert.match(wrong.message, /answer was not accepted.*Check the question/);
+        assert.ok(!/park|Not yet|classmates|wait/i.test(wrong.message), 'a wrong answer is not described as timing or missing conversation, and does not reveal the answer');
+        const short = await answer(sam, 'report-check', 'Maybe');
+        assert.equal(short.correct, false); assert.match(short.message, /at least 5 words/);
+        const witnesses = await answer(sam, 'witness-check', 'park');
+        assert.equal(witnesses.wait, true); assert.match(witnesses.message, /Exchange evidence with 1 witness/);
+        assert.ok(!/wait|Not yet/i.test(witnesses.message));
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('witness investigations block guesses and unrelated chat, keep evidence private and survive restart', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay();
     const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-interviews-'));

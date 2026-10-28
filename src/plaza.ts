@@ -1,6 +1,6 @@
 import type { AvatarConfig } from './utils/AvatarRenderer';
 import { messageId } from './utils/messageId.ts';
-import type { QuestView } from '../shared/campaign';
+import type { AnswerFeedback, QuestView } from '../shared/campaign';
 import type { WarmupView } from '../shared/warmup';
 import type { AttemptSource, StudentSupport } from '../shared/support';
 import type { Style } from '../shared/levels';
@@ -33,7 +33,7 @@ export type PlazaEvent =
   | { t: 'rename'; id: string; name: string }                              // a namesake arrived: this player's shown name changed
   | { t: 'names'; names: string[]; changes: { id?: string; from: string; name: string }[] } // the teacher switched to real names
   | { t: 'quest'; quest: QuestView | null }                                  // this student's view of the campaign
-  | { t: 'answered'; objective: string; correct: boolean; wait: boolean }
+  | ({ t: 'answered' } & AnswerFeedback)
   | { t: 'support'; support: StudentSupport; history?: boolean }
   | { t: 'xp'; xp: number; gained?: number; reason?: string }            // this student's experience; gained and why when it grows
   | { t: 'style'; id: string; style: Style };                             // a player chose a name colour or a flair

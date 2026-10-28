@@ -35,6 +35,8 @@ The guide shows the answers from the game definition, rather than maintaining a 
 
 Names are dynamic: the live guide shows the class members with the required roles and the thief selected for that game. Before a thief is chosen, the guide explains that selection will happen when the chapter starts and enough students are present. A task's clue trail follows its prerequisites, including the main-path rewards needed for fast-finisher quests.
 
+An incorrect answer receives a retry message without implying that waiting or talking to classmates will make it correct. Reports explain the five-word minimum; role-finding tasks explain using another student's displayed name. A student with the requested role is told to find another holder, or to enter the role name if no other holder is online. Missing witness evidence and the short retry delay have their own messages. Rejected answers stay in the box for editing, and their feedback clears while students edit. Warm-ups also distinguish rejected identities or names from the retry delay.
+
 Reaching the chapter's readiness percentage leaves time for unfinished students and optional quests. You choose when to start the next chapter. Selecting another chapter in the guide only changes what you are reading.
 
 ## Access and verification

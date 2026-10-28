@@ -1283,7 +1283,8 @@ export class PlazaRoom extends DurableObject<Env> {
                 .map(objective => {
                     const fallback = objective.answerRole && this.meetingFallback(game, studentKey, objective.answerRole, campaign);
                     return { id: objective.id, text: objective.text + (fallback
-                        ? ` No classmate with this role is available. Type the role name (${fallback}) to continue with the town notice.` : ''), done: player.done.includes(objective.id), optional: !!objective.optional,
+                        ? ` ${role.id === objective.answerRole ? 'You have this role, and no other student with it is online.' : 'No classmate with this role is available.'} Type the role name (${fallback}) to continue with the town notice.`
+                        : objective.answerRole && role.id === objective.answerRole ? ' You have this role. Find another student with the same role and enter their displayed name.' : ''), done: player.done.includes(objective.id), optional: !!objective.optional,
                         kind: objective.kind === 'report' ? 'report' as const : objective.answerRole ? 'name' as const : 'text' as const,
                         ...(objective.conversation ? { conversation: this.conversation(game, studentKey, objective) } : {}) };
                 }),
@@ -1474,25 +1475,28 @@ export class PlazaRoom extends DurableObject<Env> {
         if (objective.board && !this.questBoard.assignment(seat.game, objective.id, seat.studentKey)) return unavailable('Accept this quest before answering.');
         const group = objective.board && groupSize(objective) > 1 ? this.questBoard.groupOf(seat.game, objective.id, seat.studentKey) : undefined;
         if (objective.board && groupSize(objective) > 1 && group?.state !== 'playing') return unavailable('Wait until your group is complete.');
-        const reply = (correct: boolean, wait = false) => {
-            this.attemptStatus(audit, correct ? 'correct' : wait ? 'waiting' : 'incorrect', correct ? undefined : wait ? 'Wait or complete the required witness exchange.' : 'The answer was not accepted.');
+        const reply = (correct: boolean, wait = false, message?: string) => {
+            this.attemptStatus(audit, correct ? 'correct' : wait ? 'waiting' : 'incorrect', correct ? undefined : message ?? 'The answer was not accepted.');
             if (!correct && !wait) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Answer not accepted: ${objective.text}`, typed, 'instructions');
-            ws.send(JSON.stringify({ t: 'answered', objective: objective.id, correct, wait }));
+            ws.send(JSON.stringify({ t: 'answered', objective: objective.id, correct, wait, ...(!correct && message ? { message } : {}) }));
         };
         if (objective.activity || objective.conversation) {
             const conversation = this.conversation(seat.game, seat.studentKey, objective);
             if (conversation.completed < conversation.required) {
-                ws.send(JSON.stringify({ t: 'notice', level: 'warning', text: `Exchange evidence with ${conversation.required} witness${conversation.required === 1 ? '' : 'es'} before submitting this conclusion.` }));
-                return reply(false, true);
+                const message = `Exchange evidence with ${conversation.required} witness${conversation.required === 1 ? '' : 'es'} before submitting this conclusion.`;
+                ws.send(JSON.stringify({ t: 'notice', level: 'warning', text: message }));
+                return reply(false, true, message);
             }
         }
         const now = Date.now();
-        if (now - player.last_wrong < WRONG_ANSWER_WAIT_MS) return reply(false, true);
+        if (now - player.last_wrong < WRONG_ANSWER_WAIT_MS) return reply(false, true, 'Please wait a few seconds before trying again.');
         if (objective.kind !== 'report' && typed.length > 80) return unavailable('Use up to 80 characters for a short answer.');
         let right: boolean;
+        let rejection = 'That answer was not accepted. Check the question and try again.';
         if (objective.kind === 'report') {
             // Any real attempt in a few words counts; the teacher reads what was written.
             right = typed.trim().split(/\s+/).length >= 5;
+            rejection = 'Write at least 5 words, then send your report again.';
             if (right) this.sql.exec(`INSERT INTO campaign_reports (game_id, student_key, objective, text, ts) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT (game_id, student_key, objective) DO UPDATE SET text = excluded.text, ts = excluded.ts`, seat.game, seat.studentKey, objective.id, typed.trim(), now);
         } else if (objective.answerThief) {
@@ -1500,6 +1504,7 @@ export class PlazaRoom extends DurableObject<Env> {
             const names = this.rosterNames(seat.game);
             const culprits = this.chapterThieves(seat.game, campaign, row.chapter).filter(key => key !== seat.studentKey).map(key => names.get(key) ?? '');
             right = this.chapterThieves(seat.game, campaign, row.chapter).includes(seat.studentKey) ? false : answerMatches({ ...objective, accept: acceptedNames(culprits.filter(Boolean), [...names.values()]) }, typed);
+            rejection = 'That name was not accepted. Check your clues and enter the name shown above the student\'s avatar.';
         } else if (objective.answerRole) {
             // The name of a classmate who has that role, as the plaza shows it; never one's own.
             const names = this.rosterNames(seat.game);
@@ -1507,10 +1512,15 @@ export class PlazaRoom extends DurableObject<Env> {
                 .map(other => names.get(other.student_key) ?? '');
             const fallback = this.meetingFallback(seat.game, seat.studentKey, objective.answerRole, campaign);
             right = answerMatches({ ...objective, accept: [...acceptedNames(holders.filter(Boolean), [...names.values()]), ...(fallback ? [fallback] : [])] }, typed);
+            const roleName = campaign.roles.find(role => role.id === objective.answerRole)?.name ?? 'this role';
+            const ownRole = player.role_id === objective.answerRole;
+            rejection = fallback
+                ? `${ownRole ? 'You have this role, and no other student with it is online.' : 'No classmate with this role is available.'} Type the role name (${fallback}) to continue.`
+                : `${ownRole ? `You have the role “${roleName}”. This task asks for another student with that role.` : `Find a student with the role “${roleName}”.`} Enter their displayed name.`;
         } else right = answerMatches(objective, typed);
         if (!right) {
             this.sql.exec('UPDATE campaign_players SET last_wrong = ? WHERE game_id = ? AND student_key = ?', now, seat.game, seat.studentKey);
-            return reply(false);
+            return reply(false, false, rejection);
         }
         this.sql.exec('UPDATE campaign_players SET done = ? WHERE game_id = ? AND student_key = ?',
             JSON.stringify([...player.done, objective.id]), seat.game, seat.studentKey);

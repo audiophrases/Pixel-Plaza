@@ -12,6 +12,9 @@ Object.assign(browser, { window: dom.window, document: dom.window.document, HTML
   localStorage: dom.window.localStorage, sessionStorage: dom.window.sessionStorage, IS_REACT_ACT_ENVIRONMENT: true });
 Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true });
 dom.window.HTMLElement.prototype.scrollIntoView = () => {};
+// jsdom has the dialog element, but not its browser methods.
+dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
 localStorage.setItem('pixelplaza.student.v1', JSON.stringify({ studentToken: 'private-test-credential', expiresAt: Date.now() + 60000,
   student: { studentKey: 'student-a', displayName: 'Alex', className: '4B' } }));
 

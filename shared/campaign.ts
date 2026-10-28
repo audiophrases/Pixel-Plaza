@@ -50,6 +50,7 @@ export type Chapter = {
 };
 export type Role = { id: string; name: string; card: string; clue: string };
 export type Campaign = { id: string; title: string; roles: Role[]; chapters: Chapter[]; finale: string };
+export type AnswerFeedback = { objective: string; correct: boolean; wait: boolean; message?: string };
 
 // What one student is allowed to see: only their own role and what they found.
 export type QuestView = {

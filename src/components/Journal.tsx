@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { QuestView } from '../../shared/campaign';
+import type { AnswerFeedback, QuestView } from '../../shared/campaign';
 import { REPORT_MAX_LENGTH } from '../../shared/campaign';
 import { AUTO_PICK_MS } from '../../shared/sideQuests';
 import './Journal.css';
@@ -8,7 +8,7 @@ import { Investigation, WitnessInbox, type InvestigationTurn } from './Investiga
 type Props = {
   quest: QuestView;
   // What the last answer came to, so the student knows to wait or to think again.
-  feedback: { objective: string; correct: boolean; wait: boolean } | null;
+  feedback: AnswerFeedback | null;
   onAnswer: (objective: string, text: string) => void;
   onAccept?: (objective: string, changePartner?: boolean) => void;
   onLeave?: (objective: string) => void;
@@ -22,7 +22,10 @@ const SOURCE: Record<string, string> = { job: 'Your clue', reward: 'New clue', n
 // One question with its own answer box, so typing in one never lands in another.
 function Question({ objective, feedback, onAnswer, closed = false, quest, onTurn, heading }: { objective: QuestView['objectives'][number]; feedback: Props['feedback']; onAnswer: Props['onAnswer']; closed?: boolean; quest: QuestView; onTurn: Props['onTurn']; heading?: string }) {
   const [typed, setTyped] = useState('');
+  const [submitted, setSubmitted] = useState<string | null>(null);
   const report = objective.kind === 'report';
+  const rejected = feedback?.objective === objective.id && !feedback.correct && submitted === typed.trim();
+  const feedbackId = `answer-feedback-${objective.id}`;
   return <section className={`journal-block journal-question${objective.optional ? ' journal-bonus' : ''}`}>
     <h3>{heading ?? (objective.optional ? 'Bonus question' : 'Question')}</h3>
     <p className="journal-ask">{objective.text}</p>
@@ -30,18 +33,22 @@ function Question({ objective, feedback, onAnswer, closed = false, quest, onTurn
       {objective.conversation && <Investigation objective={objective.id} conversation={objective.conversation} interviews={quest.interviews ?? []} clues={quest.clues} onTurn={onTurn} />}
       <form className="journal-answer" onSubmit={event => {
         event.preventDefault();
-        if (typed.trim()) { onAnswer(objective.id, typed.trim()); setTyped(''); }
+        if (typed.trim()) { setSubmitted(typed.trim()); onAnswer(objective.id, typed.trim()); }
       }}>
         {report ? <textarea value={typed} maxLength={REPORT_MAX_LENGTH} rows={4}
           placeholder="Write your evidence and decision in English"
+          aria-describedby={rejected ? feedbackId : undefined}
           aria-label="Your report" onChange={event => setTyped(event.target.value)} /> :
           <input value={typed} maxLength={80} autoComplete="off"
             placeholder={objective.kind === 'name' ? 'Type their name' : 'Type your answer in English'}
+            aria-describedby={rejected ? feedbackId : undefined}
             aria-label="Your answer" onChange={event => setTyped(event.target.value)} />}
         <button className="journal-choice" disabled={!typed.trim() || (!!objective.conversation && objective.conversation.completed < objective.conversation.required)}>{report ? 'Send report' : 'Answer'}</button>
       </form>
-      {feedback?.objective === objective.id && !feedback.correct &&
-        <p className="journal-wrong">{feedback.wait ? 'Wait a moment.' : report ? 'Write a little more.' : 'Not yet. Ask your classmates.'}</p>}
+      {rejected && <p id={feedbackId} className="journal-wrong" role="status">{feedback.message || (feedback.wait
+        ? 'Please wait a few seconds before trying again.' : report ? 'Write at least 5 words, then send your report again.'
+          : objective.kind === 'name' ? 'That name was not accepted. Check the name shown above their avatar and try again.'
+            : 'That answer was not accepted. Check the question and try again.')}</p>}
     </>}
   </section>;
 }
