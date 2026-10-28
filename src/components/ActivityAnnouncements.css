@@ -1,0 +1,32 @@
+.activity-instructions-button { border: 1px solid #a9c6b7; background: #edf7ef; color: #24573d; border-radius: 8px; font: inherit; font-size: .85rem; font-weight: 600; padding: .5rem .75rem; cursor: pointer; }
+.activity-instructions-button:disabled { opacity: .5; cursor: default; }
+.activity-announcement { --activity-color: #266c50; --activity-soft: #eaf4ec; width: min(640px, calc(100vw - 2rem)); max-height: min(780px, calc(100dvh - 2rem)); margin: auto; padding: 0; border: 1px solid #c5d9cb; border-radius: 20px; background: #fff; color: #263f31; box-shadow: 0 20px 80px #102a3940; font-family: var(--font-main); overflow: hidden; }
+.activity-announcement[open] { display: flex; flex-direction: column; }
+.activity-announcement::backdrop { background: #122c3eb3; backdrop-filter: blur(4px); }
+.activity-warmup { --activity-color: #805e18; --activity-soft: #fff4d9; }
+.activity-board { --activity-color: #665292; --activity-soft: #f2edfa; }
+.activity-news { --activity-color: #3a648e; --activity-soft: #edf4fb; }
+.activity-announcement header { display: flex; gap: .9rem; align-items: center; padding: 1.4rem 1.5rem; border-bottom: 1px solid #dfe7e0; background: var(--activity-soft); flex-shrink: 0; }
+.activity-announcement header > div { min-width: 0; }
+.activity-announcement header p { font-size: .67rem; font-weight: 750; letter-spacing: .12em; color: var(--activity-color); margin: 0 0 .4rem; }
+.activity-announcement h2 { margin: 0; font-size: clamp(1.2rem, 3vw, 1.65rem); line-height: 1.35; color: #263f31; overflow-wrap: anywhere; }
+.activity-announcement h2:focus { outline: none; }
+.activity-announcement-icon { display: grid; place-items: center; flex: 0 0 44px; height: 44px; border-radius: 13px; background: var(--activity-color); color: #fff; font-size: 1.5rem; }
+.activity-announcement-body { padding: .2rem 1.5rem .9rem; overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+.activity-announcement-body section { padding: 1rem 0; border-bottom: 1px solid #e4eae5; }
+.activity-announcement-body section:last-child { border-bottom: 0; }
+.activity-announcement h3 { color: var(--activity-color); font-size: .8rem; margin: 0 0 .5rem; }
+.activity-announcement-body p { font-size: 1rem; line-height: 1.7; white-space: pre-line; overflow-wrap: anywhere; margin: 0; }
+.activity-announcement footer { padding: 1rem 1.5rem; border-top: 1px solid #dfe7e0; background: #f7faf7; flex-shrink: 0; }
+.activity-announcement footer > p { font-size: .83rem; line-height: 1.6; color: #4a6554; margin: 0 0 1rem; }
+.activity-announcement footer > div { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.activity-announcement footer small { color: #617868; font-size: .73rem; }
+.activity-announcement-ok { background: var(--activity-color); border: 1px solid var(--activity-color); border-radius: 10px; color: #fff; padding: .7rem 1.8rem; min-height: 44px; min-width: 100px; font: inherit; font-weight: 700; cursor: pointer; }
+.activity-announcement-ok:focus-visible, .activity-instructions-button:focus-visible { outline: 3px solid #dfa62b; outline-offset: 3px; }
+@media (max-width: 600px) {
+    .activity-announcement { width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem); border-radius: 14px; }
+    .activity-announcement header { padding: 1rem; gap: .7rem; }
+    .activity-announcement-body { padding: .2rem 1rem .5rem; }
+    .activity-announcement footer { padding: .9rem 1rem; }
+    .activity-announcement-body p { font-size: .94rem; }
+}

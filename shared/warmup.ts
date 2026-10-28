@@ -79,6 +79,7 @@ export function assignLateJoiner(inUse: readonly string[], random: () => number 
 
 // What one student is shown: their own fact and the one they are looking for now.
 export type WarmupView = {
+    runId?: string; // Distinguishes a restarted warm-up from another progress update.
     title?: string; instructions?: string; level?: string; vocabulary?: string[];
     kind: WarmupKind;
     fact: string;                 // "You have a cat."

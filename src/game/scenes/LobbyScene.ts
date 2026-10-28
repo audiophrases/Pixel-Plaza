@@ -118,6 +118,7 @@ export default class LobbyScene extends Phaser.Scene {
     // A click on a classmate opens a private chat with them. Anywhere else, Phaser swallows the click, so the
     // chat box would keep the keyboard: hand it back.
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (document.querySelector('dialog[open]')) return;
       const picked = this.onPick && this.playerAt(pointer.worldX, pointer.worldY);
       if (picked) this.onPick!(picked);
       else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
@@ -456,7 +457,7 @@ export default class LobbyScene extends Phaser.Scene {
     // Keys walk only when the chat box is not being typed in.
     const self = this.connection.players.get(this.connection.selfId);
     const immobilized = Math.max(self?.frozenUntil ?? 0, self?.downUntil ?? 0) > Date.now();
-    const typing = immobilized || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName ?? '');
+    const typing = immobilized || !!document.querySelector('dialog[open]') || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName ?? '');
     const left = !typing && (this.cursors.left.isDown || this.wasd.A.isDown);
     const right = !typing && (this.cursors.right.isDown || this.wasd.D.isDown);
     const up = !typing && (this.cursors.up.isDown || this.wasd.W.isDown);

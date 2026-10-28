@@ -1812,6 +1812,8 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         const sam = await join('signed-b');
         const chris = await join('signed-c');
         const quests = { alex: alexQuest, sam: sam.quest, chris: chris.quest };
+        assert.ok(alexQuest.runId, 'student announcements identify the current story run');
+        assert.equal(sam.quest.runId, alexQuest.runId);
         assert.equal(new Set(Object.values(quests).map(quest => quest.role.id)).size, 3, 'three students, three different roles');
 
         // Each student keeps their own job clue; missing roles have labeled notices.
@@ -1841,6 +1843,7 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         const samBack = await join('signed-b');
         const chrisBack = await join('signed-c');
         assert.equal(alexBack.quest.role.id, quests.alex.role.id);
+        assert.equal(alexBack.quest.runId, alexQuest.runId, 'reconnecting keeps acknowledged story instructions');
         assert.equal(samBack.quest.role.id, quests.sam.role.id);
         assert.equal(chrisBack.quest.role.id, quests.chris.role.id);
         assert.ok(chrisBack.quest.clues.some(c => c.from === 'park'));
@@ -1936,6 +1939,10 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'reset' } })).status, 400);
         assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'reset', confirm: true } })).body.campaign, null);
         assert.equal((await alexBack.socket.next(message => message.t === 'quest' && message.quest === null, 'story removed')).quest, null);
+        alexBack.socket.inbox.splice(0); // Discard older chapter updates queued before the reset.
+        await api(base, '/api/teacher/campaign', { session, body: { op: 'start', campaign: 'castanyada' } });
+        const restarted = (await alexBack.socket.next(message => message.t === 'quest' && message.quest?.status === 'active', 'restarted story')).quest;
+        assert.notEqual(restarted.runId, alexQuest.runId, 'restarting the same story announces it again');
     } finally {
         for (const socket of sockets) socket.ws.close();
         await plaza.stop();
@@ -2548,6 +2555,7 @@ test('warm-up editor saves private content, pins running rounds and keeps custom
         await teacher('warmup', { op: 'start', type: 'identity' });
         const view = async (who, title) => (await who.next(m => m.t === 'warmup' && m.warmup?.title === title)).warmup;
         const a = await view(alex, definition.title), b = await view(sam, definition.title);
+        assert.ok(a.runId); assert.equal(a.runId, b.runId);
         assert.equal(a.level, 'B1'); assert.equal(a.instructions, definition.instructions);
         assert.ok(a.vocabulary.includes('Zorvax')); assert.ok(a.vocabulary.includes('zorb'));
         const name = card => card.fact.match(/^You are (.+?)\. Do not say/)[1];
@@ -2574,11 +2582,15 @@ test('warm-up editor saves private content, pins running rounds and keeps custom
         plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, vars);
         session = (await api(plaza.base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
         alex = await enter(plaza.base, 'signed-a', null); sam = await enter(plaza.base, 'signed-b', null); sockets.push(alex, sam);
-        assert.equal((await view(alex, definition.title)).fact, a.fact);
+        const resumed = await view(alex, definition.title);
+        assert.equal(resumed.fact, a.fact);
+        assert.equal(resumed.runId, a.runId, 'server restart preserves the warm-up acknowledgement scope');
         assert.equal((await config('identity')).body.definition.title, future.title, 'saved template also survives restart');
         assert.equal((await send(alex, oldAlias, 'everyone', 'old-after-restart')).level, 'warning');
         await teacher('warmup', { op: 'start', type: 'identity' });
-        assert.equal((await view(alex, future.title)).title, future.title, 'restarting opts into the new content');
+        const newRound = await view(alex, future.title);
+        assert.equal(newRound.title, future.title, 'restarting opts into the new content');
+        assert.notEqual(newRound.runId, a.runId, 'a new round needs fresh acknowledgement');
         await teacher('warmup', { op: 'end' });
         const ended = await alex.next(m => m.t === 'warmup' && m.warmup === null);
         assert.ok(ended.vocabulary.includes('Zorvax the sailor'), 'custom proper names remain available to the word checker after the round');

@@ -1204,6 +1204,7 @@ export class PlazaRoom extends DurableObject<Env> {
             present.map(item => item.role_id));
         const showResolution = row.status === 'campaign_complete' || mainFinished(chapter, player.done);
         return {
+            runId: `${game}:${row.live_epoch ?? row.revision_id ?? campaign.id}`,
             campaign: { id: campaign.id, title: campaign.title },
             status: row.status,
             chapter: { index: row.chapter, of: campaign.chapters.length, title: chapter.title, intro: chapter.intro,
@@ -1737,6 +1738,7 @@ export class PlazaRoom extends DurableObject<Env> {
             : { fact: factById(me.fact, definition.kind === 'facts' ? definition.facts : [])?.mine ?? '', task: `Find someone who ${factById(me.targets[me.step], definition.kind === 'facts' ? definition.facts : [])?.find ?? ''}.` };
         return {
             kind,
+            runId: `${game}:${this.sql.exec<{ started: number }>('SELECT started FROM warmups WHERE game_id = ?', game).toArray()[0]?.started ?? 0}`,
             title: definition.title, instructions: definition.instructions, level: definition.level, vocabulary: warmupVocabulary(definition),
             fact: card.fact,
             task: open ? card.task : null,

@@ -53,6 +53,7 @@ export type Campaign = { id: string; title: string; roles: Role[]; chapters: Cha
 
 // What one student is allowed to see: only their own role and what they found.
 export type QuestView = {
+    runId?: string; // Stable across reconnects; new when the teacher restarts this campaign.
     campaign: { id: string; title: string };
     status: 'active' | 'chapter_complete' | 'campaign_complete';
     chapter: { index: number; of: number; title: string; intro: string; ending: string | null };

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Journal from '../components/Journal';
 import Warmup from '../components/Warmup';
+import ActivityAnnouncements from '../components/ActivityAnnouncements';
 import type { WarmupView } from '../../shared/warmup';
 import { IDENTITY_NAMES } from '../../shared/warmupKinds';
 import NamePicker from '../components/NamePicker';
@@ -113,6 +114,7 @@ export default function Game() {
   const warmupVocabulary = useRef<string[]>([]);
   const [alias, setAlias] = useState<{ name: string; kept: boolean } | null>(null); // set when this game gives made-up names
   const [quest, setQuest] = useState<QuestView | null>(null); // this student's part of the campaign, if one is running
+  const [gameId, setGameId] = useState('');
   const [answered, setAnswered] = useState<{ objective: string; correct: boolean; wait: boolean } | null>(null);
   const [sendError, setSendError] = useState(''); // why the last message did not go, shown by the box
   const [support, setSupport] = useState<StudentSupport>({ request: null, messages: [] });
@@ -241,7 +243,7 @@ export default function Game() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const field = chatField.current;
-      if (!field || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (!field || event.ctrlKey || event.metaKey || event.altKey || document.querySelector('dialog[open]')) return;
       const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName ?? '');
       if (event.key === 'Enter' && !typing) { event.preventDefault(); field.focus(); }
       else if (event.key === 'Escape' && document.activeElement === field) field.blur();
@@ -328,7 +330,13 @@ export default function Game() {
         setPeek(null);
       } else setPeek({ key, message: line });
     };
+    let joinedGame = '';
     const unsubscribe = plaza.subscribe(event => {
+      if (event.t === 'roster' && plaza.gameId !== joinedGame) {
+        joinedGame = plaza.gameId;
+        setGameId(joinedGame);
+        setQuest(null); setWarmup(null); setAlias(null);
+      }
       if (event.t === 'sound') { audio.setLocked(event.off); return; }
       if (event.t === 'magic' && event.power === 'lightning') audio.thunder();
       if (event.t === 'xp') { setXpReason(event.reason); setXp(event.xp); return; }
@@ -628,6 +636,9 @@ export default function Game() {
               {status.state === 'stopped' ? 'Disconnected' : status.state === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
             </span>}
           </div>
+          <ActivityAnnouncements key={`${session?.student.studentKey}:${gameId}`} quest={quest} warmup={warmup}
+            storageKey={`pixelplaza.instructions.v1:${JSON.stringify([session?.student.studentKey, gameId || state.roomCode])}`}
+            paused={status.state !== 'online' || !!(alias && !alias.kept)} />
           <button type="button" className="sound-toggle" aria-pressed={!sound.muted && !sound.locked} disabled={sound.locked}
             title={sound.locked ? 'Your teacher turned your sound off' : sound.muted ? 'Turn on chat voices and game sounds' : 'Mute chat voices and game sounds'}
             onClick={() => audioRef.current?.setMuted(!sound.muted)}>

@@ -10,6 +10,9 @@ Object.assign(global, { window: dom.window, document: dom.window.document, HTMLE
   localStorage: dom.window.localStorage, sessionStorage: dom.window.sessionStorage, IS_REACT_ACT_ENVIRONMENT: true });
 Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true });
 dom.window.HTMLElement.prototype.scrollIntoView = () => {};
+// Native focus trapping/backdrop behavior is covered separately in Chrome.
+dom.window.HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+dom.window.HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
 localStorage.setItem('pixelplaza.student.v1', JSON.stringify({ studentToken: 'test-credential', expiresAt: Date.now() + 60000,
   student: { studentKey: 'student-a', displayName: 'Alex', className: '4B' } }));
 global.fetch = async () => ({ ok: true, json: async () => ({ ticket: 'join-ticket' }) });
@@ -200,7 +203,55 @@ try {
   await send('Are you there?');
   assert.equal(socket.sent.length, before, 'nothing is sent to someone who is not here');
   assert.match(document.querySelector('.composer-error')?.textContent ?? '', /not in the Plaza now/);
-  console.log('Chat UI checks pass: nearby by default, replies that open themselves or wait announced, "is writing", everyone with who got it, waiting and declined messages, quiet history, a folded preview, renames and departures.');
+  // Activity announcements use the real websocket events and wait until the student keeps their name.
+  const quest = { runId: 'game-a:story1', campaign: { id: 'mystery', title: 'Mystery' }, status: 'active',
+    chapter: { index: 0, of: 2, title: 'The missing chestnuts', intro: 'Talk to the villagers.', ending: null },
+    role: { id: 'baker', name: 'Baker', card: 'You work in the bakery.' }, clues: [], secret: null, thieves: null,
+    objectives: [{ id: 'bag', text: 'Where is the bag?', kind: 'text', done: false, optional: false }],
+    team: { done: 0, total: 3 }, recap: null, finale: null };
+  const warmup = { runId: 'game-a:round1', kind: 'facts', title: 'Find someone who…', instructions: 'Talk to classmates.',
+    fact: 'You have a cat.', task: 'Find someone who has a dog.', step: 0, of: 2, team: { done: 0, total: 4 } };
+  const dialog = () => document.querySelector('dialog[open]');
+  const ok = () => press(document.querySelector('.activity-announcement-ok'));
+  await act(async () => {
+    socket.receive({ t: 'alias', name: 'Robin', kept: false });
+    socket.receive({ t: 'quest', quest }); socket.receive({ t: 'warmup', warmup });
+  });
+  assert.equal(dialog(), null, 'choosing your name comes first');
+  await act(async () => socket.receive({ t: 'alias', name: 'Robin', kept: true }));
+  assert.match(dialog()?.textContent ?? '', /WARM-UP STARTING/);
+  assert.equal(document.activeElement?.id, 'activity-announcement-title');
+  await act(async () => {
+    const cancel = new dom.window.Event('cancel', { cancelable: true });
+    dialog()!.dispatchEvent(cancel); assert.equal(cancel.defaultPrevented, true, 'Escape cannot acknowledge instructions');
+    document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  });
+  assert.notEqual(document.activeElement, input(), 'Enter does not send focus into chat');
+  const beforeOK = socket.sent.length;
+  await ok(); assert.match(dialog()?.textContent ?? '', /The missing chestnuts/);
+  await ok(); assert.equal(dialog(), null); assert.equal(socket.sent.length, beforeOK, 'OK only acknowledges instructions');
+  await act(async () => { socket.receive({ t: 'quest', quest }); socket.receive({ t: 'warmup', warmup }); });
+  assert.equal(dialog(), null, 'progress refreshes are quiet');
+  await press(document.querySelector('.activity-instructions-button'));
+  assert.match(dialog()?.textContent ?? '', /Your current instructions/); await ok();
+  await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: '/game', state: { roomCode: '123456', avatarConfig: null } }]}><Game key="reload" /></MemoryRouter>));
+  const back = sockets.at(-1)!;
+  await act(async () => {
+    back.open(); back.receive({ t: 'welcome', id: 'a', gameId: 'game-a', players: [{ id: 'a', name: 'Alex', x: 1000, y: 1000 }] });
+    back.receive({ t: 'quest', quest }); back.receive({ t: 'warmup', warmup });
+  });
+  assert.equal(dialog(), null, 'acknowledged instructions survive a page reload');
+  await act(async () => back.receive({ t: 'warmup', warmup: { ...warmup, runId: 'game-a:round2' } }));
+  assert.match(dialog()?.textContent ?? '', /WARM-UP STARTING/, 'restarting the same warm-up announces it again');
+  await act(async () => back.receive({ t: 'warmup', warmup: null }));
+  assert.equal(dialog(), null, 'ending an activity closes its stale instructions');
+  await act(async () => back.receive({ t: 'quest', quest: { ...quest, chapter: { ...quest.chapter, index: 1, title: 'The cellar' } } }));
+  assert.match(dialog()?.textContent ?? '', /The cellar/); await ok();
+  await act(async () => back.receive({ t: 'welcome', id: 'a', gameId: 'game-b', players: [{ id: 'a', name: 'Alex', x: 1000, y: 1000 }] }));
+  assert.equal(dialog(), null, 'switching games drops the old activity');
+  await act(async () => back.receive({ t: 'quest', quest }));
+  assert.match(dialog()?.textContent ?? '', /The missing chestnuts/, 'another game has its own acknowledgement scope');
+  console.log('Chat and announcement UI checks pass: chat behavior, name selection first, OK-only acknowledgement, sequential dialogs, review, reloads, restarted activities, chapter changes and game isolation.');
 } finally {
   await act(async () => root.unmount());
   dom.window.close();

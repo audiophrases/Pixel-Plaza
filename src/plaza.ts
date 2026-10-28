@@ -82,6 +82,7 @@ export class PlazaConnection {
   private sentAttempts = new Set<string>();
   private attemptStorageKey: string | null;
   private currentGameId = '';
+  get gameId() { return this.currentGameId; }
 
   // A null avatar keeps the one saved on the server.
   constructor(pin: string, token: string, avatar: AvatarConfig | null, studentKey?: string) {
