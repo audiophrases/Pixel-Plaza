@@ -20,6 +20,8 @@ export interface Env {
     OPENAI_API_KEY?: string;
     OPENAI_BASE_URL?: string; // tests only
     OPENAI_GRAMMAR_MODEL?: string; // which chat model gives grammar hints; a small, cheap one by default
+    OPENAI_REPORT_MODEL?: string; // compact task + language assessment, defaults to gpt-6-luna
+    REPORT_CHECKS?: string; // '0' keeps legacy written-attempt completion for offline installations/tests
     OPENAI_PARTICIPATION?: string; // '0' disables small automatic conversation XP rewards
     MOVEMENT_CHECK?: string; // '0' turns off the check that moves do not go through walls or too fast (tests only)
     GROUP_START_MS?: string; // how long a side quest group waits before it may start with who is there (tests only)
@@ -98,6 +100,7 @@ async function linkOnline(env: Env, body: { password?: unknown; url: string | nu
 function teacherAction(path: string, method: string, body: any): TeacherAction | null {
     if (path === '/api/teacher/status' && method === 'GET') return { kind: 'status' };
     if (method !== 'POST') return null;
+    if (path === '/api/teacher/report-accept' && typeof body?.gameId === 'string' && typeof body?.studentKey === 'string' && typeof body?.objective === 'string' && Number.isSafeInteger(body?.version)) return { kind: 'reportAccept', gameId: body.gameId, studentKey: body.studentKey, objective: body.objective, version: body.version };
     if (path === '/api/teacher/help-status' && ['acknowledged', 'resolved'].includes(body?.status) && typeof body?.id === 'string') return { kind: 'helpStatus', id: body.id, status: body.status, gameId: typeof body.gameId === 'string' ? body.gameId : undefined };
     if (path === '/api/teacher/help-message' && typeof body?.studentKey === 'string' && typeof body?.text === 'string') return { kind: 'helpMessage', studentKey: body.studentKey, text: body.text, gameId: typeof body.gameId === 'string' ? body.gameId : undefined };
     if (path === '/api/teacher/class' && typeof body?.open === 'boolean') {

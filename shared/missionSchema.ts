@@ -68,11 +68,16 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
         const c = obj(value, path, ['id', 'title', 'intro', 'recap', 'ending', 'share', 'objectives', 'discoveries', 'reveals', 'roleClues', 'thieves']);
         const objectives: Objective[] = list(c.objectives, `${path}.objectives`, 100).map((value, j) => {
             const p = `${path}.objectives[${j}]`;
-            const o = obj(value, p, ['id', 'text', 'accept', 'answerThief', 'thiefKnows', 'answerRole', 'kind', 'after', 'optional', 'rewards', 'requires', 'board', 'activity', 'conversation']);
+            const o = obj(value, p, ['id', 'text', 'accept', 'answerThief', 'thiefKnows', 'answerRole', 'kind', 'after', 'optional', 'rewards', 'requires', 'board', 'activity', 'conversation', 'successCriteria', 'level']);
             const result: Objective = { id: id(o.id, `${p}.id`), text: str(o.text, `${p}.text`), accept: list(o.accept, `${p}.accept`, 30).map((v, k) => str(v, `${p}.accept[${k}]`, 120)) };
             for (const key of ['answerThief', 'thiefKnows', 'optional'] as const) if (o[key] !== undefined) result[key] = boolean(o[key], `${p}.${key}`);
             for (const key of ['after', 'answerRole'] as const) if (o[key] !== undefined) result[key] = id(o[key], `${p}.${key}`);
             if (o.kind !== undefined) { if (o.kind !== 'report') fail(`${p}.kind`, 'Only report is supported; omit kind for typed or name answers.'); else result.kind = 'report'; }
+            if (o.successCriteria !== undefined) result.successCriteria = str(o.successCriteria, `${p}.successCriteria`, 600);
+            if (o.level !== undefined) {
+                if (!['A1', 'A2', 'B1', 'B2'].includes(String(o.level))) fail(`${p}.level`, 'Choose A1, A2, B1 or B2.');
+                else result.level = o.level as Objective['level'];
+            }
             if (o.rewards !== undefined) result.rewards = clues(o.rewards, `${p}.rewards`);
             if (o.conversation !== undefined) {
                 const conversation = obj(o.conversation, `${p}.conversation`, ['witnesses']);

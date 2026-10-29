@@ -11,6 +11,7 @@
 // cliffhanger, but questions stay open until the teacher starts the next chapter. If the
 // class is stuck, the teacher can reveal a prepared piece of news to everyone.
 
+import type { ReportCheck, ReportLevel } from './reportFeedback.ts';
 export const REPORT_MAX_LENGTH = 1000;
 
 // The student types the answer. `accept` lists the words or short phrases that make an answer right;
@@ -20,7 +21,9 @@ export type Objective = {
     answerThief?: boolean;            // the answer is the name of the chapter's thief (the thief does not get this question)
     thiefKnows?: boolean;             // the thief already knows the answer, so is not asked
     answerRole?: string;              // the answer is the name of a classmate who has this role (so students must meet people)
-    kind?: 'report';                  // a few written sentences, which the teacher reads; any real attempt counts
+    kind?: 'report';                  // writing checked automatically on submission
+    successCriteria?: string;        // private, concise requirements/reference facts for written answers
+    level?: ReportLevel;
     after?: string;                   // asked only once this question has been answered
     requires?: { mode: 'all' | 'any'; objectives: string[] };
     optional?: boolean;               // a bonus: it never holds the chapter up
@@ -51,7 +54,7 @@ export type Chapter = {
 export type Role = { id: string; name: string; card: string; clue: string };
 export type Campaign = { id: string; title: string; roles: Role[]; chapters: Chapter[]; finale: string };
 export type AnswerFeedback = { objective: string; correct: boolean; wait: boolean; message?: string };
-export type ReportSubmission = { text: string; version: number; submitted: boolean };
+export type ReportSubmission = { text: string; version: number; submitted: boolean; check?: ReportCheck };
 
 // What one student is allowed to see: only their own role and what they found.
 export type QuestView = {

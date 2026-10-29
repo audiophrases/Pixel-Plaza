@@ -39,7 +39,11 @@ export default function MissionStepEditor({ objective, chapter, campaign, onChan
         {type === 'text' && <><MissionField label="Accepted answers (one per line)" value={objective.accept.join('\n')} placeholder={'For example:\npark\npond'} multiline maxLength={3630} onChange={text => onChange({ accept: text.split('\n') })} onBlur={() => { const accept = objective.accept.map(a => a.trim()).filter(Boolean); if (JSON.stringify(accept) !== JSON.stringify(objective.accept)) onChange({ accept }); }} /><p className="mission-muted">Add alternative words or phrases that should also count as correct.</p></>}
         {type === 'role' && <label className="mission-field"><span>Which role should they find?</span><select value={objective.answerRole} onChange={e => onChange({ answerRole: e.target.value })}>{campaign.roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>}
         {type === 'thief' && <p className="mission-tip">The game checks the name of the assigned thief. You do not need to enter an answer.</p>}
-        {objective.kind === 'report' && <p className="mission-tip">A response of five words counts as an attempt. You read the report; it is not automatically graded. Required evidence exchanges need approval first.</p>}
+        {objective.kind === 'report' && <>
+            <MissionField label="Success criteria (optional, private)" value={objective.successCriteria ?? ''} maxLength={600} multiline placeholder="Essential requirements and reference facts. Otherwise the task instructions are used." onChange={value => onChange({ successCriteria: value.trim() ? value : undefined })} />
+            <label className="mission-field"><span>Feedback level</span><select value={objective.level ?? 'A2'} onChange={e => onChange({ level: e.target.value as Objective['level'] })}>{['A1', 'A2', 'B1', 'B2'].map(level => <option key={level}>{level}</option>)}</select></label>
+            <p className="mission-tip">Reports receive an automatic task check and one short hint. Required evidence exchanges still need to be completed first.</p>
+        </>}
         <div className="mission-form-section-title"><span>2</span><h3>When &amp; where it appears</h3></div>
         <label className="mission-field"><span>Where does this step appear?</span><select value={objective.board ? 'board' : objective.optional ? 'optional' : 'main'} onChange={e => {
             const value = e.target.value;

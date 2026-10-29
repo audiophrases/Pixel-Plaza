@@ -11,6 +11,8 @@
   pointer-events: auto;
 }
 
+.journal-report-feedback { padding: .45rem .55rem; border-radius: .35rem; background: #e6f4ff; line-height: 1.4; }
+
 .journal-toggle {
   display: flex;
   justify-content: space-between;

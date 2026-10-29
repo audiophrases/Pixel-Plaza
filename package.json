@@ -19,6 +19,7 @@
     "check:announcements:browser": "node scripts/check-announcements-browser.mjs",
     "check:teacher-guide": "node scripts/check-teacher-guide.mjs",
     "check:teacher-character": "node scripts/check-teacher-character.mjs",
+    "check:report-feedback": "node scripts/check-report-feedback.mjs",
     "check:warmups": "node scripts/check-warmup-studio.mjs",
     "theme": "node scripts/install-theme.mjs"
   },

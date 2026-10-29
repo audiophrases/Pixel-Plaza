@@ -24,6 +24,7 @@ export type SideQuest = {
     text: string;                // what the student reads on the quest board
     accept: string[];            // typed answers only
     teacherNote: string;
+    successCriteria?: string;
     roles?: string[];            // story quests for some roles only (secret missions)
     after?: string;              // story quests that use what a main question reveals
     afterMain?: boolean;         // story quests about the chapter's solution
@@ -129,6 +130,7 @@ export function questObjective(quest: SideQuest): Objective {
         text: `${quest.title}: ${quest.text}`,
         accept: quest.answer === 'text' ? [...quest.accept] : [],
         ...(quest.answer === 'report' ? { kind: 'report' as const } : {}),
+        ...(quest.answer === 'report' ? { level: quest.level, ...(quest.successCriteria ? { successCriteria: quest.successCriteria } : {}) } : {}),
         optional: true,
         ...(quest.after ? { after: quest.after } : {}),
         board: {
@@ -248,6 +250,7 @@ export function checkQuest(value: unknown): { quest: SideQuest } | { error: stri
     if (quest.theme === 'story' ? typeof quest.chapter !== 'string' || !missionId(quest.chapter) : quest.chapter !== null && quest.chapter !== undefined) return { error: `${where}: a story quest belongs to one chapter, and only story quests do.` };
     if (!Number.isInteger(quest.minutes) || quest.minutes! < 1 || quest.minutes! > 60) return { error: `${where}: minutes must be a whole number from 1 to 60.` };
     if (!isTexts(quest.focus) || !isTexts(quest.tags) || !isTexts(quest.accept) || typeof quest.teacherNote !== 'string' || quest.teacherNote.length > 4000) return { error: `${where}: focus, tags, answers and teacher note are needed.` };
+    if (quest.successCriteria !== undefined && (typeof quest.successCriteria !== 'string' || quest.successCriteria.length > 600)) return { error: `${where}: success criteria must be text of up to 600 characters.` };
     const accept = quest.answer === 'text' ? quest.accept!.map(answer => answer.trim()).filter(Boolean) : [];
     if (quest.answer === 'text' && !accept.length) return { error: `${where}: a typed answer needs accepted answers.` };
     if ((quest.roles !== undefined && !isTexts(quest.roles)) || (quest.after !== undefined && (typeof quest.after !== 'string' || !missionId(quest.after))) || (quest.afterMain !== undefined && typeof quest.afterMain !== 'boolean')) return { error: `${where}: roles, "after" and "after the main mystery" are not valid.` };
@@ -258,6 +261,7 @@ export function checkQuest(value: unknown): { quest: SideQuest } | { error: stri
         level: quest.level!, format: format as QuestFormat, answer: quest.answer!, minutes: quest.minutes!,
         focus: quest.focus!.map(item => item.trim()).filter(Boolean), tags: quest.tags!.map(tag => tag.trim().toLowerCase()).filter(Boolean),
         text: quest.text!.trim(), accept, teacherNote: quest.teacherNote.trim(),
+        ...(quest.successCriteria?.trim() ? { successCriteria: quest.successCriteria.trim() } : {}),
         ...(roles?.length ? { roles } : {}), ...(story && quest.after ? { after: quest.after } : {}), ...(story && quest.afterMain ? { afterMain: true } : {}),
     } };
 }

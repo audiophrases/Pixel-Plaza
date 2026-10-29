@@ -16,7 +16,8 @@ Every quest card shows its kind (**Story** in orange, **Generic** in blue), its 
 
 - **Levels:** A1 Starter, A2 Elementary, B1 Intermediate, B2 Advanced. The instructions themselves are written at the level, with sentence frames for A1 and useful phrases from A2.
 - **Who:** solo, pair, small group or mingle (a quest done alone by talking to several classmates, called "whole class" before). A pair (2) or small group (3) plays together, formed by the game; a mingle needs 4 students online.
-- **Answer:** a *typed answer* is checked by the game (riddles, puzzles, story facts); a *written report* counts once the student writes a real attempt, and you read it under "What students wrote" in Teacher controls.
+- **Answer:** a *typed answer* is checked by the game (riddles, puzzles, story facts); a *written report* receives an automatic task check and one short feedback message after submission. A clear omission keeps it open for revision; minor language mistakes can pass. You can read submitted writing under "What students wrote" in Teacher controls.
+- **Success criteria (optional, private):** up to 600 characters of essential requirements and reference facts. Otherwise the check uses the student instructions. Teacher notes are not sent to the model.
 - **Teacher note:** what to look for, how to adapt the quest, and for typed answers the solution and every accepted variant.
 
 ## Finding quests

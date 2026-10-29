@@ -26,7 +26,7 @@ function Question({ objective, feedback, onAnswer, onUndoReport, shared = false,
   const [typed, setTyped] = useState(objective.report?.text ?? '');
   const [hasDraft, setHasDraft] = useState(false);
   const [submitted, setSubmitted] = useState<string | null>(null);
-  const reportState = objective.report ? `${objective.report.version}:${objective.report.submitted}` : '';
+  const reportState = objective.report ? `${objective.report.version}:${objective.report.submitted}:${objective.report.check?.status}` : '';
   const [seenReport, setSeenReport] = useState(reportState);
   if (seenReport !== reportState) {
     setSeenReport(reportState);
@@ -35,13 +35,16 @@ function Question({ objective, feedback, onAnswer, onUndoReport, shared = false,
     if (!objective.done && objective.report && !objective.report.submitted) setSubmitted(null);
   }
   const report = objective.kind === 'report';
+  const check = objective.report?.check;
+  const pending = report && !objective.done && !!objective.report?.submitted && !!check;
   const rejected = feedback?.objective === objective.id && !feedback.correct && submitted === typed.trim();
   const feedbackId = `answer-feedback-${objective.id}`;
   return <section className={`journal-block journal-question${objective.optional ? ' journal-bonus' : ''}`}>
     <h3>{heading ?? (objective.optional ? 'Bonus question' : 'Question')}</h3>
     <p className="journal-ask">{objective.text}</p>
     {objective.done ? <>
-      <p className="journal-right">{report ? 'Sent to your teacher.' : 'Correct.'}</p>
+      <p className="journal-right">{report ? check ? 'Quest complete.' : 'Sent to your teacher.' : 'Correct.'}</p>
+      {check && check.feedback !== 'Quest complete.' && <p className="journal-report-feedback" role="status">{check.feedback}</p>}
       {report && objective.report && <p className="journal-submitted-report">{objective.report.text}</p>}
       {report && objective.report?.submitted && onUndoReport && !closed && <>
         <button type="button" className="journal-dismiss" onClick={() => onUndoReport(objective.id, objective.report!.version)}>Undo submission</button>
@@ -49,9 +52,14 @@ function Question({ objective, feedback, onAnswer, onUndoReport, shared = false,
       </>}
     </> : closed ? <p>Your teacher ended this campaign.</p> : <>
       {objective.conversation && quest && <Investigation objective={objective.id} conversation={objective.conversation} interviews={quest.interviews ?? []} clues={quest.clues} onTurn={onTurn} />}
-      <form className="journal-answer" onSubmit={event => {
+      {check && (objective.report?.submitted || check.status === 'revise') && <p className={`journal-report-feedback${check.status === 'revise' ? ' journal-wrong' : ''}`} role="status">{check.feedback}</p>}
+      {pending && <>
+        <p className="journal-submitted-report">{objective.report!.text}</p>
+        {onUndoReport && <button type="button" className="journal-dismiss" onClick={() => onUndoReport(objective.id, objective.report!.version)}>Undo submission</button>}
+      </>}
+      {!pending && <form className="journal-answer" onSubmit={event => {
         event.preventDefault();
-        if (typed.trim()) { setSubmitted(typed.trim()); setHasDraft(false); onAnswer(objective.id, typed.trim()); }
+        if (!pending && typed.trim()) { setSubmitted(typed.trim()); setHasDraft(false); onAnswer(objective.id, typed.trim()); }
       }}>
         {report ? <textarea value={typed} maxLength={REPORT_MAX_LENGTH} rows={4}
           placeholder="Write your evidence and decision in English"
@@ -62,8 +70,8 @@ function Question({ objective, feedback, onAnswer, onUndoReport, shared = false,
             aria-describedby={rejected ? feedbackId : undefined}
             aria-label="Your answer" onChange={event => { setTyped(event.target.value); setHasDraft(true); }} />}
         <button className="journal-choice" disabled={!typed.trim() || (!!objective.conversation && objective.conversation.completed < objective.conversation.required)}>{report ? 'Send report' : 'Answer'}</button>
-      </form>
-      {rejected && <p id={feedbackId} className="journal-wrong" role="status">{feedback.message || (feedback.wait
+      </form>}
+      {rejected && !pending && <p id={feedbackId} className="journal-wrong" role="status">{feedback.message || (feedback.wait
         ? 'Please wait a few seconds before trying again.' : report ? 'Write at least 5 words, then send your report again.'
           : objective.kind === 'name' ? 'That name was not accepted. Check the name shown above their avatar and try again.'
             : 'That answer was not accepted. Check the question and try again.')}</p>}

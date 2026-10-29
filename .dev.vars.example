@@ -7,6 +7,10 @@ PINPLAY_API_URL=https://api.pinplay.win
 # Optional: also check every message with OpenAI's moderation. Online, set it with `npx wrangler secret put OPENAI_API_KEY`.
 # Without it, only the word filter and the teacher check messages.
 OPENAI_API_KEY=
+# Written reports automatically check task completion and return one short hint using this key.
+# No key/API trouble: writing stays saved for teacher review. No extra student or teacher selection.
+# OPENAI_REPORT_MODEL=gpt-6-luna
+# REPORT_CHECKS=0  # Legacy written-attempt completion for offline installations only.
 # Optional: the chat model that gives grammar hints (default gpt-4o-mini).
 # OPENAI_GRAMMAR_MODEL=
 # Optional: set to 0 to disable small AI participation XP rewards (enabled with an OpenAI key).

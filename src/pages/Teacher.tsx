@@ -11,6 +11,7 @@ import type { Theme } from '../../shared/theme';
 import ThemePicture from '../components/ThemePicture';
 import TeacherMissionGuide from '../components/TeacherMissionGuide';
 import type { InterviewView } from '../../shared/campaign';
+import type { ReportCheck } from '../../shared/reportFeedback';
 import type { TeacherSupport as Support } from '../../shared/support';
 import type { CampaignChoice } from '../../shared/missionTypes';
 import { XP } from '../../shared/levels';
@@ -28,12 +29,12 @@ type Entry = { id: string; studentKey: string; sender: string; target: string | 
 // Where students stand with the open game's side quests, and what they wrote for them.
 type SideQuestPanel = { free: { studentKey: string; name: string }[]; doing: { studentKey: string; name: string; quest: string }[]; busy: number; quests: number;
   groups: { id: string; quest: string; members: string[]; size: number; state: 'open' | 'playing' }[]; open: { id: string; title: string }[];
-  reports: { studentKey: string; objective: string; quest: string; text: string; partner?: string; starred: boolean }[] };
+  reports: { studentKey: string; objective: string; quest: string; text: string; partner?: string; starred: boolean; version: number; check?: ReportCheck }[] };
 type CampaignInfo = {
   guideVersion?: string;
   id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string; chapterTitles?: string[]; zones?: string[];
   reveals: { shown: number; total: number; next: string | null };
-  reports: { studentKey: string; objective: string; text: string; partner?: string; starred?: boolean }[];
+  reports: { studentKey: string; objective: string; text: string; partner?: string; starred?: boolean; version: number; check?: ReportCheck }[];
   interviews?: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
   board?: { id: string; text: string; teacherReleased: boolean; released: boolean; accepted: number; completed: number }[];
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
@@ -547,6 +548,8 @@ export default function Teacher() {
             <h3>What students wrote</h3>
             <ul>{campaign.reports.map(report => <li key={report.studentKey + report.objective}>
               <span><strong>{who(report.studentKey, campaign.players.find(player => player.studentKey === report.studentKey)?.name ?? 'Student')}</strong>{report.partner ? ` · partner: ${report.partner}` : ''}: {report.text}</span>
+              {report.check && <small>{report.check.feedback}</small>}
+              {report.check && ['uncertain', 'unavailable'].includes(report.check.status) && <button className="btn btn-secondary btn-sm" onClick={() => void action('report-accept', { gameId: status.game!.id, studentKey: report.studentKey, objective: report.objective, version: report.version })}>Accept report</button>}
               <StarButton starred={report.starred} onStar={() => void action('xp', { report: { studentKey: report.studentKey, objective: report.objective } })} />
             </li>)}</ul>
           </>}
@@ -586,6 +589,8 @@ export default function Teacher() {
             <h3>What students wrote</h3>
             <ul>{side.reports.map(report => <li key={report.studentKey + report.objective}>
               <span><strong>{who(report.studentKey, status.realNames[report.studentKey] ?? 'Student')}</strong> · {report.quest}{report.partner ? ` · with ${report.partner}` : ''}: {report.text}</span>
+              {report.check && <small>{report.check.feedback}</small>}
+              {report.check && ['uncertain', 'unavailable'].includes(report.check.status) && <button className="btn btn-secondary btn-sm" onClick={() => void action('report-accept', { gameId: status.game!.id, studentKey: report.studentKey, objective: report.objective, version: report.version })}>Accept report</button>}
               <StarButton starred={report.starred} onStar={() => void action('xp', { report: { studentKey: report.studentKey, objective: report.objective } })} />
             </li>)}</ul>
           </>}

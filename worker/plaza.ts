@@ -3,6 +3,8 @@ import type { Env } from './index.ts';
 import type { PinPlayStudent } from './pinplay.ts';
 import { MIN_WORDS, checkGrammar } from './grammar.ts';
 import { languageHelp } from './aiHelp.ts';
+import { ReportChecks, checkReport, reportCacheKey, type ReportInput } from './reportFeedback.ts';
+import type { ReportCheck } from '../shared/reportFeedback.ts';
 import { moderate, type Moderation } from './moderation.ts';
 import { SafetyIncidents, type Incident } from './incidents.ts';
 import { harmFrom, localHarm, type Harm } from '../shared/safety.ts';
@@ -82,6 +84,7 @@ const CLOSE_CLASS_CLOSED = 4002; // the teacher closed the game
 // Per-socket state. It lives in the socket's attachment, so it survives the
 // room hibernating between messages.
 type Seat = { id: string; game: string; themeId?: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; style?: Style; x: number; y: number; lastChat: number; lastCheck?: number; lastTyping?: number; lastReroll?: number; movedAt?: number; left?: boolean; frozenUntil?: number; downUntil?: number };
+type AnswerSeat = Pick<Seat, 'game' | 'studentKey' | 'name'>;
 
 export type TeacherAction =
     | { kind: 'magic'; power: 'freeze' | 'thaw' | 'lightning' | 'teleport' | 'rain'; studentKey?: string; x?: number; y?: number }
@@ -96,6 +99,7 @@ export type TeacherAction =
     | { kind: 'campaign'; op: 'start' | 'next' | 'reveal' | 'reset'; campaign?: string; confirm?: boolean }
     | { kind: 'questRelease'; objective: string }
     | { kind: 'questPlace'; objective: string; studentKey: string }
+    | { kind: 'reportAccept'; gameId: string; studentKey: string; objective: string; version: number }
     | { kind: 'remove'; id: string } // takes down a message that posted
     | { kind: 'mute'; studentKey: string; muted: boolean }
     | { kind: 'incident'; id: string } // the teacher has seen a safety incident
@@ -117,7 +121,7 @@ export type CampaignStatus = {
     zones: string[]; // where the map clues are, to tell the teacher when the game's map lacks one
     reveals: { shown: number; total: number; next: string | null }; // prepared news the teacher can release
     players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
-    reports: { studentKey: string; objective: string; text: string; partner?: string; starred: boolean }[]; // what students wrote for the written questions
+    reports: { studentKey: string; objective: string; text: string; partner?: string; starred: boolean; version: number; check?: ReportCheck }[];
     interviews: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
     board?: ReturnType<QuestBoard['summary']>;
 };
@@ -127,7 +131,7 @@ export type CampaignStatus = {
 // wrote for them.
 export type SideQuestStatus = { free: { studentKey: string; name: string }[]; doing: { studentKey: string; name: string; quest: string }[]; busy: number; quests: number;
     groups: { id: string; quest: string; members: string[]; size: number; state: 'open' | 'playing' }[]; open: { id: string; title: string }[];
-    reports: { studentKey: string; objective: string; quest: string; text: string; partner?: string; starred: boolean }[] };
+    reports: { studentKey: string; objective: string; quest: string; text: string; partner?: string; starred: boolean; version: number; check?: ReportCheck }[] };
 
 export type TeacherStatus = {
     support: TeacherSupport;
@@ -177,6 +181,7 @@ export class PlazaRoom extends DurableObject<Env> {
     // OpenAI's verdict on a message, for a couple of minutes: the hint and the sending check ask about the same words.
     private moderations = new Map<string, { verdict: Moderation; at: number }>();
     private participation: Participation;
+    private reportChecks: ReportChecks;
     private interviewSends = new Set<string>();
     private liveMissions: LiveMissions;
     private moves = new Map<string, [number, number]>(); // player id to latest position, not yet passed on
@@ -295,6 +300,9 @@ export class PlazaRoom extends DurableObject<Env> {
                 AND g.objective = campaign_reports.objective AND m.student_key = campaign_reports.student_key LIMIT 1)`);
         }
         this.sql.exec('CREATE INDEX IF NOT EXISTS campaign_reports_group ON campaign_reports (game_id, objective, group_id)');
+        if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaign_reports')").toArray().some(row => row.name === 'check_id')) this.sql.exec('ALTER TABLE campaign_reports ADD COLUMN check_id TEXT');
+        this.reportChecks = new ReportChecks(this.sql);
+        this.reportChecks.initialize();
         this.questBoard = new QuestBoard(this.sql, this.groups, this.env.GROUP_START_MS !== undefined ? Number(this.env.GROUP_START_MS) : undefined);
         this.questBoard.initialize();
         this.interviews = new Interviews(this.sql);
@@ -639,6 +647,10 @@ export class PlazaRoom extends DurableObject<Env> {
         if (action.kind === 'student') {
             const problem = this.editStudent(action);
             if (problem) return problem;
+        }
+        if (action.kind === 'reportAccept') {
+            const problem = await this.acceptReport(action);
+            if (problem) return { error: problem, status: 409 };
         }
         if (action.kind === 'helpStatus' || action.kind === 'helpMessage') {
             const game = this.activeGame();
@@ -1244,7 +1256,7 @@ export class PlazaRoom extends DurableObject<Env> {
         this.sendSupport(seat.game, seat.studentKey);
     }
 
-    private beginAttempt(seat: Seat, text: string, source: AttemptSource, id?: string, to?: unknown, objective?: string): string {
+    private beginAttempt(seat: AnswerSeat, text: string, source: AttemptSource, id?: string, to?: unknown, objective?: string): string {
         const target = to === 'teacher' ? 'Teacher' : to === 'everyone' ? 'Everyone' : this.seats().find(s => s.game === seat.game && s.id === to)?.name;
         return this.assistance.begin({ game: seat.game, studentKey: seat.studentKey, name: seat.name,
             text, source, id: id && id.length <= 80 ? id : undefined, target, objective });
@@ -1371,7 +1383,7 @@ export class PlazaRoom extends DurableObject<Env> {
         } else if (data?.t === 'warmup-answer' && typeof data.text === 'string') {
             this.warmupAnswer(ws, seat, data.text, typeof data.attemptId === 'string' ? data.attemptId : undefined);
         } else if (data?.t === 'answer' && typeof data.objective === 'string' && typeof data.text === 'string') {
-            this.answer(ws, seat, data.objective, data.text, typeof data.attemptId === 'string' ? data.attemptId : undefined);
+            await this.answer(ws, seat, data.objective, data.text, typeof data.attemptId === 'string' ? data.attemptId : undefined);
         } else if (data?.t === 'quest-accept' && typeof data.objective === 'string') {
             this.claimQuest(ws, seat, data.objective, data.changePartner === true);
         } else if (data?.t === 'quest-leave' && typeof data.objective === 'string') {
@@ -1568,6 +1580,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // The student's mission view, when a mission is running, and their quest board, with or without one.
     private sendQuest(target: WebSocket, game: string, studentKey: string, withRecap = false): void {
+        if (withRecap) this.resumePassedReports(target, game, studentKey);
         const quest = this.questView(game, studentKey, withRecap);
         const board = this.boardView(game, studentKey);
         try {
@@ -1624,10 +1637,10 @@ export class PlazaRoom extends DurableObject<Env> {
         const error = this.ctx.storage.transactionSync(() => {
             const problem = this.questBoard.leave(ctx, quest);
             // A shared draft belongs to the remaining group even if its original writer gives up the quest.
-            const keeper = !problem && group && report?.submitted === 0 && report.student_key === seat.studentKey ? this.groups.members(group.group_id)[0] : undefined;
+            const keeper = !problem && group && report?.student_key === seat.studentKey ? this.groups.members(group.group_id)[0] : undefined;
             if (keeper && report && group) {
-                this.sql.exec(`INSERT INTO campaign_reports (game_id, student_key, objective, text, ts, submitted, group_id) VALUES (?, ?, ?, ?, ?, 0, ?)
-                    ON CONFLICT (game_id, student_key, objective) DO UPDATE SET text = excluded.text, ts = excluded.ts, submitted = 0, group_id = excluded.group_id`, seat.game, keeper, objective, report.text, report.ts, group.group_id);
+                this.sql.exec(`INSERT INTO campaign_reports (game_id, student_key, objective, text, ts, submitted, group_id, check_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (game_id, student_key, objective) DO UPDATE SET text = excluded.text, ts = excluded.ts, submitted = excluded.submitted, group_id = excluded.group_id, check_id = excluded.check_id`, seat.game, keeper, objective, report.text, report.ts, report.submitted, group.group_id, report.check_id);
                 this.sql.exec('DELETE FROM campaign_reports WHERE game_id = ? AND objective = ? AND student_key = ?', seat.game, objective, seat.studentKey);
             }
             return problem;
@@ -1770,26 +1783,114 @@ export class PlazaRoom extends DurableObject<Env> {
         const shared = !!objective.board && groupSize(objective) > 1;
         const group = shared ? this.questBoard.groupOf(game, objective.id, student) : undefined;
         if (shared && !group) return undefined;
-        return this.sql.exec<{ student_key: string; text: string; ts: number; submitted: number }>(
-            `SELECT student_key, text, ts, submitted FROM campaign_reports WHERE game_id = ? AND objective = ?
+        return this.sql.exec<{ student_key: string; text: string; ts: number; submitted: number; check_id: string | null }>(
+            `SELECT student_key, text, ts, submitted, check_id FROM campaign_reports WHERE game_id = ? AND objective = ?
              AND ${group ? 'group_id = ?' : 'group_id IS NULL AND student_key = ?'} ORDER BY ts DESC LIMIT 1`, game, objective.id, group?.group_id ?? student).toArray()[0];
     }
 
     private reportView(game: string, objective: Objective, student: string) {
         const report = this.savedReport(game, objective, student);
-        return report ? { text: report.text, version: report.ts, submitted: report.submitted === 1 } : undefined;
+        const check = report?.check_id ? this.reportChecks.get(report.check_id) : undefined;
+        return report ? { text: report.text, version: report.ts, submitted: report.submitted === 1,
+            ...(check ? { check: { status: check.status, feedback: check.feedback } } : {}) } : undefined;
     }
 
-    private saveReport(game: string, objective: Objective, student: string, text: string): void {
+    private saveReport(game: string, objective: Objective, student: string, text: string, checkId: string | null = null): number {
         const previous = this.savedReport(game, objective, student);
         const version = Math.max(Date.now(), (previous?.ts ?? 0) + 1);
         const group = objective.board && groupSize(objective) > 1 ? this.questBoard.groupOf(game, objective.id, student) : undefined;
         // A teammate may resubmit the reopened report: replace the previous author's copy for this group only.
         this.ctx.storage.transactionSync(() => {
             if (previous && previous.student_key !== student) this.sql.exec('DELETE FROM campaign_reports WHERE game_id = ? AND objective = ? AND student_key = ?', game, objective.id, previous.student_key);
-            this.sql.exec(`INSERT INTO campaign_reports (game_id, student_key, objective, text, ts, submitted, group_id) VALUES (?, ?, ?, ?, ?, 1, ?)
-                ON CONFLICT (game_id, student_key, objective) DO UPDATE SET text = excluded.text, ts = excluded.ts, submitted = 1, group_id = excluded.group_id`, game, student, objective.id, text.trim(), version, group?.group_id ?? null);
+            this.sql.exec(`INSERT INTO campaign_reports (game_id, student_key, objective, text, ts, submitted, group_id, check_id) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                ON CONFLICT (game_id, student_key, objective) DO UPDATE SET text = excluded.text, ts = excluded.ts, submitted = 1, group_id = excluded.group_id, check_id = excluded.check_id`, game, student, objective.id, text.trim(), version, group?.group_id ?? null, checkId);
         });
+        return version;
+    }
+
+    private reportEpoch(game: string, objective: string): string {
+        if (this.sql.exec('SELECT 1 FROM game_side_quests WHERE game_id = ? AND quest_id = ?', game, objective).toArray().length) return 'library';
+        const row = this.campaignRow(game);
+        return JSON.stringify([row?.live_epoch, row?.chapter]);
+    }
+    private reportObjective(game: string, student: string, id: string): Objective | undefined {
+        const ctx = this.boardContext(game, student), row = this.campaignRow(game);
+        return ctx?.quests.find(o => o.id === id) ?? (row && this.gameCampaign(game)?.chapters[row.chapter]?.objectives.find(o => o.id === id)) ?? undefined;
+    }
+    private reportApproved(game: string, objective: Objective, student: string, version: number): boolean {
+        const report = this.savedReport(game, objective, student);
+        return !!report && report.ts === version && report.submitted === 1 && !!report.check_id && this.reportChecks.get(report.check_id)?.status === 'pass';
+    }
+    // A check may finish while its game is closed. Apply its saved pass when a member returns, without another call.
+    private resumePassedReports(ws: WebSocket, game: string, student: string): void {
+        if (!this.isOpen() || this.activeGame() !== game) return;
+        const done = this.boardContext(game, student)?.player.done ?? [];
+        const reports = this.sql.exec<{ student_key: string; objective: string; text: string; ts: number }>(
+            `SELECT DISTINCT r.student_key, r.objective, r.text, r.ts FROM campaign_reports r JOIN report_checks c ON c.id = r.check_id
+             LEFT JOIN side_quest_members m ON m.group_id = r.group_id AND m.student_key = ?
+             WHERE r.game_id = ? AND r.submitted = 1 AND c.status = 'pass'
+             AND ((r.group_id IS NULL AND r.student_key = ?) OR m.student_key IS NOT NULL)`, student, game, student).toArray();
+        for (const report of reports) {
+            if (done.includes(report.objective) || !this.reportObjective(game, report.student_key, report.objective)) continue;
+            const seat: AnswerSeat = { game, studentKey: report.student_key, name: this.rosterNames(game).get(report.student_key) ?? 'Student' };
+            this.ctx.waitUntil(this.answer(ws, seat, report.objective, report.text, undefined,
+                { version: report.ts, audit: this.beginAttempt(seat, report.text, 'answer', undefined, undefined, report.objective) }));
+        }
+    }
+    private async submitReport(ws: WebSocket | undefined, seat: AnswerSeat, objective: Objective, text: string, audit: string): Promise<void> {
+        const pending = this.savedReport(seat.game, objective, seat.studentKey);
+        if (pending?.submitted === 1 && pending.check_id && this.reportChecks.get(pending.check_id)?.status === 'checking') {
+            this.attemptStatus(audit, 'waiting', 'This report is already being checked.');
+            this.sendBoardChange(seat.game, seat.studentKey, objective);
+            return;
+        }
+        const input: ReportInput = { task: objective.text, criteria: objective.successCriteria, level: objective.level, answer: text };
+        const epoch = this.reportEpoch(seat.game, objective.id);
+        const group = objective.board && groupSize(objective) > 1 ? this.questBoard.groupOf(seat.game, objective.id, seat.studentKey) : undefined;
+        const owner = group ? `group:${group.group_id}` : `student:${seat.studentKey}`;
+        const { check, fresh } = this.reportChecks.reserve(seat.game, objective.id, owner, JSON.stringify([epoch, reportCacheKey(input, this.env)]));
+        const previous = this.savedReport(seat.game, objective, seat.studentKey);
+        // A second click/teammate/reconnect attaches to the same saved check, without replacing its author or version.
+        if (!(previous?.submitted === 1 && previous.check_id === check.id)) this.saveReport(seat.game, objective, seat.studentKey, text, check.id);
+        this.attemptStatus(audit, 'waiting', check.feedback);
+        this.sendBoardChange(seat.game, seat.studentKey, objective);
+        if (fresh) this.reportChecks.finish(check.id, await checkReport(input, this.env));
+        const result = this.reportChecks.get(check.id);
+        if (!result || result.status === 'checking') return;
+        // Never apply an answer after undo, a new report, a changed quest, campaign reset, or game switch.
+        const current = this.sql.exec<{ student_key: string; text: string; ts: number }>('SELECT student_key, text, ts FROM campaign_reports WHERE game_id = ? AND objective = ? AND check_id = ? AND submitted = 1', seat.game, objective.id, check.id).toArray()[0];
+        if (!current || this.reportEpoch(seat.game, objective.id) !== epoch) return;
+        const latest = this.reportObjective(seat.game, current.student_key, objective.id);
+        if (!latest || JSON.stringify(latest) !== JSON.stringify(objective)) return;
+        const author = { ...seat, studentKey: current.student_key, name: this.rosterNames(seat.game).get(current.student_key) ?? seat.name };
+        const socket = this.ctx.getWebSockets(current.student_key).find(socket => (socket.deserializeAttachment() as Seat | null)?.game === seat.game) ?? ws;
+        const active = this.isOpen() && this.activeGame() === seat.game;
+        if (result.status === 'pass') {
+            if (active) await this.answer(socket, author, objective.id, current.text, undefined, { version: current.ts, audit });
+        }
+        else {
+            const revise = result.status === 'revise';
+            if (revise) this.sql.exec('UPDATE campaign_reports SET submitted = 0 WHERE game_id = ? AND objective = ? AND check_id = ?', seat.game, objective.id, check.id);
+            this.attemptStatus(audit, revise ? 'incorrect' : 'waiting', result.feedback);
+            if (revise) this.assistance.signal(seat.game, current.student_key, author.name, `Revise report: ${objective.text}`, current.text, 'instructions');
+        }
+        if (active) this.sendBoardChange(seat.game, current.student_key, objective);
+    }
+
+    // Exception path only: uncertainty/outages need a human decision, never an automatic incorrect grade.
+    private async acceptReport(action: Extract<TeacherAction, { kind: 'reportAccept' }>): Promise<string | null> {
+        if (!this.isOpen() || action.gameId !== this.activeGame()) return 'The selected game changed.';
+        const objective = this.reportObjective(action.gameId, action.studentKey, action.objective);
+        const report = objective && this.savedReport(action.gameId, objective, action.studentKey);
+        const check = report?.check_id && this.reportChecks.get(report.check_id);
+        if (!objective || !report || report.ts !== action.version || report.submitted !== 1 || !check || !['uncertain', 'unavailable'].includes(check.status)) return 'This report changed or is not waiting for review.';
+        const socket = this.ctx.getWebSockets(action.studentKey).find(socket => (socket.deserializeAttachment() as Seat | null)?.game === action.gameId);
+        // Offline students still receive the result on reconnect. Only game/student/name are used when finishing answers.
+        const seat = socket?.deserializeAttachment() as Seat | undefined;
+        const fallback: AnswerSeat = { game: action.gameId, studentKey: action.studentKey, name: this.rosterNames(action.gameId).get(action.studentKey) ?? 'Student' };
+        this.reportChecks.approve(check.id);
+        await this.answer(socket, seat ?? fallback, objective.id, report.text, undefined, { version: report.ts, audit: this.beginAttempt(seat ?? fallback, report.text, 'answer', undefined, undefined, objective.id) });
+        return null;
     }
 
     // Undo reopens a shared report for its original group, or an individual report for its author. Writing and XP
@@ -1803,10 +1904,10 @@ export class PlazaRoom extends DurableObject<Env> {
         const objective = ctx?.quests.find(o => o.id === objectiveId) ?? chapter?.objectives.find(o => o.id === objectiveId);
         if (!ctx || objective?.kind !== 'report') return warn('That report cannot be reopened.');
         if (!ctx.gameQuests.has(objective.id) && row?.status === 'campaign_complete') return warn('Your teacher ended this campaign.');
-        if (!ctx.player.done.includes(objective.id)) return; // a repeated undo is harmless
+        const finished = ctx.player.done.includes(objective.id);
         if (objective.board && !this.questBoard.assignment(seat.game, objective.id, seat.studentKey)) return warn('That report is not yours to reopen.');
         const group = objective.board && groupSize(objective) > 1 ? this.questBoard.groupOf(seat.game, objective.id, seat.studentKey) : undefined;
-        if (objective.board && groupSize(objective) > 1 && group?.state !== 'done') return warn('That group report cannot be reopened.');
+        if (objective.board && groupSize(objective) > 1 && group?.state !== (finished ? 'done' : 'playing')) return warn('That group report cannot be reopened.');
         const report = this.savedReport(seat.game, objective, seat.studentKey);
         if (!report || report.submitted !== 1 || report.ts !== version) {
             this.sendQuest(ws, seat.game, seat.studentKey);
@@ -1850,14 +1951,14 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     // A student's typed answer to a chapter question. A wrong one can be tried again after a short wait.
-    private answer(ws: WebSocket, seat: Seat, objectiveId: string, typed: string, attemptId?: string): void {
-        const audit = this.beginAttempt(seat, typed, 'answer', attemptId, undefined, objectiveId);
+    private async answer(ws: WebSocket | undefined, seat: AnswerSeat, objectiveId: string, typed: string, attemptId?: string, checked?: { version: number; audit: string }): Promise<void> {
+        const audit = checked?.audit ?? this.beginAttempt(seat, typed, 'answer', attemptId, undefined, objectiveId);
         const unavailable = (reason: string) => { this.attemptStatus(audit, 'invalid', reason); };
         if (typed.length > REPORT_MAX_LENGTH) return unavailable('The answer exceeds the maximum length.');
         // One of the game's side quests: answered with or without a mission.
         const board = this.boardContext(seat.game, seat.studentKey);
         const given = board?.gameQuests.has(objectiveId) ? board.quests.find(o => o.id === objectiveId) : undefined;
-        if (board && given) return this.answerSideQuest(ws, seat, board, given, typed, audit);
+        if (board && given) return this.answerSideQuest(ws, seat, board, given, typed, audit, checked);
         const row = this.campaignRow(seat.game);
         const campaign = row && this.gameCampaign(seat.game);
         const objective = campaign?.chapters[row?.chapter ?? 0]?.objectives.find(item => item.id === objectiveId);
@@ -1872,26 +1973,28 @@ export class PlazaRoom extends DurableObject<Env> {
         const reply = (correct: boolean, wait = false, message?: string) => {
             this.attemptStatus(audit, correct ? 'correct' : wait ? 'waiting' : 'incorrect', correct ? undefined : message ?? 'The answer was not accepted.');
             if (!correct && !wait) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Answer not accepted: ${objective.text}`, typed, 'instructions');
-            ws.send(JSON.stringify({ t: 'answered', objective: objective.id, correct, wait, ...(!correct && message ? { message } : {}) }));
+            try { ws?.send(JSON.stringify({ t: 'answered', objective: objective.id, correct, wait, ...(!correct && message ? { message } : {}) })); } catch { /* saved result reaches reconnects */ }
         };
         if (objective.activity || objective.conversation) {
             const conversation = this.conversation(seat.game, seat.studentKey, objective);
             if (conversation.completed < conversation.required) {
                 const message = `Exchange evidence with ${conversation.required} witness${conversation.required === 1 ? '' : 'es'} before submitting this conclusion.`;
-                ws.send(JSON.stringify({ t: 'notice', level: 'warning', text: message }));
+                try { ws?.send(JSON.stringify({ t: 'notice', level: 'warning', text: message })); } catch { /* disconnected */ }
                 return reply(false, true, message);
             }
         }
         const now = Date.now();
-        if (now - player.last_wrong < WRONG_ANSWER_WAIT_MS) return reply(false, true, 'Please wait a few seconds before trying again.');
+        if (!checked && now - player.last_wrong < WRONG_ANSWER_WAIT_MS) return reply(false, true, 'Please wait a few seconds before trying again.');
         if (objective.kind !== 'report' && typed.length > 80) return unavailable('Use up to 80 characters for a short answer.');
         let right: boolean;
         let rejection = 'That answer was not accepted. Check the question and try again.';
         if (objective.kind === 'report') {
-            // Any real attempt in a few words counts; the teacher reads what was written.
             right = typed.trim().split(/\s+/).length >= 5;
             rejection = 'Write at least 5 words, then send your report again.';
-            if (right) this.saveReport(seat.game, objective, seat.studentKey, typed);
+            if (right && this.env.REPORT_CHECKS !== '0') {
+                if (!checked) return this.submitReport(ws, seat, objective, typed, audit);
+                if (!this.reportApproved(seat.game, objective, seat.studentKey, checked.version)) return;
+            } else if (right) this.saveReport(seat.game, objective, seat.studentKey, typed);
         } else if (objective.answerThief) {
             // The thief's made-up name, as the plaza shows it. The thief never gets this question.
             const names = this.rosterNames(seat.game);
@@ -1940,7 +2043,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // A student's answer to one of the game's side quests: checked as a mission's would be, and kept with the game. One
     // answer finishes a group's quest for every member, with XP for each.
-    private answerSideQuest(ws: WebSocket, seat: Seat, ctx: BoardContext, objective: Objective, typed: string, audit: string): void {
+    private async answerSideQuest(ws: WebSocket | undefined, seat: AnswerSeat, ctx: BoardContext, objective: Objective, typed: string, audit: string, checked?: { version: number; audit: string }): Promise<void> {
         const unavailable = (reason: string) => { this.attemptStatus(audit, 'invalid', reason); };
         if (ctx.player.done.includes(objective.id)) return unavailable('That side quest is finished.');
         if (!this.questBoard.assignment(seat.game, objective.id, seat.studentKey)) return unavailable('Accept this quest before answering.');
@@ -1949,18 +2052,20 @@ export class PlazaRoom extends DurableObject<Env> {
         const reply = (correct: boolean, wait = false, message?: string) => {
             this.attemptStatus(audit, correct ? 'correct' : wait ? 'waiting' : 'incorrect', correct ? undefined : message ?? 'The answer was not accepted.');
             if (!correct && !wait) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Answer not accepted: ${objective.text}`, typed, 'instructions');
-            ws.send(JSON.stringify({ t: 'answered', objective: objective.id, correct, wait, ...(!correct && message ? { message } : {}) }));
+            try { ws?.send(JSON.stringify({ t: 'answered', objective: objective.id, correct, wait, ...(!correct && message ? { message } : {}) })); } catch { /* saved result reaches reconnects */ }
         };
         const now = Date.now(); const key = `${seat.game}:${seat.studentKey}`;
-        if (now - (this.sideQuestWrong.get(key) ?? 0) < WRONG_ANSWER_WAIT_MS) return reply(false, true, 'Please wait a few seconds before trying again.');
+        if (!checked && now - (this.sideQuestWrong.get(key) ?? 0) < WRONG_ANSWER_WAIT_MS) return reply(false, true, 'Please wait a few seconds before trying again.');
         const report = objective.kind === 'report';
         if (!report && typed.length > 80) return unavailable('Use up to 80 characters for a short answer.');
-        // A report counts as any real attempt in a few words; the teacher reads what was written.
         if (!(report ? typed.trim().split(/\s+/).length >= 5 : answerMatches(objective, typed))) {
             this.sideQuestWrong.set(key, now);
             return reply(false, false, report ? 'Write at least 5 words, then send your report again.' : 'That answer was not accepted. Check the question and try again.');
         }
-        if (report) this.saveReport(seat.game, objective, seat.studentKey, typed);
+        if (report && this.env.REPORT_CHECKS !== '0') {
+            if (!checked) return this.submitReport(ws, seat, objective, typed, audit);
+            if (!this.reportApproved(seat.game, objective, seat.studentKey, checked.version)) return;
+        } else if (report) this.saveReport(seat.game, objective, seat.studentKey, typed);
         this.gameSideQuests.finish(seat.game, seat.studentKey, objective.id);
         reply(true);
         this.award(seat.studentKey, `answer:${seat.game}:${objective.id}`, XP.quest, 'Side quest completed', seat.game);
@@ -2008,6 +2113,7 @@ export class PlazaRoom extends DurableObject<Env> {
             // The game's side quests stay, with who did them and what they wrote: they belong to the game, not the mission.
             this.sql.exec('DELETE FROM campaign_players WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM campaign_reports WHERE game_id = ? AND objective NOT IN (SELECT quest_id FROM game_side_quests WHERE game_id = ?)', game, game);
+            this.sql.exec('DELETE FROM report_checks WHERE game_id = ? AND objective NOT IN (SELECT quest_id FROM game_side_quests WHERE game_id = ?)', game, game);
             this.interviews.clear(game);
             this.sql.exec('DELETE FROM campaign_thieves WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM quest_assignments WHERE game_id = ? AND chapter <> ?', game, GAME_CHAPTER);
@@ -2036,11 +2142,12 @@ export class PlazaRoom extends DurableObject<Env> {
             groups: chapters.flatMap(chapter => this.groups.current(game, chapter)).flatMap(group => sideQuests.some(o => o.id === group.objective) && group.state !== 'done'
                 ? [{ id: group.group_id, quest: title(group.objective), members: this.groups.members(group.group_id).map(name), size: group.size, state: group.state }] : []),
             open: sideQuests.filter(o => !base.closed.has(o.id)).map(o => ({ id: o.id, title: title(o.id) })),
-            reports: this.sql.exec<{ student_key: string; objective: string; text: string }>('SELECT student_key, objective, text FROM campaign_reports WHERE game_id = ? AND submitted = 1 ORDER BY ts DESC LIMIT 100', game).toArray()
+            reports: this.sql.exec<{ student_key: string; objective: string; text: string; ts: number; check_id: string | null }>('SELECT student_key, objective, text, ts, check_id FROM campaign_reports WHERE game_id = ? AND submitted = 1 ORDER BY ts DESC LIMIT 100', game).toArray()
                 .filter(report => given.has(report.objective)).map(report => {
                     // A group's report was written for every member: the teacher sees who else was in it.
                     const others = this.questBoard.groupOf(game, report.objective, report.student_key)?.members.filter(key => key !== report.student_key) ?? [];
-                    return { studentKey: report.student_key, objective: report.objective, quest: title(report.objective), text: report.text, starred: this.starred(report.student_key, `report:${game}:${report.objective}`),
+                    const check = report.check_id ? this.reportChecks.get(report.check_id) : undefined;
+                    return { studentKey: report.student_key, objective: report.objective, quest: title(report.objective), text: report.text, version: report.ts, ...(check ? { check: { status: check.status, feedback: check.feedback } } : {}), starred: this.starred(report.student_key, `report:${game}:${report.objective}`),
                         ...(others.length ? { partner: others.map(name).join(', ') } : {}) };
                 }) };
         for (const player of base.players) {
@@ -2080,14 +2187,15 @@ export class PlazaRoom extends DurableObject<Env> {
                 incoming: false, studentKey: i.investigator, witnessKey: i.witness, questionId: i.question_id, answerId: i.answer_id, name: names.get(i.witness) ?? 'Classmate',
                 question: i.question, questionStatus: i.question_status, answer: i.answer, answerStatus: i.answer_status, evidence: i.evidence, shared: i.shared
             })),
-            reports: this.sql.exec<{ student_key: string; objective: string; text: string; partner_key: string | null }>(
-                `SELECT r.student_key, r.objective, r.text, a.partner_key FROM campaign_reports r
+            reports: this.sql.exec<{ student_key: string; objective: string; text: string; partner_key: string | null; ts: number; check_id: string | null }>(
+                `SELECT r.student_key, r.objective, r.text, r.ts, r.check_id, a.partner_key FROM campaign_reports r
                 LEFT JOIN quest_assignments a ON r.game_id = a.game_id AND r.student_key = a.student_key AND r.objective = a.objective
                 WHERE r.game_id = ? AND r.submitted = 1 AND r.objective NOT IN (SELECT quest_id FROM game_side_quests WHERE game_id = ?) ORDER BY r.ts DESC LIMIT 100`, game, game).toArray()
                 .map(report => {
                     // A group's report was written for every member: the teacher sees who else was in it.
                     const others = this.questBoard.groupOf(game, report.objective, report.student_key)?.members.filter(key => key !== report.student_key) ?? [];
-                    return { studentKey: report.student_key, objective: report.objective, text: report.text,
+                    const check = report.check_id ? this.reportChecks.get(report.check_id) : undefined;
+                    return { studentKey: report.student_key, objective: report.objective, text: report.text, version: report.ts, ...(check ? { check: { status: check.status, feedback: check.feedback } } : {}),
                         starred: this.starred(report.student_key, `report:${game}:${report.objective}`),
                         ...(report.partner_key ? { partner: names.get(report.partner_key) ?? 'Classmate' } : others.length ? { partner: others.map(key => names.get(key) ?? 'Classmate').join(', ') } : {}) };
                 })
@@ -2212,6 +2320,7 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         this.assistance.clear(game);
         this.participation.clear(game);
+        this.reportChecks.clear(game);
         this.incidents.forget(game);
         this.blockedWords.forget(game);
         for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'side_quest_groups', 'side_quest_members', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'game_side_quests', 'side_quest_done', 'game_side_quest_previews', 'warmups', 'warmup_players', 'speech_plays']) {

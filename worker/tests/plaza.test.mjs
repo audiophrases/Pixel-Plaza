@@ -71,7 +71,7 @@ async function startPlaza(pinPlayUrl, persistTo, vars = {}, { content = true, po
         '--var', `CREATE_PASSWORD_HASH:${await sha256Hex(PASSWORD)}`,
         '--var', `PINPLAY_API_URL:${pinPlayUrl}`,
         // No OpenAI key unless a test brings its own: the one in .dev.vars must not change the results.
-        ...Object.entries({ OPENAI_API_KEY: '', MOVEMENT_CHECK: '0', CONTENT_TOKEN, ...vars }).flatMap(([key, value]) => ['--var', `${key}:${value}`])], {
+        ...Object.entries({ OPENAI_API_KEY: '', REPORT_CHECKS: '0', MOVEMENT_CHECK: '0', CONTENT_TOKEN, ...vars }).flatMap(([key, value]) => ['--var', `${key}:${value}`])], {
         cwd: root, env: { ...process.env, WRANGLER_SEND_METRICS: 'false' }, stdio: ['ignore', 'pipe', 'pipe']
     });
     let log = '';
@@ -935,6 +935,181 @@ test('Side quests belong to the game: added with or without a campaign, taken at
         assert.deepEqual([side.quests, side.reports.length, side.doing.map(item => item.name)], [2, 1, ['Sam']]);
     } finally {
         for (const socket of sockets) socket.ws.close(); await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
+test('automatic report feedback: revision, shared checks, cache, undo, stale results, teacher exceptions and restart', { timeout: 180000 }, async () => {
+    const requests = [], releases = new Map();
+    const openai = http.createServer(async (req, res) => {
+        let raw = ''; for await (const chunk of req) raw += chunk;
+        res.setHeader('content-type', 'application/json');
+        if (req.url !== '/v1/responses') return res.end('{}');
+        const body = JSON.parse(raw), input = JSON.parse(body.input); requests.push(input);
+        if (input.answer.includes('delay')) await new Promise(resolve => releases.set(input.answer, resolve));
+        if (input.answer.includes('outage')) { res.statusCode = 503; return res.end('{}'); }
+        const verdict = input.answer.includes('one reason') ? { status: 'revise', feedback: 'Add a second reason for your choice.' }
+            : input.answer.includes('unsure') ? { status: 'uncertain', feedback: 'Your teacher can check the evidence for this answer.' }
+            : { status: 'pass', feedback: 'Use “we were” when talking about the past.' };
+        res.end(JSON.stringify({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(verdict) }] }] }));
+    });
+    await new Promise(resolve => openai.listen(0, '127.0.0.1', resolve));
+    const pinPlay = await startPinPlay(), persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-report-checks-'));
+    const vars = { REPORT_CHECKS: '1', OPENAI_API_KEY: 'test', OPENAI_BASE_URL: `http://127.0.0.1:${openai.address().port}` };
+    const auth = `http://127.0.0.1:${pinPlay.address().port}`;
+    let plaza = await startPlaza(auth, persistTo, vars), base = plaza.base, session;
+    const sockets = [], join = async token => { const socket = await enter(base, token, null); sockets.push(socket); return socket; };
+    const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+    const question = (socket, id, predicate) => socket.next(m => m.t === 'quest' && m.quest?.objectives.some(o => o.id === id && predicate(o)), id).then(m => m.quest.objectives.find(o => o.id === id));
+    const card = (socket, id, predicate) => socket.next(m => m.t === 'board' && m.board.some(o => o.id === id && predicate(o)), `${id}: ${predicate}`).then(m => m.board.find(o => o.id === id));
+    const answer = (socket, id, text) => socket.send({ t: 'answer', objective: id, text });
+    const release = async text => {
+        for (let i = 0; i < 100 && !releases.has(text); i++) await new Promise(resolve => setTimeout(resolve, 20));
+        assert.ok(releases.has(text), 'the mock API received the delayed answer'); releases.get(text)();
+    };
+    try {
+        session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const created = (await teacher('game', { name: 'Automatic feedback', randomNames: false })).body;
+        PIN = created.pin; const gameId = created.game.id;
+        let alex = await join('signed-a'), sam = await join('signed-b');
+        // Library reports use the same default check, and keep their configured learner level.
+        const solo = sideQuests.find(q => !q.chapter && q.format === 'solo' && q.answer === 'report');
+        const boardTarget = (await teacher('side-quests/board')).body.target;
+        const preview = (await teacher('side-quests/board-preview', { gameId, version: boardTarget.version, questIds: [solo.id] })).body.preview;
+        assert.equal((await teacher('side-quests/board-release', { previewId: preview.id })).status, 200);
+        alex.send({ t: 'quest-accept', objective: solo.id }); await card(alex, solo.id, o => o.state === 'active');
+        answer(alex, solo.id, 'We choose a quiet park with enough space for everyone.');
+        let libraryDone = await card(alex, solo.id, o => o.state === 'done');
+        assert.equal(requests.length, 1); assert.equal(requests[0].level, solo.level);
+        assert.equal(requests[0].teacherNote, undefined);
+        alex.send({ t: 'report-undo', objective: solo.id, version: libraryDone.report.version, gameId });
+        await card(alex, solo.id, o => o.report?.submitted === false);
+        answer(alex, solo.id, libraryDone.report.text); await card(alex, solo.id, o => o.state === 'done');
+        assert.equal(requests.length, 1, 'library resubmission reuses its check');
+        requests.length = 0;
+        let draft = (await teacher('missions/create', { id: 'compact-checks', source: 'castanyada' })).body.draft;
+        const report = { text: 'Recommend a meeting place and give two reasons.', kind: 'report', accept: [], successCriteria: 'Name one place and give two reasons.', level: 'A2' };
+        draft.campaign.chapters = [{ ...draft.campaign.chapters[0], discoveries: [], reveals: [], objectives: [
+            { ...report, id: 'write' }, { ...report, id: 'team-write', optional: true, board: { minPlayers: 2 } },
+            ...['review', 'failure', 'late', 'reopen'].map(id => ({ ...report, id, optional: true })),
+            { ...report, id: 'evidence', optional: true, conversation: { witnesses: 1 } },
+            { id: 'short', text: 'Which place?', accept: ['park'], optional: true },
+        ] }];
+        draft = (await teacher('missions/save', { id: draft.campaign.id, version: draft.version, envelope: missionEnvelope(draft.campaign) })).body.draft;
+        assert.ok(draft); assert.equal((await teacher('missions/publish', { id: draft.campaign.id, version: draft.version })).status, 200);
+        await teacher('campaign', { op: 'start', campaign: draft.campaign.id });
+        const undo = (socket, id, version) => socket.send({ t: 'report-undo', objective: id, version, gameId });
+        answer(alex, 'write', 'Too short');
+        assert.equal((await alex.next(m => m.t === 'answered' && m.objective === 'write')).correct, false);
+        assert.equal(requests.length, 0);
+        // Observe the existing local wrong-answer cooldown before making a valid attempt.
+        await new Promise(resolve => setTimeout(resolve, 3100));
+        const incomplete = 'We choose the park with one reason.';
+        answer(alex, 'write', incomplete);
+        const revision = await question(alex, 'write', o => o.report?.check?.status === 'revise');
+        assert.equal(revision.done, false); assert.equal(revision.report.submitted, false);
+        assert.equal(revision.report.text, incomplete); assert.equal(requests.length, 1);
+        assert.equal(requests[0].criteria, report.successCriteria);
+        assert.ok(!JSON.stringify(revision).includes(report.successCriteria), 'private criteria never reach student state');
+        answer(alex, 'write', incomplete);
+        await question(alex, 'write', o => o.report?.check?.status === 'revise');
+        assert.equal(requests.length, 1, 'unchanged rejected writing is cached');
+        const good = 'We choose the park because it is quiet and we were comfortable there.';
+        answer(alex, 'write', good);
+        let passed = await question(alex, 'write', o => o.done);
+        assert.equal(passed.report.check.status, 'pass'); assert.equal(requests.length, 2);
+        answer(sam, 'write', good); await question(sam, 'write', o => o.done);
+        assert.equal(requests.length, 3, 'individual students do not share a grading cache');
+        undo(alex, 'write', passed.report.version); await question(alex, 'write', o => o.report?.submitted === false);
+        answer(alex, 'write', good); passed = await question(alex, 'write', o => o.done && o.report?.version > passed.report.version);
+        assert.equal(requests.length, 3, 'undo and identical resubmission reuse the result');
+
+        alex.send({ t: 'quest-accept', objective: 'team-write' }); await card(alex, 'team-write', o => o.state === 'active');
+        sam.send({ t: 'quest-accept', objective: 'team-write' }); await card(sam, 'team-write', o => o.group?.state === 'playing');
+        const delayed = 'We choose the park for quiet and space with a delay.';
+        answer(alex, 'team-write', delayed);
+        let checking = await card(sam, 'team-write', o => o.report?.check?.status === 'checking');
+        answer(sam, 'team-write', delayed);
+        await card(sam, 'team-write', o => o.report?.version === checking.report.version);
+        assert.equal(requests.length, 4, 'one in-flight API request for the whole team');
+        await release(delayed);
+        let teamDone = await card(alex, 'team-write', o => o.state === 'done');
+        assert.deepEqual((await card(sam, 'team-write', o => o.state === 'done')).report, teamDone.report);
+        // An older response cannot complete or overwrite an edited/undone group report.
+        undo(sam, 'team-write', teamDone.report.version); await card(sam, 'team-write', o => o.report?.submitted === false);
+        const older = 'We choose another quiet place and enough space with delay.';
+        answer(alex, 'team-write', older); checking = await card(sam, 'team-write', o => o.report?.check?.status === 'checking');
+        undo(sam, 'team-write', checking.report.version); await card(sam, 'team-write', o => o.report?.submitted === false);
+        answer(sam, 'team-write', good); teamDone = await card(sam, 'team-write', o => o.state === 'done' && o.report?.text === good);
+        await release(older);
+        assert.equal((await teacher('status')).body.campaign.reports.find(r => r.objective === 'team-write').text, good);
+        // If the writer leaves a pending group quest, the remaining member keeps the report and result.
+        undo(alex, 'team-write', teamDone.report.version); await card(alex, 'team-write', o => o.report?.submitted === false);
+        const departing = 'We choose a quiet park with space after another delay.';
+        answer(sam, 'team-write', departing); await card(alex, 'team-write', o => o.report?.check?.status === 'checking');
+        sam.send({ t: 'quest-leave', objective: 'team-write' });
+        await card(alex, 'team-write', o => o.group?.members.length === 1 && o.report?.check?.status === 'checking');
+        await release(departing); await card(alex, 'team-write', o => o.state === 'done' && o.report?.text === departing);
+        assert.equal((await teacher('status')).body.campaign.reports.find(r => r.objective === 'team-write').studentKey, 'stu_a');
+
+        const before = requests.length;
+        answer(alex, 'short', 'park'); await alex.next(m => m.t === 'answered' && m.objective === 'short' && m.correct);
+        answer(alex, 'evidence', good); await alex.next(m => m.t === 'answered' && m.objective === 'evidence' && m.wait);
+        assert.equal(requests.length, before, 'fixed answers and missing participation do not call AI');
+        answer(alex, 'review', 'We are unsure which evidence supports these two reasons.');
+        let review = await question(alex, 'review', o => o.report?.check?.status === 'uncertain');
+        assert.equal(review.done, false); assert.equal(review.report.submitted, true);
+        let body = { gameId, studentKey: 'stu_a', objective: 'review', version: review.report.version };
+        assert.equal((await api(base, '/api/teacher/report-accept', { body })).status, 401);
+        assert.equal((await teacher('report-accept', { ...body, version: body.version - 1 })).status, 409);
+        assert.equal((await teacher('report-accept', { ...body, gameId: 'wrong' })).status, 409);
+        alex.ws.close(); await alex.closed;
+        assert.equal((await teacher('report-accept', body)).status, 200, 'teacher resolves an exception while student is offline');
+        alex = await join('signed-a');
+        review = await question(alex, 'review', o => o.done);
+        assert.match(review.report.check.feedback, /teacher/);
+        answer(alex, 'failure', 'We choose a quiet place with space during an outage.');
+        const failure = await question(alex, 'failure', o => o.report?.check?.status === 'unavailable');
+        assert.equal(failure.done, false); assert.equal(failure.report.submitted, true);
+        assert.equal((await teacher('status')).body.campaign.reports.find(r => r.objective === 'failure').check.status, 'unavailable');
+
+        // A saved pass arriving while the class is closed completes automatically when the student returns.
+        const closing = 'We choose the library for quiet and space after closing delay.';
+        answer(alex, 'reopen', closing); await question(alex, 'reopen', o => o.report?.check?.status === 'checking');
+        await teacher('class', { open: false }); await alex.closed; await sam.closed;
+        await release(closing);
+        const countBeforeClose = requests.length;
+        for (let i = 0; i < 40; i++) {
+            const check = (await teacher('status')).body.campaign.reports.find(r => r.objective === 'reopen')?.check;
+            if (check?.status === 'pass') break;
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        await teacher('class', { open: true });
+        alex = await join('signed-a'); sam = await join('signed-b');
+        await question(alex, 'reopen', o => o.done);
+        assert.equal(requests.length, countBeforeClose, 'returning students reuse a pass received while closed');
+
+        // Cache and feedback survive a real restart, with no additional paid request.
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        const count = requests.length;
+        plaza = await startPlaza(auth, persistTo, vars); base = plaza.base;
+        session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        alex = await join('signed-a'); sam = await join('signed-b');
+        const restored = await question(alex, 'write', o => o.done);
+        undo(alex, 'write', restored.report.version); await question(alex, 'write', o => o.report?.submitted === false);
+        answer(alex, 'write', good); await question(alex, 'write', o => o.done);
+        assert.equal(requests.length, count);
+        const late = 'We choose a quiet park with space for everyone after delay.';
+        answer(alex, 'late', late); await question(alex, 'late', o => o.report?.check?.status === 'checking');
+        await teacher('campaign', { op: 'reset', confirm: true });
+        await teacher('campaign', { op: 'start', campaign: draft.campaign.id });
+        await release(late);
+        const status = (await teacher('status')).body;
+        assert.equal(status.campaign.reports.length, 0, 'late result cannot restore erased reports');
+        assert.equal(status.campaign.players.find(p => p.studentKey === 'stu_a').done.length, 0);
+    } finally {
+        for (const release of releases.values()) release();
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); await new Promise(resolve => openai.close(resolve)); removeTemp(persistTo);
     }
 });
 

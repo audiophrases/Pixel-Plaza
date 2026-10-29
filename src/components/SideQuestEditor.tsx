@@ -5,18 +5,20 @@ import MissionField from './MissionField';
 // The form keeps lists as the teacher types them: commas for focus, tags and roles, one accepted answer a line.
 type Draft = {
     title: string; text: string; theme: QuestTheme; category: string; chapter: string; level: QuestLevel; format: QuestFormat; answer: QuestAnswer;
-    minutes: string; focus: string; tags: string; accept: string; teacherNote: string; roles: string; after: string; afterMain: boolean;
+    minutes: string; focus: string; tags: string; accept: string; teacherNote: string; successCriteria: string; roles: string; after: string; afterMain: boolean;
 };
 const list = (text: string, separator: RegExp) => text.split(separator).map(item => item.trim()).filter(Boolean);
 const draftOf = (quest: SideQuest): Draft => ({
     title: quest.title, text: quest.text, theme: quest.theme, category: quest.category, chapter: quest.chapter ?? '', level: quest.level, format: quest.format, answer: quest.answer,
     minutes: String(quest.minutes), focus: quest.focus.join(', '), tags: quest.tags.join(', '), accept: quest.accept.join('\n'), teacherNote: quest.teacherNote,
     roles: quest.roles?.join(', ') ?? '', after: quest.after ?? '', afterMain: !!quest.afterMain,
+    successCriteria: quest.successCriteria ?? '',
 });
 const questOf = (draft: Draft, id: string) => ({
     id, title: draft.title, text: draft.text, theme: draft.theme, category: draft.category, chapter: draft.theme === 'story' ? draft.chapter : null,
     level: draft.level, format: draft.format, answer: draft.answer, minutes: Number(draft.minutes), focus: list(draft.focus, /,/), tags: list(draft.tags, /,/),
     accept: draft.answer === 'text' ? list(draft.accept, /\n/) : [], teacherNote: draft.teacherNote,
+    ...(draft.answer === 'report' && draft.successCriteria.trim() ? { successCriteria: draft.successCriteria.trim() } : {}),
     ...(draft.theme === 'story' && draft.roles.trim() ? { roles: list(draft.roles, /,/) } : {}),
     ...(draft.theme === 'story' && draft.after.trim() ? { after: draft.after.trim() } : {}),
     ...(draft.theme === 'story' && draft.afterMain ? { afterMain: true } : {}),
@@ -65,10 +67,11 @@ export default function SideQuestEditor({ quest, creating, chapters, categories,
             <MissionField label="Tags (commas between)" value={draft.tags} maxLength={2000} placeholder="cafe, role-play, warm-up" onChange={value => set('tags', value)} />
         </div>
         <MissionField label="Teacher note" multiline value={draft.teacherNote} maxLength={4000} placeholder="What to look for, how to adapt it, the solution." onChange={value => set('teacherNote', value)} />
+        {draft.answer === 'report' && <MissionField label="Success criteria (optional, private)" multiline value={draft.successCriteria} maxLength={600} placeholder="For example: Recommend one place and give two reasons. Otherwise the instructions are used." onChange={value => set('successCriteria', value)} />}
 
         <div className="ql-board-preview" aria-label="On the quest board"><p className="mission-eyebrow">ON THE QUEST BOARD</p>
             <p>{draft.title.trim() || 'Title'}: {draft.text.trim() || 'What the student reads.'}</p>
-            <small>{draft.answer === 'text' ? 'The student types the answer; the game checks it.' : 'The student writes a report for you to read.'}{format.players > 1 ? ` Waits until ${format.players} students are online.` : ''}</small></div>
+            <small>{draft.answer === 'text' ? 'The student types the answer; the game checks it.' : 'Reports receive an automatic task check and a short revision hint.'}{format.players > 1 ? ` Waits until ${format.players} students are online.` : ''}</small></div>
         {problem && touched && <p className="ql-reason" role="status">Still to do: {problem}</p>}
         {saved && !touched && <p className="mission-sync" role="status">✓ Saved.</p>}
         <div className="mission-toolbar"><button className="mission-button primary" disabled={busy || !!problem}>{creating ? 'Add to the library' : 'Save changes'}</button></div>
