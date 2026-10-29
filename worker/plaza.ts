@@ -85,7 +85,7 @@ const CLOSE_CLASS_CLOSED = 4002; // the teacher closed the game
 
 // Per-socket state. It lives in the socket's attachment, so it survives the
 // room hibernating between messages.
-type Seat = { id: string; game: string; themeId?: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; style?: Style; x: number; y: number; lastChat: number; lastCheck?: number; lastTyping?: number; lastReroll?: number; movedAt?: number; left?: boolean; frozenUntil?: number; downUntil?: number };
+type Seat = { id: string; game: string; themeId?: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; style?: Style; x: number; y: number; lastChat: number; lastCheck?: number; lastTyping?: number; lastReroll?: number; movedAt?: number; left?: boolean; frozenUntil?: number; downUntil?: number; inTab?: boolean; tabSwitches?: number; tabAwayAt?: number | null };
 type AnswerSeat = Pick<Seat, 'game' | 'studentKey' | 'name'>;
 
 export type TeacherAction =
@@ -240,7 +240,10 @@ export class PlazaRoom extends DurableObject<Env> {
                 PRIMARY KEY (game_id, student_key, objective));
             CREATE TABLE IF NOT EXISTS campaign_players (
                 game_id TEXT NOT NULL, student_key TEXT NOT NULL, role_id TEXT NOT NULL, clues TEXT NOT NULL DEFAULT '[]',
-                done TEXT NOT NULL DEFAULT '[]', last_wrong INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (game_id, student_key));`);
+                done TEXT NOT NULL DEFAULT '[]', last_wrong INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (game_id, student_key));
+            CREATE TABLE IF NOT EXISTS student_tab_stats (
+                game_id TEXT NOT NULL, student_key TEXT NOT NULL, tab_switches INTEGER NOT NULL DEFAULT 0, last_away INTEGER,
+                PRIMARY KEY (game_id, student_key));`);
         // Older rooms predate nearby chat and whispers: their messages were for everyone.
         const chatColumns = this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('chat')").toArray().map(row => row.name);
         for (const [column, type] of [['target_key', 'TEXT'], ['target_name', 'TEXT'], ['x', 'REAL'], ['y', 'REAL'], ['flag', 'TEXT'], ['note', 'TEXT'], ['game_id', 'TEXT'], ['marks', 'TEXT'], ['voice', 'TEXT']]) {
@@ -840,7 +843,8 @@ export class PlazaRoom extends DurableObject<Env> {
                     current.id, Date.now() - PLAYS_SHOWN_MS, PLAYS_SHOWN).toArray() : []
             },
             online: this.seats().filter(seat => seat.game === current?.id).map(seat => ({
-                studentKey: seat.studentKey, name: seat.name, x: seat.x, y: seat.y, zone: this.themes.world(seat.themeId).zoneAt(seat.x, seat.y), level: levelOf(this.xpOf(seat.studentKey)).level, look: seat.avatar
+                studentKey: seat.studentKey, name: seat.name, x: seat.x, y: seat.y, zone: this.themes.world(seat.themeId).zoneAt(seat.x, seat.y), level: levelOf(this.xpOf(seat.studentKey)).level, look: seat.avatar,
+                inTab: seat.inTab !== false, tabSwitches: seat.tabSwitches ?? 0, tabAwayAt: seat.tabAwayAt ?? null
             }))
         };
     }
@@ -852,7 +856,16 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!name) return { error: 'That student is not in this game.', status: 404 };
         const avatar = this.avatarOf(studentKey);
         avatar.voice ??= voiceFor(studentKey);
-        return { studentKey, name, avatar };
+        const tabStat = this.sql.exec<{ tab_switches: number; last_away: number | null }>(
+            'SELECT tab_switches, last_away FROM student_tab_stats WHERE game_id = ? AND student_key = ?',
+            gameId, studentKey).toArray()[0];
+        const seat = this.seats().find(s => s.game === gameId && s.studentKey === studentKey);
+        return {
+            studentKey, name, avatar,
+            inTab: seat ? seat.inTab !== false : false,
+            tabSwitches: Math.max(seat?.tabSwitches ?? 0, tabStat?.tab_switches ?? 0),
+            tabAwayAt: seat?.tabAwayAt ?? tabStat?.last_away ?? null
+        };
     }
 
     private editStudent(action: Extract<TeacherAction, { kind: 'student' }>): { error: string; status: number } | null {
@@ -1312,12 +1325,16 @@ export class PlazaRoom extends DurableObject<Env> {
         const spot = saved.x != null && saved.y != null && !isBlocked(saved.x, saved.y)
             ? { x: saved.x, y: saved.y }
             : { x: SPAWN.x + Math.round(Math.random() * 100 - 50), y: SPAWN.y + Math.round(Math.random() * 100 - 50) };
+        const tabStat = this.sql.exec<{ tab_switches: number; last_away: number | null }>(
+            'SELECT tab_switches, last_away FROM student_tab_stats WHERE game_id = ? AND student_key = ?',
+            game, row.student_key).toArray()[0];
         const seat: Seat = {
             id: crypto.randomUUID().slice(0, 8), game, themeId, studentKey: row.student_key, name: this.rosterNames(game).get(row.student_key) ?? saved.name,
             avatar: (saved.avatar && sanitizeAvatar(JSON.parse(saved.avatar))) || defaultAvatar(),
             style: readStyle(saved.style, levelOf(saved.xp).level),
             x: spot.x, y: spot.y,
-            lastChat: 0, movedAt: Date.now()
+            lastChat: 0, movedAt: Date.now(),
+            inTab: true, tabSwitches: tabStat?.tab_switches ?? 0, tabAwayAt: null
         };
         // Never chosen a voice: one of their own, not the same default as everyone else.
         if (!isEnglishVoice(seat.avatar.voice)) seat.avatar.voice = voiceFor(row.student_key);
@@ -1327,7 +1344,7 @@ export class PlazaRoom extends DurableObject<Env> {
         // Every classmate in this game, here or not, so naming one who is absent is still English.
         // The map itself comes with the welcome: the page has none of its own.
         server.send(JSON.stringify({ t: 'welcome', id: seat.id, gameId: seat.game, themeId, theme: this.themes.theme(themeId), players: [...others, seat].map(publicSeat),
-            names: [...this.rosterNames(seat.game).values()] }));
+            names: [...this.rosterNames(seat.game).values()], tabSwitches: seat.tabSwitches ?? 0 }));
         this.broadcast({ t: 'join', player: publicSeat(seat) }, server);
         if (replaced.length === 0) this.systemChat(`${seat.name} has joined the Plaza.`, server);
         this.sendQuest(server, seat.game, seat.studentKey, true);
@@ -1376,6 +1393,21 @@ export class PlazaRoom extends DurableObject<Env> {
                 }
             }
             ws.send(JSON.stringify({ t: 'attempt-recorded', id: data.id, kind: 'attempt-outcome' }));
+        } else if (data?.t === 'tab-focus') {
+            const inTab = data.inTab !== false;
+            const count = Math.max(0, Math.min(9999, Math.round(Number(data.count || 0))));
+            seat.inTab = inTab;
+            if (count > (seat.tabSwitches ?? 0)) seat.tabSwitches = count;
+            seat.tabAwayAt = inTab ? null : (seat.tabAwayAt ?? Date.now());
+            ws.serializeAttachment(seat);
+            if ((seat.tabSwitches ?? 0) > 0) {
+                this.sql.exec(
+                    `INSERT INTO student_tab_stats (game_id, student_key, tab_switches, last_away)
+                     VALUES (?, ?, ?, ?)
+                     ON CONFLICT (game_id, student_key) DO UPDATE SET tab_switches = MAX(student_tab_stats.tab_switches, excluded.tab_switches), last_away = excluded.last_away`,
+                    seat.game, seat.studentKey, seat.tabSwitches, seat.tabAwayAt ?? Date.now()
+                );
+            }
         } else if (data?.t === 'help-request') {
             await this.requestHelp(seat, data);
         } else if (data?.t === 'move') {
@@ -2341,7 +2373,7 @@ export class PlazaRoom extends DurableObject<Env> {
         this.activityHistory.clear(game);
         this.incidents.forget(game);
         this.blockedWords.forget(game);
-        for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'side_quest_groups', 'side_quest_members', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'game_side_quests', 'side_quest_done', 'game_side_quest_previews', 'warmups', 'warmup_players', 'speech_plays']) {
+        for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'side_quest_groups', 'side_quest_members', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'game_side_quests', 'side_quest_done', 'game_side_quest_previews', 'warmups', 'warmup_players', 'speech_plays', 'student_tab_stats']) {
             this.sql.exec(`DELETE FROM ${table} WHERE game_id = ?`, game);
         }
         this.sql.exec('DELETE FROM games WHERE id = ?', game);

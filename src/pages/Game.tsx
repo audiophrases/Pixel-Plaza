@@ -171,6 +171,22 @@ export default function Game() {
     try { localStorage.setItem('pixelplaza.chat', JSON.stringify(chatSpot)); } catch { /* storage disabled */ }
   }, [chatSpot]);
 
+  // Focus tracking for tab leaves (PinPlay feature reuse)
+  const blurAtRef = useRef<number | null>(null);
+  const [isTabAway, setIsTabAway] = useState(false);
+  const [tabSwitches, setTabSwitches] = useState<number>(() => {
+    try {
+      const key = `pixelplaza.lefttab:${session?.student.studentKey}:${state?.roomCode}`;
+      return Math.max(0, parseInt(sessionStorage.getItem(key) || '0', 10) || 0);
+    } catch {
+      return 0;
+    }
+  });
+  const tabSwitchesRef = useRef(tabSwitches);
+  useEffect(() => {
+    tabSwitchesRef.current = tabSwitches;
+  }, [tabSwitches]);
+
   // Which conversation a message belongs to, and what is new in each.
   const convOf = (message: ChatMessage) => conversationOf(message, myName);
   const byConv = new Map<string, ChatMessage[]>();
@@ -283,6 +299,64 @@ export default function Game() {
       window.removeEventListener('keydown', enable, true);
     };
   }, []);
+
+  const handleFocusLost = useCallback(() => {
+    if (blurAtRef.current != null) return;
+    blurAtRef.current = Date.now();
+    setIsTabAway(true);
+    setTabSwitches(prev => {
+      const next = prev + 1;
+      tabSwitchesRef.current = next;
+      try {
+        if (session?.student.studentKey && state?.roomCode) {
+          sessionStorage.setItem(`pixelplaza.lefttab:${session.student.studentKey}:${state.roomCode}`, String(next));
+        }
+      } catch { /* storage disabled */ }
+      plazaRef.current?.send({ t: 'tab-focus', inTab: false, count: next });
+      return next;
+    });
+  }, [session, state]);
+
+  const handleFocusRegained = useCallback(() => {
+    if (blurAtRef.current == null && !isTabAway) return;
+    blurAtRef.current = null;
+    setIsTabAway(false);
+    plazaRef.current?.send({ t: 'tab-focus', inTab: true, count: tabSwitchesRef.current });
+  }, [isTabAway]);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        handleFocusLost();
+      } else if (document.hasFocus()) {
+        handleFocusRegained();
+      }
+    };
+
+    const onBlur = () => {
+      setTimeout(() => {
+        if (blurAtRef.current != null) return;
+        if (document.hasFocus()) return;
+        handleFocusLost();
+      }, 0);
+    };
+
+    const onFocus = () => {
+      if (!document.hidden) {
+        handleFocusRegained();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [handleFocusLost, handleFocusRegained]);
 
   useEffect(() => {
     if (!state?.roomCode || !session) {
@@ -457,11 +531,26 @@ export default function Game() {
         });
       }
       else if (event.t === 'notice') say({ sender: event.level === 'warning' ? 'System Warning' : 'System', text: event.text, conv: activeRef.current });
+      else if (event.t === 'tab-switches') {
+        setTabSwitches(current => {
+          const higher = Math.max(current, event.count);
+          tabSwitchesRef.current = higher;
+          try {
+            if (session?.student.studentKey && state?.roomCode) {
+              sessionStorage.setItem(`pixelplaza.lefttab:${session.student.studentKey}:${state.roomCode}`, String(higher));
+            }
+          } catch { /* storage disabled */ }
+          return higher;
+        });
+      }
     });
     const unwatch = plaza.onStatus(next => {
       setStatus(next);
       if (next.state !== 'online') audio.stop();
-      if (next.state === 'online') setConnection(plaza); // the map appears once connected
+      if (next.state === 'online') {
+        setConnection(plaza); // the map appears once connected
+        plaza.send({ t: 'tab-focus', inTab: !document.hidden && document.hasFocus(), count: tabSwitchesRef.current });
+      }
       if (next.state === 'stopped' && next.message) say({ sender: 'System Warning', text: next.message, conv: '*' });
     });
 
@@ -642,6 +731,11 @@ export default function Game() {
             <span className="badge">Room: Lobby</span>
             <span className="badge">{myName}</span>
             {state.roomCode && <span className="badge">Class: {state.roomCode}</span>}
+            {tabSwitches > 0 && (
+              <span className="badge badge-tab-warning" title="Each time you leave this tab is recorded for your teacher.">
+                ⚠️ Left tab {tabSwitches}x
+              </span>
+            )}
             {status.state !== 'online' && <span className="badge badge-status">
               {status.state === 'stopped' ? 'Disconnected' : status.state === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
             </span>}
@@ -672,6 +766,23 @@ export default function Game() {
             return sendRecorded(plaza, { t: 'help-request', topic, text, route, attemptId }, attemptId);
           }}
           onOpenChat={openTeacherChat} />
+
+        {isTabAway && (
+          <div className="tab-focus-overlay" role="dialog" aria-modal="true" aria-label="Game paused" onClick={handleFocusRegained}>
+            <div className="tab-focus-card" onClick={e => e.stopPropagation()}>
+              <div className="tab-focus-icon" aria-hidden="true">⚠️</div>
+              <div className="tab-focus-title">Game paused</div>
+              <div className="tab-focus-desc">You left this page. Your teacher can see if you leave this tab.</div>
+              <div className="tab-focus-count">
+                You've left this page <span className="tab-focus-count-num">{tabSwitches}</span> {tabSwitches === 1 ? 'time' : 'times'} so far.
+              </div>
+              <button type="button" className="btn btn-primary" style={{ width: '100%', marginBottom: '10px' }} onClick={handleFocusRegained}>
+                Resume game
+              </button>
+              <div className="tab-focus-resume">Click anywhere to resume</div>
+            </div>
+          </div>
+        )}
 
         {status.state === 'stopped' && status.message && <div className="class-ended glass-panel" role="alert">
           <p>{status.message}</p>

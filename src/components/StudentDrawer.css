@@ -31,3 +31,6 @@
 .drawer-who { display: block; color: #6b7480; font-size: .72rem; font-weight: 700; }
 .drawer-text { overflow-wrap: anywhere; }
 .drawer-meta { display: flex; justify-content: flex-end; gap: .3rem; color: #8a93a3; font-size: .72rem; }
+.drawer-tab-away { color: #b45309; font-weight: 700; background: #fef3c7; padding: 1px 6px; border-radius: 4px; }
+.drawer-tab-count { color: #b45309; font-weight: 700; }
+

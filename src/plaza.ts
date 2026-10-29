@@ -39,7 +39,8 @@ export type PlazaEvent =
   | ({ t: 'answered' } & AnswerFeedback)
   | { t: 'support'; support: StudentSupport; history?: boolean }
   | { t: 'xp'; xp: number; gained?: number; reason?: string }            // this student's experience; gained and why when it grows
-  | { t: 'style'; id: string; style: Style };                             // a player chose a name colour or a flair
+  | { t: 'style'; id: string; style: Style }                             // a player chose a name colour or a flair
+  | { t: 'tab-switches'; count: number };                                // server-synced tab switch total
 
 // As in PinPlay's live-socket.js: a connection can die without closing (a laptop
 // lid, Wi-Fi roaming), and only a missing pong shows it. The room answers
@@ -67,6 +68,7 @@ export class PlazaConnection {
   vision = 0; // how far this student sees, from the server; 0 shows everyone
   classNames: string[] = []; // every classmate in this game, online or not, for the English word check
   xp = 0; // this student's experience, kept for good
+  tabSwitches = 0; // times this student left the tab
   status: PlazaStatus = { state: 'connecting' };
   private pin: string;
   private token: string;
@@ -118,6 +120,10 @@ export class PlazaConnection {
       this.ws.send(JSON.stringify(message));
       return true;
     } catch { return false; }
+  }
+
+  setTabFocus(inTab: boolean, count: number): boolean {
+    return this.send({ t: 'tab-focus', inTab, count });
   }
 
   recordAttempt(text: string, to?: string, source: ClientAttemptSource = 'chat', objective?: string): string {
@@ -303,6 +309,10 @@ export class PlazaConnection {
       }
       this.sentAttempts.clear();
       this.flushAttempts();
+      if (typeof message.tabSwitches === 'number') {
+        this.tabSwitches = message.tabSwitches;
+        this.emit({ t: 'tab-switches', count: message.tabSwitches });
+      }
       this.setStatus({ state: 'online' });
       this.emit({ t: 'roster' });
       return;

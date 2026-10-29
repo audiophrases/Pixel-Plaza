@@ -11,7 +11,7 @@ import './StudentDrawer.css';
 
 // Everything about one student, beside the class: who they are, a private message, the quick actions (chat,
 // sound, spells), and their conversations, one tab for each person or place they talked to.
-export type DrawerStudent = { studentKey: string; name: string; zone?: string | null; level?: number; look?: Partial<AvatarConfig> };
+export type DrawerStudent = { studentKey: string; name: string; zone?: string | null; level?: number; look?: Partial<AvatarConfig>; inTab?: boolean; tabSwitches?: number; tabAwayAt?: number | null };
 type Props = {
   token: string;
   gameId: string;
@@ -99,7 +99,33 @@ export default function StudentDrawer({ token, gameId, student, online, muted, s
     <div className="drawer-top">
       <Face player={student.look} name={student.name} />
       <div><strong>{who(student.studentKey, student.name)}</strong>
-        <small>{online ? `${student.zone ?? 'in the plaza'}${student.level !== undefined ? ` · Lv ${student.level}` : ''}` : 'not in the plaza'}</small></div>
+        <small>
+          {online ? (
+            <>
+              {student.inTab === false ? (
+                <span className="drawer-tab-away" title="Currently switched to another tab or application">⚠️ Left tab right now</span>
+              ) : (
+                <>{student.zone ?? 'in the plaza'}</>
+              )}
+              {student.level !== undefined && ` · Lv ${student.level}`}
+              {(student.tabSwitches ?? 0) > 0 && (
+                <span className="drawer-tab-count" title={`Left tab ${student.tabSwitches} time${student.tabSwitches === 1 ? '' : 's'}`}>
+                  {' · '}⚠️ Left tab {student.tabSwitches}×
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              not in the plaza
+              {(student.tabSwitches ?? 0) > 0 && (
+                <span className="drawer-tab-count" title={`Left tab ${student.tabSwitches} time${student.tabSwitches === 1 ? '' : 's'}`}>
+                  {' · '}⚠️ Left tab {student.tabSwitches}×
+                </span>
+              )}
+            </>
+          )}
+        </small>
+      </div>
       <button type="button" className="drawer-close" onClick={onClose} aria-label="Close" title="Close (Esc)">✕</button>
     </div>
 

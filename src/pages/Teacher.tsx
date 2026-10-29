@@ -43,7 +43,7 @@ type CampaignInfo = {
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
 };
 type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean; themeId?: string };
-type LiveStudent = { studentKey: string; name: string; x: number; y: number; zone: string | null; level?: number; look?: Partial<AvatarConfig> };
+type LiveStudent = { studentKey: string; name: string; x: number; y: number; zone: string | null; level?: number; look?: Partial<AvatarConfig>; inTab?: boolean; tabSwitches?: number; tabAwayAt?: number | null };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
   warmupPlays?: Partial<Record<WarmupKind, PlayStats>>;
@@ -477,13 +477,14 @@ export default function Teacher() {
           }}>
             {plazaMap && <ThemePicture theme={plazaMap} />}
             {status.online.map(student => <button key={student.studentKey} type="button"
-              className={`teacher-map-marker${selectedStudent === student.studentKey ? ' selected' : ''}`}
+              className={`teacher-map-marker${selectedStudent === student.studentKey ? ' selected' : ''}${student.inTab === false ? ' marker-tab-away' : ''}`}
               style={{ left: `${student.x / MAP_SIZE * 100}%`, top: `${student.y / MAP_SIZE * 100}%` }}
               onClick={event => { event.stopPropagation(); setSelectedStudent(student.studentKey); }}
               aria-pressed={selectedStudent === student.studentKey}
               aria-label={`${who(student.studentKey, student.name)}: ${placeName(student.zone)}`}
-              title={`${who(student.studentKey, student.name)} · ${placeName(student.zone)}`}>
+              title={`${who(student.studentKey, student.name)} · ${placeName(student.zone)}${student.inTab === false ? ' · ⚠️ Out of tab' : ''}${(student.tabSwitches ?? 0) > 0 ? ` · Left tab ${student.tabSwitches}x` : ''}`}>
               <Face player={student.look} name={student.name} />
+              {student.inTab === false && <span className="marker-tab-indicator" aria-hidden="true">⚠️</span>}
               {selectedStudent === student.studentKey && <span className="teacher-map-label">{who(student.studentKey, student.name)}</span>}
             </button>)}
           </div>

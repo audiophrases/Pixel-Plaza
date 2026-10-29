@@ -161,6 +161,19 @@ test('explicit chat attempts survive disconnects and reloads until acknowledged 
         assert.equal(support.messages[0].id, 'reply-1');
         assert.equal(support.request.status, 'acknowledged');
         unsubscribe();
+
+        // Tab focus and tab switch tracking
+        let tabSwitchesReceived = 0;
+        const unTab = plaza.subscribe(event => { if (event.t === 'tab-switches') tabSwitchesReceived = event.count; });
+        restored.receive({ t: 'welcome', id: 'socket-tab-test', gameId: 'game-b', players: [], theme, tabSwitches: 5 });
+        assert.equal(tabSwitchesReceived, 5);
+        assert.equal(plaza.tabSwitches, 5);
+        unTab();
+
+        plaza.setTabFocus(false, 6);
+        assert.deepEqual(restored.sent.at(-1), { t: 'tab-focus', inTab: false, count: 6 });
+        plaza.setTabFocus(true, 6);
+        assert.deepEqual(restored.sent.at(-1), { t: 'tab-focus', inTab: true, count: 6 });
     } finally {
         Object.defineProperty(globalThis, 'crypto', cryptoDescriptor);
         for (const connection of connections) connection.close();

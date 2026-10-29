@@ -382,3 +382,85 @@ button.chat-sender:hover { text-decoration: underline; }
 
 /* A correction from the teacher: on its own line under "Correction:", with room for the colours. */
 .chat-correction { line-height: 1.7; }
+
+/* Student tab-switch warning badge in room-info */
+.badge-tab-warning {
+  background: #f59e0b;
+  color: #1f2937;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Fullscreen pause overlay when leaving the tab (PinPlay-inspired) */
+.tab-focus-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(10, 12, 18, 0.78);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.tab-focus-card {
+  max-width: 420px;
+  width: 100%;
+  background: rgba(20, 24, 34, 0.96);
+  border: 1px solid rgba(255, 200, 80, 0.5);
+  border-radius: 14px;
+  padding: 24px 28px;
+  color: #fff;
+  text-align: center;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.tab-focus-icon {
+  font-size: 36px;
+  line-height: 1;
+  margin-bottom: 10px;
+}
+
+.tab-focus-title {
+  font-weight: 800;
+  font-size: 1.2rem;
+  margin-bottom: 8px;
+  color: #fbbf24;
+}
+
+.tab-focus-desc {
+  font-size: 0.95rem;
+  line-height: 1.45;
+  opacity: 0.9;
+  margin-bottom: 12px;
+}
+
+.tab-focus-count {
+  font-size: 0.95rem;
+  color: #f3f4f6;
+  margin-bottom: 16px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.tab-focus-count-num {
+  color: #f87171;
+  font-size: 1.25em;
+  font-weight: 800;
+}
+
+.tab-focus-resume {
+  font-size: 0.85rem;
+  opacity: 0.65;
+  letter-spacing: 0.02em;
+}
+

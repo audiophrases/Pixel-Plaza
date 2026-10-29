@@ -16,7 +16,7 @@ import './LiveClass.css';
 // students as faces that say who needs them. A face opens that student's drawer; everything else is in the tabs below.
 export type LiveEntry = { id: string; studentKey: string; sender: string; target: string | null; everyone?: boolean; flag: string | null; note: string | null;
   text: string; timestamp: number; status: string; starred?: boolean };
-export type LiveStudent = { studentKey: string; name: string; zone: string | null; level?: number; look?: Partial<AvatarConfig> };
+export type LiveStudent = { studentKey: string; name: string; zone: string | null; level?: number; look?: Partial<AvatarConfig>; inTab?: boolean; tabSwitches?: number; tabAwayAt?: number | null };
 // A clip one student's device read aloud: a chat message (id) or a voice sample (no id). `now` is the server's clock.
 export type LivePlay = { at: number; studentKey: string; id: string | null; senderKey: string; text: string };
 export type LiveSound = { allOff?: boolean; off: string[]; now: number; plays: LivePlay[] };
@@ -284,7 +284,13 @@ export default function LiveClass({ gameId, alerts, incidents, repeats, online, 
     </div>
 
     <div className="live-column">
-      <div className="live-heading"><h2>Class <span className="live-muted">{online.length} here</span></h2>
+      <div className="live-heading"><h2>Class <span className="live-muted">{online.length} here</span>
+        {online.filter(s => s.inTab === false).length > 0 && (
+          <span className="live-tab-away-badge" title={online.filter(s => s.inTab === false).map(s => who(s.studentKey, s.name)).join(', ')}>
+            ⚠️ {online.filter(s => s.inTab === false).length} out of tab
+          </span>
+        )}
+      </h2>
         <input type="search" className="live-heard-search" value={phrase} onChange={event => setPhrase(event.target.value)}
           placeholder="🔊 Heard something? Type it" aria-label="Find which devices read a phrase aloud" />
       </div>
@@ -311,13 +317,18 @@ export default function LiveClass({ gameId, alerts, incidents, repeats, online, 
       <div className="live-tiles">{tiles.map(student => {
         const help = helpFor(student.studentKey);
         const away = !online.some(item => item.studentKey === student.studentKey);
+        const tabAway = !away && student.inTab === false;
+        const tabCount = student.tabSwitches ?? 0;
         return <button key={student.studentKey} type="button" aria-pressed={selected === student.studentKey}
-          className={`live-tile${help?.status === 'open' || incidentOf(student.studentKey) ? ' live-tile-help' : ''}${away ? ' live-tile-away' : ''}`}
-          onClick={() => onSelect(selected === student.studentKey ? null : student.studentKey)} title={`${who(student.studentKey, student.name)}${student.zone ? ` · ${student.zone}` : ''}`}>
+          className={`live-tile${help?.status === 'open' || incidentOf(student.studentKey) ? ' live-tile-help' : ''}${away ? ' live-tile-away' : ''}${tabAway ? ' live-tile-tab-away' : ''}`}
+          onClick={() => onSelect(selected === student.studentKey ? null : student.studentKey)}
+          title={`${who(student.studentKey, student.name)}${student.zone ? ` · ${student.zone}` : ''}${tabAway ? ' · ⚠️ Out of tab right now' : ''}${tabCount > 0 ? ` · Left tab ${tabCount}x` : ''}`}>
           <Face player={student.look} name={student.name} />
           <span className="live-tile-name">{student.name}</span>
           {incidentOf(student.studentKey) ? <span className="live-tile-flag" title={`🚨 ${HARM_LABEL[incidentOf(student.studentKey)!.harm]}`}>🚨</span>
             : help && <span className="live-tile-flag" title={help.kind === 'requested' ? 'Asks for help' : 'May need help'}>{help.kind === 'requested' ? '🙋' : '💡'}</span>}
+          {tabAway && <span className="live-tile-tab-away-badge" title={`Currently out of tab! Left tab ${tabCount} time${tabCount === 1 ? '' : 's'}`}>⚠️ Away</span>}
+          {!tabAway && tabCount > 0 && <span className="live-tile-tab-count-badge" title={`Left tab ${tabCount} time${tabCount === 1 ? '' : 's'}`}>⚠️ {tabCount}×</span>}
           {muted.includes(student.studentKey) && <span className="live-tile-muted" title="Chat muted">🤐</span>}
           {silenced(student.studentKey) ? <span className="live-tile-sound" title="Sound off">🔇</span>
             : playing.has(student.studentKey) && <span className="live-tile-sound live-tile-playing" title="Reading a message aloud">🔊</span>}
