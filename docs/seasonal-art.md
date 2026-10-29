@@ -11,6 +11,8 @@ The app prepares a clear request for an external art AI, then imports and previe
 
 The AI creates **one complete square background**, including terrain and all scenery. It does not need to supply sprite sheets or separate ground/prop files. Nothing requires grass, a fountain, park, pond or bridge.
 
+The copied prompt and template kit require a visibly enclosed map on all four sides. Streets and paths must loop, turn inward or end at a destination inside the playable area. Walls, snowbanks, shoreline, railings or other setting-appropriate boundaries follow the blocked outer edges. No road may run off an edge, and no open gate, gap or other apparent exit may suggest more explorable map.
+
 The ZIP includes:
 
 - `prompt.md`: the setting, campaign/style brief, avatar scale and current geometry.
@@ -31,8 +33,8 @@ This is a starting layout, not a permanent set of objects or positions. Reuse it
 
 1. **Import AI background**. Any square PNG/WebP fits the logical map coordinates; higher resolution does not move the areas. Nonsquare backgrounds are rejected.
 2. Choose an area in **Adjust an area**, or click it on the map. Drag and resize it, or edit its X/Y/width/height. Set a hiding area's ground line where the object meets the floor. Existing polygon tools remain available for a simple outline.
-3. **Check paths** verifies access to the story places. **Walk around it** uses the game's foot box and speed and previews hiding. Inspect each foreground feature from both sides. The path check cannot judge visual alignment.
-4. If the AI adds clutter or awkward passages, ask it for a revision with the same prompt and guide instead of adding many small collision pieces.
+3. **Check paths** verifies access to the story places. **Walk around it** uses the game's foot box and speed and previews hiding. Inspect each foreground feature from both sides. Also inspect all four edges and every route ending: the visible perimeter must match the blocked edges, with no paths cropped by the image or suggesting travel beyond the playable area. The path check cannot judge visual alignment or misleading exits.
+4. If the AI adds apparent exits, clutter or awkward passages, ask it for a revision with the same prompt and guide instead of adding many small collision pieces.
 5. Give the theme a fresh ID and name. Under **On the server**, sign in, then **Save draft** and **Publish to games**. The background is uploaded to the plaza database with the map. Publishing and the theme download are disabled until a background has been imported; the AI kit can be exported beforehand.
 
 A published map is offered for new games at once, with no restart or deploy. Existing games keep their selected map and positions.
