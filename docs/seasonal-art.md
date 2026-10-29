@@ -11,13 +11,13 @@ The app prepares a clear request for an external art AI, then imports and previe
 
 The AI creates **one complete square background**, including terrain and all scenery. It does not need to supply sprite sheets or separate ground/prop files. Nothing requires grass, a fountain, park, pond or bridge.
 
-The copied prompt and template kit require a visibly enclosed map on all four sides. Streets and paths must loop, turn inward or end at a destination inside the playable area. Walls, snowbanks, shoreline, railings or other setting-appropriate boundaries follow the blocked outer edges. No road may run off an edge, and no open gate, gap or other apparent exit may suggest more explorable map.
+The copied prompt and template kit require a visibly enclosed map on all four sides. Use open ground or a compact interior path loop with short branches to visible interior destinations. The loop has no downward stem or approach road: players spawn inside and need no external entrance. Walls, snowbanks, shoreline, railings or other setting-appropriate boundaries follow the blocked outer edges, continuing without a gap across the bottom center. These composition rules take priority over the creative brief and any apparent exits in a reference image.
 
 The ZIP includes:
 
 - `prompt.md`: the setting, campaign/style brief, avatar scale and current geometry.
-- `layout.png` / `layout.svg`: solid footprints in red, hiding silhouettes in blue and broad open ground in green. Blue lines show where foreground objects meet the floor.
-- `reference.png`: the current preview with an avatar for scale. Before import this is a diagram.
+- `layout.png` / `layout.svg`: solid footprints in red, hiding silhouettes in blue and broad open ground in green. Dark red emphasizes blocked outer edges, with no legend covering the perimeter. Blue lines show where foreground objects meet the floor. Dashed place boxes are story zones, not road outlines.
+- `reference.png`: the current preview with an avatar for scale. Before import this is a diagram. Use it for style and scale only; do not copy its paths, exits or extra props. The current layout guide and enclosed-map composition take priority.
 - `story-context.md`: visible place names paired with the existing mission discovery IDs.
 - Theme JSON and `instructions.md` for import, checking and installation.
 

@@ -8,9 +8,10 @@ export function layoutGuide(theme: Theme): string {
     const shape = (piece: NonNullable<Theme['blockedShapes']>[number], colour: string) => piece.shape === 'ellipse'
         ? `<ellipse cx="${piece.rect[0] + piece.rect[2] / 2}" cy="${piece.rect[1] + piece.rect[3] / 2}" rx="${piece.rect[2] / 2}" ry="${piece.rect[3] / 2}" fill="${colour}"/>`
         : `<polygon points="${piece.points.map(p => p.join(',')).join(' ')}" fill="${colour}"/>`;
+    // An annotation over the blocked perimeter can look like an exit to an art AI. Keep the boundary unobscured.
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${theme.art}" height="${theme.art}" viewBox="0 0 ${theme.art} ${theme.art}">
 <rect width="100%" height="100%" fill="#edf6e9"/>
-${theme.blocked.map(([x, y, w, h]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#d9a5a1"/>`).join('')}
+${theme.blocked.map(([x, y, w, h]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${x <= 0 || y <= 0 || x + w >= theme.art || y + h >= theme.art ? '#b96358' : '#d9a5a1'}"/>`).join('')}
 ${(theme.blockedShapes ?? []).map(p => shape(p, '#b96358')).join('')}
 ${theme.walkBehind.map(p => shape(p, '#7b9cd488')).join('')}
 ${theme.walkBehind.map(p => {
@@ -20,7 +21,7 @@ ${theme.walkBehind.map(p => {
 ${(theme.layers ?? []).filter(p => p.sortY !== undefined).map(p => `<rect x="${p.rect[0]}" y="${p.rect[1]}" width="${p.rect[2]}" height="${p.rect[3]}" fill="#80a9db66"/><path d="M${p.rect[0]} ${p.sortY}h${p.rect[2]}" stroke="#28598d" stroke-width="3"/>`).join('')}
 ${theme.zones.map(z => `<rect x="${z.rect[0]}" y="${z.rect[1]}" width="${z.rect[2]}" height="${z.rect[3]}" fill="none" stroke="#478559" stroke-width="2" stroke-dasharray="8 5"/><text x="${z.rect[0] + 10}" y="${z.rect[1] + 26}" font-family="sans-serif" font-size="20" fill="#224c31">${esc(z.name ?? z.id)}</text>`).join('')}
 <g transform="translate(${theme.spawn.x} ${theme.spawn.y}) scale(${theme.art / theme.world})" fill="#325b8b"><circle cy="-82" r="13"/><rect x="-12" y="-65" width="24" height="65" rx="4"/><text x="40" y="0" font-family="sans-serif" font-size="30">start · avatar scale</text></g>
-<rect x="${theme.art * .3}" y="${theme.art - 30}" width="${theme.art * .4}" height="24" rx="6" fill="white"/><text x="50%" y="${theme.art - 12}" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#334155">RED: solid · BLUE: walk behind · GREEN: open ground</text></svg>`;
+</svg>`;
 }
 
 export function sheetGuide(): string {
