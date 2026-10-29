@@ -19,7 +19,15 @@ export class QuestBoard {
     private sql: SqlStorage;
     private groups: SideQuestGroups;
     private groupStartMs: number; // how long a group waits before its members may start with who is there
-    constructor(sql: SqlStorage, groups: SideQuestGroups, groupStartMs = GROUP_START_MS) { this.sql = sql; this.groups = groups; this.groupStartMs = groupStartMs; }
+    private onPlay?: (ctx: BoardContext, objective: Objective) => void;
+    constructor(sql: SqlStorage, groups: SideQuestGroups, groupStartMs = GROUP_START_MS, onPlay?: (ctx: BoardContext, objective: Objective) => void) {
+        this.sql = sql; this.groups = groups; this.groupStartMs = groupStartMs; this.onPlay = onPlay;
+    }
+    markPlayed(ctx: BoardContext, objective: Objective): void {
+        if (!ctx.sideQuests.has(objective.id)) return;
+        if (groupSize(objective) > 1 && this.groups.of(ctx.game, objective.id, ctx.player.student_key)?.state !== 'playing') return;
+        this.onPlay?.(ctx, objective);
+    }
     initialize(): void {
         this.sql.exec(`CREATE TABLE IF NOT EXISTS quest_assignments (
             game_id TEXT NOT NULL, chapter INTEGER NOT NULL, objective TEXT NOT NULL, student_key TEXT NOT NULL,
@@ -63,7 +71,7 @@ export class QuestBoard {
     claim(ctx: BoardContext, objective: Objective, changePartner = false): string | null {
         const existing = this.assignment(ctx.game, objective.id, ctx.player.student_key);
         if (ctx.player.done.includes(objective.id)) return 'You have already finished this quest.';
-        if (existing && !changePartner) return null; // idempotent: one quest per student per game
+        if (existing && !changePartner) { this.markPlayed(ctx, objective); return null; }
         if (changePartner && (!existing || !objective.activity)) return 'Accept this social quest first.';
         if (changePartner && existing?.partner_key && ctx.online.has(existing.partner_key)) return 'Your partner is still in the plaza.';
         const reason = this.wait(ctx, objective); if (reason) return reason;
@@ -78,6 +86,7 @@ export class QuestBoard {
             ON CONFLICT (game_id, objective, student_key) DO UPDATE SET partner_key = excluded.partner_key`, ctx.game, this.chapterOf(ctx, objective), objective.id, ctx.player.student_key, partner, Date.now());
         // A pair or group side quest: into the group that has waited longest, or a new one.
         if (ctx.sideQuests.has(objective.id) && groupSize(objective) > 1) this.groups.join(ctx.game, this.chapterOf(ctx, objective), objective.id, groupSize(objective), ctx.player.student_key);
+        this.markPlayed(ctx, objective);
         return null;
     }
     // A student can leave the side quest they are doing, to choose another; their group carries on without them.
@@ -95,6 +104,7 @@ export class QuestBoard {
         if (this.groups.members(group.group_id).length < 2) return 'Wait for at least one more classmate.';
         if (Date.now() < group.created + this.groupStartMs) return 'Wait a little longer for more classmates.';
         this.groups.setState(group.group_id, 'playing');
+        this.markPlayed(ctx, objective);
         return null;
     }
     // Pairs and groups still looking for members, the longest waiting first: the game's and the mission chapter's.

@@ -17,6 +17,7 @@ let conflict = false, writes = 0;
 globalThis.fetch = async (url, init) => {
     assert.ok(init);
     assert.equal((init.headers as Record<string, string>)['x-teacher-session'], 'teacher-token');
+    if (String(url).startsWith('/api/teacher/activity-history')) return Response.json({ game: null, games: [], quests: {}, warmups: {}, tasks: {}, recent: [] });
     const kind = new URL(String(url), 'http://localhost').searchParams.get('kind') as WarmupKind;
     if (init?.method === 'POST') {
         if (conflict) return Response.json({ error: 'Changed in another tab.' }, { status: 409 });

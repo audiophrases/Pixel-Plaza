@@ -12,6 +12,9 @@ import ThemePicture from '../components/ThemePicture';
 import TeacherMissionGuide from '../components/TeacherMissionGuide';
 import type { InterviewView } from '../../shared/campaign';
 import type { ReportCheck } from '../../shared/reportFeedback';
+import type { PlayStats } from '../../shared/activityHistory';
+import { playLabel } from '../../shared/activityHistory';
+import { PlayBadge } from '../components/ActivityHistory';
 import type { TeacherSupport as Support } from '../../shared/support';
 import type { CampaignChoice } from '../../shared/missionTypes';
 import { XP } from '../../shared/levels';
@@ -43,6 +46,7 @@ type Game = { id: string; name: string; pin: string; lastOpened: number; open: b
 type LiveStudent = { studentKey: string; name: string; x: number; y: number; zone: string | null; level?: number; look?: Partial<AvatarConfig> };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
+  warmupPlays?: Partial<Record<WarmupKind, PlayStats>>;
   campaign: CampaignInfo | null; campaigns: CampaignChoice[];
   sideQuests?: SideQuestPanel | null; // the open game's side quests, with or without a campaign
   warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
@@ -68,6 +72,7 @@ const PAGES: [string, string][] = [['/quest-library', 'Side quest library'], ['/
 const CHAT_VIEWS: [ChatFilter, string, string][] = [['everyone', '📢', 'Everyone chat'], ['nearby', '👥', 'Nearby chat'], ['private', '🔒', 'Private messages'], ['blocked', '⛔', 'Blocked messages'], ['all', '💬', 'All chat']];
 
 export default function Teacher() {
+  const [unplayedWarmups, setUnplayedWarmups] = useState(false);
   const navigate = useNavigate();
   const [movingStudent, setMovingStudent] = useState(false);
   const [password, setPassword] = useState('');
@@ -486,11 +491,14 @@ export default function Teacher() {
 
         {shown === 'warmup' && <>
           <p>{WARMUP_KINDS.find(kind => kind.id === warmupKind)?.blurb} Good for the first few minutes.</p>
+          <label><input type="checkbox" checked={unplayedWarmups} disabled={!status.warmupPlays} onChange={event => setUnplayedWarmups(event.target.checked)} /> Never played before in {status.game?.name ?? 'this game'}</label>
           <div className="teacher-newgame">
-            <select value={warmupKind} onChange={event => setWarmupKind(event.target.value as WarmupKind)} aria-label="Which warm-up">
-              {WARMUP_KINDS.map(kind => <option key={kind.id} value={kind.id}>{kind.label}</option>)}
+            <select value={unplayedWarmups && status.warmupPlays?.[warmupKind]?.plays ? '' : warmupKind} onChange={event => setWarmupKind(event.target.value as WarmupKind)} aria-label="Which warm-up">
+              {unplayedWarmups && <option value="" disabled>Choose a warm-up not played before</option>}
+              {WARMUP_KINDS.filter(kind => !unplayedWarmups || !status.warmupPlays?.[kind.id]?.plays).map(kind => <option key={kind.id} value={kind.id}>{kind.label}{status.warmupPlays ? ` · ${playLabel(status.warmupPlays[kind.id])}` : ''}</option>)}
             </select>
-            <button className="btn btn-primary" disabled={!status.open} onClick={() => void action('warmup', { op: 'start', type: warmupKind })}>
+            {status.warmupPlays && <PlayBadge stats={status.warmupPlays[warmupKind]} label="Selected warm-up" />}
+            <button className="btn btn-primary" disabled={!status.open || (unplayedWarmups && !!status.warmupPlays?.[warmupKind]?.plays)} onClick={() => void action('warmup', { op: 'start', type: warmupKind })}>
               {status.warmup?.active ? 'Start again' : 'Start the warm-up'}</button>
             {status.warmup?.active && <button className="btn btn-secondary" onClick={() => void action('warmup', { op: 'end' })}>End the warm-up</button>}
             <Link to={`/warmup-studio?kind=${warmupKind}`}>Edit warm-up</Link>

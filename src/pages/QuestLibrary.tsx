@@ -7,6 +7,9 @@ import {
     type QuestAnswer, type QuestFilters, type QuestFormat, type QuestLevel, type QuestTheme, type SideQuest, type SideQuestLibrary, type SideQuestPreview, type SideQuestTarget, type StoryChapter,
 } from '../../shared/sideQuests';
 import SideQuestEditor from '../components/SideQuestEditor';
+import { PlayBadge, PlayHistory } from '../components/ActivityHistory';
+import { useActivityHistory } from '../useActivityHistory';
+import { matchesPlayFilter, type PlayFilter } from '../../shared/activityHistory';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import './MissionStudio.css';
 import './QuestLibrary.css';
@@ -61,6 +64,8 @@ export default function QuestLibrary() {
     const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
     const [query, setQuery] = useState(''); const [filters, setFilters] = useState<QuestFilters>({});
     const [fitsOnly, setFitsOnly] = useState(false); const [shown, setShown] = useState(PAGE);
+    const activity = useActivityHistory(token);
+    const [playFilter, setPlayFilter] = useState<PlayFilter>('all');
     const [selected, setSelected] = useState<string[]>([]);
     const [target, setTarget] = useState<SideQuestTarget | null>(null);
     const [preview, setPreview] = useState<SideQuestPreview | null>(null);
@@ -114,12 +119,14 @@ export default function QuestLibrary() {
         if (quest.after && !target.mission?.questionIds.includes(quest.after)) return 'Needs a question this game does not have.';
         return null;
     };
+    const historyQuests = useMemo(() => playFilter === 'all' ? quests : activity.history?.game
+        ? quests.filter(quest => matchesPlayFilter(activity.history?.quests[quest.id], playFilter)) : [], [quests, playFilter, activity.history]);
     const results = useMemo(() => {
-        const found = searchQuests(quests, query, filters);
+        const found = searchQuests(historyQuests, query, filters);
         return fitsOnly && target ? found.filter(quest => !blocked(quest)) : found;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [quests, query, filters, fitsOnly, target]);
-    const facets = useMemo(() => questFacets(library ?? EMPTY, query, filters), [library, query, filters]);
+    }, [historyQuests, query, filters, fitsOnly, target]);
+    const facets = useMemo(() => questFacets({ ...(library ?? EMPTY), quests: historyQuests }, query, filters), [library, historyQuests, query, filters]);
     const categories = useMemo(() => questCategories(quests), [quests]);
     const usedChapters = useMemo(() => new Set(quests.map(quest => quest.chapter)), [quests]);
     const chosen = selected.map(id => quests.find(quest => quest.id === id)).filter((quest): quest is SideQuest => !!quest);
@@ -140,7 +147,7 @@ export default function QuestLibrary() {
         { label: 'Halloween & autumn', apply: () => { setQuery(''); setFilter({ categories: categories.filter(c => /autumn/i.test(c.category)).map(c => c.category) }); } },
         { label: 'Christmas & winter', apply: () => { setQuery(''); setFilter({ categories: categories.filter(c => /winter/i.test(c.category)).map(c => c.category) }); } },
     ];
-    const anyFilter = !!query || Object.values(filters).some(value => Array.isArray(value) ? value.length : !!value);
+    const anyFilter = !!query || fitsOnly || playFilter !== 'all' || Object.values(filters).some(value => Array.isArray(value) ? value.length : !!value);
 
     // Writing, changing, deleting and restoring quests. Every answer brings the whole library back.
     const edit = (quest: SideQuest, creating = false) => { setConfirming(null); setEditing({ quest, creating, saved: false, key: Date.now() }); };
@@ -185,6 +192,7 @@ export default function QuestLibrary() {
         }); }}><h2>Teacher sign-in</h2><label className="mission-field"><span>Teacher password</span><input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label><button className="mission-button primary" disabled={busy}>Open the library</button></form>
         : <div className={`ql-layout${editing ? ' ql-editing' : ''}`}>
             <section className="ql-main">
+                <PlayHistory state={activity} filter={playFilter} onFilter={value => { setPlayFilter(value); setShown(PAGE); }} />
                 <div className="mission-card ql-search">
                     <label className="ql-searchbox"><span className="ql-sr">Search quests</span>
                         <input type="search" value={query} autoFocus placeholder='Search: food, debate, past simple, riddle, Christmas, hotel…' onChange={e => { setQuery(e.target.value); setShown(PAGE); setShowTrash(false); }} /></label>
@@ -208,7 +216,7 @@ export default function QuestLibrary() {
                             <option value={0}>Any length</option><option value={5}>5 minutes or less</option><option value={10}>10 minutes or less</option>
                         </select></label>
                         {target && <label className="ql-check"><input type="checkbox" checked={fitsOnly} onChange={e => setFitsOnly(e.target.checked)} />Only quests that fit {target.game.name} now</label>}
-                        {anyFilter && <button type="button" className="mission-button" onClick={() => { setQuery(''); setFilter({}); setFitsOnly(false); }}>Clear search</button>}
+                        {anyFilter && <button type="button" className="mission-button" onClick={() => { setQuery(''); setFilter({}); setFitsOnly(false); setPlayFilter('all'); }}>Clear search</button>}
                     </div>
                 </div>
                 <div className="mission-toolbar ql-count">
@@ -235,7 +243,7 @@ export default function QuestLibrary() {
                             <span className={`ql-kind ql-kind-${theme.kind}`}>{theme.kind === 'story' ? `Story · ${chapterName(quest.chapter)}` : `Generic · ${theme.name}`}</span>
                             <span className={`ql-level ql-level-${quest.level}`}>{levelName(quest.level)}</span>
                         </header>
-                        <h3>{quest.title}</h3>
+                        <h3>{quest.title} {activity.history?.game && <PlayBadge stats={activity.history.quests[quest.id]} label={quest.title} />}</h3>
                         <p className="ql-meta">{quest.category} · {FORMATS.find(f => f.id === quest.format)!.name} · {quest.minutes} min · {quest.answer === 'text' ? 'Typed answer, checked by the game' : 'Written report for you to read'}{quest.roles?.length ? ` · only for: ${quest.roles.join(', ')}` : ''}</p>
                         <p className="ql-text">{quest.text}</p>
                         {!!quest.focus.length && <p className="ql-focus">Focus: {quest.focus.join(' · ')}</p>}

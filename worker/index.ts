@@ -295,6 +295,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         const result = await plaza(env).warmupEditor(request.headers.get('x-teacher-session') || '', new URL(request.url).searchParams.get('kind'), post ? body : undefined);
         return json(result, 'error' in result ? result.status : 200);
     }
+    if (path === '/api/teacher/activity-history' && get) {
+        const result = await plaza(env).playedActivities(request.headers.get('x-teacher-session') || '', new URL(request.url).searchParams.get('gameId') ?? undefined);
+        return json(result, 'error' in result ? result.status : 200);
+    }
     if (path === '/api/teacher/campaign-guide' && get) {
         const query = new URL(request.url).searchParams;
         const result = await plaza(env).campaignGuide(request.headers.get('x-teacher-session') || '', query.get('campaign') ?? undefined, query.get('game') ?? undefined);

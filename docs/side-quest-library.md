@@ -73,3 +73,10 @@ A campaign without a mystery: students get one of four light roles (Explorer, Re
 - Story quests never spoil a main answer: those that use information from a main question unlock after it, and those about a chapter's solution unlock once the student has finished the main mystery. None asks who the thief is, so the thief can play them too.
 - Written reports are not graded automatically. Choose a few to discuss with the class.
 - The quests are data on the online server, one record each, like missions, and the class laptop keeps a copy (README, *Missions live online*). `worker/sideQuestStore.ts` keeps them; on its first start it turns a library from before (one file) into records. `shared/sideQuests.ts` holds their shape, checks every quest from the editor, a file or the other server, turns quests into quest-board objectives and provides the search. The tests use a frozen copy in `worker/tests/fixtures/side-quests.json` and check every quest against the game's rules.
+
+
+## Play history
+
+Choose **History for** to browse the current or another saved game/class. Each quest has a play-count badge; use **Never played before** or **Played before** alongside the existing filters. Random picks use the filtered results. **Recent plays** shows the latest 30 class activity starts and their dates; totals include all recorded plays. Changing the history selection keeps the live release target unchanged.
+
+One side quest counts once per class lesson when play starts, rather than once per student or team. Merely releasing a quest or waiting for group members does not count. Resubmitting or undoing within that lesson does not increase its total. History survives campaign resets, quest closure and server restarts. Warm-up rounds and their assigned identities, facts and pairs have the same class-specific history in the Warm-up editor. Recovered historical counts carry a **+** where the old app did not retain the full history.

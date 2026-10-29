@@ -938,6 +938,103 @@ test('Side quests belong to the game: added with or without a campaign, taken at
     }
 });
 
+test('activity history counts class starts and warm-up tasks, filters by saved game, survives restart and ignores retries', { timeout: 150000 }, async () => {
+    const pinPlay = await startPinPlay(), persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-activity-history-'));
+    const auth = `http://127.0.0.1:${pinPlay.address().port}`;
+    let plaza = await startPlaza(auth, persistTo, { GROUP_START_MS: '0' }), base = plaza.base, session;
+    const sockets = [], join = async token => { const socket = await enter(base, token, null); sockets.push(socket); return socket; };
+    const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+    const history = async game => (await teacher(`activity-history${game ? `?gameId=${game}` : ''}`)).body;
+    const card = (socket, id, check) => socket.next(m => m.t === 'board' && m.board.some(q => q.id === id && check(q)), id).then(m => m.board.find(q => q.id === id));
+    const release = async (gameId, ids) => {
+        const target = (await teacher('side-quests/board')).body.target;
+        const preview = (await teacher('side-quests/board-preview', { gameId, version: target.version, questIds: ids })).body.preview;
+        assert.ok(preview); assert.equal((await teacher('side-quests/board-release', { previewId: preview.id })).status, 200);
+    };
+    try {
+        session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const created = (await teacher('game', { name: 'History 3A', randomNames: false })).body;
+        PIN = created.pin; const gameId = created.game.id;
+        assert.equal((await api(base, '/api/teacher/activity-history')).status, 401);
+        assert.equal((await teacher('activity-history?gameId=missing')).status, 404);
+        assert.deepEqual((await history()).quests, {});
+        let alex = await join('signed-a'), sam = await join('signed-b');
+        const definitions = defaultWarmup('identity'); definitions.identities = definitions.identities.slice(0, 4);
+        assert.equal((await teacher('warmup-editor?kind=identity', { version: 0, definition: definitions })).status, 200);
+        assert.equal((await teacher('warmup', { op: 'start', type: 'identity' })).status, 200);
+        let first = await history();
+        assert.equal(first.warmups.identity.plays, 1);
+        assert.equal(Object.keys(first.tasks.identity).length, 2, 'unassigned identities stay never played');
+        const chris = await join('signed-c');
+        await chris.next(m => m.t === 'warmup' && m.warmup?.kind === 'identity');
+        first = await history();
+        assert.equal(first.warmups.identity.plays, 1, 'late joining does not restart a class round');
+        assert.equal(Object.keys(first.tasks.identity).length, 3);
+        await teacher('warmup', { op: 'start', type: 'identity' });
+        assert.equal((await history()).warmups.identity.plays, 2, 'Start again counts another round');
+        assert.equal((await teacher('status')).body.warmupPlays.identity.plays, 2);
+        await teacher('warmup', { op: 'end' });
+        const group = sideQuests.find(q => !q.chapter && q.format === 'group' && q.answer === 'report');
+        const solo = sideQuests.find(q => !q.chapter && q.format === 'solo' && q.answer === 'report');
+        await release(gameId, [group.id, solo.id]);
+        assert.deepEqual((await history()).quests, {}, 'releasing quests is not playing them');
+        alex.send({ t: 'quest-accept', objective: group.id }); await card(alex, group.id, q => q.state === 'active');
+        sam.send({ t: 'quest-accept', objective: group.id }); await card(sam, group.id, q => q.group?.members.length === 2);
+        assert.equal((await history()).quests[group.id], undefined, 'a waiting group has not started');
+        sam.send({ t: 'quest-start', objective: group.id }); await card(alex, group.id, q => q.group?.state === 'playing');
+        assert.equal((await history()).quests[group.id].plays, 1);
+        alex.send({ t: 'quest-accept', objective: group.id });
+        await card(alex, group.id, q => q.group?.state === 'playing');
+        assert.equal((await history()).quests[group.id].plays, 1, 'repeated accepts cannot inflate counts');
+        const text = 'We chose the park because it is quiet and has enough space.';
+        alex.send({ t: 'answer', objective: group.id, text });
+        let done = await card(sam, group.id, q => q.state === 'done');
+        sam.send({ t: 'report-undo', objective: group.id, version: done.report.version, gameId });
+        await card(sam, group.id, q => q.report?.submitted === false);
+        sam.send({ t: 'answer', objective: group.id, text }); done = await card(sam, group.id, q => q.state === 'done' && q.report?.version > done.report.version);
+        assert.equal((await history()).quests[group.id].plays, 1, 'answers and revisions share the class play');
+        assert.equal((await teacher('quest-place', { objective: solo.id, studentKey: 'stu_c' })).status, 200);
+        assert.equal((await history()).quests[solo.id].plays, 1, 'teacher placement records actual play');
+        await teacher('side-quests/board-close', { gameId, questId: solo.id });
+        assert.equal((await history()).quests[solo.id].plays, 1, 'closing a quest preserves its history');
+        await teacher('class', { open: false }); await alex.closed; await sam.closed;
+        await teacher('class', { open: true }); alex = await join('signed-a'); sam = await join('signed-b');
+        await card(sam, group.id, q => q.state === 'done');
+        sam.send({ t: 'report-undo', objective: group.id, version: done.report.version, gameId });
+        await card(sam, group.id, q => q.report?.submitted === false);
+        assert.equal((await history()).quests[group.id].plays, 1, 'undo alone is not a new play');
+        sam.send({ t: 'answer', objective: group.id, text }); await card(sam, group.id, q => q.state === 'done');
+        assert.equal((await history()).quests[group.id].plays, 2, 'continuing in another lesson records another class play');
+        for (const socket of sockets) socket.ws.close(); await plaza.stop();
+        plaza = await startPlaza(auth, persistTo, { GROUP_START_MS: '0' }); base = plaza.base;
+        session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        assert.equal((await history()).quests[group.id].plays, 2);
+        assert.equal((await history()).warmups.identity.plays, 2);
+        assert.equal((await history()).quests[group.id].recovered, false, 'restart does not backfill already-recorded plays');
+        await teacher('campaign', { op: 'start', campaign: 'castanyada' });
+        await teacher('campaign', { op: 'reset', confirm: true });
+        assert.equal((await history()).quests[group.id].plays, 2, 'campaign reset preserves class history');
+        const other = (await teacher('game', { name: 'History 3B', randomNames: false })).body;
+        PIN = other.pin;
+        assert.deepEqual((await history()).quests, {}, 'another saved class has independent history');
+        assert.equal((await teacher('warmup', { op: 'start', type: 'identity' })).status, 400);
+        assert.deepEqual((await history()).warmups, {}, 'failed starts do not count');
+        assert.equal((await history(gameId)).quests[group.id].plays, 2);
+        assert.equal((await teacher('status')).body.game.id, other.game.id, 'browsing another history does not switch the live game');
+        alex = await join('signed-a'); sam = await join('signed-b');
+        await release(other.game.id, [solo.id]);
+        alex.send({ t: 'quest-auto' }); await card(alex, solo.id, q => q.state === 'active');
+        sam.send({ t: 'quest-auto' }); await card(sam, solo.id, q => q.state === 'active');
+        assert.equal((await history()).quests[solo.id].plays, 1, 'auto placement and multiple students share one class play');
+        await teacher('game/delete', { game: other.game.id, confirm: true });
+        assert.equal((await teacher(`activity-history?gameId=${other.game.id}`)).status, 404);
+        assert.equal((await history(gameId)).quests[group.id].plays, 2);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('automatic report feedback: revision, shared checks, cache, undo, stale results, teacher exceptions and restart', { timeout: 180000 }, async () => {
     const requests = [], releases = new Map();
     const openai = http.createServer(async (req, res) => {

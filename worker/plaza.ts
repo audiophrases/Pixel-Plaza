@@ -4,6 +4,8 @@ import type { PinPlayStudent } from './pinplay.ts';
 import { MIN_WORDS, checkGrammar } from './grammar.ts';
 import { languageHelp } from './aiHelp.ts';
 import { ReportChecks, checkReport, reportCacheKey, type ReportInput } from './reportFeedback.ts';
+import { ActivityHistory } from './activityHistory.ts';
+import type { ActivityHistoryView } from '../shared/activityHistory.ts';
 import type { ReportCheck } from '../shared/reportFeedback.ts';
 import { moderate, type Moderation } from './moderation.ts';
 import { SafetyIncidents, type Incident } from './incidents.ts';
@@ -134,6 +136,7 @@ export type SideQuestStatus = { free: { studentKey: string; name: string }[]; do
     reports: { studentKey: string; objective: string; quest: string; text: string; partner?: string; starred: boolean; version: number; check?: ReportCheck }[] };
 
 export type TeacherStatus = {
+    warmupPlays: ActivityHistoryView['warmups'];
     support: TeacherSupport;
     incidents: Incident[]; // harmful things students tried to send, open until the teacher has seen them
     blocked: BlockedStatus; // words blocked for this lesson, and what the whole plaza is repeating
@@ -182,6 +185,7 @@ export class PlazaRoom extends DurableObject<Env> {
     private moderations = new Map<string, { verdict: Moderation; at: number }>();
     private participation: Participation;
     private reportChecks: ReportChecks;
+    private activityHistory: ActivityHistory;
     private interviewSends = new Set<string>();
     private liveMissions: LiveMissions;
     private moves = new Map<string, [number, number]>(); // player id to latest position, not yet passed on
@@ -303,7 +307,10 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaign_reports')").toArray().some(row => row.name === 'check_id')) this.sql.exec('ALTER TABLE campaign_reports ADD COLUMN check_id TEXT');
         this.reportChecks = new ReportChecks(this.sql);
         this.reportChecks.initialize();
-        this.questBoard = new QuestBoard(this.sql, this.groups, this.env.GROUP_START_MS !== undefined ? Number(this.env.GROUP_START_MS) : undefined);
+        this.activityHistory = new ActivityHistory(this.sql);
+        this.activityHistory.initialize();
+        this.questBoard = new QuestBoard(this.sql, this.groups, this.env.GROUP_START_MS !== undefined ? Number(this.env.GROUP_START_MS) : undefined,
+            (board, objective) => this.activityHistory.record(board.game, 'quest', objective.id, this.helpSession(), objective.text));
         this.questBoard.initialize();
         this.interviews = new Interviews(this.sql);
         this.interviews.initialize();
@@ -327,6 +334,11 @@ export class PlazaRoom extends DurableObject<Env> {
         for (const row of this.sql.exec<{ id: string }>("UPDATE chat SET status = 'rejected' WHERE status = 'pending' RETURNING id").toArray()) this.assistance.chatStatus(row.id, 'rejected');
         // Keepalive pings are answered without waking the room.
         ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
+        this.ctx.storage.transactionSync(() => {
+            const game = this.activeGame();
+            const row = game ? this.sql.exec<{ last_opened: number }>('SELECT last_opened FROM games WHERE id = ?', game).toArray()[0] : undefined;
+            this.activityHistory.recover(game && row && this.isOpen() ? { game, session: this.helpSession(), opened: row.last_opened } : undefined);
+        });
     }
 
     // ---------- Called by the Worker ----------
@@ -795,6 +807,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const current = this.game(this.activeGame());
         return {
             incidents: current ? this.incidents.open(current.id, this.rosterNames(current.id)) : [],
+            warmupPlays: current ? this.activityHistory.warmupCounts(current.id) : {},
             blocked,
             support: { alerts: current ? this.assistance.alerts(current.id, this.rosterNames(current.id)) : [],
                 ai: this.assistance.aiCount(this.helpSession()),
@@ -1729,6 +1742,8 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!clue) return warn('Choose one of your private clues to share.');
         if (typeof data.text !== 'string' || !data.text.trim() || data.text.length > 200) return warn('Write up to 200 characters about this investigation.');
         const questionText = data.text.trim();
+        const board = objective.board && this.boardContext(seat.game, seat.studentKey);
+        if (board) this.questBoard.markPlayed(board, objective);
         const epoch = row.live_epoch;
         const valid = () => {
             const current = this.campaignRow(seat.game);
@@ -1970,6 +1985,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (objective.board && !this.questBoard.assignment(seat.game, objective.id, seat.studentKey)) return unavailable('Accept this quest before answering.');
         const group = objective.board && groupSize(objective) > 1 ? this.questBoard.groupOf(seat.game, objective.id, seat.studentKey) : undefined;
         if (objective.board && groupSize(objective) > 1 && group?.state !== 'playing') return unavailable('Wait until your group is complete.');
+        if (board && objective.board && !checked) this.questBoard.markPlayed(board, objective);
         const reply = (correct: boolean, wait = false, message?: string) => {
             this.attemptStatus(audit, correct ? 'correct' : wait ? 'waiting' : 'incorrect', correct ? undefined : message ?? 'The answer was not accepted.');
             if (!correct && !wait) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Answer not accepted: ${objective.text}`, typed, 'instructions');
@@ -2049,6 +2065,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!this.questBoard.assignment(seat.game, objective.id, seat.studentKey)) return unavailable('Accept this quest before answering.');
         const group = groupSize(objective) > 1 ? this.questBoard.groupOf(seat.game, objective.id, seat.studentKey) : undefined;
         if (groupSize(objective) > 1 && group?.state !== 'playing') return unavailable('Wait until your group is complete.');
+        if (!checked) this.questBoard.markPlayed(ctx, objective);
         const reply = (correct: boolean, wait = false, message?: string) => {
             this.attemptStatus(audit, correct ? 'correct' : wait ? 'waiting' : 'incorrect', correct ? undefined : message ?? 'The answer was not accepted.');
             if (!correct && !wait) this.assistance.signal(seat.game, seat.studentKey, seat.name, `Answer not accepted: ${objective.text}`, typed, 'instructions');
@@ -2321,6 +2338,7 @@ export class PlazaRoom extends DurableObject<Env> {
         this.assistance.clear(game);
         this.participation.clear(game);
         this.reportChecks.clear(game);
+        this.activityHistory.clear(game);
         this.incidents.forget(game);
         this.blockedWords.forget(game);
         for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'side_quest_groups', 'side_quest_members', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'game_side_quests', 'side_quest_done', 'game_side_quest_previews', 'warmups', 'warmup_players', 'speech_plays']) {
@@ -2359,6 +2377,15 @@ export class PlazaRoom extends DurableObject<Env> {
     // ---------- The warm-up ----------
     // A few minutes at the start of a lesson: each student has a made-up fact about themselves and looks for
     // classmates who have other facts, typing their names. It is separate from the campaign.
+
+    playedActivities(token: string, gameId?: string): ActivityHistoryView | { error: string; status: number } {
+        if (!token || !this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray().length) return { error: 'Please sign in again.', status: 401 };
+        const games = this.sql.exec<{ id: string; name: string }>('SELECT id, name FROM games ORDER BY last_opened DESC, id').toArray();
+        const selected = gameId && gameId !== 'current' ? gameId : this.activeGame();
+        const game = games.find(game => game.id === selected) ?? null;
+        if (selected && !game) return { error: 'That saved game no longer exists.', status: 404 };
+        return this.activityHistory.view(game, games);
+    }
 
     warmupEditor(token: string, kind: unknown, input?: unknown): SavedWarmup | { error: string; status: number } {
         if (!token || !this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray().length) return { error: 'Please sign in again.', status: 401 };
@@ -2414,12 +2441,17 @@ export class PlazaRoom extends DurableObject<Env> {
         if (here.length < 2) return 'At least two students need to be in the plaza.';
         const definition = this.savedWarmup(kind).definition;
         if (definition.kind === 'identity' && definition.identities.length < here.length) return `Add at least ${here.length} identities in the warm-up editor so every student has a different one.`;
-        this.sql.exec('DELETE FROM warmup_players WHERE game_id = ?', game);
-        this.sql.exec('INSERT INTO warmups (game_id, active, started, kind, definition) VALUES (?, 1, ?, ?, ?) ON CONFLICT (game_id) DO UPDATE SET active = 1, started = excluded.started, kind = excluded.kind, definition = excluded.definition', game, Date.now(), kind, JSON.stringify(definition));
-        for (const [key, assignment] of (definition.kind === 'identity' ? assignIdentities(here, Math.random, definition.identities)
-            : definition.kind === 'pairs' ? assignPairs(here, Math.random, definition.pairs) : assignWarmup(here, Math.random, definition.facts, definition.rounds))) {
-            this.sql.exec('INSERT INTO warmup_players (game_id, student_key, fact, targets) VALUES (?, ?, ?, ?)', game, key, assignment.fact, JSON.stringify(assignment.targets));
-        }
+        const previous = this.sql.exec<{ started: number }>('SELECT started FROM warmups WHERE game_id = ?', game).toArray()[0];
+        const started = Math.max(Date.now(), (previous?.started ?? 0) + 1);
+        this.ctx.storage.transactionSync(() => {
+            this.sql.exec('DELETE FROM warmup_players WHERE game_id = ?', game);
+            this.sql.exec('INSERT INTO warmups (game_id, active, started, kind, definition) VALUES (?, 1, ?, ?, ?) ON CONFLICT (game_id) DO UPDATE SET active = 1, started = excluded.started, kind = excluded.kind, definition = excluded.definition', game, started, kind, JSON.stringify(definition));
+            for (const [key, assignment] of (definition.kind === 'identity' ? assignIdentities(here, Math.random, definition.identities)
+                : definition.kind === 'pairs' ? assignPairs(here, Math.random, definition.pairs) : assignWarmup(here, Math.random, definition.facts, definition.rounds))) {
+                this.sql.exec('INSERT INTO warmup_players (game_id, student_key, fact, targets) VALUES (?, ?, ?, ?)', game, key, assignment.fact, JSON.stringify(assignment.targets));
+            }
+            this.activityHistory.warmup(game, started, definition, this.warmupPlayers(game));
+        });
         this.sendWarmupToAll(game);
         return null;
     }
@@ -2447,6 +2479,8 @@ export class PlazaRoom extends DurableObject<Env> {
             late.targets = [different[Math.floor(Math.random() * different.length)].student_key];
         }
         this.sql.exec('INSERT INTO warmup_players (game_id, student_key, fact, targets) VALUES (?, ?, ?, ?)', game, studentKey, late.fact, JSON.stringify(late.targets));
+        const round = this.sql.exec<{ started: number }>('SELECT started FROM warmups WHERE game_id = ?', game).one();
+        this.activityHistory.warmup(game, round.started, definition, this.warmupPlayers(game));
         return true;
     }
 
