@@ -103,3 +103,5 @@
 .journal-transcript { border-left: 3px solid #51848b; padding-left: .6rem; margin: .6rem 0; overflow-wrap: anywhere; }
 .journal-transcript small { color: #465e67; }
 .journal-answer button:disabled { opacity: .55; cursor: default; }
+.journal-submitted-report { white-space: pre-wrap; overflow-wrap: anywhere; padding: .6rem .75rem; border-left: 3px solid #84a99c; background: rgba(255, 255, 255, .5); }
+.journal-undo-note { font-size: .8rem; opacity: .8; }

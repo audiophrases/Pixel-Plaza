@@ -10,7 +10,7 @@ import { BlockedWords } from './blockedWords.ts';
 import { blockedIn, repeated, taskWordSet, type BlockedStatus, type Term } from '../shared/blockedWords.ts';
 import { isGlitch } from '../shared/tidy.ts';
 import { PARTICIPATION, Participation, participationDecision } from './participation.ts';
-import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, nothingElseToDo, pickRole, rewardClues, teamProgress, type BoardView, type QuestView } from '../shared/campaign.ts';
+import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, nothingElseToDo, pickRole, prerequisiteIds, rewardClues, teamProgress, type BoardView, type QuestView } from '../shared/campaign.ts';
 import { MissionRepository, readCopy, type MissionResult } from './missions.ts';
 import { SideQuestStore, readQuestCopy, type SideQuestResult } from './sideQuestStore.ts';
 import { QuestBoard, type BoardContext } from './questBoard.ts';
@@ -245,6 +245,10 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('game_students')").toArray().some(row => row.name === 'display_name')) {
             this.sql.exec('ALTER TABLE game_students ADD COLUMN display_name TEXT');
         }
+        // Undo keeps the writing as a draft while taking it out of the teacher's submitted reports.
+        if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaign_reports')").toArray().some(row => row.name === 'submitted')) {
+            this.sql.exec('ALTER TABLE campaign_reports ADD COLUMN submitted INTEGER NOT NULL DEFAULT 1');
+        }
         // Levels: a student's experience, kept for good, and the look they chose with it. Each award is
         // recorded by what earned it, so the same message or answer never counts twice.
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('students')").toArray().some(row => row.name === 'xp')) {
@@ -284,6 +288,13 @@ export class PlazaRoom extends DurableObject<Env> {
         this.themeAssets.initialize();
         this.groups = new SideQuestGroups(this.sql);
         this.groups.initialize();
+        if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaign_reports')").toArray().some(row => row.name === 'group_id')) {
+            this.sql.exec('ALTER TABLE campaign_reports ADD COLUMN group_id TEXT');
+            this.sql.exec(`UPDATE campaign_reports SET group_id = (SELECT g.group_id FROM side_quest_groups g
+                JOIN side_quest_members m ON m.group_id = g.group_id WHERE g.game_id = campaign_reports.game_id
+                AND g.objective = campaign_reports.objective AND m.student_key = campaign_reports.student_key LIMIT 1)`);
+        }
+        this.sql.exec('CREATE INDEX IF NOT EXISTS campaign_reports_group ON campaign_reports (game_id, objective, group_id)');
         this.questBoard = new QuestBoard(this.sql, this.groups, this.env.GROUP_START_MS !== undefined ? Number(this.env.GROUP_START_MS) : undefined);
         this.questBoard.initialize();
         this.interviews = new Interviews(this.sql);
@@ -1365,6 +1376,8 @@ export class PlazaRoom extends DurableObject<Env> {
             this.claimQuest(ws, seat, data.objective, data.changePartner === true);
         } else if (data?.t === 'quest-leave' && typeof data.objective === 'string') {
             this.leaveQuest(ws, seat, data.objective);
+        } else if (data?.t === 'report-undo' && typeof data.objective === 'string' && typeof data.gameId === 'string' && Number.isSafeInteger(data.version)) {
+            this.undoReport(ws, seat, data.objective, data.version, data.gameId);
         } else if ((data?.t === 'quest-start' && typeof data.objective === 'string') || data?.t === 'quest-auto') {
             this.groupOrPick(ws, seat, data);
         } else if (data?.t === 'interview-ask' || data?.t === 'interview-reply') {
@@ -1540,6 +1553,7 @@ export class PlazaRoom extends DurableObject<Env> {
                         ? ` ${role.id === objective.answerRole ? 'You have this role, and no other student with it is online.' : 'No classmate with this role is available.'} Type the role name (${fallback}) to continue with the town notice.`
                         : objective.answerRole && role.id === objective.answerRole ? ' You have this role. Find another student with the same role and enter their displayed name.' : ''), done: player.done.includes(objective.id), optional: !!objective.optional,
                         kind: objective.kind === 'report' ? 'report' as const : objective.answerRole ? 'name' as const : 'text' as const,
+                        ...(objective.kind === 'report' ? { report: this.reportView(game, objective, studentKey) } : {}),
                         ...(objective.conversation ? { conversation: this.conversation(game, studentKey, objective) } : {}) };
                 }),
             interviews: this.interviews.view(game, row.chapter, studentKey, names, new Map(chapter.objectives.map(o => [o.id, o.text]))),
@@ -1591,7 +1605,8 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!ctx) return null;
         return { board: this.questBoard.view(ctx).map(item => {
             const objective = ctx.quests.find(o => o.id === item.id)!;
-            return { ...item, ...(objective.activity || objective.conversation ? { conversation: this.conversation(game, studentKey, objective) } : {}) };
+            return { ...item, ...(objective.kind === 'report' && (item.state === 'active' || item.state === 'done') ? { report: this.reportView(game, objective, studentKey) } : {}),
+                ...(objective.activity || objective.conversation ? { conversation: this.conversation(game, studentKey, objective) } : {}) };
         }), sideQuests: this.questBoard.sideQuestsView(ctx) };
     }
     // True while the student still has a warm-up task: side quests wait until it is done.
@@ -1604,7 +1619,19 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!this.isOpen()) return;
         const ctx = this.boardContext(seat.game, seat.studentKey); const quest = ctx?.quests.find(o => o.id === objective);
         if (!ctx || !quest || (!ctx.gameQuests.has(quest.id) && ctx.status === 'campaign_complete')) return;
-        const error = this.questBoard.leave(ctx, quest);
+        const group = quest.kind === 'report' ? this.questBoard.groupOf(seat.game, objective, seat.studentKey) : undefined;
+        const report = group ? this.savedReport(seat.game, quest, seat.studentKey) : undefined;
+        const error = this.ctx.storage.transactionSync(() => {
+            const problem = this.questBoard.leave(ctx, quest);
+            // A shared draft belongs to the remaining group even if its original writer gives up the quest.
+            const keeper = !problem && group && report?.submitted === 0 && report.student_key === seat.studentKey ? this.groups.members(group.group_id)[0] : undefined;
+            if (keeper && report && group) {
+                this.sql.exec(`INSERT INTO campaign_reports (game_id, student_key, objective, text, ts, submitted, group_id) VALUES (?, ?, ?, ?, ?, 0, ?)
+                    ON CONFLICT (game_id, student_key, objective) DO UPDATE SET text = excluded.text, ts = excluded.ts, submitted = 0, group_id = excluded.group_id`, seat.game, keeper, objective, report.text, report.ts, group.group_id);
+                this.sql.exec('DELETE FROM campaign_reports WHERE game_id = ? AND objective = ? AND student_key = ?', seat.game, objective, seat.studentKey);
+            }
+            return problem;
+        });
         if (error) ws.send(JSON.stringify({ t: 'notice', level: 'warning', text: error }));
         this.sendBoardChange(seat.game, seat.studentKey, quest);
     }
@@ -1739,6 +1766,89 @@ export class PlazaRoom extends DurableObject<Env> {
         for (const ws of this.ctx.getWebSockets(seat.studentKey)) this.sendQuest(ws, seat.game, seat.studentKey);
     }
 
+    private savedReport(game: string, objective: Objective, student: string) {
+        const shared = !!objective.board && groupSize(objective) > 1;
+        const group = shared ? this.questBoard.groupOf(game, objective.id, student) : undefined;
+        if (shared && !group) return undefined;
+        return this.sql.exec<{ student_key: string; text: string; ts: number; submitted: number }>(
+            `SELECT student_key, text, ts, submitted FROM campaign_reports WHERE game_id = ? AND objective = ?
+             AND ${group ? 'group_id = ?' : 'group_id IS NULL AND student_key = ?'} ORDER BY ts DESC LIMIT 1`, game, objective.id, group?.group_id ?? student).toArray()[0];
+    }
+
+    private reportView(game: string, objective: Objective, student: string) {
+        const report = this.savedReport(game, objective, student);
+        return report ? { text: report.text, version: report.ts, submitted: report.submitted === 1 } : undefined;
+    }
+
+    private saveReport(game: string, objective: Objective, student: string, text: string): void {
+        const previous = this.savedReport(game, objective, student);
+        const version = Math.max(Date.now(), (previous?.ts ?? 0) + 1);
+        const group = objective.board && groupSize(objective) > 1 ? this.questBoard.groupOf(game, objective.id, student) : undefined;
+        // A teammate may resubmit the reopened report: replace the previous author's copy for this group only.
+        this.ctx.storage.transactionSync(() => {
+            if (previous && previous.student_key !== student) this.sql.exec('DELETE FROM campaign_reports WHERE game_id = ? AND objective = ? AND student_key = ?', game, objective.id, previous.student_key);
+            this.sql.exec(`INSERT INTO campaign_reports (game_id, student_key, objective, text, ts, submitted, group_id) VALUES (?, ?, ?, ?, ?, 1, ?)
+                ON CONFLICT (game_id, student_key, objective) DO UPDATE SET text = excluded.text, ts = excluded.ts, submitted = 1, group_id = excluded.group_id`, game, student, objective.id, text.trim(), version, group?.group_id ?? null);
+        });
+    }
+
+    // Undo reopens a shared report for its original group, or an individual report for its author. Writing and XP
+    // awards stay saved; resubmission replaces the report and cannot earn the same completion reward twice.
+    private undoReport(ws: WebSocket, seat: Seat, objectiveId: string, version: number, gameId: string): void {
+        if (!this.isOpen() || gameId !== seat.game || seat.game !== this.activeGame()) return;
+        const warn = (text: string) => ws.send(JSON.stringify({ t: 'notice', level: 'warning', text }));
+        const ctx = this.boardContext(seat.game, seat.studentKey);
+        const row = this.campaignRow(seat.game), campaign = row && this.gameCampaign(seat.game);
+        const chapter = row && campaign ? campaign.chapters[row.chapter] : undefined;
+        const objective = ctx?.quests.find(o => o.id === objectiveId) ?? chapter?.objectives.find(o => o.id === objectiveId);
+        if (!ctx || objective?.kind !== 'report') return warn('That report cannot be reopened.');
+        if (!ctx.gameQuests.has(objective.id) && row?.status === 'campaign_complete') return warn('Your teacher ended this campaign.');
+        if (!ctx.player.done.includes(objective.id)) return; // a repeated undo is harmless
+        if (objective.board && !this.questBoard.assignment(seat.game, objective.id, seat.studentKey)) return warn('That report is not yours to reopen.');
+        const group = objective.board && groupSize(objective) > 1 ? this.questBoard.groupOf(seat.game, objective.id, seat.studentKey) : undefined;
+        if (objective.board && groupSize(objective) > 1 && group?.state !== 'done') return warn('That group report cannot be reopened.');
+        const report = this.savedReport(seat.game, objective, seat.studentKey);
+        if (!report || report.submitted !== 1 || report.ts !== version) {
+            this.sendQuest(ws, seat.game, seat.studentKey);
+            return warn('This report has changed. Check the latest submission before undoing it.');
+        }
+        const members = group?.members ?? [seat.studentKey];
+        const dependsOnReport = (candidate: Objective, seen = new Set<string>()): boolean => {
+            if (seen.has(candidate.id)) return false;
+            seen.add(candidate.id);
+            return prerequisiteIds(candidate).some(id => id === objective.id || !!chapter?.objectives.some(o => o.id === id && dependsOnReport(o, seen)));
+        };
+        for (const member of members) {
+            const player = ctx.players.find(p => p.student_key === member);
+            if (!player) return warn('A group member is no longer in this game.');
+            const active = this.questBoard.activeSideQuest({ ...ctx, player });
+            if (objective.board && active && active.id !== objective.id) return warn(member === seat.studentKey
+                ? 'Leave your current side quest before reopening this report.'
+                : `${ctx.names.get(member) ?? 'A group member'} has started another side quest. They need to leave it before this report can reopen.`);
+            if (chapter?.objectives.some(o => dependsOnReport(o) && (player.done.includes(o.id) || !!this.questBoard.assignment(seat.game, o.id, member)))) {
+                return warn('A later task already uses this report. It cannot be reopened.');
+            }
+        }
+        this.ctx.storage.transactionSync(() => {
+            this.sql.exec('UPDATE campaign_reports SET submitted = 0 WHERE game_id = ? AND objective = ? AND student_key = ?', seat.game, objective.id, report.student_key);
+            for (const member of members) {
+                if (ctx.gameQuests.has(objective.id)) this.sql.exec('DELETE FROM side_quest_done WHERE game_id = ? AND student_key = ? AND quest_id = ?', seat.game, member, objective.id);
+                else {
+                    const player = this.campaignPlayers(seat.game).find(p => p.student_key === member);
+                    if (player) this.sql.exec('UPDATE campaign_players SET done = ? WHERE game_id = ? AND student_key = ?', JSON.stringify(player.done.filter(id => id !== objective.id)), seat.game, member);
+                }
+            }
+            if (group) this.groups.setState(group.group_id, 'playing');
+            if (!ctx.gameQuests.has(objective.id) && row?.status === 'chapter_complete' && chapter && !chapterDone(chapter, this.campaignPlayers(seat.game))) {
+                this.sql.exec("UPDATE campaigns SET status = 'active' WHERE game_id = ?", seat.game);
+            }
+        });
+        this.sendQuestToAll(seat.game);
+        for (const member of members) this.notify(member, 'info', group
+            ? `${seat.name} undid the group report submission. Your writing is back in the Journal.`
+            : 'Submission undone. Your writing is back in the Journal.');
+    }
+
     // A student's typed answer to a chapter question. A wrong one can be tried again after a short wait.
     private answer(ws: WebSocket, seat: Seat, objectiveId: string, typed: string, attemptId?: string): void {
         const audit = this.beginAttempt(seat, typed, 'answer', attemptId, undefined, objectiveId);
@@ -1781,8 +1891,7 @@ export class PlazaRoom extends DurableObject<Env> {
             // Any real attempt in a few words counts; the teacher reads what was written.
             right = typed.trim().split(/\s+/).length >= 5;
             rejection = 'Write at least 5 words, then send your report again.';
-            if (right) this.sql.exec(`INSERT INTO campaign_reports (game_id, student_key, objective, text, ts) VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (game_id, student_key, objective) DO UPDATE SET text = excluded.text, ts = excluded.ts`, seat.game, seat.studentKey, objective.id, typed.trim(), now);
+            if (right) this.saveReport(seat.game, objective, seat.studentKey, typed);
         } else if (objective.answerThief) {
             // The thief's made-up name, as the plaza shows it. The thief never gets this question.
             const names = this.rosterNames(seat.game);
@@ -1851,8 +1960,7 @@ export class PlazaRoom extends DurableObject<Env> {
             this.sideQuestWrong.set(key, now);
             return reply(false, false, report ? 'Write at least 5 words, then send your report again.' : 'That answer was not accepted. Check the question and try again.');
         }
-        if (report) this.sql.exec(`INSERT INTO campaign_reports (game_id, student_key, objective, text, ts) VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT (game_id, student_key, objective) DO UPDATE SET text = excluded.text, ts = excluded.ts`, seat.game, seat.studentKey, objective.id, typed.trim(), now);
+        if (report) this.saveReport(seat.game, objective, seat.studentKey, typed);
         this.gameSideQuests.finish(seat.game, seat.studentKey, objective.id);
         reply(true);
         this.award(seat.studentKey, `answer:${seat.game}:${objective.id}`, XP.quest, 'Side quest completed', seat.game);
@@ -1928,7 +2036,7 @@ export class PlazaRoom extends DurableObject<Env> {
             groups: chapters.flatMap(chapter => this.groups.current(game, chapter)).flatMap(group => sideQuests.some(o => o.id === group.objective) && group.state !== 'done'
                 ? [{ id: group.group_id, quest: title(group.objective), members: this.groups.members(group.group_id).map(name), size: group.size, state: group.state }] : []),
             open: sideQuests.filter(o => !base.closed.has(o.id)).map(o => ({ id: o.id, title: title(o.id) })),
-            reports: this.sql.exec<{ student_key: string; objective: string; text: string }>('SELECT student_key, objective, text FROM campaign_reports WHERE game_id = ? ORDER BY ts DESC LIMIT 100', game).toArray()
+            reports: this.sql.exec<{ student_key: string; objective: string; text: string }>('SELECT student_key, objective, text FROM campaign_reports WHERE game_id = ? AND submitted = 1 ORDER BY ts DESC LIMIT 100', game).toArray()
                 .filter(report => given.has(report.objective)).map(report => {
                     // A group's report was written for every member: the teacher sees who else was in it.
                     const others = this.questBoard.groupOf(game, report.objective, report.student_key)?.members.filter(key => key !== report.student_key) ?? [];
@@ -1975,7 +2083,7 @@ export class PlazaRoom extends DurableObject<Env> {
             reports: this.sql.exec<{ student_key: string; objective: string; text: string; partner_key: string | null }>(
                 `SELECT r.student_key, r.objective, r.text, a.partner_key FROM campaign_reports r
                 LEFT JOIN quest_assignments a ON r.game_id = a.game_id AND r.student_key = a.student_key AND r.objective = a.objective
-                WHERE r.game_id = ? AND r.objective NOT IN (SELECT quest_id FROM game_side_quests WHERE game_id = ?) ORDER BY r.ts DESC LIMIT 100`, game, game).toArray()
+                WHERE r.game_id = ? AND r.submitted = 1 AND r.objective NOT IN (SELECT quest_id FROM game_side_quests WHERE game_id = ?) ORDER BY r.ts DESC LIMIT 100`, game, game).toArray()
                 .map(report => {
                     // A group's report was written for every member: the teacher sees who else was in it.
                     const others = this.questBoard.groupOf(game, report.objective, report.student_key)?.members.filter(key => key !== report.student_key) ?? [];
@@ -2439,7 +2547,7 @@ export class PlazaRoom extends DurableObject<Env> {
         }
         if (action.report) {
             const { studentKey, objective } = action.report;
-            if (!this.sql.exec('SELECT 1 FROM campaign_reports WHERE game_id = ? AND student_key = ? AND objective = ?', game, studentKey, objective).toArray().length) return 'That report was not found.';
+            if (!this.sql.exec('SELECT 1 FROM campaign_reports WHERE game_id = ? AND student_key = ? AND objective = ? AND submitted = 1', game, studentKey, objective).toArray().length) return 'That report was not found.';
             return this.award(studentKey, `report:${game}:${objective}`, XP.teacher, 'Your teacher liked your report', game) ? null : 'That report already has a star.';
         }
         return 'Choose a message or a report.';

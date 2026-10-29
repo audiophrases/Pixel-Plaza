@@ -702,6 +702,10 @@ export default function Game() {
           }}
           onAccept={(objective, changePartner) => connection?.send({ t: 'quest-accept', objective, changePartner })}
           onLeave={objective => connection?.send({ t: 'quest-leave', objective })}
+          onUndoReport={(objective, version) => {
+            setAnswered(null);
+            connection?.send({ t: 'report-undo', objective, version, gameId });
+          }}
           onStart={objective => connection?.send({ t: 'quest-start', objective })}
           onAuto={autoPick}
           onAnswer={(objective, text) => {

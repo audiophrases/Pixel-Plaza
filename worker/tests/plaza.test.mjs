@@ -938,6 +938,141 @@ test('Side quests belong to the game: added with or without a campaign, taken at
     }
 });
 
+test('report undo reopens group and individual writing, keeps drafts through restart, and never repeats XP or overwrites a newer submission', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-report-undo-'));
+    const authUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    let plaza = await startPlaza(authUrl, persistTo, { GROUP_START_MS: '0' });
+    const sockets = [];
+    const join = async token => { const socket = await enter(plaza.base, token, null); sockets.push(socket); return socket; };
+    try {
+        let base = plaza.base;
+        let session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+        const created = (await teacher('game', { name: 'Undo reports', randomNames: false })).body;
+        PIN = created.pin;
+        const gameId = created.game.id;
+        let alex = await join('signed-a'), sam = await join('signed-b'), outsider = await join('signed-c');
+        const group = sideQuests.find(q => !q.chapter && q.format === 'group' && q.answer === 'report');
+        const solo = sideQuests.find(q => !q.chapter && q.format === 'solo' && q.answer === 'report');
+        const board = (op, body) => teacher(`side-quests/${op}`, body);
+        const target = (await board('board')).body.target;
+        const preview = (await board('board-preview', { gameId, version: target.version, questIds: [group.id, solo.id] })).body.preview;
+        assert.equal((await board('board-release', { previewId: preview.id })).status, 200);
+        const card = (socket, id, check) => socket.next(m => m.t === 'board' && m.board.some(q => q.id === id && check(q)), `${id} card`).then(m => m.board.find(q => q.id === id));
+        const undo = (socket, id, version, selectedGame = gameId) => socket.send({ t: 'report-undo', objective: id, version, gameId: selectedGame });
+        const submit = async (socket, id, text) => {
+            socket.send({ t: 'answer', objective: id, text });
+            assert.equal((await socket.next(m => m.t === 'answered' && m.objective === id, 'submission result for ' + id)).correct, true);
+            return card(socket, id, q => q.state === 'done' && q.report?.text === text);
+        };
+
+        alex.send({ t: 'quest-accept', objective: group.id });
+        await card(alex, group.id, q => q.state === 'active');
+        sam.send({ t: 'quest-accept', objective: group.id });
+        await card(sam, group.id, q => q.group?.members.length === 2);
+        sam.send({ t: 'quest-start', objective: group.id });
+        await card(alex, group.id, q => q.group?.state === 'playing');
+        const text = 'We chose the park because it is quiet and green.';
+        const submitted = await submit(alex, group.id, text);
+        const teamCopy = await card(sam, group.id, q => q.state === 'done');
+        assert.deepEqual(teamCopy.report, submitted.report, 'everyone in this group sees the shared submitted writing');
+        assert.equal((await outsider.next(m => m.t === 'board' && m.board.some(q => q.id === group.id))).board.find(q => q.id === group.id).report, undefined, 'other groups never see this report');
+        const xpBefore = (await teacher('status')).body.online.filter(s => ['stu_a', 'stu_b'].includes(s.studentKey)).map(s => [s.studentKey, s.level]).sort();
+        const awarded = await sam.next(m => m.t === 'xp' && m.gained, 'initial group XP');
+        const xp = awarded.xp;
+        outsider.inbox.length = 0;
+        undo(outsider, group.id, submitted.report.version);
+        assert.equal((await teacher('status')).body.sideQuests.reports.length, 1, 'a nonmember cannot undo another group report');
+
+        // Another member can undo, including while the original author is offline.
+        alex.ws.close(); await alex.closed;
+        await sam.next(m => m.t === 'leave' && m.id === alex.me.id, 'original writer leaves the plaza');
+        undo(sam, group.id, submitted.report.version);
+        const reopened = await card(sam, group.id, q => q.state === 'active' && q.report?.submitted === false);
+        assert.equal(reopened.report.text, text);
+        assert.equal(reopened.group.state, 'playing');
+        let status = (await teacher('status')).body;
+        assert.equal(status.sideQuests.reports.length, 0, 'withdrawn writing is no longer shown as a final report');
+        assert.equal(status.sideQuests.doing.filter(s => ['stu_a', 'stu_b'].includes(s.studentKey)).length, 2, 'the whole original group reopens, including offline members');
+        assert.equal((await teacher('xp', { report: { studentKey: 'stu_a', objective: group.id } })).status, 400, 'a draft cannot receive a report star');
+        alex = await join('signed-a');
+        assert.equal((await card(alex, group.id, q => q.state === 'active')).report.text, text, 'a reconnect receives the recovered draft');
+
+        const revised = 'We compared the park and square and decided to use the square.';
+        const resubmitted = await submit(sam, group.id, revised);
+        assert.ok(resubmitted.report.version > submitted.report.version);
+        await card(alex, group.id, q => q.state === 'done' && q.report?.text === revised);
+        status = (await teacher('status')).body;
+        assert.deepEqual(status.sideQuests.reports.map(r => [r.studentKey, r.text]), [['stu_b', revised]], 'a teammate resubmits one replacement report');
+        assert.deepEqual(status.online.filter(s => ['stu_a', 'stu_b'].includes(s.studentKey)).map(s => [s.studentKey, s.level]).sort(), xpBefore);
+        sam.inbox.length = 0;
+        undo(alex, group.id, submitted.report.version);
+        await alex.next(m => m.t === 'notice' && /report has changed/.test(m.text), 'stale undo warning');
+        assert.equal((await teacher('status')).body.sideQuests.reports[0].text, revised, 'a delayed undo cannot retract newer writing');
+
+        // Reopening cannot take a teammate away from a different quest they have started.
+        sam.send({ t: 'quest-accept', objective: solo.id }); await card(sam, solo.id, q => q.state === 'active');
+        undo(alex, group.id, resubmitted.report.version);
+        await alex.next(m => m.t === 'notice' && /started another side quest/.test(m.text), 'busy teammate warning');
+        sam.send({ t: 'quest-leave', objective: solo.id });
+        await sam.next(m => m.t === 'board' && !m.board.some(q => q.id === solo.id && q.state === 'active'), 'teammate leaves newer quest');
+        undo(alex, group.id, resubmitted.report.version);
+        await card(alex, group.id, q => q.state === 'active' && !q.report?.submitted);
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        plaza = await startPlaza(authUrl, persistTo);
+        base = plaza.base;
+        session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        alex = await join('signed-a'); sam = await join('signed-b'); outsider = await join('signed-c');
+        const saved = await card(sam, group.id, q => q.state === 'active');
+        assert.deepEqual(saved.report, { text: revised, version: resubmitted.report.version, submitted: false }, 'the reopened shared draft survives a real server restart');
+        assert.equal((await sam.next(m => m.t === 'xp', 'saved XP after restart')).xp, xp, 'undo and resubmit never repeat completion XP');
+        const final = await submit(alex, group.id, revised);
+        undo(sam, group.id, final.report.version);
+        await card(sam, group.id, q => q.state === 'active' && q.report?.submitted === false);
+        alex.send({ t: 'quest-leave', objective: group.id });
+        assert.equal((await card(sam, group.id, q => q.group?.members.length === 1)).report.text, revised, 'the shared draft stays with the group when its writer leaves');
+        alex.send({ t: 'quest-accept', objective: group.id });
+        const newGroup = await card(alex, group.id, q => q.state === 'active' && q.group?.state === 'open');
+        assert.equal(newGroup.report, undefined, 'a new group does not inherit another group’s writing');
+
+        // Individual library writing has the same undo and saved-draft behavior.
+        outsider.send({ t: 'quest-accept', objective: solo.id }); await card(outsider, solo.id, q => q.state === 'active');
+        const own = await submit(outsider, solo.id, text);
+        undo(outsider, solo.id, own.report.version);
+        assert.equal((await card(outsider, solo.id, q => q.state === 'active')).report.text, text);
+        outsider.send({ t: 'quest-leave', objective: solo.id });
+
+        // Individual mission reports also reopen chapter readiness, while protecting completed follow-up work.
+        let draft = (await teacher('missions/create', { id: 'undo-writing', source: 'castanyada' })).body.draft;
+        draft.campaign.chapters = [{ ...draft.campaign.chapters[0], share: 0.3, discoveries: [], reveals: [], objectives: [
+            { id: 'writing', text: 'Explain the class plan.', kind: 'report', accept: [] },
+            { id: 'followup', text: 'Which place did you choose?', accept: ['park'], after: 'writing', optional: true }
+        ] }];
+        draft = (await teacher('missions/save', { id: draft.campaign.id, version: draft.version, envelope: missionEnvelope(draft.campaign) })).body.draft;
+        assert.equal((await teacher('missions/publish', { id: draft.campaign.id, version: draft.version })).status, 200);
+        await teacher('campaign', { op: 'start', campaign: draft.campaign.id });
+        outsider.send({ t: 'answer', objective: 'writing', text });
+        await outsider.next(m => m.t === 'answered' && m.objective === 'writing' && m.correct, 'mission writing result');
+        const mission = (await outsider.next(m => m.t === 'quest' && m.quest?.objectives.some(o => o.id === 'writing' && o.done), 'completed mission writing')).quest;
+        assert.equal(mission.status, 'chapter_complete');
+        const version = mission.objectives.find(o => o.id === 'writing').report.version;
+        undo(outsider, 'writing', version);
+        const draftQuest = (await outsider.next(m => m.t === 'quest' && m.quest?.objectives.some(o => o.id === 'writing' && !o.done && o.report?.submitted === false), 'reopened mission writing')).quest;
+        assert.equal(draftQuest.status, 'active');
+        assert.equal(draftQuest.objectives.find(o => o.id === 'writing').report.text, text);
+        outsider.send({ t: 'answer', objective: 'writing', text }); await outsider.next(m => m.t === 'answered' && m.objective === 'writing' && m.correct, 'mission writing result');
+        const latest = (await outsider.next(m => m.t === 'quest' && m.quest?.objectives.some(o => o.id === 'writing' && o.done), 'completed mission writing')).quest.objectives.find(o => o.id === 'writing').report;
+        outsider.send({ t: 'answer', objective: 'followup', text: 'park' }); await outsider.next(m => m.t === 'answered' && m.objective === 'followup' && m.correct, 'follow-up answer');
+        undo(outsider, 'writing', latest.version);
+        await outsider.next(m => m.t === 'notice' && /later task already uses/.test(m.text), 'dependent-task warning');
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('Side quest groups: the game forms pairs and groups, one answer counts for all, free students are placed, quests close', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-groups-'));
     // A group may start with who is there at once, instead of after three minutes.

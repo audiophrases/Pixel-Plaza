@@ -11,6 +11,7 @@ type Props = {
   // What the last answer came to, so the student knows to wait or to think again.
   feedback: AnswerFeedback | null;
   onAnswer: (objective: string, text: string) => void;
+  onUndoReport?: (objective: string, version: number) => void;
   onAccept?: (objective: string, changePartner?: boolean) => void;
   onLeave?: (objective: string) => void;
   onStart?: (objective: string) => void; // a waiting group starts with who is there
@@ -21,29 +22,45 @@ type Props = {
 const SOURCE: Record<string, string> = { job: 'Your clue', reward: 'New clue', news: 'News' };
 
 // One question with its own answer box, so typing in one never lands in another.
-function Question({ objective, feedback, onAnswer, closed = false, quest, onTurn, heading }: { objective: QuestView['objectives'][number]; feedback: Props['feedback']; onAnswer: Props['onAnswer']; closed?: boolean; quest: QuestView | null; onTurn: Props['onTurn']; heading?: string }) {
-  const [typed, setTyped] = useState('');
+function Question({ objective, feedback, onAnswer, onUndoReport, shared = false, closed = false, quest, onTurn, heading }: { objective: QuestView['objectives'][number]; feedback: Props['feedback']; onAnswer: Props['onAnswer']; onUndoReport?: Props['onUndoReport']; shared?: boolean; closed?: boolean; quest: QuestView | null; onTurn: Props['onTurn']; heading?: string }) {
+  const [typed, setTyped] = useState(objective.report?.text ?? '');
+  const [hasDraft, setHasDraft] = useState(false);
   const [submitted, setSubmitted] = useState<string | null>(null);
+  const reportState = objective.report ? `${objective.report.version}:${objective.report.submitted}` : '';
+  const [seenReport, setSeenReport] = useState(reportState);
+  if (seenReport !== reportState) {
+    setSeenReport(reportState);
+    // Teammates receive the shared writing too. Preserve any unfinished draft they already had in this box.
+    if (objective.report && (!hasDraft || !typed.trim())) { setTyped(objective.report.text); setHasDraft(false); }
+    if (!objective.done && objective.report && !objective.report.submitted) setSubmitted(null);
+  }
   const report = objective.kind === 'report';
   const rejected = feedback?.objective === objective.id && !feedback.correct && submitted === typed.trim();
   const feedbackId = `answer-feedback-${objective.id}`;
   return <section className={`journal-block journal-question${objective.optional ? ' journal-bonus' : ''}`}>
     <h3>{heading ?? (objective.optional ? 'Bonus question' : 'Question')}</h3>
     <p className="journal-ask">{objective.text}</p>
-    {objective.done ? <p className="journal-right">{report ? 'Sent to your teacher.' : 'Correct.'}</p> : closed ? <p>Your teacher ended this campaign.</p> : <>
+    {objective.done ? <>
+      <p className="journal-right">{report ? 'Sent to your teacher.' : 'Correct.'}</p>
+      {report && objective.report && <p className="journal-submitted-report">{objective.report.text}</p>}
+      {report && objective.report?.submitted && onUndoReport && !closed && <>
+        <button type="button" className="journal-dismiss" onClick={() => onUndoReport(objective.id, objective.report!.version)}>Undo submission</button>
+        {shared && <p className="journal-undo-note">Reopens this report for everyone in your group, with the writing saved.</p>}
+      </>}
+    </> : closed ? <p>Your teacher ended this campaign.</p> : <>
       {objective.conversation && quest && <Investigation objective={objective.id} conversation={objective.conversation} interviews={quest.interviews ?? []} clues={quest.clues} onTurn={onTurn} />}
       <form className="journal-answer" onSubmit={event => {
         event.preventDefault();
-        if (typed.trim()) { setSubmitted(typed.trim()); onAnswer(objective.id, typed.trim()); }
+        if (typed.trim()) { setSubmitted(typed.trim()); setHasDraft(false); onAnswer(objective.id, typed.trim()); }
       }}>
         {report ? <textarea value={typed} maxLength={REPORT_MAX_LENGTH} rows={4}
           placeholder="Write your evidence and decision in English"
           aria-describedby={rejected ? feedbackId : undefined}
-          aria-label="Your report" onChange={event => setTyped(event.target.value)} /> :
+          aria-label="Your report" onChange={event => { setTyped(event.target.value); setHasDraft(true); }} /> :
           <input value={typed} maxLength={80} autoComplete="off"
             placeholder={objective.kind === 'name' ? 'Type their name' : 'Type your answer in English'}
             aria-describedby={rejected ? feedbackId : undefined}
-            aria-label="Your answer" onChange={event => setTyped(event.target.value)} />}
+            aria-label="Your answer" onChange={event => { setTyped(event.target.value); setHasDraft(true); }} />}
         <button className="journal-choice" disabled={!typed.trim() || (!!objective.conversation && objective.conversation.completed < objective.conversation.required)}>{report ? 'Send report' : 'Answer'}</button>
       </form>
       {rejected && <p id={feedbackId} className="journal-wrong" role="status">{feedback.message || (feedback.wait
@@ -56,7 +73,7 @@ function Question({ objective, feedback, onAnswer, closed = false, quest, onTurn
 
 // The student's side of the campaign, in short labelled blocks: the task, who you are, what you know, the questions,
 // and the quest board. Without a campaign, only the quest board. It shows only what the server sent this student.
-export default function Journal({ quest, board: boardView, feedback, onAnswer, onAccept, onLeave, onStart, onAuto, onTurn }: Props) {
+export default function Journal({ quest, board: boardView, feedback, onAnswer, onUndoReport, onAccept, onLeave, onStart, onAuto, onTurn }: Props) {
   const [open, setOpen] = useState(() => window.innerHeight >= 700); // shut at first on a short screen, where it would cover the map
   const [fresh, setFresh] = useState(false); // something changed while the journal was shut
   const [recapSeen, setRecapSeen] = useState(false);
@@ -146,7 +163,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
       </section>
 
       {quest.status !== 'campaign_complete' && <WitnessInbox interviews={quest.interviews ?? []} clues={quest.clues} onTurn={onTurn} />}
-      {main.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} quest={quest} onTurn={onTurn} />)}
+      {main.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} quest={quest} onTurn={onTurn} />)}
 
       {quest.thieves && quest.thieves.length > 0 && <section className="journal-block journal-ending">
         <h3>{quest.thieves.length === 1 ? 'The thief was' : 'The thieves were'}</h3>
@@ -159,7 +176,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
         <p>{quest.chapter.ending}</p>
       </section>}
 
-      {bonus.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} closed={ended} quest={quest} onTurn={onTurn} />)}
+      {bonus.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} closed={ended} quest={quest} onTurn={onTurn} />)}
       </>}
       {(!ended || !!items.length) && <section className={`journal-block journal-board${choosing ? ' journal-choosing' : ''}`}><h3>{quest ? 'Quest board' : 'Your side quests'}</h3>
         <p>Do one side quest at a time; each is yours to do once.</p>
@@ -176,7 +193,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
               {item.group.state === 'open' ? ` · waiting for ${item.group.size - item.group.members.length} more` : '. One answer counts for everyone; work it out together.'}
               {item.group.state === 'open' && item.group.startAt !== null && item.group.startAt <= now && <button className="journal-choice" onClick={() => onStart?.(item.id)}>Start with who&rsquo;s here</button>}</p>}
             {item.group?.state === 'open' && item.state === 'active' ? <p className="journal-ask">{item.text}</p>
-              : <Question objective={{ id: item.id, text: item.text, kind: item.kind, optional: true, done: item.state === 'done', conversation: item.conversation }} feedback={feedback} onAnswer={onAnswer} closed={!!item.ended} quest={quest} onTurn={onTurn} heading={item.sideQuest ? 'Side quest' : undefined} />}
+              : <Question objective={{ id: item.id, text: item.text, kind: item.kind, optional: true, done: item.state === 'done', conversation: item.conversation, report: item.report }} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} closed={!!item.ended} quest={quest} onTurn={onTurn} heading={item.sideQuest ? 'Side quest' : undefined} shared={!!item.group} />}
             {item.sideQuest && item.state === 'active' && !item.ended && <button type="button" className="journal-dismiss" onClick={() => onLeave?.(item.id)}>Leave this quest and choose another</button>}
           </> : <><p className="journal-ask">{item.text}</p>{item.activity && <p>{item.activity === 'interview' ? 'Interview a classmate' : 'Exchange information with a classmate'}</p>}
             {item.reason && <p>{item.reason}</p>}<button className="journal-choice" disabled={item.state !== 'available'} onClick={() => onAccept?.(item.id)}>{item.joining?.length ? `Join ${item.joining.join(', ')}` : 'Accept quest'}</button></>}

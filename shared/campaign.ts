@@ -51,6 +51,7 @@ export type Chapter = {
 export type Role = { id: string; name: string; card: string; clue: string };
 export type Campaign = { id: string; title: string; roles: Role[]; chapters: Chapter[]; finale: string };
 export type AnswerFeedback = { objective: string; correct: boolean; wait: boolean; message?: string };
+export type ReportSubmission = { text: string; version: number; submitted: boolean };
 
 // What one student is allowed to see: only their own role and what they found.
 export type QuestView = {
@@ -63,7 +64,7 @@ export type QuestView = {
     clues: { id: string; text: string; from: string }[];
     secret: { title: string; text: string } | null; // only for the thief
     thieves: string[] | null; // who it was, once the chapter is over
-    objectives: { id: string; text: string; done: boolean; optional: boolean; kind: 'text' | 'name' | 'report'; conversation?: ConversationView }[];
+    objectives: { id: string; text: string; done: boolean; optional: boolean; kind: 'text' | 'name' | 'report'; conversation?: ConversationView; report?: ReportSubmission }[];
     interviews?: InterviewView[];
     team: { done: number; total: number }; // how far the whole class is through this chapter's main questions
     recap: string | null; // sent when the student comes back to a story already under way
@@ -75,6 +76,7 @@ export type BoardQuestView = {
     state: 'available' | 'active' | 'done' | 'waiting'; reason: string | null;
     partner: { name: string; online: boolean } | null;
     conversation?: ConversationView;
+    report?: ReportSubmission;
     sideQuest?: boolean;
     ended?: boolean; // a quest of the mission, which has ended: it can no longer be answered
     // A pair or group side quest: the student's own group (names, how many it needs, whether it is still waiting, and

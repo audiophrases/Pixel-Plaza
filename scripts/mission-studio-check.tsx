@@ -339,13 +339,14 @@ await act(async () => { previewRoot.unmount(); });
 const { default: Journal } = await import('../src/components/Journal');
 const journalRoot = createRoot(document.getElementById('root')!);
 const accepted: string[] = []; const reports: string[] = [];
+const undone: [string, number][] = [];
 const turns: Record<string, unknown>[] = [];
 const quest: QuestView = { campaign: { id: 'test', title: 'Test' }, status: 'active', chapter: { index: 0, of: 1, title: 'Investigation', intro: 'Find evidence.', ending: null },
     role: { id: 'baker', name: 'Baker', card: 'Ask a witness.' }, clues: [], secret: null, thieves: null, objectives: [], team: { done: 0, total: 0 }, recap: null, finale: null };
 // The quest board comes on its own, as the server sends it: here, the mission's partner quest.
 const board: BoardView = { board: [{ id: 'interview', text: 'Interview the witness.', kind: 'report', activity: 'interview', state: 'waiting', reason: 'Finish your main mystery first.', partner: null }],
     sideQuests: { state: 'empty', reason: 'Your teacher will add side quests soon.', waiting: 0 } };
-const renderJournal = async (feedback: AnswerFeedback | null = null) => { await act(async () => { journalRoot.render(<Journal quest={structuredClone(quest)} board={structuredClone(board)} feedback={feedback} onTurn={turn => turns.push(turn)} onAnswer={(_id, text) => reports.push(text)} onAccept={(id, change) => accepted.push(change ? `${id}-replace` : id)} />); }); };
+const renderJournal = async (feedback: AnswerFeedback | null = null) => { await act(async () => { journalRoot.render(<Journal quest={structuredClone(quest)} board={structuredClone(board)} feedback={feedback} onTurn={turn => turns.push(turn)} onAnswer={(_id, text) => reports.push(text)} onUndoReport={(id, version) => undone.push([id, version])} onAccept={(id, change) => accepted.push(change ? `${id}-replace` : id)} />); }); };
 await renderJournal();
 assert.equal(button('Accept quest').disabled, true);
 board.board[0].state = 'available'; board.board[0].reason = null;
@@ -415,6 +416,38 @@ assert.equal(field('Your report').value, 'Maybe');
 await renderJournal({ objective: 'written', correct: false, wait: true, message: 'Exchange evidence with 2 witnesses before submitting this conclusion.' });
 assert.match(document.querySelector('.journal-wrong')!.textContent!, /2 witnesses/);
 assert.ok(!document.querySelector('.journal-wrong')!.textContent!.includes('wait'), 'missing participation is not described as a timing problem');
+const savedWriting = 'We checked the evidence and agreed on a safer plan.';
+await edit('Your report', savedWriting); await click('Send report');
+quest.objectives[0].done = true; quest.objectives[0].report = { text: savedWriting, version: 10, submitted: true };
+await renderJournal(); await click('Undo submission');
+assert.deepEqual(undone.at(-1), ['written', 10], 'individual writing sends the exact submission version to undo');
+quest.objectives[0].done = false; quest.objectives[0].report.submitted = false;
+await renderJournal();
+assert.equal(field('Your report').value, savedWriting, 'undo preserves the individual report for further writing');
+assert.equal(document.querySelector('.journal-wrong'), null, 'old answer feedback does not follow a reopened report');
+
+// A teammate sees a report submitted by somebody else, then gets the shared writing back on undo.
+quest.objectives = [];
+board.board = [{ id: 'team-writing', text: 'Agree on a plan together.', kind: 'report', activity: null, state: 'active', reason: null, partner: null,
+    sideQuest: true, group: { members: ['Alex', 'Sam'], size: 2, state: 'playing', startAt: null } }];
+await renderJournal(); assert.equal(field('Your report').value, '');
+board.board[0].state = 'done'; board.board[0].group!.state = 'done';
+board.board[0].report = { text: savedWriting, version: 20, submitted: true };
+await renderJournal(); assert.match(document.querySelector('.journal-undo-note')!.textContent!, /everyone in your group/);
+assert.equal(document.querySelector('.journal-submitted-report')!.textContent, savedWriting);
+await click('Undo submission'); assert.deepEqual(undone.at(-1), ['team-writing', 20]);
+board.board[0].state = 'active'; board.board[0].group!.state = 'playing'; board.board[0].report!.submitted = false;
+await renderJournal(); assert.equal(field('Your report').value, savedWriting, 'a teammate recovers the shared text even if their own box had been empty');
+await edit('Your report', 'My unfinished addition to our group report.');
+await renderJournal(); assert.equal(field('Your report').value, 'My unfinished addition to our group report.', 'ordinary updates preserve ongoing edits');
+await click('Send report');
+const latestSharedWriting = 'Sam revised our proposal after we compared the two plans.';
+board.board[0].state = 'done'; board.board[0].report = { text: latestSharedWriting, version: 21, submitted: true };
+await renderJournal(); await click('Undo submission');
+board.board[0].state = 'active'; board.board[0].report!.submitted = false;
+await renderJournal(); assert.equal(field('Your report').value, latestSharedWriting, 'reopening uses the latest shared report rather than an older local submission');
+board.board[0].state = 'done'; board.board[0].report!.submitted = true; board.board[0].ended = true;
+await renderJournal(); assert.equal([...document.querySelectorAll('button')].some(item => item.textContent?.trim() === 'Undo submission'), false, 'an ended mission cannot reopen reports');
 await act(async () => { journalRoot.unmount(); });
 
 const { default: Warmup } = await import('../src/components/Warmup');
