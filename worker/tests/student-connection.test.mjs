@@ -144,6 +144,17 @@ test('explicit chat attempts survive disconnects and reloads until acknowledged 
         restored.receive({ t: 'checked', id: check.id, ok: false, corrected: 'He walks home.', why: 'Use walks with he.' });
         assert.deepEqual(await hint, { ok: false, corrected: 'He walks home.', why: 'Use walks with he.' });
 
+        // Appearance updates replace the figure data in place, keeping its socket identity, position and rewards.
+        restored.receive({ t: 'join', player: { id: 'classmate', name: 'Sam', x: 300, y: 420, shirt: 1, hair: 2, style: { colour: 1, flair: null } } });
+        const classmate = plaza.players.get('classmate');
+        let changedAppearance;
+        const stopAppearance = plaza.subscribe(event => { if (event.t === 'avatar') changedAppearance = event; });
+        restored.receive({ t: 'avatar', id: 'classmate', avatar: { shirt: 12, hair: 4, head: 3, voice: 'en-AU-NatashaNeural' } });
+        assert.equal(plaza.players.get('classmate'), classmate);
+        assert.deepEqual([classmate.name, classmate.x, classmate.y, classmate.shirt, classmate.hair, classmate.head, classmate.style.colour], ['Sam', 300, 420, 12, 4, 3, 1]);
+        assert.equal(changedAppearance.id, 'classmate');
+        stopAppearance();
+
         let support;
         const unsubscribe = plaza.subscribe(event => { if (event.t === 'support') support = event.support; });
         restored.receive({ t: 'support', support: { request: { id: 'help-1', topic: 'writing', status: 'acknowledged' }, messages: [{ id: 'reply-1', text: 'Tell me your idea.', timestamp: 100 }] } });

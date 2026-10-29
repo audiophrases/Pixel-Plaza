@@ -244,14 +244,14 @@ export default function Teacher() {
     helpBefore.current = new Set(helpIds);
   }, [helpSignature, incidentSignature, repeatCount]);
 
-  const action = async (path: string, body: object) => {
+  const action = async (path: string, body: object, onError?: (cause: unknown) => void) => {
     try {
       const result = await request(path, body);
       setStatus(result);
       setError('');
       if (result.notice !== undefined) setNotice(result.notice);
       return true;
-    } catch (cause) { failed(cause); return false; }
+    } catch (cause) { onError?.(cause); failed(cause); return false; }
   };
 
   // Saved classmates remain available for private help even when they are offline or have no alert.
@@ -665,7 +665,7 @@ export default function Teacher() {
 
       {notice && <p role="alert" className="teacher-error">{notice}</p>}
 
-      {status.game && drawerStudent && <StudentDrawer key={drawerStudent.studentKey} token={token} gameId={status.game.id} student={drawerStudent}
+      {status.game && drawerStudent && <StudentDrawer key={`${status.game.id}:${drawerStudent.studentKey}`} token={token} gameId={status.game.id} student={drawerStudent}
         online={isOnline(drawerStudent.studentKey)} muted={status.muted.includes(drawerStudent.studentKey)}
         soundOff={allSoundOff || !!status.sound?.off.includes(drawerStudent.studentKey)} allSoundOff={allSoundOff}
         who={who} action={action} failed={failed} onClose={closeDrawer} onOpen={setSelectedStudent} />}

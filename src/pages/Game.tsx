@@ -298,12 +298,12 @@ export default function Game() {
     const me = () => plaza.players.get(plaza.selfId)?.name ?? '';
     const names = new Map<string, string>(); // player id to the name shown, to follow a rename
     // Classmates nearest first, for the faces to start a chat with, and who would hear nearby chat.
-    const findClassmates = () => {
+    const findClassmates = (refreshAppearance = false) => {
       const self = plaza.players.get(plaza.selfId);
       if (!self) return;
       const others = [...plaza.players.values()].filter(player => player.id !== self.id)
         .sort((a, b) => Math.hypot(a.x - self.x, a.y - self.y) - Math.hypot(b.x - self.x, b.y - self.y));
-      setClassmates(current => sameClassmates(current, others) ? current : others.map(player => ({ ...player })));
+      setClassmates(current => !refreshAppearance && sameClassmates(current, others) ? current : others.map(player => ({ ...player })));
       const near = inEarshot(self, others).map(player => player.name);
       setEarshot(current => current.join('\n') === near.join('\n') ? current : near);
     };
@@ -350,7 +350,7 @@ export default function Game() {
       if (event.t === 'rename' || event.t === 'names') {
         const before = event.t === 'rename' ? names.get(event.id) : null;
         const changes = new Map(event.t === 'names' ? event.changes.map(c => [c.from, c.name]) : before ? [[before, event.name]] : []);
-        if (event.t === 'names') setAlias(null);
+        if (event.t === 'names' && !event.randomNames) setAlias(null);
         if (changes.size) {
           const move = (key: string) => { const partner = partnerOf(key); return partner && changes.has(partner) ? privateChat(changes.get(partner)!) : key; };
           const moveKeys = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).map(([key, value]) => [move(key), value]));
@@ -363,12 +363,12 @@ export default function Game() {
           if (pending.current) pending.current.conv = move(pending.current.conv);
         }
       }
-      if (event.t === 'roster' || event.t === 'join' || event.t === 'leave' || event.t === 'rename' || event.t === 'names') {
+      if (event.t === 'roster' || event.t === 'join' || event.t === 'leave' || event.t === 'rename' || event.t === 'names' || event.t === 'avatar') {
         const self = plaza.players.get(plaza.selfId ?? '');
         if (self) setMyName(self.name);
         names.clear();
         for (const player of plaza.players.values()) names.set(player.id, player.name);
-        findClassmates();
+        findClassmates(event.t === 'avatar' || event.t === 'roster');
       }
       if (event.t === 'typing') {
         setTyping(current => ({ ...current, [event.id]: { scope: event.scope, until: Date.now() + TYPING_SHOWN_MS } }));

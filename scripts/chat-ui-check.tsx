@@ -1,5 +1,7 @@
 import { JSDOM } from 'jsdom';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
 
 // The chat as a student meets it: conversations as faces, replies that find the student, "is writing",
 // and what became of each message they sent. The real page and connection, with the canvas, dictionary
@@ -10,6 +12,7 @@ Object.assign(global, { window: dom.window, document: dom.window.document, HTMLE
   localStorage: dom.window.localStorage, sessionStorage: dom.window.sessionStorage, IS_REACT_ACT_ENVIRONMENT: true });
 Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true });
 dom.window.HTMLElement.prototype.scrollIntoView = () => {};
+vm.runInNewContext(fs.readFileSync('public/cup/avatar-parts.js', 'utf8'), { window: dom.window });
 // Native focus trapping/backdrop behavior is covered separately in Chrome.
 dom.window.HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
 dom.window.HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
@@ -83,7 +86,7 @@ try {
     root.render(<MemoryRouter initialEntries={[{ pathname: '/game', state: { roomCode: '123456', avatarConfig: null } }]}><Game /></MemoryRouter>);
   });
   const socket = sockets[0];
-  await act(async () => { socket.open(); socket.receive({ t: 'welcome', id: 'a', gameId: 'game-a', players: [{ id: 'a', name: 'Alex', x: 1000, y: 1000 }] }); });
+  await act(async () => { socket.open(); socket.receive({ t: 'welcome', id: 'a', gameId: 'game-a', theme: { id: 'plaza', image: '/assets/maps/plaza.webp' }, players: [{ id: 'a', name: 'Alex', x: 1000, y: 1000 }] }); });
 
   // The chat starts with the people nearby, and says plainly when there is nobody to hear.
   assert.equal(selected(), 'Nearby');
@@ -101,6 +104,9 @@ try {
   assert.equal(tab('Sam'), null);
   await act(async () => socket.receive({ t: 'typing', id: 'b', scope: 'private' }));
   assert.ok(tab('Sam')?.querySelector('.chat-conv-writing'), 'a classmate writing to you appears before their message');
+  const originalFace = tab('Sam')?.querySelector('img')?.src;
+  await act(async () => socket.receive({ t: 'avatar', id: 'b', avatar: { head: 3, shirt: 12, hair: 4, hat: 6 } }));
+  assert.notEqual(tab('Sam')?.querySelector('img')?.src, originalFace, 'the teacher-changed character updates the chat portrait immediately');
   // A private message for a student who is not writing opens by itself, so the reply goes back to the right person.
   await act(async () => socket.receive(chat('Sam', 'Hi Alex, where are you?', { whisper: true, to: 'Alex' })));
   assert.equal(selected(), 'Sam');
@@ -237,7 +243,7 @@ try {
   await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: '/game', state: { roomCode: '123456', avatarConfig: null } }]}><Game key="reload" /></MemoryRouter>));
   const back = sockets.at(-1)!;
   await act(async () => {
-    back.open(); back.receive({ t: 'welcome', id: 'a', gameId: 'game-a', players: [{ id: 'a', name: 'Alex', x: 1000, y: 1000 }] });
+    back.open(); back.receive({ t: 'welcome', id: 'a', gameId: 'game-a', theme: { id: 'plaza', image: '/assets/maps/plaza.webp' }, players: [{ id: 'a', name: 'Alex', x: 1000, y: 1000 }] });
     back.receive({ t: 'quest', quest }); back.receive({ t: 'warmup', warmup });
   });
   assert.equal(dialog(), null, 'acknowledged instructions survive a page reload');
@@ -247,7 +253,7 @@ try {
   assert.equal(dialog(), null, 'ending an activity closes its stale instructions');
   await act(async () => back.receive({ t: 'quest', quest: { ...quest, chapter: { ...quest.chapter, index: 1, title: 'The cellar' } } }));
   assert.match(dialog()?.textContent ?? '', /The cellar/); await ok();
-  await act(async () => back.receive({ t: 'welcome', id: 'a', gameId: 'game-b', players: [{ id: 'a', name: 'Alex', x: 1000, y: 1000 }] }));
+  await act(async () => back.receive({ t: 'welcome', id: 'a', gameId: 'game-b', theme: { id: 'plaza', image: '/assets/maps/plaza.webp' }, players: [{ id: 'a', name: 'Alex', x: 1000, y: 1000 }] }));
   assert.equal(dialog(), null, 'switching games drops the old activity');
   await act(async () => back.receive({ t: 'quest', quest }));
   assert.match(dialog()?.textContent ?? '', /The missing chestnuts/, 'another game has its own acknowledgement scope');
@@ -262,8 +268,12 @@ try {
     back.receive({ t: 'leave', id: 'b' });
   });
   assert.ok(document.querySelector('[aria-label="Choose your name"]'));
+  await act(async () => back.receive({ t: 'names', randomNames: true, names: ['Alex', 'Teacher Fox'], changes: [
+    { from: 'Brave Sam', name: 'Teacher Fox' },
+  ] }));
+  assert.ok(document.querySelector('[aria-label="Choose your name"]'), 'editing another student does not dismiss a pending name choice');
   await act(async () => back.receive({ t: 'names', names: ['Alex R', 'Sam'], changes: [
-    { id: 'a', from: 'Alex', name: 'Alex R' }, { from: 'Brave Sam', name: 'Sam' },
+    { id: 'a', from: 'Alex', name: 'Alex R' }, { from: 'Teacher Fox', name: 'Sam' },
   ] }));
   assert.equal(document.querySelector('[aria-label="Choose your name"]'), null, 'switching clears an unfinished random name choice');
   assert.equal(selected(), 'Sam'); assert.ok(tab('Sam')?.classList.contains('chat-conv-away'));

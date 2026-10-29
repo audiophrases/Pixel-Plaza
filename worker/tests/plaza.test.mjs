@@ -2196,6 +2196,92 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
     }
 });
 
+test('teachers edit student names and characters live or offline, scoped correctly and saved through a restart', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-profile-'));
+    const authUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    let plaza = await startPlaza(authUrl, persistTo);
+    const sockets = [];
+    const join = async token => { const socket = await enter(plaza.base, token, null); sockets.push(socket); return socket; };
+    try {
+        let base = plaza.base;
+        let session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+        const created = (await teacher('game', { name: 'Character changes', randomNames: false })).body;
+        PIN = created.pin;
+        const gameId = created.game.id;
+        const alex = await join('signed-a'), sam = await join('signed-b');
+        const profileUrl = key => `/api/teacher/student?gameId=${gameId}&studentKey=${key}`;
+        const original = (await api(base, profileUrl('stu_a'), { session })).body;
+        const avatar = { ...original.avatar, head: 1, shirt: 3, hair: 4, hat: 6, glasses: 2, voice: 'en-AU-NatashaNeural' };
+        const edit = { gameId, studentKey: 'stu_a', name: 'Captain Owl', avatar };
+
+        assert.equal((await api(base, profileUrl('stu_a'))).status, 401);
+        assert.equal((await api(base, '/api/teacher/student', { token: 'signed-a', body: edit })).status, 401, 'student sign-in cannot edit characters');
+        assert.equal((await teacher('student', { ...edit, gameId: 'previous-game' })).status, 409);
+        assert.equal((await teacher('student', { ...edit, studentKey: 'not-in-game' })).status, 404);
+        assert.equal((await teacher('student', { ...edit, avatar: { shirt: 999 } })).status, 400);
+        assert.equal((await teacher('student', { ...edit, avatar: { ...avatar, voice: 'unknown' } })).status, 400);
+        assert.equal((await teacher('student', { ...edit, name: 'sAm' })).status, 409);
+        assert.equal((await teacher('student', { ...edit, name: 'Teacher' })).status, 400);
+        assert.equal((await teacher('student', { ...edit, name: '' })).status, 400);
+        assert.deepEqual((await api(base, profileUrl('stu_a'), { session })).body, original, 'invalid combined edits change neither name nor character');
+
+        alex.send({ t: 'chat', to: sam.me.id, text: 'Let us meet at the cafe.' });
+        await sam.next(m => m.t === 'chat' && m.text === 'Let us meet at the cafe.');
+        const updated = await teacher('student', edit);
+        assert.equal(updated.status, 200, JSON.stringify(updated.body));
+        const live = updated.body.online.find(student => student.studentKey === 'stu_a');
+        assert.deepEqual([live.name, live.x, live.y, live.look], ['Captain Owl', alex.me.x, alex.me.y, avatar]);
+        assert.equal(updated.body.realNames.stu_a, 'Alex', 'the sign-in identity stays intact');
+        assert.equal(updated.body.entries.find(entry => entry.text === 'Let us meet at the cafe.').sender, 'Captain Owl');
+        for (const socket of [alex, sam]) {
+            const names = await socket.next(m => m.t === 'names' && m.changes.some(change => change.name === 'Captain Owl'));
+            assert.deepEqual(names.changes, [{ id: alex.me.id, from: 'Alex', name: 'Captain Owl' }]);
+            assert.deepEqual((await socket.next(m => m.t === 'avatar' && m.id === alex.me.id)).avatar, avatar);
+        }
+
+        sam.ws.close(); await sam.closed;
+        await alex.next(m => m.t === 'leave' && m.id === sam.me.id);
+        assert.equal((await teacher('student', { gameId, studentKey: 'stu_b', name: 'Night Fox', avatar: { shirt: 10 } })).status, 200);
+        const back = await join('signed-b');
+        assert.deepEqual([back.me.name, back.me.shirt], ['Night Fox', 10], 'offline edits apply on reconnect');
+        assert.equal((await teacher('student', { gameId, studentKey: 'stu_a', name: 'Roger' })).status, 200);
+        const roger = await join('roger-1');
+        assert.equal(roger.me.name, 'Roger 2', 'a late arrival cannot take the teacher-chosen name');
+
+        const random = (await teacher('game', { name: 'Made-up names' })).body;
+        PIN = random.pin;
+        const next = await join('signed-a'), waiting = await join('signed-b');
+        assert.notEqual(next.me.name, 'Roger', 'a name edit belongs only to the selected game');
+        assert.equal(next.me.shirt, avatar.shirt, 'the saved outfit follows the student across games');
+        assert.equal((await waiting.next(m => m.t === 'alias')).kept, false);
+        assert.equal((await teacher('student', { gameId: random.game.id, studentKey: 'stu_a', name: 'Winter Owl' })).status, 200);
+        assert.equal((await next.next(m => m.t === 'alias' && m.name === 'Winter Owl')).kept, true, 'the teacher can finish a pending name choice');
+        assert.equal((await waiting.next(m => m.t === 'names' && m.changes.some(c => c.name === 'Winter Owl'))).randomNames, true);
+        waiting.send({ t: 'reroll' });
+        assert.equal((await waiting.next(m => m.t === 'alias')).kept, false, 'classmates still choose their own pending names');
+
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        plaza = await startPlaza(authUrl, persistTo);
+        base = plaza.base;
+        session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const restored = await join('signed-a');
+        assert.deepEqual([restored.me.name, restored.me.shirt, restored.me.voice], ['Winter Owl', avatar.shirt, avatar.voice], 'name and avatar survive a real server restart');
+        await teacher('class', { open: true, game: gameId });
+        PIN = created.pin;
+        const firstGame = await join('signed-a');
+        assert.equal(firstGame.me.name, 'Roger', 'the first game retains its own teacher-chosen name');
+        assert.deepEqual((await api(base, profileUrl('stu_a'), { session })).body.avatar, avatar);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        removeTemp(persistTo);
+    }
+});
+
 test('shown names: first name alone, then a surname letter for namesakes, updating the Rogers already there', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay();
     const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-'));

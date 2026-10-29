@@ -5,6 +5,7 @@ import { readCorrection } from '../../shared/diff';
 import { tidy } from '../../shared/tidy';
 import Correction from './Correction';
 import Face from './Face';
+import StudentCharacterEditor, { type StudentAction } from './StudentCharacterEditor';
 import { ago } from './liveFormat';
 import './StudentDrawer.css';
 
@@ -20,7 +21,7 @@ type Props = {
   soundOff: boolean;
   allSoundOff: boolean;
   who: (studentKey: string, name: string) => string;
-  action: (path: string, body: object) => Promise<boolean>;
+  action: StudentAction;
   failed: (cause: unknown) => void;
   onClose: () => void;
   onOpen: (studentKey: string) => void; // another student, from a conversation
@@ -40,6 +41,7 @@ export default function StudentDrawer({ token, gameId, student, online, muted, s
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
+  const [editingCharacter, setEditingCharacter] = useState(false);
   const field = useRef<HTMLInputElement>(null);
   const end = useRef<HTMLLIElement>(null);
 
@@ -108,6 +110,7 @@ export default function StudentDrawer({ token, gameId, student, online, muted, s
     </form>
 
     <div className="drawer-actions">
+      <button type="button" onClick={() => setEditingCharacter(true)}>Edit name & character</button>
       <button type="button" onClick={() => void action('mute', { studentKey: student.studentKey, muted: !muted })}
         title={muted ? 'Let them chat again' : 'Stop their chat until you unmute it'}>{muted ? '💬 Unmute' : '🤐 Mute'}</button>
       <button type="button" disabled={allSoundOff} onClick={() => void action('sound', { studentKey: student.studentKey, off: !soundOff })}
@@ -118,6 +121,8 @@ export default function StudentDrawer({ token, gameId, student, online, muted, s
         <button type="button" onClick={() => void action('magic', { power: 'lightning', studentKey: student.studentKey })} title="A playful tumble: up again in 4 seconds">⚡ Lightning</button>
       </>}
     </div>
+
+    {editingCharacter && <StudentCharacterEditor token={token} gameId={gameId} studentKey={student.studentKey} action={action} failed={failed} onClose={() => setEditingCharacter(false)} />}
 
     <div className="drawer-threads" role="tablist" aria-label="Conversations">
       {threads.map(key => <button key={key} type="button" role="tab" aria-selected={key === open} onClick={() => setThread(key)}>

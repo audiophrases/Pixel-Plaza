@@ -64,6 +64,8 @@ Configure PinPlay's roster policy (**PinPlay → Students**) for the intended cl
 
 **Ctrl+K** (or **/**) opens one box for everything on the page. Type a student's name, shown or real, for what you can do with them: open their conversations, message them, mute, sound, find them on the map, spells; or a few words such as *mute ana*. Type **ana: try "I am going"** and Enter to send Ana a private message at once; the box stays open for the next one. Or type an action: *approve*, *everyone chat*, *nearby chat*, *end warm-up*, *next news*, *mute all sound*, *vision*, a tab or another page. Commands with a key show it, and the ones you use most come first.
 
+To change a student's appearance or displayed name, open their face or name, then choose **Edit name & character**. Preview a character, outfit, hair, hat, glasses or voice and press **Save changes**. Their displayed name is saved for this game; their character and voice follow them across games. Changes reach everyone immediately and can also be made while the student is offline. Their sign-in identity, position, experience and activity progress stay intact. Display names must be unique in the game.
+
 ## How students chat
 
 The chat box lists conversations down its left side, as faces: **Nearby** (everyone within 350 map pixels; the chat starts here), **Everyone** (the whole plaza), a private chat with each classmate, the newest on top, and the **Teacher** (private, any language). The top of the open conversation shows who reads it: in Nearby, the faces of the classmates close enough, or *Nobody near you*.

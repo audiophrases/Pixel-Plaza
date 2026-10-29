@@ -89,6 +89,7 @@ export type TeacherAction =
     | { kind: 'open'; open: boolean; game?: string } // a saved game (the last played by default), or close the open one
     | { kind: 'newGame'; name: string; randomNames?: boolean; vision?: number; themeId?: string } // a new game with its own PIN, opened at once
     | { kind: 'realNames'; gameId: string } // switch the current live game to real first names
+    | { kind: 'student'; gameId: string; studentKey: string; name?: unknown; avatar?: unknown }
     | { kind: 'deleteGame'; game: string; confirm?: boolean } // erases a game and everything saved in it
     | { kind: 'vision'; radius: number }                // how far a student sees, in map pixels; 0 shows everyone
     | { kind: 'warmup'; op: 'start' | 'end'; type?: WarmupKind } // a get-to-know-you warm-up at the start of a lesson
@@ -239,6 +240,10 @@ export class PlazaRoom extends DurableObject<Env> {
         // The whole name as PinPlay gives it, from which each game works out what to show.
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('students')").toArray().some(row => row.name === 'full_name')) {
             this.sql.exec('ALTER TABLE students ADD COLUMN full_name TEXT');
+        }
+        // A teacher's chosen display name belongs to the game, independent of the student's sign-in identity.
+        if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('game_students')").toArray().some(row => row.name === 'display_name')) {
+            this.sql.exec('ALTER TABLE game_students ADD COLUMN display_name TEXT');
         }
         // Levels: a student's experience, kept for good, and the look they chose with it. Each award is
         // recorded by what earned it, so the same message or answer never counts twice.
@@ -620,6 +625,10 @@ export class PlazaRoom extends DurableObject<Env> {
     async teacher(token: string, action: TeacherAction): Promise<TeacherStatus | { error: string; status: number }> {
         const session = this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray();
         if (!token || session.length === 0) return { error: 'Please sign in again.', status: 401 };
+        if (action.kind === 'student') {
+            const problem = this.editStudent(action);
+            if (problem) return problem;
+        }
         if (action.kind === 'helpStatus' || action.kind === 'helpMessage') {
             const game = this.activeGame();
             if (!game || (action.gameId && action.gameId !== game)) return { error: 'The selected game changed. Refresh the controls.', status: 409 };
@@ -798,6 +807,66 @@ export class PlazaRoom extends DurableObject<Env> {
                 studentKey: seat.studentKey, name: seat.name, x: seat.x, y: seat.y, zone: this.themes.world(seat.themeId).zoneAt(seat.x, seat.y), level: levelOf(this.xpOf(seat.studentKey)).level, look: seat.avatar
             }))
         };
+    }
+
+    studentProfile(token: string, gameId: string, studentKey: string) {
+        if (!token || !this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray().length) return { error: 'Please sign in again.', status: 401 };
+        if (!gameId || gameId !== this.activeGame()) return { error: 'The selected game changed. Refresh the controls.', status: 409 };
+        const name = this.rosterNames(gameId).get(studentKey);
+        if (!name) return { error: 'That student is not in this game.', status: 404 };
+        const avatar = this.avatarOf(studentKey);
+        avatar.voice ??= voiceFor(studentKey);
+        return { studentKey, name, avatar };
+    }
+
+    private editStudent(action: Extract<TeacherAction, { kind: 'student' }>): { error: string; status: number } | null {
+        const game = this.activeGame();
+        if (!game || action.gameId !== game) return { error: 'The selected game changed. Refresh the controls.', status: 409 };
+        const before = this.rosterNames(game);
+        if (!before.has(action.studentKey)) return { error: 'That student is not in this game.', status: 404 };
+        if (action.name === undefined && action.avatar === undefined) return { error: 'Choose a name or character to change.', status: 400 };
+        let name: string | undefined;
+        if (action.name !== undefined) {
+            if (typeof action.name !== 'string') return { error: 'Enter a display name.', status: 400 };
+            name = action.name.normalize('NFC').trim().replace(/\s+/g, ' ');
+            if (!/^[\p{L}\p{N} '_-]{2,24}$/u.test(name) || !/[\p{L}\p{N}]/u.test(name)) return { error: 'Use 2–24 letters, numbers, spaces, apostrophes, hyphens or underscores.', status: 400 };
+            if (chatProblem(name) || ['teacher', 'system', 'everyone', 'nearby'].includes(name.toLowerCase())) return { error: 'Choose a different display name.', status: 400 };
+            if ([...before].some(([key, other]) => key !== action.studentKey && other.toLowerCase() === name!.toLowerCase())) return { error: 'Another student in this game already has that name.', status: 409 };
+        }
+        const avatar = action.avatar === undefined ? undefined : sanitizeAvatar(action.avatar);
+        if (avatar === null) return { error: 'That character is not available.', status: 400 };
+        if (avatar) avatar.voice ??= this.avatarOf(action.studentKey).voice ?? voiceFor(action.studentKey);
+        this.ctx.storage.transactionSync(() => {
+            if (name !== undefined && name !== before.get(action.studentKey)) {
+                this.sql.exec(`INSERT INTO game_students (game_id, student_key, display_name) VALUES (?, ?, ?)
+                    ON CONFLICT (game_id, student_key) DO UPDATE SET display_name = excluded.display_name`, game, action.studentKey, name);
+            }
+            if (avatar) this.sql.exec('UPDATE students SET avatar = ? WHERE student_key = ?', JSON.stringify(avatar), action.studentKey);
+        });
+        const names = this.rosterNames(game);
+        const changes = [...names].flatMap(([key, current]) => before.get(key) !== current ? [{ key, from: before.get(key)!, name: current }] : []);
+        const ids = new Map<string, string>();
+        for (const ws of this.ctx.getWebSockets()) {
+            const seat = ws.deserializeAttachment() as Seat | null;
+            if (!seat || seat.left || seat.game !== game) continue;
+            ids.set(seat.studentKey, seat.id);
+            seat.name = names.get(seat.studentKey) ?? seat.name;
+            if (avatar && seat.studentKey === action.studentKey) seat.avatar = avatar;
+            ws.serializeAttachment(seat);
+            if (seat.studentKey === action.studentKey) this.sendAlias(ws, game, seat.studentKey);
+        }
+        for (const change of changes) {
+            this.sql.exec('UPDATE chat SET sender = ? WHERE game_id = ? AND student_key = ?', change.name, game, change.key);
+            this.sql.exec('UPDATE chat SET target_name = ? WHERE game_id = ? AND target_key = ?', change.name, game, change.key);
+        }
+        if (changes.length) this.broadcast({ t: 'names', randomNames: this.isRandom(game), names: [...names.values()], changes: changes.map(change => ({ id: ids.get(change.key), from: change.from, name: change.name })) });
+        if (avatar) {
+            const id = ids.get(action.studentKey);
+            if (id) this.broadcast({ t: 'avatar', id, avatar });
+        }
+        this.sendWarmupToAll(game);
+        this.sendQuestToAll(game);
+        return null;
     }
 
     // One student's conversations for the teacher's drawer: a thread for each person or place they wrote to, what they
@@ -1929,10 +1998,21 @@ export class PlazaRoom extends DurableObject<Env> {
                 'SELECT student_key FROM game_students WHERE game_id = ? UNION SELECT student_key FROM positions WHERE game_id = ?', game, game).toArray()
                 .map(row => [row.student_key, this.alias(game, row.student_key).name]));
         }
-        const rows = this.sql.exec<{ student_key: string; full: string }>(
-            `SELECT student_key, COALESCE(full_name, name) AS full FROM students WHERE student_key IN
-             (SELECT student_key FROM game_students WHERE game_id = ? UNION SELECT student_key FROM positions WHERE game_id = ?)`, game, game).toArray();
-        return shownNames(rows.map(row => ({ key: row.student_key, full: row.full })));
+        const rows = this.sql.exec<{ student_key: string; full: string; display_name: string | null }>(
+            `SELECT s.student_key, COALESCE(s.full_name, s.name) AS full, g.display_name FROM students s
+             LEFT JOIN game_students g ON g.student_key = s.student_key AND g.game_id = ? WHERE s.student_key IN
+             (SELECT student_key FROM game_students WHERE game_id = ? UNION SELECT student_key FROM positions WHERE game_id = ?)`, game, game, game).toArray();
+        const names = shownNames(rows.filter(row => !row.display_name).map(row => ({ key: row.student_key, full: row.full })));
+        const taken = new Set(rows.flatMap(row => row.display_name ? [row.display_name.toLowerCase()] : []));
+        for (const row of rows) {
+            if (row.display_name) { names.set(row.student_key, row.display_name); continue; }
+            const base = names.get(row.student_key)!;
+            let name = base;
+            for (let suffix = 2; taken.has(name.toLowerCase()); suffix++) name = `${base} ${suffix}`;
+            names.set(row.student_key, name);
+            taken.add(name.toLowerCase());
+        }
+        return names;
     }
 
     // Anyone online whose shown name has changed (because a namesake arrived) is renamed, on every screen.
@@ -2043,6 +2123,8 @@ export class PlazaRoom extends DurableObject<Env> {
     // The made-up name a student has in a game with random names, chosen the first time they are seen.
     // `kept` is false until they have chosen to keep it; until then they can ask for another.
     private alias(game: string, studentKey: string): { name: string; kept: boolean } {
+        const chosen = this.sql.exec<{ display_name: string | null }>('SELECT display_name FROM game_students WHERE game_id = ? AND student_key = ?', game, studentKey).toArray()[0]?.display_name;
+        if (chosen) return { name: chosen, kept: true };
         const existing = this.sql.exec<{ name: string; kept: number }>('SELECT name, kept FROM aliases WHERE game_id = ? AND student_key = ?', game, studentKey).toArray()[0];
         if (existing) return { name: existing.name, kept: existing.kept === 1 };
         return { name: this.newAlias(game, studentKey), kept: false };
@@ -2050,7 +2132,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // A name nobody else in the game has (and not the one this student has now), saved for them.
     private newAlias(game: string, studentKey: string): string {
-        const taken = new Set(this.sql.exec<{ name: string }>('SELECT name FROM aliases WHERE game_id = ?', game).toArray().map(row => row.name.toLowerCase()));
+        const taken = new Set(this.sql.exec<{ name: string }>('SELECT name FROM aliases WHERE game_id = ? UNION SELECT display_name AS name FROM game_students WHERE game_id = ? AND display_name IS NOT NULL', game, game).toArray().map(row => row.name.toLowerCase()));
         const name = randomName(taken);
         this.sql.exec(`INSERT INTO aliases (game_id, student_key, name, kept) VALUES (?, ?, ?, 0)
             ON CONFLICT (game_id, student_key) DO UPDATE SET name = excluded.name`, game, studentKey, name);

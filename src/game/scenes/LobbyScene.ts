@@ -31,6 +31,7 @@ export default class LobbyScene extends Phaser.Scene {
 
   private playerEntities: { [id: string]: Phaser.GameObjects.Container } = {};
   private figures: { [id: string]: AvatarFigure } = {};
+  private appearanceVersion = 0;
   private nameplates: { [id: string]: Phaser.GameObjects.Text } = {};
   private fog?: Phaser.GameObjects.Image;
   private vision = 0;
@@ -221,6 +222,7 @@ export default class LobbyScene extends Phaser.Scene {
     }
     else if (event.t === 'roster') this.syncRoster();
     else if (event.t === 'join') this.addPlayer(event.player);
+    else if (event.t === 'avatar') this.updateAvatar(event.id);
     else if (event.t === 'leave') this.removePlayer(event.id);
     else if (event.t === 'names') {
       for (const player of this.connection.players.values()) this.nameplates[player.id]?.setText(plateText(player));
@@ -372,6 +374,23 @@ export default class LobbyScene extends Phaser.Scene {
 
       this.cameras.main.startFollow(this.localPlayerContainer, true, 0.1, 0.1);
     }
+  }
+
+  private updateAvatar(id: string) {
+    const player = this.connection.players.get(id), container = this.playerEntities[id], artwork = this.artwork[id];
+    if (!player || !container || !artwork) return;
+    // Replace just the figure; preserve its feet, camera, movement, nameplate and speech bubbles.
+    artwork.removeAll(true);
+    this.figures[id]?.destroy();
+    delete this.figures[id];
+    const existing = new Set(container.list);
+    const figure = AvatarFigure.create(this, container, `${id}_look_${++this.appearanceVersion}`, player);
+    if (figure) {
+      this.figures[id] = figure;
+      const pieces = container.list.filter(piece => !existing.has(piece));
+      container.remove(pieces);
+      artwork.add(pieces);
+    } else artwork.add(this.add.rectangle(0, -16, 32, 64, id === this.connection.selfId ? 0xFF5A5F : 0x4285F4));
   }
 
   private removePlayer(id: string) {

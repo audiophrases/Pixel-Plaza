@@ -106,6 +106,7 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     if (path === '/api/teacher/game' && typeof body?.name === 'string') return { kind: 'newGame', name: body.name, randomNames: body.randomNames !== false, ...(typeof body.vision === 'number' ? { vision: body.vision } : {}), ...(body.themeId !== undefined ? { themeId: body.themeId } : {}) };
     if (path === '/api/teacher/game/delete' && typeof body?.game === 'string') return { kind: 'deleteGame', game: body.game, confirm: body.confirm === true };
     if (path === '/api/teacher/real-names' && typeof body?.gameId === 'string') return { kind: 'realNames', gameId: body.gameId };
+    if (path === '/api/teacher/student' && typeof body?.studentKey === 'string' && typeof body?.gameId === 'string') return { kind: 'student', studentKey: body.studentKey, gameId: body.gameId, name: body.name, avatar: body.avatar };
     if (path === '/api/teacher/magic' && method === 'POST' && ['freeze', 'thaw', 'lightning', 'teleport', 'rain'].includes(body?.power)) return { kind: 'magic', power: body.power, studentKey: body.studentKey, x: body.x, y: body.y };
     if (path === '/api/teacher/vision' && typeof body?.radius === 'number') return { kind: 'vision', radius: body.radius };
     if (path === '/api/teacher/warmup' && (body?.op === 'start' || body?.op === 'end')) {
@@ -311,6 +312,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         }
         if (!(get && op === 'list') && !(post && ['save', 'delete', 'restore', 'import'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
         const result = await plaza(env).sideQuestStudio(request.headers.get('x-teacher-session') || '', op, get ? {} : body);
+        return 'error' in result ? json({ error: result.error }, result.status) : json(result);
+    }
+    if (path === '/api/teacher/student' && get) {
+        const query = new URL(request.url).searchParams;
+        const result = await plaza(env).studentProfile(request.headers.get('x-teacher-session') || '', query.get('gameId') || '', query.get('studentKey') || '');
         return 'error' in result ? json({ error: result.error }, result.status) : json(result);
     }
     if (path === '/api/teacher/conversations' && get) {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { renderAvatarSvg } from '../utils/AvatarRenderer';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
 import { ENGLISH_VOICES, isEnglishVoice, normalizeVoice, randomVoice } from '../../shared/voices';
@@ -10,6 +11,9 @@ interface AvatarEditorProps {
   initialConfig?: Partial<AvatarConfig>;
   onSave: (config: AvatarConfig) => void;
   onCancel?: () => void;
+  mode?: 'student' | 'teacher';
+  busy?: boolean;
+  children?: ReactNode;
 }
 
 // Same combination rules as PinPlay's randomAvatar.
@@ -23,7 +27,7 @@ function randomCombination(catalog: any): Omit<AvatarConfig, 'voice'> {
   };
 }
 
-export default function AvatarEditor({ initialConfig, onSave, onCancel }: AvatarEditorProps) {
+export default function AvatarEditor({ initialConfig, onSave, onCancel, mode = 'student', busy = false, children }: AvatarEditorProps) {
   const [config, setConfig] = useState<AvatarConfig>({
     skin: 0,
     head: 0,
@@ -126,7 +130,9 @@ export default function AvatarEditor({ initialConfig, onSave, onCancel }: Avatar
 
   return (
     <div className="avatar-editor">
-      <h2 className="heading-pixel">Your Character</h2>
+      <h2 className="heading-pixel">{mode === 'teacher' ? 'Edit student character' : 'Your Character'}</h2>
+      <fieldset className="avatar-editor-fields" disabled={busy}>
+      {children}
 
       {/* As in PinPlay: the character beside a short list of parts, each stepped with ‹ and ›. */}
       <div className="avatar-builder">
@@ -165,18 +171,19 @@ export default function AvatarEditor({ initialConfig, onSave, onCancel }: Avatar
             {voice.label} · {voice.accent}
           </option>)}
         </select>
-        <p>Your messages will be read aloud in this voice.</p>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => void previewVoice()}>
+        <p>{mode === 'teacher' ? 'Their messages will be read aloud in this voice.' : 'Your messages will be read aloud in this voice.'}</p>
+        {mode === 'student' && <button type="button" className="btn btn-secondary btn-sm" onClick={() => void previewVoice()}>
           {previewing ? 'Stop preview' : 'Hear this voice'}
-        </button>
+        </button>}
         {previewing && <p role="status">Voice preview…</p>}
         {voiceError && <p role="alert" className="character-voice-error">{voiceError}</p>}
       </div>
 
       <div className="editor-actions">
         {onCancel && <button type="button" className="btn btn-secondary" onClick={() => { stopPreview(); onCancel(); }}>Cancel</button>}
-        <button type="button" className="btn btn-primary" onClick={() => { unlockSound(); stopPreview(); onSave(config); }}>Save Character</button>
+        <button type="button" className="btn btn-primary" onClick={() => { if (mode === 'student') unlockSound(); stopPreview(); onSave(config); }}>{busy ? 'Saving…' : mode === 'teacher' ? 'Save changes' : 'Save Character'}</button>
       </div>
+      </fieldset>
     </div>
   );
 }
