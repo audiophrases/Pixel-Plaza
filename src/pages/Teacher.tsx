@@ -261,7 +261,7 @@ export default function Teacher() {
   };
 
   // Saved classmates remain available for private help even when they are offline or have no alert.
-  const supportStudents = new Map<string, { studentKey: string; name: string }>();
+  const supportStudents = new Map<string, Support['students'][number]>();
   if (status) {
     for (const student of status.support?.students ?? []) supportStudents.set(student.studentKey, student);
     for (const student of status.online) supportStudents.set(student.studentKey, student);
@@ -389,7 +389,8 @@ export default function Teacher() {
     if (!status || !selectedStudent) return null;
     const live = status.online.find(student => student.studentKey === selectedStudent);
     const known = live ?? supportStudents.get(selectedStudent);
-    return known ? { studentKey: selectedStudent, name: known.name, zone: live ? placeName(live.zone) : null, level: live?.level, look: live?.look } : null;
+    return known ? { studentKey: selectedStudent, name: known.name, zone: live ? placeName(live.zone) : null, level: live?.level, look: live?.look,
+      inTab: live?.inTab, tabSwitches: known.tabSwitches, tabAwayAt: known.tabAwayAt } : null;
   })();
 
   return <main className={`teacher-page${drawerStudent ? ' teacher-with-drawer' : ''}`}>

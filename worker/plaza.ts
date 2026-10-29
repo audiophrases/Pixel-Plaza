@@ -808,13 +808,17 @@ export class PlazaRoom extends DurableObject<Env> {
         // recent history, read through the indexes, not the whole log each time.
         const blocked = await this.blockedStatus(this.activeGame());
         const current = this.game(this.activeGame());
+        const tabStats = new Map(current ? this.sql.exec<{ student_key: string; tab_switches: number; last_away: number | null }>(
+            'SELECT student_key, tab_switches, last_away FROM student_tab_stats WHERE game_id = ?', current.id).toArray()
+            .map(row => [row.student_key, row] as const) : []);
         return {
             incidents: current ? this.incidents.open(current.id, this.rosterNames(current.id)) : [],
             warmupPlays: current ? this.activityHistory.warmupCounts(current.id) : {},
             blocked,
             support: { alerts: current ? this.assistance.alerts(current.id, this.rosterNames(current.id)) : [],
                 ai: this.assistance.aiCount(this.helpSession()),
-                students: current ? [...this.rosterNames(current.id)].map(([studentKey, name]) => ({ studentKey, name })) : [] },
+                students: current ? [...this.rosterNames(current.id)].map(([studentKey, name]) => ({ studentKey, name,
+                    tabSwitches: tabStats.get(studentKey)?.tab_switches ?? 0, tabAwayAt: tabStats.get(studentKey)?.last_away ?? null })) : [] },
             warmup: this.warmupStatus(current?.id ?? null),
             campaign: this.campaignStatus(current?.id ?? null),
             sideQuests: this.sideQuestStatus(current?.id ?? null),
@@ -864,7 +868,7 @@ export class PlazaRoom extends DurableObject<Env> {
             studentKey, name, avatar,
             inTab: seat ? seat.inTab !== false : false,
             tabSwitches: Math.max(seat?.tabSwitches ?? 0, tabStat?.tab_switches ?? 0),
-            tabAwayAt: seat?.tabAwayAt ?? tabStat?.last_away ?? null
+            tabAwayAt: seat ? seat.tabAwayAt ?? null : tabStat?.last_away ?? null
         };
     }
 
@@ -1394,18 +1398,19 @@ export class PlazaRoom extends DurableObject<Env> {
             }
             ws.send(JSON.stringify({ t: 'attempt-recorded', id: data.id, kind: 'attempt-outcome' }));
         } else if (data?.t === 'tab-focus') {
-            const inTab = data.inTab !== false;
-            const count = Math.max(0, Math.min(9999, Math.round(Number(data.count || 0))));
+            if (typeof data.inTab !== 'boolean' || !Number.isSafeInteger(data.count) || data.count < 0 || data.count > 9999) return;
+            const inTab = data.inTab;
+            const count = data.count;
             seat.inTab = inTab;
             if (count > (seat.tabSwitches ?? 0)) seat.tabSwitches = count;
             seat.tabAwayAt = inTab ? null : (seat.tabAwayAt ?? Date.now());
             ws.serializeAttachment(seat);
-            if ((seat.tabSwitches ?? 0) > 0) {
+            if ((seat.tabSwitches ?? 0) > 0 || !inTab) {
                 this.sql.exec(
                     `INSERT INTO student_tab_stats (game_id, student_key, tab_switches, last_away)
                      VALUES (?, ?, ?, ?)
-                     ON CONFLICT (game_id, student_key) DO UPDATE SET tab_switches = MAX(student_tab_stats.tab_switches, excluded.tab_switches), last_away = excluded.last_away`,
-                    seat.game, seat.studentKey, seat.tabSwitches, seat.tabAwayAt ?? Date.now()
+                     ON CONFLICT (game_id, student_key) DO UPDATE SET tab_switches = MAX(student_tab_stats.tab_switches, excluded.tab_switches), last_away = COALESCE(excluded.last_away, student_tab_stats.last_away)`,
+                    seat.game, seat.studentKey, seat.tabSwitches ?? 0, seat.tabAwayAt
                 );
             }
         } else if (data?.t === 'help-request') {

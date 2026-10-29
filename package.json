@@ -21,6 +21,8 @@
     "check:teacher-character": "node scripts/check-teacher-character.mjs",
     "check:report-feedback": "node scripts/check-report-feedback.mjs",
     "check:activity-history": "node scripts/check-activity-history.mjs",
+    "check:tab-focus": "node scripts/check-tab-focus.mjs",
+    "check:tab-focus:browser": "node scripts/check-tab-focus-browser.mjs",
     "check:warmups": "node scripts/check-warmup-studio.mjs",
     "theme": "node scripts/install-theme.mjs"
   },

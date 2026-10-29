@@ -149,6 +149,74 @@ async function enter(base, token, avatar) {
     return { ...socket, welcome, me: welcome.players.find(player => player.id === welcome.id) };
 }
 
+test('tab focus: teacher status, repeated events, validation, reconnect, persistence and game isolation', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-tab-focus-'));
+    const authUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    let plaza = await startPlaza(authUrl, persistTo);
+    const sockets = [];
+    try {
+        let base = plaza.base;
+        let session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (op, body) => api(base, `/api/teacher/${op}`, { session, body });
+        const game = (await teacher('game', { name: 'Tab focus class', randomNames: false })).body;
+        PIN = game.pin;
+        let alex = await enter(base, 'signed-a', null); sockets.push(alex);
+        const sam = await enter(base, 'signed-b', null); sockets.push(sam);
+        assert.equal(alex.welcome.tabSwitches, 0);
+        const profile = () => teacher(`student?gameId=${game.game.id}&studentKey=stu_a`);
+        const focus = async (socket, data) => {
+            socket.send({ t: 'tab-focus', ...data });
+            // An acknowledgement on the same socket is a barrier before polling the HTTP status.
+            const id = crypto.randomUUID();
+            socket.send({ t: 'attempt', id, source: 'chat', text: 'Hello.' });
+            await socket.next(m => m.t === 'attempt-recorded' && m.id === id, 'focus message processed');
+            return (await teacher('status')).body.online.find(student => student.studentKey === 'stu_a');
+        };
+        const away = await focus(alex, { inTab: false, count: 1 });
+        assert.deepEqual([away.inTab, away.tabSwitches], [false, 1]);
+        assert.ok(away.tabAwayAt >= Date.now() - 5000);
+        const firstAwayAt = away.tabAwayAt;
+        const repeated = await focus(alex, { inTab: false, count: 1 });
+        assert.deepEqual([repeated.tabSwitches, repeated.tabAwayAt], [1, firstAwayAt]);
+        for (const invalid of [{ inTab: 'yes', count: 8 }, { inTab: true, count: '8' }, { inTab: true, count: -1 },
+            { inTab: true, count: 1.5 }, { inTab: true, count: null }, { inTab: true, count: 10000 }]) {
+            const unchanged = await focus(alex, invalid);
+            assert.deepEqual([unchanged.inTab, unchanged.tabSwitches, unchanged.tabAwayAt], [false, 1, firstAwayAt], 'malformed reports cannot alter focus history');
+        }
+        const back = await focus(alex, { inTab: true, count: 0 });
+        assert.deepEqual([back.inTab, back.tabSwitches, back.tabAwayAt], [true, 1, null], 'a stale client total cannot erase recorded leaves');
+        assert.equal((await profile()).body.tabAwayAt, null, 'online profile reports current away state');
+        assert.equal((await teacher('status')).body.online.find(s => s.studentKey === 'stu_b').tabSwitches, 0);
+        alex.ws.close(); await alex.closed;
+        const offline = (await teacher('status')).body.support.students.find(s => s.studentKey === 'stu_a');
+        assert.equal(offline.tabSwitches, 1, 'teacher keeps the count after the student disconnects');
+        assert.equal((await profile()).body.tabAwayAt, firstAwayAt, 'returning does not replace the last leave time');
+        alex = await enter(base, 'signed-a', null); sockets.push(alex);
+        assert.equal(alex.welcome.tabSwitches, 1);
+        const secondAway = await focus(alex, { inTab: false, count: 2 });
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); plaza = await startPlaza(authUrl, persistTo); base = plaza.base;
+        session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        assert.equal((await profile()).body.tabSwitches, 2, 'history survives a real workerd restart');
+        assert.equal((await profile()).body.tabAwayAt, secondAway.tabAwayAt);
+        alex = await enter(base, 'signed-a', null); sockets.push(alex);
+        assert.equal(alex.welcome.tabSwitches, 2);
+        const other = (await teacher('game', { name: 'Other class', randomNames: false })).body;
+        await alex.closed; PIN = other.pin;
+        const otherAlex = await enter(base, 'signed-a', null); sockets.push(otherAlex);
+        assert.equal(otherAlex.welcome.tabSwitches, 0, 'counts belong to the game and student');
+        await teacher('class', { open: true, game: game.game.id });
+        assert.equal((await profile()).body.tabSwitches, 2, 'switching games preserves the original history');
+        const removed = await teacher('game/delete', { game: game.game.id, confirm: true });
+        assert.equal(removed.status, 200);
+        assert.equal((await profile()).status, 409, 'a deleted game cannot be selected for a profile');
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 // A witness exchange: the question and the reply each post at once (nothing waits for the teacher), and the exchange
 // counts once the reply has posted. `teacher` finds the two messages in the chat log.
 async function exchangeEvidence(teacher, investigator, witness, objective) {

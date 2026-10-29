@@ -13,7 +13,7 @@ export type HelpAlert = {
     evidence: { reason: string; text: string; timestamp: number; count?: number }[]; // count: the same text tried again
     since?: number; // messages posted or answers right since the last attempt in the evidence
 };
-export type TeacherSupport = { alerts: HelpAlert[]; students: { studentKey: string; name: string }[]; ai?: { used: number; students: number } };
+export type TeacherSupport = { alerts: HelpAlert[]; students: { studentKey: string; name: string; tabSwitches?: number; tabAwayAt?: number | null }[]; ai?: { used: number; students: number } };
 export type StudentSupport = {
     ai?: { session: string; available: boolean; used: boolean; pending: boolean; tip: string | null; resultId: string | null };
     request: { id: string; topic: HelpTopic; status: HelpStatus } | null;

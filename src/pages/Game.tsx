@@ -171,21 +171,18 @@ export default function Game() {
     try { localStorage.setItem('pixelplaza.chat', JSON.stringify(chatSpot)); } catch { /* storage disabled */ }
   }, [chatSpot]);
 
-  // Focus tracking for tab leaves (PinPlay feature reuse)
+  // The server identifies the game before we restore its tab history; PINs can be reused.
   const blurAtRef = useRef<number | null>(null);
+  const tabGameRef = useRef('');
   const [isTabAway, setIsTabAway] = useState(false);
-  const [tabSwitches, setTabSwitches] = useState<number>(() => {
+  const [tabSwitches, setTabSwitches] = useState(0);
+  const tabSwitchesRef = useRef(0);
+  const saveTabCount = useCallback((count: number) => {
+    if (!session || !tabGameRef.current) return;
     try {
-      const key = `pixelplaza.lefttab:${session?.student.studentKey}:${state?.roomCode}`;
-      return Math.max(0, parseInt(sessionStorage.getItem(key) || '0', 10) || 0);
-    } catch {
-      return 0;
-    }
-  });
-  const tabSwitchesRef = useRef(tabSwitches);
-  useEffect(() => {
-    tabSwitchesRef.current = tabSwitches;
-  }, [tabSwitches]);
+      sessionStorage.setItem(`pixelplaza.lefttab:${session.student.studentKey}:${tabGameRef.current}`, String(count));
+    } catch { /* storage disabled */ }
+  }, [session]);
 
   // Which conversation a message belongs to, and what is new in each.
   const convOf = (message: ChatMessage) => conversationOf(message, myName);
@@ -301,31 +298,29 @@ export default function Game() {
   }, []);
 
   const handleFocusLost = useCallback(() => {
-    if (blurAtRef.current != null) return;
+    if (!plazaRef.current || plazaRef.current.status.state === 'stopped' || blurAtRef.current != null) return;
     blurAtRef.current = Date.now();
     setIsTabAway(true);
-    setTabSwitches(prev => {
-      const next = prev + 1;
-      tabSwitchesRef.current = next;
-      try {
-        if (session?.student.studentKey && state?.roomCode) {
-          sessionStorage.setItem(`pixelplaza.lefttab:${session.student.studentKey}:${state.roomCode}`, String(next));
-        }
-      } catch { /* storage disabled */ }
-      plazaRef.current?.send({ t: 'tab-focus', inTab: false, count: next });
-      return next;
-    });
-  }, [session, state]);
+    // Keep writes outside React updaters, which StrictMode may replay.
+    const next = Math.min(9999, tabSwitchesRef.current + 1);
+    tabSwitchesRef.current = next;
+    setTabSwitches(next);
+    saveTabCount(next);
+    plazaRef.current.send({ t: 'tab-focus', inTab: false, count: next });
+  }, [saveTabCount]);
 
   const handleFocusRegained = useCallback(() => {
-    if (blurAtRef.current == null && !isTabAway) return;
+    if (document.hidden || !document.hasFocus() || blurAtRef.current == null) return;
     blurAtRef.current = null;
     setIsTabAway(false);
     plazaRef.current?.send({ t: 'tab-focus', inTab: true, count: tabSwitchesRef.current });
-  }, [isTabAway]);
+  }, []);
 
   useEffect(() => {
+    let blurTimer: number | undefined;
+    let leavingPage = false;
     const onVisibilityChange = () => {
+      if (leavingPage) return;
       if (document.hidden) {
         handleFocusLost();
       } else if (document.hasFocus()) {
@@ -334,7 +329,9 @@ export default function Game() {
     };
 
     const onBlur = () => {
-      setTimeout(() => {
+      window.clearTimeout(blurTimer);
+      blurTimer = window.setTimeout(() => {
+        if (leavingPage) return;
         if (blurAtRef.current != null) return;
         if (document.hasFocus()) return;
         handleFocusLost();
@@ -342,19 +339,27 @@ export default function Game() {
     };
 
     const onFocus = () => {
-      if (!document.hidden) {
+      if (!leavingPage && !document.hidden) {
         handleFocusRegained();
       }
     };
+    // Reloads and navigation also hide a document. They must not add a tab leave.
+    const onPageHide = () => { leavingPage = true; window.clearTimeout(blurTimer); };
+    const onPageShow = () => { leavingPage = false; onVisibilityChange(); };
 
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('blur', onBlur);
     window.addEventListener('focus', onFocus);
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
 
     return () => {
+      window.clearTimeout(blurTimer);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
     };
   }, [handleFocusLost, handleFocusRegained]);
 
@@ -532,16 +537,16 @@ export default function Game() {
       }
       else if (event.t === 'notice') say({ sender: event.level === 'warning' ? 'System Warning' : 'System', text: event.text, conv: activeRef.current });
       else if (event.t === 'tab-switches') {
-        setTabSwitches(current => {
-          const higher = Math.max(current, event.count);
-          tabSwitchesRef.current = higher;
-          try {
-            if (session?.student.studentKey && state?.roomCode) {
-              sessionStorage.setItem(`pixelplaza.lefttab:${session.student.studentKey}:${state.roomCode}`, String(higher));
-            }
-          } catch { /* storage disabled */ }
-          return higher;
-        });
+        const current = !tabGameRef.current || tabGameRef.current === plaza.gameId ? tabSwitchesRef.current : 0;
+        tabGameRef.current = plaza.gameId;
+        let saved = 0;
+        try { saved = Number(sessionStorage.getItem(`pixelplaza.lefttab:${session.student.studentKey}:${plaza.gameId}`)) || 0; }
+        catch { /* storage disabled */ }
+        const higher = Math.min(9999, Math.max(current, event.count, Number.isSafeInteger(saved) && saved >= 0 ? saved : 0));
+        // onStatus('online') runs immediately after this event, before React renders.
+        tabSwitchesRef.current = higher;
+        setTabSwitches(higher);
+        saveTabCount(higher);
       }
     });
     const unwatch = plaza.onStatus(next => {
@@ -549,7 +554,10 @@ export default function Game() {
       if (next.state !== 'online') audio.stop();
       if (next.state === 'online') {
         setConnection(plaza); // the map appears once connected
-        plaza.send({ t: 'tab-focus', inTab: !document.hidden && document.hasFocus(), count: tabSwitchesRef.current });
+        const away = document.hidden || !document.hasFocus();
+        if (away && blurAtRef.current == null) handleFocusLost();
+        else if (!away && blurAtRef.current != null) handleFocusRegained();
+        else plaza.send({ t: 'tab-focus', inTab: !away, count: tabSwitchesRef.current });
       }
       if (next.state === 'stopped' && next.message) say({ sender: 'System Warning', text: next.message, conv: '*' });
     });
@@ -566,7 +574,7 @@ export default function Game() {
       if (plazaRef.current === plaza) plazaRef.current = null;
       plaza.close();
     };
-  }, [state, session, navigate]);
+  }, [state, session, navigate, saveTabCount, handleFocusLost, handleFocusRegained]);
 
   // Scroll chat to bottom
   useEffect(() => {

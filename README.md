@@ -299,12 +299,15 @@ Google sign-in works locally only from an origin listed in the OAuth client (for
 npm run lint
 npm test
 npm run check:missions
+npm run check:tab-focus
 node scripts/check-audio.mjs
 node scripts/check-chat.mjs
 node scripts/check-student-support.mjs
 ```
 
 `npm test` builds the app, runs the unit tests, then starts `wrangler dev` with a fake PinPlay for a full lesson: PIN and identity checks, moving, chat, mutes, a second window, and a restart that must keep every student's avatar and position.
+
+`npm run check:tab-focus` checks student focus events, reconnects, reloads and teacher indicators with simulated browser events. With `npm run dev` running and Chrome installed, `npm run check:tab-focus:browser` switches real Chrome tabs and verifies the total after a reload; it uses an isolated class fixture and saves a screenshot under `.wrangler/tab-focus-browser-*`. The server persistence check is `node --test --test-name-pattern="tab focus:" worker/tests/plaza.test.mjs`.
 
 ## Current limits
 
