@@ -2453,7 +2453,7 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         const early = await enter(base, 'signed-a', null);
         sockets.push(early);
         await pause(300);
-        assert.equal(early.inbox.some(message => message.t === 'quest'), false);
+        console.log('QUEST MSG:', JSON.stringify(early.inbox.filter(m => m.t === 'quest'))); assert.equal(early.inbox.some(message => message.t === 'quest'), false);
 
         // The teacher starts it; everyone inside gets a role, and anyone arriving later does too.
         assert.equal((await api(base, '/api/teacher/campaign', { session, body: { op: 'start', campaign: 'nope' } })).status, 400);
