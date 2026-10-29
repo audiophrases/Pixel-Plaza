@@ -1,4 +1,4 @@
-import type { QuestView } from '../../shared/campaign';
+import type { BoardView, QuestView } from '../../shared/campaign';
 import type { WarmupView } from '../../shared/warmup';
 import { IDENTITY_CHAT_REMINDER } from '../../shared/activityChat.ts';
 
@@ -15,8 +15,8 @@ const taskInstructions = (objective: QuestView['objectives'][number]): ActivityI
 ];
 
 // Build only from the server's private view for this student. The browser never
-// needs the campaign definition, answers, or another role's clues.
-export function activityAnnouncements(quest: QuestView | null, warmup: WarmupView | null, seen: ReadonlySet<string>): ActivityAnnouncement[] {
+// needs the campaign definition, answers, or another role's clues. `board`: the quest board, with or without a campaign.
+export function activityAnnouncements(quest: QuestView | null, warmup: WarmupView | null, seen: ReadonlySet<string>, board: BoardView | null = null): ActivityAnnouncement[] {
     const result: ActivityAnnouncement[] = [];
     const add = (id: string, content: Omit<ActivityAnnouncement, 'id' | 'acknowledge'>, extra: string[] = []) => {
         if (!seen.has(id)) result.push({ id, acknowledge: [id, ...extra], ...content });
@@ -35,12 +35,11 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
         else if (warmup.task) add(step, { kind: 'warmup', eyebrow: 'NEXT WARM-UP TASK', title, sections, next: 'Ask classmates, then enter the answer in the Warm-up panel.' });
         else add(key('warmup-done', run), { kind: 'ending', eyebrow: 'WARM-UP COMPLETE', title: 'You did it!', sections: [{ label: title, text: warmup.kind === 'identity' ? 'Keep helping with yes or no answers, without giving away your secret identity.' : 'You finished your tasks. Keep helping your classmates.' }], next: 'Your teacher will tell you what comes next.' }, [intro, step]);
     }
-    if (!quest) return result;
-    const run = key(quest.runId ?? quest.campaign.id, quest.chapter.index, quest.role.id);
+    const run = quest ? key(quest.runId ?? quest.campaign.id, quest.chapter.index, quest.role.id) : '';
     const intro = key('chapter', run);
     const taskKey = (id: string) => key('task', run, id);
-    const current = quest.objectives.filter(o => !o.done);
-    if (quest.status !== 'campaign_complete' && !seen.has(intro)) {
+    const current = quest?.objectives.filter(o => !o.done) ?? [];
+    if (quest && quest.status !== 'campaign_complete' && !seen.has(intro)) {
         add(intro, { kind: 'chapter', eyebrow: `CHAPTER ${quest.chapter.index + 1} OF ${quest.chapter.of}`, title: quest.chapter.title,
             sections: [
                 ...(quest.recap ? [{ label: 'Previously', text: quest.recap }] : []),
@@ -50,32 +49,37 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
                 ...quest.clues.filter(c => c.from === 'job').map(c => ({ label: 'Your private clue', text: c.text })),
                 ...current.flatMap(taskInstructions),
             ], next: 'Press OK, then use chat to talk to classmates. Your clues, tasks and answer boxes are in the Journal.' }, current.map(o => taskKey(o.id)));
-    } else if (quest.status !== 'campaign_complete') {
+    } else if (quest && quest.status !== 'campaign_complete') {
         const tasks = current.filter(o => !seen.has(taskKey(o.id)));
         if (tasks.length) add(taskKey(tasks[0].id), { kind: 'task', eyebrow: 'NEW TASK', title: tasks.length === 1 ? 'Your next task is ready' : `${tasks.length} new tasks are ready`, sections: tasks.flatMap(taskInstructions), next: 'Read your clues and talk to classmates. Submit your answers in the Journal.' }, tasks.slice(1).map(o => taskKey(o.id)));
     }
-    if (quest.status !== 'campaign_complete') {
-        // Free for side quests: choose one. Asked again each time the student is free after finishing one.
-        if (quest.sideQuests?.state === 'choose') {
-            const open = (quest.board ?? []).filter(o => o.sideQuest && o.state === 'available');
-            add(key('choose', run, (quest.board ?? []).filter(o => o.sideQuest && o.state === 'done').length), { kind: 'board', eyebrow: 'YOUR MAIN WORK IS DONE', title: 'Choose a side quest',
-                sections: open.slice(0, 5).map(o => ({ label: 'Side quest', text: o.text })), next: `Press OK, then accept one in Journal → Quest board${open.length > 5 ? ` (${open.length} to choose from)` : ''}. You do one side quest at a time.` });
+    // The quest board belongs to the game: its announcements do not depend on a mission.
+    if (board) {
+        const items = board.board.filter(o => !o.ended);
+        // Nothing else to do: choose a side quest. Asked again each time, after finishing one.
+        if (board.sideQuests.state === 'choose') {
+            const open = items.filter(o => o.sideQuest && o.state === 'available');
+            add(key('choose', 'board', items.filter(o => o.sideQuest && o.state === 'done').length), { kind: 'board', eyebrow: 'TIME FOR A SIDE QUEST', title: 'Choose a side quest',
+                sections: open.slice(0, 5).map(o => ({ label: 'Side quest', text: o.text })), next: `Press OK, then accept one in the Journal${open.length > 5 ? ` (${open.length} to choose from)` : ''}. You do one side quest at a time.` });
         }
-        const available = (quest.board ?? []).filter(o => o.state === 'available' && !o.sideQuest && !seen.has(key('offer', run, o.id)));
+        const available = items.filter(o => o.state === 'available' && !o.sideQuest && !seen.has(key('offer', run, o.id)));
         if (available.length) add(key('offer', run, available[0].id), { kind: 'board', eyebrow: 'OPTIONAL SIDE QUESTS', title: available.length === 1 ? 'A side quest is available' : `${available.length} side quests are available`,
             sections: available.map(o => ({ label: o.activity ? 'Partner activity' : 'Optional activity', text: o.text })),
             next: 'These are optional. Press OK, then open Journal → Quest board and choose Accept quest if you want to join. OK does not accept a quest.' }, available.slice(1).map(o => key('offer', run, o.id)));
-        for (const item of quest.board ?? []) if (item.state === 'active') {
-            add(key('accepted', run, item.id), { kind: 'board', eyebrow: 'SIDE QUEST ACCEPTED', title: item.partner ? `Work with ${item.partner.name}` : 'Your side quest is ready',
+        for (const item of items) if (item.state === 'active') {
+            add(key('accepted', 'board', item.id), { kind: 'board', eyebrow: 'SIDE QUEST ACCEPTED', title: item.partner ? `Work with ${item.partner.name}` : 'Your side quest is ready',
                 sections: [{ label: 'What to do', text: item.text }, ...(item.partner ? [{ label: 'Your partner', text: `${item.partner.name}${item.partner.online ? '' : ' is away from the plaza. You can wait or choose Find another partner in the Journal.'}` }] : []),
                     ...(item.conversation ? [{ label: 'Exchange evidence', text: witnessText(item.conversation.required) }] : []),
-                    ...(item.kind === 'report' ? [{ label: 'Your report', text: 'Write what you learned in the Journal. Your teacher will read your response.' }] : [])], next: 'Your side quest and its answer box are in Journal → Quest board.' }, [key('offer', run, item.id)]);
+                    ...(item.kind === 'report' ? [{ label: 'Your report', text: 'Write what you learned in the Journal. Your teacher will read your response.' }] : [])], next: 'Your side quest and its answer box are in the Journal.' }, [key('offer', run, item.id)]);
         }
-        for (const item of quest.board ?? []) if (item.state === 'active' && item.group?.state === 'playing') {
-            add(key('group', run, item.id), { kind: 'board', eyebrow: item.group.size === 2 ? 'YOUR PAIR IS READY' : 'YOUR GROUP IS READY', title: `Work with ${item.group.members.join(', ')}`,
+        for (const item of items) if (item.state === 'active' && item.group?.state === 'playing') {
+            add(key('group', 'board', item.id), { kind: 'board', eyebrow: item.group.size === 2 ? 'YOUR PAIR IS READY' : 'YOUR GROUP IS READY', title: `Work with ${item.group.members.join(', ')}`,
                 sections: [{ label: 'What to do', text: item.text }, { label: 'Together', text: 'Find each other in the plaza and talk. One answer in the Journal counts for everyone.' }],
-                next: 'The quest and its answer box are in Journal → Quest board.' });
+                next: 'The quest and its answer box are in the Journal.' });
         }
+    }
+    if (!quest) return result;
+    if (quest.status !== 'campaign_complete') {
         const news = quest.clues.filter(c => c.from === 'news' && !seen.has(key('news', run, c.id)));
         if (news.length) add(key('news', run, news[0].id), { kind: 'news', eyebrow: 'FROM YOUR TEACHER', title: 'New information for the class', sections: news.map(c => ({ label: 'Teacher announcement', text: c.text })), next: 'You can read this again in your Journal clues.' }, news.slice(1).map(c => key('news', run, c.id)));
     }

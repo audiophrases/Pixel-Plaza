@@ -64,8 +64,6 @@ export type QuestView = {
     secret: { title: string; text: string } | null; // only for the thief
     thieves: string[] | null; // who it was, once the chapter is over
     objectives: { id: string; text: string; done: boolean; optional: boolean; kind: 'text' | 'name' | 'report'; conversation?: ConversationView }[];
-    board?: BoardQuestView[];
-    sideQuests?: SideQuestsView;
     interviews?: InterviewView[];
     team: { done: number; total: number }; // how far the whole class is through this chapter's main questions
     recap: string | null; // sent when the student comes back to a story already under way
@@ -78,15 +76,18 @@ export type BoardQuestView = {
     partner: { name: string; online: boolean } | null;
     conversation?: ConversationView;
     sideQuest?: boolean;
+    ended?: boolean; // a quest of the mission, which has ended: it can no longer be answered
     // A pair or group side quest: the student's own group (names, how many it needs, whether it is still waiting, and
     // from when its members may start with who is there), or the classmates waiting in the group they would join.
     group?: { members: string[]; size: number; state: 'open' | 'playing' | 'done'; startAt: number | null };
     joining?: string[];
 };
-// Where a student stands with the library's side quests. "locked": the main work is not done (`reason` says what is
-// left; `waiting` side quests are ready for later). "choose": free, with `waiting` quests to pick one from. "active":
-// doing one. "empty": free, with nothing to pick (`reason` says why).
-export type SideQuestsView = { state: 'locked' | 'choose' | 'active' | 'empty'; reason: string | null; waiting: number };
+// Where a student stands with the side quests. "choose": nothing else to do, with `waiting` quests to pick one from (the
+// game picks after a minute). "open": `waiting` quests to take whenever they like, beside a warm-up or mission still
+// under way. "active": doing one. "empty": nothing to pick (`reason` says why).
+export type SideQuestsView = { state: 'choose' | 'open' | 'active' | 'empty'; reason: string | null; waiting: number };
+// A student's quest board, with or without a mission: the game's side quests and the mission's own board quests.
+export type BoardView = { board: BoardQuestView[]; sideQuests: SideQuestsView };
 
 export type InterviewView = {
     id: string; objective: string; task: string; incoming: boolean; name: string;
@@ -115,12 +116,10 @@ export const isUnlocked = (objective: Objective, done: readonly string[]) => {
 };
 export const mainFinished = (chapter: Chapter, done: readonly string[]) => chapter.objectives.filter(o => !o.optional).every(o => done.includes(o.id));
 
-// Side quests are for students who have finished their main work: the chapter's main questions, and their part of a
-// warm-up while one runs. Why a student is not free for them yet, or null.
-export function sideQuestWait(chapter: Chapter, done: readonly string[], warmupLeft: boolean): string | null {
-    if (!mainFinished(chapter, done)) return 'Side quests open when you finish your main questions.';
-    if (warmupLeft) return 'Side quests open when you finish the warm-up.';
-    return null;
+// Side quests never wait for other work. A student with nothing else to do (no warm-up part left and, in a mission,
+// the chapter's main questions answered) is asked to choose one; anyone else can take one whenever they like.
+export function nothingElseToDo(chapter: Chapter | null, done: readonly string[], warmupLeft: boolean): boolean {
+    return !warmupLeft && (!chapter || mainFinished(chapter, done));
 }
 
 export function boardWait(objective: Objective, chapter: Chapter, role: string, done: readonly string[], released: boolean, online: number): string | null {

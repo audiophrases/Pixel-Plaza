@@ -25,6 +25,10 @@ import Face from '../components/Face';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; everyone?: boolean; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred?: boolean };
+// Where students stand with the open game's side quests, and what they wrote for them.
+type SideQuestPanel = { free: { studentKey: string; name: string }[]; doing: { studentKey: string; name: string; quest: string }[]; busy: number; quests: number;
+  groups: { id: string; quest: string; members: string[]; size: number; state: 'open' | 'playing' }[]; open: { id: string; title: string }[];
+  reports: { studentKey: string; objective: string; quest: string; text: string; partner?: string; starred: boolean }[] };
 type CampaignInfo = {
   guideVersion?: string;
   id: string; title: string; status: 'active' | 'chapter_complete' | 'campaign_complete'; chapter: number; chapters: number; chapterTitle: string; chapterTitles?: string[]; zones?: string[];
@@ -32,8 +36,6 @@ type CampaignInfo = {
   reports: { studentKey: string; objective: string; text: string; partner?: string; starred?: boolean }[];
   interviews?: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
   board?: { id: string; text: string; teacherReleased: boolean; released: boolean; accepted: number; completed: number }[];
-  sideQuests?: { free: { studentKey: string; name: string }[]; doing: { studentKey: string; name: string; quest: string }[]; busy: number; quests: number;
-    groups?: { id: string; quest: string; members: string[]; size: number; state: 'open' | 'playing' }[]; open?: { id: string; title: string }[] };
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
 };
 type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean; themeId?: string };
@@ -41,6 +43,7 @@ type LiveStudent = { studentKey: string; name: string; x: number; y: number; zon
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
   campaign: CampaignInfo | null; campaigns: CampaignChoice[];
+  sideQuests?: SideQuestPanel | null; // the open game's side quests, with or without a campaign
   warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
   incidents?: Incident[];
   blocked?: BlockedStatus;
@@ -294,6 +297,7 @@ export default function Teacher() {
 
   // One row of tabs for everything that is not the class now. A word or number beside a title says how it stands.
   const campaign = status?.campaign ?? null;
+  const side = status?.sideQuests ?? null;
   const tabs: TabInfo[] = !status ? [] : [
     ...(status.game ? [
       { id: 'chat' as const, icon: '💬', title: 'Chat log' },
@@ -301,6 +305,7 @@ export default function Teacher() {
       { id: 'map' as const, icon: '🗺', title: 'Map & spells', label: `${status.online.length} online` },
       { id: 'warmup' as const, icon: '🧩', title: 'Warm-up', label: status.warmup?.active ? 'running' : undefined },
       { id: 'campaign' as const, icon: '📖', title: 'Campaign', label: campaign ? `chapter ${campaign.chapter + 1} of ${campaign.chapters}` : undefined },
+      { id: 'side' as const, icon: '✦', title: 'Side quests', label: side?.quests ? `${side.doing.length} doing` : undefined },
       { id: 'history' as const, icon: '🗂', title: 'Message history' },
     ] : []),
     { id: 'games', icon: '🎮', title: 'Games', label: `${status.games.length}` },
@@ -560,21 +565,32 @@ export default function Teacher() {
               </div>
             </article>)}
           </details>}
-          {campaign.sideQuests && (campaign.sideQuests.quests > 0 || campaign.sideQuests.free.length > 0) && <><h3>Side quests</h3>
-            <p>{campaign.sideQuests.free.length} free to choose · {campaign.sideQuests.doing.length} doing one · {campaign.sideQuests.busy} still on their main work · {campaign.sideQuests.quests} side quest{campaign.sideQuests.quests === 1 ? '' : 's'} in this chapter</p>
-            {campaign.sideQuests.free.length > 0 && campaign.sideQuests.quests === 0 && <p className="teacher-error">{campaign.sideQuests.free.length === 1 ? '1 student has' : `${campaign.sideQuests.free.length} students have`} finished and there are no side quests to choose. <Link to="/quest-library">Add some from the library</Link>.</p>}
-            {campaign.sideQuests.free.length > 0 && <ul>{campaign.sideQuests.free.map(item => <li key={item.studentKey}><span><strong>{who(item.studentKey, item.name)}</strong> · free</span>
-              {!!campaign.sideQuests?.open?.length && <select aria-label={`Place ${item.name} in a side quest`} value="" onChange={event => { if (event.target.value) void action('quest-place', { studentKey: item.studentKey, objective: event.target.value }); }}>
-                <option value="">Place in a side quest…</option>{campaign.sideQuests.open.map(quest => <option key={quest.id} value={quest.id}>{quest.title}</option>)}</select>}</li>)}</ul>}
-            {!!campaign.sideQuests.groups?.length && <ul>{campaign.sideQuests.groups.map(group => <li key={group.id}><span>{group.size === 2 ? 'Pair' : 'Group'} · <strong>{group.quest}</strong>: {group.members.join(', ')}
-              {group.state === 'open' ? ` · waiting for ${group.size - group.members.length} more` : ' · playing'}</span></li>)}</ul>}
-            {campaign.sideQuests.doing.length > 0 && <ul>{campaign.sideQuests.doing.map(item => <li key={item.studentKey}><span><strong>{who(item.studentKey, item.name)}</strong> · {item.quest}</span></li>)}</ul>}</>}
-          <p className="teacher-muted">Students finished early, or a short session between chapters? <Link to="/quest-library">Add side quests from the library</Link>: story quests for this chapter or generic ones for any game.
-            Change chapters in <Link to="/mission-studio">Mission Studio</Link>.</p>
+          <p className="teacher-muted">Side quests for early finishers have their own tab, with or without a campaign. Change chapters in <Link to="/mission-studio">Mission Studio</Link>.</p>
           <button className="btn btn-secondary btn-sm teacher-danger" onClick={() => {
             if (window.confirm('Erase the campaign for this game, including every role and clue?')) void action('campaign', { op: 'reset', confirm: true });
           }}>Erase campaign</button>
         </>)}
+
+        {shown === 'side' && status.game && side && <>
+          <p>{side.free.length} free to choose · {side.doing.length} doing one · {side.busy} on the warm-up or campaign · {side.quests} side quest{side.quests === 1 ? '' : 's'} on the board</p>
+          {side.quests === 0 && (side.free.length > 0
+            ? <p className="teacher-error">{side.free.length === 1 ? '1 student has' : `${side.free.length} students have`} nothing else to do and no side quests to choose. <Link to="/quest-library">Add some from the library</Link>.</p>
+            : <p className="teacher-muted">No side quests in this game yet. <Link to="/quest-library">Add some from the library</Link>: students can take them straight away, with or without a campaign.</p>)}
+          {side.free.length > 0 && <ul>{side.free.map(item => <li key={item.studentKey}><span><strong>{who(item.studentKey, item.name)}</strong> · free</span>
+            {side.open.length > 0 && <select aria-label={`Place ${item.name} in a side quest`} value="" onChange={event => { if (event.target.value) void action('quest-place', { studentKey: item.studentKey, objective: event.target.value }); }}>
+              <option value="">Place in a side quest…</option>{side.open.map(quest => <option key={quest.id} value={quest.id}>{quest.title}</option>)}</select>}</li>)}</ul>}
+          {side.groups.length > 0 && <ul>{side.groups.map(group => <li key={group.id}><span>{group.size === 2 ? 'Pair' : 'Group'} · <strong>{group.quest}</strong>: {group.members.join(', ')}
+            {group.state === 'open' ? ` · waiting for ${group.size - group.members.length} more` : ' · playing'}</span></li>)}</ul>}
+          {side.doing.length > 0 && <ul>{side.doing.map(item => <li key={item.studentKey}><span><strong>{who(item.studentKey, item.name)}</strong> · {item.quest}</span></li>)}</ul>}
+          {side.reports.length > 0 && <>
+            <h3>What students wrote</h3>
+            <ul>{side.reports.map(report => <li key={report.studentKey + report.objective}>
+              <span><strong>{who(report.studentKey, status.realNames[report.studentKey] ?? 'Student')}</strong> · {report.quest}{report.partner ? ` · with ${report.partner}` : ''}: {report.text}</span>
+              <StarButton starred={report.starred} onStar={() => void action('xp', { report: { studentKey: report.studentKey, objective: report.objective } })} />
+            </li>)}</ul>
+          </>}
+          <p className="teacher-muted"><Link to="/quest-library">Add side quests from the library</Link>, and close or withdraw them there. Students choose one at a time; with nothing else to do, the game asks them to choose.</p>
+        </>}
 
         {shown === 'history' && status.game && <TeacherSupport key={status.game.id} gameId={status.game.id} token={token}
           support={status.support ?? { alerts: [], students: [] }}
@@ -660,7 +676,7 @@ export default function Teacher() {
   </main>;
 }
 
-type TabId = 'chat' | 'blocked' | 'map' | 'warmup' | 'campaign' | 'history' | 'games' | 'vision' | 'laptop' | 'report';
+type TabId = 'chat' | 'blocked' | 'map' | 'warmup' | 'campaign' | 'side' | 'history' | 'games' | 'vision' | 'laptop' | 'report';
 // label: a word or number of how it stands, beside the title.
 type TabInfo = { id: TabId; icon: string; title: string; label?: string };
 const TAB_KEY = 'pixelplaza.teacher.tab.v1';

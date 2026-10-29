@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { missionJson } from '../../shared/missionSchema';
-import type { LiveMissionPreview, LiveMissionTarget, MissionSync } from '../../shared/missionTypes';
+import type { MissionSync } from '../../shared/missionTypes';
 import {
     ANSWERS, FORMATS, LEVELS, THEMES, questCategories, questFacets, questObjective, searchQuests,
-    type QuestAnswer, type QuestFilters, type QuestFormat, type QuestLevel, type QuestTheme, type SideQuest, type SideQuestLibrary, type StoryChapter,
+    type QuestAnswer, type QuestFilters, type QuestFormat, type QuestLevel, type QuestTheme, type SideQuest, type SideQuestLibrary, type SideQuestPreview, type SideQuestTarget, type StoryChapter,
 } from '../../shared/sideQuests';
 import SideQuestEditor from '../components/SideQuestEditor';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import './MissionStudio.css';
 import './QuestLibrary.css';
 
-// `route` follows /api/teacher/: "missions/…" for the running game, "side-quests/…" for the library itself.
+// `route` follows /api/teacher/: "side-quests/board…" for the open game's quest board, "side-quests/…" for the library.
 async function request<T>(token: string, route: string, body?: object): Promise<T> {
     const response = await fetch(`/api/teacher/${route}`, { method: body ? 'POST' : 'GET', headers: { 'x-teacher-session': token, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
     const result = await response.json();
@@ -62,8 +62,8 @@ export default function QuestLibrary() {
     const [query, setQuery] = useState(''); const [filters, setFilters] = useState<QuestFilters>({});
     const [fitsOnly, setFitsOnly] = useState(false); const [shown, setShown] = useState(PAGE);
     const [selected, setSelected] = useState<string[]>([]);
-    const [target, setTarget] = useState<LiveMissionTarget | null>(null);
-    const [preview, setPreview] = useState<LiveMissionPreview | null>(null);
+    const [target, setTarget] = useState<SideQuestTarget | null>(null);
+    const [preview, setPreview] = useState<SideQuestPreview | null>(null);
     // The library is data on the server, like missions: null until it arrives, EMPTY when this server has none yet.
     const [library, setLibrary] = useState<SideQuestLibrary | null>(null);
     const [trash, setTrash] = useState<SideQuest[]>([]); const [versions, setVersions] = useState<Record<string, number>>({});
@@ -89,11 +89,11 @@ export default function QuestLibrary() {
             if (result.sync.questsKeptBoth?.length) setNotice(`Changed online too, so both versions are kept. Yours is now “${result.sync.questsKeptBoth.map(item => item.title).join('”, “')}”.`);
         }
     };
-    const refresh = () => run(async () => { setTarget((await request<{ target: LiveMissionTarget | null }>(token, 'missions/live')).target); setPreview(null); });
+    const refresh = () => run(async () => { setTarget((await request<{ target: SideQuestTarget | null }>(token, 'side-quests/board')).target); setPreview(null); });
     useEffect(() => {
         if (!token) return;
         let active = true;
-        request<{ target: LiveMissionTarget | null }>(token, 'missions/live').then(result => { if (active) setTarget(result.target); })
+        request<{ target: SideQuestTarget | null }>(token, 'side-quests/board').then(result => { if (active) setTarget(result.target); })
             .catch(cause => { if (active) { setError(cause.message); signedOut(cause); } });
         request<Listing>(token, 'side-quests/list').then(result => { if (active) apply(result); })
             .catch(cause => { if (active) { setError(cause.message || 'Could not load the library.'); signedOut(cause); } });
@@ -102,15 +102,16 @@ export default function QuestLibrary() {
     // A reviewed selection is only valid for what was reviewed; cancel it when the page moves on.
     useEffect(() => {
         const id = preview?.id;
-        return () => { if (id && token) void request(token, 'missions/live-cancel', { previewId: id }).catch(() => {}); };
+        return () => { if (id && token) void request(token, 'side-quests/board-cancel', { previewId: id }).catch(() => {}); };
     }, [token, preview?.id]);
 
-    // Why a quest cannot go into the running game right now; the server checks again.
+    // Why a quest cannot go into the open game right now; the server checks again. A generic quest fits any game, with
+    // or without a campaign; a story quest only while its own chapter runs.
     const blocked = (quest: SideQuest): string | null => {
         if (!target) return null;
-        if (target.objectiveIds.includes(quest.id) || target.additions.some(a => a.id === quest.id)) return 'Already in this game.';
-        if (quest.chapter && quest.chapter !== target.chapter.id) return `Story quest for ${chapterName(quest.chapter)}; the game is on another chapter.`;
-        if (quest.after && !target.objectiveIds.includes(quest.after)) return 'Needs a question this game does not have.';
+        if (target.quests.some(item => item.id === quest.id)) return 'Already in this game.';
+        if (quest.chapter && quest.chapter !== target.mission?.chapter.id) return target.mission ? `Story quest for ${chapterName(quest.chapter)}; the game is on another chapter.` : `Story quest for ${chapterName(quest.chapter)}: start that campaign first.`;
+        if (quest.after && !target.mission?.questionIds.includes(quest.after)) return 'Needs a question this game does not have.';
         return null;
     };
     const results = useMemo(() => {
@@ -135,7 +136,7 @@ export default function QuestLibrary() {
         { label: 'Auto-checked answers', apply: () => { setQuery(''); setFilter({ answers: ['text'] }); } },
         { label: 'Pair work', apply: () => { setQuery(''); setFilter({ formats: ['pair'] }); } },
         { label: 'Mingles', apply: () => { setQuery(''); setFilter({ formats: ['mingle'] }); } },
-        ...(target && library?.chapters.some(c => c.id === target.chapter.id) && usedChapters.has(target.chapter.id) ? [{ label: `Story quests for ${chapterName(target.chapter.id)}`, apply: () => { setQuery(''); setFilter({ chapters: [target.chapter.id] }); } }] : []),
+        ...(target?.mission && library?.chapters.some(c => c.id === target.mission!.chapter.id) && usedChapters.has(target.mission.chapter.id) ? [{ label: `Story quests for ${chapterName(target.mission.chapter.id)}`, apply: () => { setQuery(''); setFilter({ chapters: [target.mission!.chapter.id] }); } }] : []),
         { label: 'Halloween & autumn', apply: () => { setQuery(''); setFilter({ categories: categories.filter(c => /autumn/i.test(c.category)).map(c => c.category) }); } },
         { label: 'Christmas & winter', apply: () => { setQuery(''); setFilter({ categories: categories.filter(c => /winter/i.test(c.category)).map(c => c.category) }); } },
     ];
@@ -157,11 +158,11 @@ export default function QuestLibrary() {
         apply(await request<Listing>(token, 'side-quests/restore', { id: quest.id, version: versions[quest.id] }));
         setNotice(`“${quest.title}” is back in the library.`);
     });
-    // Closing or withdrawing a quest already in the running game.
-    const live = (op: 'live-close' | 'live-withdraw', objectiveId: string) => run(async () => {
-        const result = await request<{ target: LiveMissionTarget }>(token, `missions/${op}`, { gameId: target!.game.id, targetVersion: target!.version, targetEpoch: target!.epoch, objectiveId });
+    // Closing or withdrawing a quest already in the open game.
+    const live = (op: 'board-close' | 'board-withdraw', questId: string) => run(async () => {
+        const result = await request<{ target: SideQuestTarget }>(token, `side-quests/${op}`, { gameId: target!.game.id, questId });
         setTarget(result.target);
-        setNotice(op === 'live-close' ? 'Closed: nobody new can take it.' : 'Withdrawn from the game.');
+        setNotice(op === 'board-close' ? 'Closed: nobody new can take it.' : 'Withdrawn from the game.');
     });
     const importFile = (file: File) => run(async () => {
         let quests: unknown;
@@ -263,40 +264,40 @@ export default function QuestLibrary() {
             </aside>
             : <aside className="mission-card ql-tray" aria-label="Your selection">
                 <div className="mission-toolbar"><h2>Your selection</h2><button type="button" className="mission-button" disabled={busy} onClick={() => void refresh()}>Refresh game</button></div>
-                {target ? <p className="ql-target"><strong>{target.game.name}</strong> · {target.campaign.title}<br />Chapter {target.chapter.index + 1}: {target.chapter.title}
-                    {!target.open && <><br /><em>Open this game in Teacher controls to add quests.</em></>}{target.ended && <><br /><em>This campaign has ended.</em></>}</p>
-                    : <p className="ql-target">No game is running. In Teacher controls, open a game and start a campaign (for example <strong>Plaza Free Play</strong>) to add quests. You can still browse, write and download.</p>}
+                {target ? <p className="ql-target"><strong>{target.game.name}</strong>{target.mission ? <> · {target.mission.title}<br />Chapter {target.mission.chapter.index + 1}: {target.mission.chapter.title}</> : <> · no campaign: side quests only</>}
+                    {!target.open && <><br /><em>Open this game in Teacher controls to add quests.</em></>}</p>
+                    : <p className="ql-target">No game yet. In Teacher controls, create or open a game to add quests; a campaign is not needed. You can still browse, write and download.</p>}
                 <p className="mission-muted">{selected.length} of {MAX_RELEASE} chosen. The game adds up to {MAX_RELEASE} at a time.</p>
                 {chosen.length ? <ol className="ql-chosen">{chosen.map(quest => <li key={quest.id}><span>{quest.title} <small>{quest.level} · {quest.theme === 'story' ? chapterName(quest.chapter) : THEMES.find(t => t.id === quest.theme)!.name}</small></span>
                     <button type="button" aria-label={`Remove ${quest.title}`} onClick={() => pick(quest)}>×</button></li>)}</ol> : <p>Select quests from the results.</p>}
                 <fieldset className="ql-actions" disabled={busy}>
-                    <button type="button" className="mission-button primary" disabled={!target?.open || target.ended || !chosen.length || chosen.some(quest => !!blocked(quest))} onClick={() => void run(async () => {
-                        const result = await request<{ target: LiveMissionTarget; preview: LiveMissionPreview }>(token, 'missions/library-preview', { gameId: target!.game.id, targetVersion: target!.version, targetEpoch: target!.epoch, chapterId: target!.chapter.id, questIds: selected });
+                    <button type="button" className="mission-button primary" disabled={!target?.open || !chosen.length || chosen.some(quest => !!blocked(quest))} onClick={() => void run(async () => {
+                        const result = await request<{ target: SideQuestTarget; preview: SideQuestPreview }>(token, 'side-quests/board-preview', { gameId: target!.game.id, version: target!.version, questIds: selected });
                         setTarget(result.target); setPreview(result.preview);
                     })}>Review and add to the game</button>
                     <button type="button" className="mission-button" disabled={!chosen.length} onClick={() => download(missionPack(chosen), 'side-quest-pack.json')}>Download for Mission Studio</button>
                     {!!selected.length && <button type="button" className="mission-button" onClick={() => { setSelected([]); setPreview(null); }}>Clear selection</button>}
                 </fieldset>
-                {preview && <div className="mission-import-preview"><h3>Ready to release to {preview.game.name}</h3>
+                {preview && <div className="mission-import-preview"><h3>Ready to add to {preview.game.name}</h3>
                     <p className="mission-muted">This review expires at {new Date(preview.expires).toLocaleTimeString()}. Students who can accept now:</p>
                     <ul>{preview.quests.map(quest => <li key={quest.id}><strong>{quests.find(q => q.id === quest.id)?.title ?? quest.id}</strong> · {quest.audience} · {quest.eligibleNow} now</li>)}</ul>
                     <div className="mission-toolbar"><button type="button" className="mission-button primary" disabled={busy} onClick={() => void run(async () => {
-                        const result = await request<{ target: LiveMissionTarget; released: string[] }>(token, 'missions/live-release', { previewId: preview.id });
+                        const result = await request<{ target: SideQuestTarget; released: string[] }>(token, 'side-quests/board-release', { previewId: preview.id });
                         setTarget(result.target); setPreview(null); setSelected([]); setNotice(`${result.released.length} quests are on the quest board in ${preview.game.name}.`);
                     })}>Release to students</button>
-                    <button type="button" className="mission-button" disabled={busy} onClick={() => void run(async () => { await request(token, 'missions/live-cancel', { previewId: preview.id }); setPreview(null); })}>Cancel</button></div>
+                    <button type="button" className="mission-button" disabled={busy} onClick={() => void run(async () => { await request(token, 'side-quests/board-cancel', { previewId: preview.id }); setPreview(null); })}>Cancel</button></div>
                 </div>}
-                {!!target?.additions.length && <details className="ql-added"><summary>Added to this chapter ({target.additions.length})</summary>
-                    <ul className="ql-added-list">{target.additions.map(item => <li key={item.id}><span>{quests.find(q => q.id === item.id)?.title ?? item.text}<small>{item.withdrawn ? ' · withdrawn' : `${item.closed ? ' · closed' : ''}${item.started ? ' · started' : ''}`}</small></span>
+                {!!target?.quests.length && <details className="ql-added"><summary>Added to this game ({target.quests.length})</summary>
+                    <ul className="ql-added-list">{target.quests.map(item => <li key={item.id}><span>{quests.find(q => q.id === item.id)?.title ?? item.text}<small>{item.withdrawn ? ' · withdrawn' : `${item.closed ? ' · closed' : ''}${item.started ? ' · started' : ''}`}</small></span>
                         {!item.withdrawn && <span className="ql-edit-row">
-                            {!item.closed && <button type="button" disabled={busy} title="Nobody new can take it; those doing it can finish" onClick={() => void live('live-close', item.id)}>Close</button>}
-                            {!item.started && <button type="button" className="danger" disabled={busy} title="Take it off the board" onClick={() => void live('live-withdraw', item.id)}>Withdraw</button>}
+                            {!item.closed && <button type="button" disabled={busy} title="Nobody new can take it; those doing it can finish" onClick={() => void live('board-close', item.id)}>Close</button>}
+                            {!item.started && <button type="button" className="danger" disabled={busy} title="Take it off the board" onClick={() => void live('board-withdraw', item.id)}>Withdraw</button>}
                         </span>}</li>)}</ul>
                     <p className="mission-muted"><strong>Close</strong> stops new students taking a quest; those doing it can finish. <strong>Withdraw</strong> takes off a quest nobody has started.</p></details>}
                 <details className="ql-help"><summary>How it works</summary>
-                    <p><strong>Story quests</strong> use one chapter of a story mission and can be added while that chapter runs. <strong>Generic quests</strong> work in any game, also in a free-play mission between chapters.</p>
+                    <p><strong>Generic quests</strong> work in any game, with or without a campaign, and stay on its board until you close or withdraw them. <strong>Story quests</strong> use one chapter of a story campaign: they can be added while that chapter runs, and leave the board with it.</p>
                     <p>Levels: {LEVELS.map(l => `${l.id} ${l.name}: ${l.description}`).join(' ')}</p>
-                    <p>Students see the side quests once they finish their main questions (and their warm-up task), then choose and do one at a time on their quest board. The game forms pairs and groups; one answer counts for the whole group. Typed answers are checked by the game; written reports count once a student writes a real attempt, and you read them in Teacher controls.</p>
+                    <p>Students can take a side quest straight away, beside a warm-up or campaign, and do one at a time; a student with nothing else to do is asked to choose, and the game chooses after a minute. The game forms pairs and groups; one answer counts for the whole group. Typed answers are checked by the game; written reports count once a student writes a real attempt, and you read them in Teacher controls.</p>
                     <p>Every quest is yours to change: <strong>Edit</strong> it, <strong>Duplicate</strong> it to make a variant, or <strong>Delete</strong> it (it goes to Trash). <strong>Export</strong> saves quests as a file; <strong>Import file</strong> adds the quests in a file and updates those with the same ID.</p>
                 </details>
             </aside>}

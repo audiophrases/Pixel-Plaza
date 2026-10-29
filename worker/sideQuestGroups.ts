@@ -1,3 +1,5 @@
+import { GAME_CHAPTER } from './gameSideQuests.ts';
+
 // Pairs and small groups for side quests. The game forms them: a student who accepts a pair or group quest joins the
 // group for it that has waited longest, or opens a new one. A group plays once it is full (or when its members start
 // with who is there), and one answer finishes the quest for every member. Each member also has a quest assignment, so
@@ -53,8 +55,10 @@ export class SideQuestGroups {
         if (!this.members(group.group_id).length) this.sql.exec('DELETE FROM side_quest_groups WHERE group_id = ?', group.group_id);
     }
     setState(group: string, state: QuestGroup['state']): void { this.sql.exec('UPDATE side_quest_groups SET state = ? WHERE group_id = ?', state, group); }
-    clear(game: string): void {
-        this.sql.exec('DELETE FROM side_quest_members WHERE game_id = ?', game);
-        this.sql.exec('DELETE FROM side_quest_groups WHERE game_id = ?', game);
+    // A game's groups, or with `keepGame` only those of a mission's chapters: the game's own side quests keep theirs.
+    clear(game: string, keepGame = false): void {
+        const chapter = keepGame ? ` AND chapter <> ${GAME_CHAPTER}` : '';
+        this.sql.exec(`DELETE FROM side_quest_members WHERE group_id IN (SELECT group_id FROM side_quest_groups WHERE game_id = ?${chapter})`, game);
+        this.sql.exec(`DELETE FROM side_quest_groups WHERE game_id = ?${chapter}`, game);
     }
 }

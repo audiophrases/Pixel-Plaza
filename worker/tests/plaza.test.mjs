@@ -17,7 +17,7 @@ import { identityById } from '../../shared/warmupKinds.ts';
 import { defaultWarmup, validateWarmup } from '../../shared/warmupConfig.ts';
 import { missionEnvelope } from '../../shared/missionSchema.ts';
 import { legalMove } from '../../shared/plazaMap.ts';
-import { SIDE_QUEST_SOURCE } from '../../shared/sideQuests.ts';
+import { SIDE_QUEST_SOURCE, questObjective } from '../../shared/sideQuests.ts';
 import { getWorld } from '../../shared/themeCatalog.ts';
 import { makeWorld } from '../../shared/theme.ts';
 import { createHash } from 'node:crypto';
@@ -114,7 +114,7 @@ async function api(base, route, { token, session, body } = {}) {
 function openSocket(base, ticket) {
     const ws = new WebSocket(`${base.replace('http', 'ws')}/api/plaza/ws?ticket=${ticket}`);
     const inbox = [];
-    const state = { quest: null };
+    const state = { quest: null, board: null };
     const waiters = [];
     const deliver = () => {
         for (const waiter of [...waiters]) {
@@ -125,7 +125,7 @@ function openSocket(base, ticket) {
             waiter.resolve(inbox.splice(index, 1)[0]);
         }
     };
-    ws.onmessage = event => { if (event.data !== 'pong') { const message = JSON.parse(event.data); if (message.t === 'quest') state.quest = message.quest;
+    ws.onmessage = event => { if (event.data !== 'pong') { const message = JSON.parse(event.data); if (message.t === 'quest') state.quest = message.quest; if (message.t === 'board') state.board = message;
         // Batched positions are checked as the single moves a student sees.
         if (message.t === 'moves') inbox.push(...message.moves.map(([id, x, y]) => ({ t: 'move', id, x, y }))); else inbox.push(message);
         deliver(); } };
@@ -695,15 +695,15 @@ test('witness investigations block guesses and unrelated chat, keep evidence pri
         const evidence = (await teacher('status')).body.campaign.interviews;
         assert.equal(evidence.length, 2); assert.ok(evidence.every(i => i.questionStatus === 'approved' && i.answerStatus === 'approved' && i.shared && i.evidence));
         sam = await enter(base, 'signed-b', null); chris = await enter(base, 'signed-c', null); sockets.push(sam, chris);
-        // Board quests open once the main questions are done, each after its own witness.
+        // The mission's board quest, after the main questions, each after its own witness.
         for (const [objective, text] of [['when', '9 30'], ['keys', 'two']]) {
             await exchangeEvidence(teacher, alex, sam, objective);
             alex.send({ t: 'answer', objective, text });
             assert.equal((await alex.next(m => m.t === 'answered' && m.objective === objective)).correct, true, objective);
         }
         alex.send({ t: 'quest-accept', objective: 'paper-check' });
-        await alex.next(m => m.t === 'quest' && m.quest?.board?.some(o => o.id === 'paper-check' && o.state === 'active'));
-        assert.equal(alex.state.quest.board.find(o => o.id === 'paper-check').conversation.completed, 0, 'a board quest cannot reuse main-objective exchanges');
+        await alex.next(m => m.t === 'board' && m.board.some(o => o.id === 'paper-check' && o.state === 'active'));
+        assert.equal(alex.state.board.board.find(o => o.id === 'paper-check').conversation.completed, 0, 'a board quest cannot reuse main-objective exchanges');
         await exchangeEvidence(teacher, alex, sam, 'paper-check'); await exchangeEvidence(teacher, alex, chris, 'paper-check');
         alex.send({ t: 'answer', objective: 'paper-check', text: 'We compared the two witness accounts.' });
         assert.equal((await alex.next(m => m.t === 'answered' && m.objective === 'paper-check')).correct, true, 'unassigned board questions can require two witnesses');
@@ -733,7 +733,7 @@ test('Live missions: reviewed additions preserve progress, enforce conflicts and
         const game = (await teacher('status')).body.game.id;
         const solver = await enter(base, 'signed-a', null); const other = await enter(base, 'signed-b', null); sockets.push(solver, other);
         await teacher('campaign', { op: 'start', campaign: 'castanyada' });
-        // The solver finishes the main questions, so board quests are open to them.
+        // The solver finishes the main questions, so the quests that follow them are open to them.
         for (const [objective, text] of [['where', 'park'], ['when', '9 30'], ['keys', 'two']]) {
             solver.send({ t: 'answer', objective, text }); assert.equal((await solver.next(m => m.t === 'answered' && m.objective === objective)).correct, true);
         }
@@ -759,12 +759,13 @@ test('Live missions: reviewed additions preserve progress, enforce conflicts and
         const targetBeforePreview = (await live('live')).body.target; assert.deepEqual(targetBeforePreview.additions, []);
         const released = await live('live-release', { previewId: reviewed.body.preview.id, objectiveIds: ['where'] }); assert.equal(released.status, 200);
         assert.deepEqual(released.body.released, ['live-puzzle', 'live-followup']); target = released.body.target;
-        const solverView = (await solver.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === 'live-puzzle'), 'live quest')).quest;
-        assert.equal(solverView.board.find(q => q.id === 'live-puzzle').state, 'available');
-        assert.equal(solverView.campaign.title, castanyada.title); assert.equal(JSON.stringify(solverView).includes('Changed source secret'), false);
-        assert.equal(JSON.stringify(solverView).includes('"accept"'), false);
-        const otherView = (await other.next(m => m.t === 'quest' && m.quest.board, 'other student live view')).quest;
-        assert.equal(otherView.board.some(q => q.id === 'live-puzzle'), false, 'live audience restrictions stay private');
+        const solverBoard = await solver.next(m => m.t === 'board' && m.board.some(q => q.id === 'live-puzzle'), 'live quest');
+        assert.equal(solverBoard.board.find(q => q.id === 'live-puzzle').state, 'available');
+        const solverView = solver.state.quest;
+        assert.equal(solverView.campaign.title, castanyada.title); assert.equal(JSON.stringify([solverView, solverBoard]).includes('Changed source secret'), false);
+        assert.equal(JSON.stringify([solverView, solverBoard]).includes('"accept"'), false);
+        const otherBoard = await other.next(m => m.t === 'board' && m.board.length > 0, 'other student live view');
+        assert.equal(otherBoard.board.some(q => q.id === 'live-puzzle'), false, 'live audience restrictions stay private');
         const afterRelease = (await teacher('status')).body.campaign;
         assert.deepEqual(afterRelease.players, before.players); assert.equal(afterRelease.chapter, before.chapter);
         assert.equal((await live('live-release', { previewId: reviewed.body.preview.id })).status, 409, 'review token cannot be replayed');
@@ -775,7 +776,7 @@ test('Live missions: reviewed additions preserve progress, enforce conflicts and
         assert.equal((await review(['live-followup'])).status, 400, 'withdrawn IDs are reserved');
         const liveDefinition = (await live('live-inspect?id=live-puzzle')).body.inspection; assert.deepEqual(liveDefinition.definition.accept, ['two', '2']);
         solver.send({ t: 'quest-accept', objective: 'live-puzzle' });
-        await solver.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === 'live-puzzle' && q.state === 'active'));
+        await solver.next(m => m.t === 'board' && m.board.some(q => q.id === 'live-puzzle' && q.state === 'active'));
         assert.equal((await withdraw('live-puzzle')).status, 409, 'started quests cannot be withdrawn');
         solver.send({ t: 'answer', objective: 'live-puzzle', text: '2' }); assert.equal((await solver.next(m => m.t === 'answered' && m.objective === 'live-puzzle')).correct, true);
         const previewForChange = (await review(['next-live-quest'])).body.preview;
@@ -815,10 +816,10 @@ test('Live missions: reviewed additions preserve progress, enforce conflicts and
         plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); base = plaza.base;
         assert.equal((await live('live-release', { previewId: expiredPreview.id })).status, 409, 'expired review is rejected after restart');
         const resumed = await enter(base, 'signed-a', null); sockets.push(resumed);
-        const resumedView = (await resumed.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === 'live-puzzle'), 'persisted live quests')).quest;
-        assert.equal(resumedView.board.find(q => q.id === 'live-puzzle').state, 'done');
-        assert.ok(resumedView.objectives.find(o => o.id === 'where').done);
-        assert.ok(!resumedView.board.some(q => q.id === 'live-followup'));
+        const resumedBoard = await resumed.next(m => m.t === 'board' && m.board.some(q => q.id === 'live-puzzle'), 'persisted live quests');
+        assert.equal(resumedBoard.board.find(q => q.id === 'live-puzzle').state, 'done');
+        assert.ok(resumed.state.quest.objectives.find(o => o.id === 'where').done);
+        assert.ok(!resumedBoard.board.some(q => q.id === 'live-followup'));
         assert.deepEqual((await live('live-inspect?id=live-puzzle')).body.inspection.definition.accept, ['two', '2']);
         target = (await live('live')).body.target; const oldEpoch = target.epoch;
         await teacher('campaign', { op: 'reset', confirm: true }); await teacher('campaign', { op: 'start', campaign: 'castanyada' });
@@ -834,15 +835,15 @@ test('Live missions: reviewed additions preserve progress, enforce conflicts and
     }
 });
 
-test('Side quest library: quests added to Castanyada and Plaza Free Play open after the main work, one at a time', { timeout: 120000 }, async () => {
+test('Side quests belong to the game: added with or without a campaign, taken at once, one at a time, and kept across chapters', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-library-'));
     const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); const sockets = [];
     try {
         const { base } = plaza;
         const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
         const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
-        const live = (op, body) => teacher(`missions/${op}`, body);
-        assert.equal((await api(base, '/api/teacher/missions/library-preview', { body: {} })).status, 401);
+        const board = (op, body) => teacher(`side-quests/${op}`, body);
+        assert.equal((await api(base, '/api/teacher/side-quests/board-preview', { body: {} })).status, 401);
         // A generic quest with a typed answer, a generic written one, and a story quest for chapter 1 with no prerequisite.
         const riddle = sideQuests.find(q => !q.chapter && q.answer === 'text' && q.format === 'solo');
         const report = sideQuests.find(q => !q.chapter && q.answer === 'report' && q.format === 'solo');
@@ -850,90 +851,88 @@ test('Side quest library: quests added to Castanyada and Plaza Free Play open af
         const elsewhere = sideQuests.find(q => q.chapter && q.chapter !== 'missing-chestnuts');
         assert.ok(riddle && report && story && elsewhere, 'the library has every kind of quest this test needs');
 
+        // A brand-new class, no campaign: side quests go straight on its board.
         PIN = (await teacher('game', { name: 'Library class', randomNames: false })).body.pin;
         const alex = await enter(base, 'signed-a', null); const sam = await enter(base, 'signed-b', null); sockets.push(alex, sam);
-        await teacher('campaign', { op: 'start', campaign: 'castanyada-complete' });
-        let target = (await live('live')).body.target;
-        const review = (questIds, t = target) => live('library-preview', { gameId: t.game.id, targetVersion: t.version, targetEpoch: t.epoch, chapterId: t.chapter.id, questIds });
+        let target = (await board('board')).body.target;
+        assert.deepEqual([target.game.name, target.open, target.mission, target.quests], ['Library class', true, null, []]);
+        const review = (questIds, t = target) => board('board-preview', { gameId: t.game.id, version: t.version, questIds });
         assert.equal((await review(['not-a-library-quest'])).status, 400, 'only library quests');
-        const wrongChapter = await review([elsewhere.id]); assert.equal(wrongChapter.status, 400, 'a story quest needs its own chapter');
-        assert.match(wrongChapter.body.error, /chapter/);
-        assert.equal((await live('library-preview', { gameId: target.game.id, targetVersion: target.version + 1, targetEpoch: target.epoch, chapterId: target.chapter.id, questIds: [riddle.id] })).status, 409);
-        const reviewed = await review([riddle.id, report.id, story.id]); assert.equal(reviewed.status, 200, JSON.stringify(reviewed.body));
-        assert.deepEqual(reviewed.body.preview.quests.map(q => q.id), [riddle.id, report.id, story.id]);
-        assert.equal(reviewed.body.preview.quests[0].eligibleNow, 0, 'nobody has finished the main questions yet');
-        const released = await live('live-release', { previewId: reviewed.body.preview.id }); assert.equal(released.status, 200, JSON.stringify(released.body));
+        const noStory = await review([story.id]); assert.equal(noStory.status, 400); assert.match(noStory.body.error, /start that mission/, 'a story quest needs its campaign');
+        assert.equal((await board('board-preview', { gameId: target.game.id, version: target.version + 1, questIds: [riddle.id] })).status, 409);
+        const reviewed = await review([riddle.id, report.id]); assert.equal(reviewed.status, 200, JSON.stringify(reviewed.body));
+        assert.deepEqual(reviewed.body.preview.quests.map(q => [q.id, q.audience, q.eligibleNow]), [[riddle.id, 'Everyone', 2], [report.id, 'Everyone', 2]], 'both students could take them now');
+        const released = await board('board-release', { previewId: reviewed.body.preview.id }); assert.equal(released.status, 200, JSON.stringify(released.body));
         target = released.body.target;
-        assert.deepEqual(target.additions.map(a => a.id), [riddle.id, report.id, story.id]);
-        assert.equal((await live(`live-inspect?id=${riddle.id}`)).body.inspection.sourceId, SIDE_QUEST_SOURCE);
+        assert.deepEqual(target.quests.map(q => [q.id, q.closed, q.withdrawn, q.started]), [[riddle.id, false, false, false], [report.id, false, false, false]]);
+        assert.equal((await board('board-release', { previewId: reviewed.body.preview.id })).status, 409, 'a review is used once');
         assert.equal((await review([riddle.id])).status, 400, 'a library quest joins a game once');
 
-        // In a story, side quests wait for the main questions, out of sight.
-        // The mission's own two partner quests and the three added: all wait for the main questions.
-        const locked = (await alex.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'locked' && m.quest.sideQuests.waiting === 5, 'side quests waiting')).quest;
-        assert.match(locked.sideQuests.reason, /main questions/);
-        assert.ok(!locked.board?.some(q => q.id === riddle.id));
-        alex.send({ t: 'quest-accept', objective: riddle.id });
-        assert.match((await alex.next(m => m.t === 'notice' && /Side quests open/.test(m.text), 'refused')).text, /main questions/);
-        let sideStatus = (await teacher('status')).body.campaign.sideQuests;
-        assert.deepEqual([sideStatus.free, sideStatus.doing, sideStatus.busy, sideStatus.quests], [[], [], 2, 5]);
-
-        // Between chapters, or any day: Plaza Free Play has no mystery, only a check-in and side quests.
-        await teacher('game', { name: 'Free play', randomNames: false });
-        PIN = (await teacher('status')).body.pin;
-        const chris = await enter(base, 'signed-c', null); const roger = await enter(base, 'roger-1', null); sockets.push(chris, roger);
-        assert.ok((await teacher('status')).body.campaigns.some(c => c.id === 'plaza-free-play'));
-        await teacher('campaign', { op: 'start', campaign: 'plaza-free-play' });
-        const free = (await chris.next(m => m.t === 'quest' && m.quest, 'free play journal')).quest;
-        assert.equal(free.chapter.title, 'Free play: session 1'); assert.equal(free.objectives[0].kind, 'report');
-        assert.deepEqual(free.sideQuests, { state: 'locked', reason: 'Side quests open when you finish your main questions.', waiting: 0 }, 'the check-in is the main work');
-        let freeTarget = (await live('live')).body.target;
-        assert.equal((await review([story.id], freeTarget)).status, 400, 'story quests stay with their story');
-        const freeReview = await review([riddle.id, report.id], freeTarget); assert.equal(freeReview.status, 200, JSON.stringify(freeReview.body));
-        assert.equal((await live('live-release', { previewId: freeReview.body.preview.id })).status, 200);
-        await chris.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'locked' && m.quest.sideQuests.waiting === 2, 'waiting for the check-in');
-
-        // The check-in done, Chris chooses one side quest; the other waits out of sight until it is finished or left.
-        const checkIn = 'Hello, I am ready to play today.';
-        chris.send({ t: 'answer', objective: free.objectives[0].id, text: checkIn });
-        assert.equal((await chris.next(m => m.t === 'answered' && m.objective === free.objectives[0].id)).correct, true);
-        let view = (await chris.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'choose', 'choose a side quest')).quest;
-        assert.deepEqual(view.board.filter(q => q.sideQuest).map(q => [q.id, q.state]), [[riddle.id, 'available'], [report.id, 'available']]);
-        assert.equal(view.board.find(q => q.id === riddle.id).text, `${riddle.title}: ${riddle.text}`);
+        // Nothing else to do, so Alex is asked to choose; one side quest at a time.
+        let view = await alex.next(m => m.t === 'board' && m.sideQuests.state === 'choose' && m.sideQuests.waiting === 2, 'choose a side quest');
+        assert.deepEqual(view.board.map(q => [q.id, q.state, q.sideQuest]), [[riddle.id, 'available', true], [report.id, 'available', true]]);
+        assert.equal(view.board[0].text, `${riddle.title}: ${riddle.text}`);
         assert.equal(JSON.stringify(view).includes('"accept"'), false, 'answers stay on the server');
-        chris.send({ t: 'quest-accept', objective: riddle.id });
-        view = (await chris.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'active', 'doing one')).quest;
-        assert.deepEqual(view.board.filter(q => q.sideQuest).map(q => [q.id, q.state]), [[riddle.id, 'active']]);
-        chris.send({ t: 'quest-accept', objective: report.id });
-        assert.match((await chris.next(m => m.t === 'notice' && /side quest first/.test(m.text), 'one at a time')).text, /leave it/);
-        sideStatus = (await teacher('status')).body.campaign.sideQuests;
-        assert.deepEqual(sideStatus.doing.map(item => [item.name, item.quest]), [['Chris', riddle.title]]); assert.equal(sideStatus.busy, 1, 'Roger has not checked in');
-        chris.send({ t: 'quest-leave', objective: riddle.id });
-        await chris.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'choose' && m.quest.sideQuests.waiting === 2, 'back to the choice');
-        chris.send({ t: 'quest-accept', objective: report.id });
-        await chris.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === report.id && q.state === 'active'), 'accepted report');
-        chris.send({ t: 'answer', objective: report.id, text: 'I asked two classmates and they told me their ideas.' });
-        assert.equal((await chris.next(m => m.t === 'answered' && m.objective === report.id)).correct, true);
-        await chris.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'choose' && m.quest.sideQuests.waiting === 1, 'free again');
-        chris.send({ t: 'quest-accept', objective: riddle.id });
-        await chris.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === riddle.id && q.state === 'active'), 'accepted riddle');
-        chris.send({ t: 'answer', objective: riddle.id, text: `It is ${riddle.accept[0]}` });
-        assert.equal((await chris.next(m => m.t === 'answered' && m.objective === riddle.id)).correct, true);
-        view = (await chris.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'empty' && m.quest.board?.every(q => q.state === 'done'), 'all done')).quest;
+        alex.send({ t: 'quest-accept', objective: riddle.id });
+        view = await alex.next(m => m.t === 'board' && m.sideQuests.state === 'active', 'doing one');
+        assert.deepEqual(view.board.map(q => [q.id, q.state]), [[riddle.id, 'active']], 'the others wait out of sight');
+        alex.send({ t: 'quest-accept', objective: report.id });
+        assert.match((await alex.next(m => m.t === 'notice' && /side quest first/.test(m.text), 'one at a time')).text, /leave it/);
+        let side = (await teacher('status')).body.sideQuests;
+        assert.deepEqual([side.doing.map(item => [item.name, item.quest]), side.free.map(item => item.name), side.busy, side.quests], [[['Alex', riddle.title]], ['Sam'], 0, 2]);
+        alex.send({ t: 'quest-leave', objective: riddle.id });
+        await alex.next(m => m.t === 'board' && m.sideQuests.state === 'choose' && m.sideQuests.waiting === 2, 'back to the choice');
+        alex.send({ t: 'quest-accept', objective: report.id });
+        await alex.next(m => m.t === 'board' && m.board.some(q => q.id === report.id && q.state === 'active'), 'accepted report');
+        alex.send({ t: 'answer', objective: report.id, text: 'Hi.' });
+        assert.equal((await alex.next(m => m.t === 'answered' && m.objective === report.id)).correct, false, 'a report needs five words');
+        await new Promise(resolve => setTimeout(resolve, 3100)); // the short wait after a wrong answer
+        alex.send({ t: 'answer', objective: report.id, text: 'I asked two classmates and they told me their ideas.' });
+        assert.equal((await alex.next(m => m.t === 'answered' && m.objective === report.id)).correct, true);
+        assert.ok((await alex.next(m => m.t === 'xp' && m.gained, 'XP')).reason.includes('Side quest'));
+        await alex.next(m => m.t === 'board' && m.sideQuests.state === 'choose' && m.sideQuests.waiting === 1, 'free again');
+        side = (await teacher('status')).body.sideQuests;
+        assert.deepEqual(side.reports.map(item => [item.quest, item.text]), [[report.title, 'I asked two classmates and they told me their ideas.']], 'the teacher reads it');
+        alex.send({ t: 'quest-accept', objective: riddle.id });
+        await alex.next(m => m.t === 'board' && m.board.some(q => q.id === riddle.id && q.state === 'active'), 'accepted riddle');
+        alex.send({ t: 'answer', objective: riddle.id, text: `It is ${riddle.accept[0]}` });
+        assert.equal((await alex.next(m => m.t === 'answered' && m.objective === riddle.id)).correct, true);
+        view = await alex.next(m => m.t === 'board' && m.sideQuests.state === 'empty' && m.board.every(q => q.state === 'done'), 'all done');
         assert.match(view.sideQuests.reason, /teacher will add/);
 
-        // A warm-up comes first too: while Roger has a warm-up task, his side quests wait.
-        roger.send({ t: 'answer', objective: free.objectives[0].id, text: checkIn });
-        await roger.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'choose', 'Roger is free');
+        // A warm-up does not hold side quests back: Sam, with a warm-up part, can take one, but is not asked to.
         assert.equal((await teacher('warmup', { op: 'start' })).status, 200);
-        await roger.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'locked' && /warm-up/.test(m.quest.sideQuests.reason), 'warm-up first');
-        assert.ok(!roger.state.quest.board.some(q => q.sideQuest && q.state === 'available'), 'out of sight during the warm-up');
-        roger.inbox.length = 0; // only what comes after the warm-up ends
+        await sam.next(m => m.t === 'board' && m.sideQuests.state === 'open' && m.sideQuests.waiting === 2, 'open during the warm-up');
+        sam.send({ t: 'quest-accept', objective: riddle.id });
+        await sam.next(m => m.t === 'board' && m.board.some(q => q.id === riddle.id && q.state === 'active'), 'Sam takes one anyway');
+        assert.equal((await teacher('status')).body.sideQuests.doing.find(item => item.name === 'Sam').quest, riddle.title);
         await teacher('warmup', { op: 'end' });
-        await roger.next(m => m.t === 'quest' && m.quest.sideQuests?.state === 'choose', 'free after the warm-up');
+
+        // A campaign later: the side quests stay, and a story quest for its chapter can join them.
+        assert.equal((await teacher('campaign', { op: 'start', campaign: 'castanyada-complete' })).status, 200);
+        target = (await board('board')).body.target;
+        assert.equal(target.mission.chapter.id, 'missing-chestnuts');
+        const wrongChapter = await review([elsewhere.id]); assert.equal(wrongChapter.status, 400); assert.match(wrongChapter.body.error, /chapter/);
+        const storyReview = await review([story.id]); assert.equal(storyReview.status, 200, JSON.stringify(storyReview.body));
+        assert.equal((await board('board-release', { previewId: storyReview.body.preview.id })).status, 200);
+        view = await alex.next(m => m.t === 'board' && m.board.some(q => q.id === story.id), 'the story quest');
+        assert.notEqual(view.sideQuests.state, 'choose', 'with main questions to answer, Alex is not asked to choose');
+        assert.deepEqual([riddle.id, report.id].map(id => view.board.find(q => q.id === id)?.state), ['done', 'done'], 'done stays done');
+        assert.equal(alex.state.quest.campaign.id, 'castanyada-complete');
+        // The next chapter: the game's side quests stay; the story quest leaves with its chapter.
+        sam.inbox.length = 0; // only what comes after the chapter changes
         await teacher('campaign', { op: 'next' });
-        freeTarget = (await live('live')).body.target;
-        assert.equal(freeTarget.chapter.id, 'free-play-2'); assert.deepEqual(freeTarget.additions, [], 'each session starts with a fresh board');
+        view = await sam.next(m => m.t === 'board' && !m.board.some(q => q.id === story.id), 'chapter 2');
+        assert.equal(sam.state.quest.chapter.index, 1);
+        assert.equal(view.board.find(q => q.id === riddle.id).state, 'active', 'Sam is still on the riddle');
+        // Erasing the campaign keeps the game's side quests, who did them and what they wrote.
+        alex.inbox.length = 0; // only what comes after the campaign is erased
+        assert.equal((await teacher('campaign', { op: 'reset', confirm: true })).status, 200);
+        const kept = await alex.next(m => m.t === 'board', 'no campaign again');
+        assert.equal(alex.state.quest, null);
+        assert.deepEqual(kept.board.map(q => [q.id, q.state]), [[riddle.id, 'done'], [report.id, 'done']]);
+        side = (await teacher('status')).body.sideQuests;
+        assert.deepEqual([side.quests, side.reports.length, side.doing.map(item => item.name)], [2, 1, ['Sam']]);
     } finally {
         for (const socket of sockets) socket.ws.close(); await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
     }
@@ -947,23 +946,17 @@ test('Side quest groups: the game forms pairs and groups, one answer counts for 
         const { base } = plaza;
         const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
         const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
-        const live = (op, body) => teacher(`missions/${op}`, body);
+        const board = (op, body) => teacher(`side-quests/${op}`, body);
         const pair = sideQuests.find(q => !q.chapter && q.format === 'pair' && q.answer === 'text');
         const group = sideQuests.find(q => !q.chapter && q.format === 'group' && q.answer === 'report');
         const solo = sideQuests.find(q => !q.chapter && q.format === 'solo' && q.answer === 'text');
         PIN = (await teacher('game', { name: 'Groups', randomNames: false })).body.pin;
         const [alex, sam, chris, roger] = [await enter(base, 'signed-a', null), await enter(base, 'signed-b', null), await enter(base, 'signed-c', null), await enter(base, 'roger-1', null)];
         sockets.push(alex, sam, chris, roger);
-        await teacher('campaign', { op: 'start', campaign: 'plaza-free-play' });
-        let target = (await live('live')).body.target;
-        const reviewed = await live('library-preview', { gameId: target.game.id, targetVersion: target.version, targetEpoch: target.epoch, chapterId: target.chapter.id, questIds: [pair.id, group.id, solo.id] });
-        assert.equal((await live('live-release', { previewId: reviewed.body.preview.id })).status, 200);
-        const checkIn = (await alex.next(m => m.t === 'quest' && m.quest, 'journal')).quest.objectives[0].id;
-        for (const student of [alex, sam, chris, roger]) {
-            student.send({ t: 'answer', objective: checkIn, text: 'Hello, I am ready to play today.' });
-            assert.equal((await student.next(m => m.t === 'answered' && m.objective === checkIn)).correct, true);
-        }
-        const card = (student, id, check) => student.next(m => m.t === 'quest' && m.quest.board?.some(q => q.id === id && check(q)), `${id} card`).then(m => m.quest.board.find(q => q.id === id));
+        let target = (await board('board')).body.target;
+        const reviewed = await board('board-preview', { gameId: target.game.id, version: target.version, questIds: [pair.id, group.id, solo.id] });
+        assert.equal((await board('board-release', { previewId: reviewed.body.preview.id })).status, 200);
+        const card = (student, id, check) => student.next(m => m.t === 'board' && m.board.some(q => q.id === id && check(q)), `${id} card`).then(m => m.board.find(q => q.id === id));
 
         // A pair: Alex waits alone; Sam is offered to join him, and the pair starts once it is full.
         alex.send({ t: 'quest-accept', objective: pair.id });
@@ -975,6 +968,7 @@ test('Side quest groups: the game forms pairs and groups, one answer counts for 
         sam.send({ t: 'answer', objective: pair.id, text: `It is ${pair.accept[0]}` });
         assert.equal((await sam.next(m => m.t === 'answered' && m.objective === pair.id)).correct, true);
         await card(alex, pair.id, q => q.state === 'done');
+        assert.ok((await alex.next(m => m.t === 'xp' && m.gained, 'XP for the other member')).reason.includes('Group side quest'));
 
         // A small group of three starts with who is there: two are enough, one is not.
         chris.send({ t: 'quest-accept', objective: group.id });
@@ -989,8 +983,7 @@ test('Side quest groups: the game forms pairs and groups, one answer counts for 
         roger.send({ t: 'answer', objective: group.id, text: 'We chose the park because it is quiet and green.' });
         assert.equal((await roger.next(m => m.t === 'answered' && m.objective === group.id)).correct, true);
         await card(chris, group.id, q => q.state === 'done');
-        let status = (await teacher('status')).body.campaign;
-        assert.ok(status.players.find(p => p.name === 'Chris').done.includes(group.id), 'done for every member');
+        let status = (await teacher('status')).body.sideQuests;
         assert.equal(status.reports.find(r => r.objective === group.id).partner, 'Chris', 'the teacher sees who else was in the group');
 
         // A student who has not chosen is placed: in a group that is waiting before a quest of their own.
@@ -998,19 +991,73 @@ test('Side quest groups: the game forms pairs and groups, one answer counts for 
         await card(sam, group.id, q => q.state === 'active');
         alex.send({ t: 'quest-auto' });
         assert.deepEqual((await card(alex, group.id, q => q.state === 'active')).group.members, ['Sam', 'Alex']);
-        status = (await teacher('status')).body.campaign.sideQuests;
+        status = (await teacher('status')).body.sideQuests;
         assert.deepEqual(status.groups.map(g => [g.members, g.size, g.state]), [[['Sam', 'Alex'], 3, 'open']]);
 
         // Closed: nobody new takes the solo quest. The teacher places Chris in the pair quest instead.
-        target = (await live('live')).body.target;
+        target = (await board('board')).body.target;
         chris.inbox.length = 0; // only what comes after the quest is closed
-        assert.equal((await live('live-close', { gameId: target.game.id, targetEpoch: target.epoch, objectiveId: solo.id })).status, 200);
-        const closed = (await chris.next(m => m.t === 'quest' && m.quest.board && !m.quest.board.some(q => q.id === solo.id), 'solo closed')).quest;
+        assert.equal((await board('board-close', { gameId: target.game.id, questId: solo.id })).status, 200);
+        const closed = await chris.next(m => m.t === 'board' && !m.board.some(q => q.id === solo.id), 'solo closed');
         assert.ok(closed.board.some(q => q.id === pair.id && q.state === 'available'));
-        assert.ok((await live('live')).body.target.additions.find(a => a.id === solo.id).closed);
+        assert.ok((await board('board')).body.target.quests.find(q => q.id === solo.id).closed);
+        assert.equal((await board('board-withdraw', { gameId: target.game.id, questId: pair.id })).status, 409, 'a started quest is closed, not withdrawn');
         assert.equal((await teacher('quest-place', { studentKey: students['signed-c'].studentKey, objective: solo.id })).status, 409, 'not into a closed quest');
         assert.equal((await teacher('quest-place', { studentKey: students['signed-c'].studentKey, objective: pair.id })).status, 200);
         assert.deepEqual((await card(chris, pair.id, q => q.state === 'active')).group, { members: ['Chris'], size: 2, state: 'open', startAt: null });
+    } finally {
+        for (const socket of sockets) socket.ws.close(); await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
+test('Side quests once added to a mission chapter move to the game, with who finished them and who is doing them', { timeout: 120000 }, async () => {
+    const { DatabaseSync } = await import('node:sqlite');
+    const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-side-quest-move-'));
+    const pinPlayUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    let plaza = await startPlaza(pinPlayUrl, persistTo); const sockets = [];
+    try {
+        let base = plaza.base;
+        const session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+        const riddle = sideQuests.find(q => !q.chapter && q.answer === 'text' && q.format === 'solo');
+        const report = sideQuests.find(q => !q.chapter && q.answer === 'report' && q.format === 'solo');
+        PIN = (await teacher('game', { name: 'Older class', randomNames: false })).body.pin;
+        const game = (await teacher('status')).body.game.id;
+        sockets.push(await enter(base, 'signed-a', null), await enter(base, 'signed-b', null));
+        await teacher('campaign', { op: 'start', campaign: 'castanyada-complete' });
+        for (const socket of sockets) socket.ws.close(); sockets.length = 0; await new Promise(resolve => setTimeout(resolve, 200)); await plaza.stop();
+
+        // As the old version kept them: two library quests in the mission's first chapter. Alex finished the riddle; Sam
+        // had accepted the report.
+        const files = directory => fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);
+        let written = false;
+        for (const file of files(persistTo).filter(file => file.endsWith('.sqlite'))) {
+            const db = new DatabaseSync(file);
+            try {
+                if (!db.prepare("SELECT name FROM sqlite_master WHERE name = 'mission_live_quests'").get()) continue;
+                const add = db.prepare('INSERT INTO mission_live_quests (game_id, objective_id, chapter_id, content, source_id, source_version, created) VALUES (?, ?, ?, ?, ?, 1, ?)');
+                add.run(game, riddle.id, 'missing-chestnuts', JSON.stringify(questObjective(riddle)), SIDE_QUEST_SOURCE, 1);
+                add.run(game, report.id, 'missing-chestnuts', JSON.stringify(questObjective(report)), SIDE_QUEST_SOURCE, 2);
+                const alexDone = JSON.parse(db.prepare('SELECT done FROM campaign_players WHERE game_id = ? AND student_key = ?').get(game, 'stu_a').done);
+                db.prepare('UPDATE campaign_players SET done = ? WHERE game_id = ? AND student_key = ?').run(JSON.stringify([...alexDone, riddle.id]), game, 'stu_a');
+                const assign = db.prepare('INSERT INTO quest_assignments (game_id, chapter, objective, student_key, partner_key, accepted) VALUES (?, 0, ?, ?, NULL, 1)');
+                assign.run(game, riddle.id, 'stu_a'); assign.run(game, report.id, 'stu_b');
+                written = true;
+            } finally { db.close(); }
+        }
+        assert.ok(written, 'test found the isolated PlazaRoom database');
+
+        plaza = await startPlaza(pinPlayUrl, persistTo, {}, { content: false }); base = plaza.base;
+        const target = (await teacher('side-quests/board')).body.target;
+        assert.deepEqual(target.quests.map(q => [q.id, q.chapter, q.started]), [[riddle.id, null, true], [report.id, null, true]], 'the game has them now, for any chapter');
+        assert.deepEqual((await teacher('missions/live')).body.target.additions, [], 'the mission keeps only its own additions');
+        const alex = await enter(base, 'signed-a', null); const sam = await enter(base, 'signed-b', null); sockets.push(alex, sam);
+        assert.equal((await alex.next(m => m.t === 'board' && m.board.length, 'Alex board')).board.find(q => q.id === riddle.id).state, 'done');
+        assert.equal((await sam.next(m => m.t === 'board' && m.board.length, 'Sam board')).board.find(q => q.id === report.id).state, 'active');
+        // A second start moves nothing again.
+        for (const socket of sockets) socket.ws.close(); sockets.length = 0; await new Promise(resolve => setTimeout(resolve, 200)); await plaza.stop();
+        plaza = await startPlaza(pinPlayUrl, persistTo, {}, { content: false }); base = plaza.base;
+        assert.equal((await teacher('side-quests/board')).body.target.quests.length, 2);
     } finally {
         for (const socket of sockets) socket.ws.close(); await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
     }
@@ -1119,38 +1166,39 @@ test('Quest board: eligibility, release, assignments, partner replacement and re
         const solver = status.players.find(p => p.role === 'Investigator');
         let partner = status.players.find(p => p.role === 'Witness');
         const spare = status.players.find(p => p.studentKey !== solver.studentKey && p.studentKey !== partner.studentKey);
-        const view = (key, predicate) => byKey[key].next(m => m.t === 'quest' && m.quest && predicate(m.quest), 'board update').then(m => m.quest);
+        // A student's quest board, with their mission view as it was when the board came.
+        const view = (key, predicate) => byKey[key].next(m => m.t === 'board' && predicate(m), 'board update').then(m => ({ ...m, quest: byKey[key].state.quest }));
         const answer = async (key, objective, text) => {
             byKey[key].send({ t: 'answer', objective, text }); return byKey[key].next(m => m.t === 'answered' && m.objective === objective, 'answer');
         };
-        const initial = await view(solver.studentKey, q => q.board && !q.board.some(o => o.id === 'interview'));
-        assert.ok(!initial.objectives.some(o => o.id === 'time'), 'all prerequisite blocks time until location');
+        const initial = await view(solver.studentKey, q => !q.board.some(o => o.id === 'interview'));
+        assert.ok(!initial.quest.objectives.some(o => o.id === 'time'), 'all prerequisite blocks time until location');
         assert.equal(JSON.stringify(initial).includes('"accept"'), false);
         assert.equal((await api(base, '/api/teacher/quest-release', { body: { objective: 'interview' } })).status, 401);
         assert.equal((await teacher('quest-release', { objective: 'location' })).status, 400, 'main questions cannot be released as quests');
         assert.equal((await teacher('quest-release', { objective: 'interview' })).status, 200);
-        // Board quests from the mission follow the side quest rules too: out of sight until the main questions are done.
-        const released = await view(solver.studentKey, q => q.sideQuests?.state === 'locked' && q.sideQuests.waiting === 2);
-        assert.match(released.sideQuests.reason, /main questions/);
-        assert.ok(!released.board.some(o => o.id === 'interview'));
-        const witnessView = await view(partner.studentKey, q => q.board);
+        // The mission's own board quests keep the rule their author set: these follow the main mystery, so they wait for it.
+        const released = await view(solver.studentKey, q => q.board.some(o => o.id === 'interview' && o.state === 'waiting'));
+        assert.match(released.board.find(o => o.id === 'interview').reason, /main mystery/);
+        assert.equal(released.sideQuests.state, 'empty', 'nothing to take yet');
+        const witnessView = await view(partner.studentKey, () => true);
         assert.ok(!witnessView.board.some(o => o.id === 'interview'), 'role-limited content stays hidden');
         byKey[partner.studentKey].send({ t: 'quest-accept', objective: 'interview' });
-        assert.match((await byKey[partner.studentKey].next(m => m.t === 'notice')).text, /main questions/);
+        assert.match((await byKey[partner.studentKey].next(m => m.t === 'notice')).text, /another role/);
         assert.equal((await answer(solver.studentKey, 'location', 'hotel')).correct, true);
         assert.equal((await answer(solver.studentKey, 'time', 'nine')).correct, true);
-        const waiting = await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.reason?.includes('another investigator')));
+        const waiting = await view(solver.studentKey, q => q.board.some(o => o.id === 'interview' && o.reason?.includes('another investigator')));
         assert.ok(waiting.board.find(o => o.id === 'interview').reason, 'slow students are not assigned as fast-finisher partners');
         for (const key of [partner.studentKey, spare.studentKey]) {
             assert.equal((await answer(key, 'location', 'hotel')).correct, true);
             assert.equal((await answer(key, 'time', 'nine')).correct, true);
         }
-        await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.state === 'available'));
+        await view(solver.studentKey, q => q.board.some(o => o.id === 'interview' && o.state === 'available'));
         byKey[solver.studentKey].send({ t: 'answer', objective: 'interview', text: 'The witness saw a large delivery.' });
         await new Promise(resolve => setTimeout(resolve, 200));
         assert.equal((await teacher('status')).body.campaign.reports.length, 0, 'cannot bypass acceptance');
         byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'interview' });
-        const accepted = await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.state === 'active'));
+        const accepted = await view(solver.studentKey, q => q.board.some(o => o.id === 'interview' && o.state === 'active'));
         const assignedName = accepted.board.find(o => o.id === 'interview').partner.name;
         partner = status.players.find(p => p.name === assignedName);
         assert.notEqual(partner.studentKey, solver.studentKey);
@@ -1158,12 +1206,12 @@ test('Quest board: eligibility, release, assignments, partner replacement and re
         byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'interview' });
         assert.equal((await teacher('status')).body.campaign.board.find(o => o.id === 'interview').accepted, 1, 'claim is idempotent');
         const assignedSocket = byKey[partner.studentKey]; assignedSocket.ws.close(); await assignedSocket.closed;
-        const away = await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.partner && !o.partner.online));
+        const away = await view(solver.studentKey, q => q.board.some(o => o.id === 'interview' && o.partner && !o.partner.online));
         assert.equal(away.board.find(o => o.id === 'interview').partner.name, assignedName);
         // Keep the original partner on reconnect; replacement is optional and only possible if a matching peer is there.
         const tokenFor = key => Object.keys(students).find(token => students[token].studentKey === key);
         byKey[partner.studentKey] = await enter(base, tokenFor(partner.studentKey), null); sockets.push(byKey[partner.studentKey]);
-        const back = await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.partner?.online));
+        const back = await view(solver.studentKey, q => q.board.some(o => o.id === 'interview' && o.partner?.online));
         assert.equal(back.board.find(o => o.id === 'interview').partner.name, assignedName);
         byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'interview', changePartner: true });
         assert.match((await byKey[solver.studentKey].next(m => m.t === 'notice')).text, /still in the plaza/);
@@ -1171,18 +1219,18 @@ test('Quest board: eligibility, release, assignments, partner replacement and re
         await byKey[solver.studentKey].next(m => m.t === 'notice' && /Exchange evidence/.test(m.text), 'report gate warning');
         await exchangeEvidence(teacher, byKey[solver.studentKey], byKey[partner.studentKey], 'interview');
         assert.equal((await answer(solver.studentKey, 'interview', 'The witness saw a large delivery.')).correct, true);
-        const completed = await view(solver.studentKey, q => q.board?.some(o => o.id === 'interview' && o.state === 'done'));
+        const completed = await view(solver.studentKey, q => q.board.some(o => o.id === 'interview' && o.state === 'done'));
         assert.ok(completed.board.some(o => o.id === 'exchange' && o.state === 'available'), 'any prerequisite unlocks the next social quest');
         const report = (await teacher('status')).body.campaign.reports[0]; assert.equal(report.partner, assignedName);
         byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'interview' });
         assert.match((await byKey[solver.studentKey].next(m => m.t === 'notice' && /already finished/.test(m.text))).text, /already finished/);
         byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'exchange' });
-        const exchange = await view(solver.studentKey, q => q.board?.some(o => o.id === 'exchange' && o.state === 'active'));
+        const exchange = await view(solver.studentKey, q => q.board.some(o => o.id === 'exchange' && o.state === 'active'));
         const exchangePartner = status.players.find(p => p.name === exchange.board.find(o => o.id === 'exchange').partner.name);
         const departing = byKey[exchangePartner.studentKey]; departing.ws.close(); await departing.closed;
-        await view(solver.studentKey, q => q.board?.some(o => o.id === 'exchange' && o.partner && !o.partner.online));
+        await view(solver.studentKey, q => q.board.some(o => o.id === 'exchange' && o.partner && !o.partner.online));
         byKey[solver.studentKey].send({ t: 'quest-accept', objective: 'exchange', changePartner: true });
-        const reassigned = await view(solver.studentKey, q => q.board?.some(o => o.id === 'exchange' && o.partner?.online && o.partner.name !== exchangePartner.name));
+        const reassigned = await view(solver.studentKey, q => q.board.some(o => o.id === 'exchange' && o.partner?.online && o.partner.name !== exchangePartner.name));
         const replacementName = reassigned.board.find(o => o.id === 'exchange').partner.name;
         const replacement = status.players.find(p => p.name === replacementName);
         await exchangeEvidence(teacher, byKey[solver.studentKey], byKey[replacement.studentKey], 'exchange');
@@ -1190,7 +1238,7 @@ test('Quest board: eligibility, release, assignments, partner replacement and re
         for (const socket of sockets) socket.ws.close(); await plaza.stop();
         plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); base = plaza.base;
         byKey[solver.studentKey] = await enter(base, tokenFor(solver.studentKey), null); sockets.push(byKey[solver.studentKey]);
-        const resumed = await view(solver.studentKey, q => q.board?.some(o => o.id === 'exchange' && o.state === 'active'));
+        const resumed = await view(solver.studentKey, q => q.board.some(o => o.id === 'exchange' && o.state === 'active'));
         assert.equal(resumed.board.find(o => o.id === 'interview').state, 'done');
         assert.equal(resumed.board.find(o => o.id === 'interview').partner.name, assignedName);
         assert.equal(resumed.board.find(o => o.id === 'exchange').partner.name, replacementName);

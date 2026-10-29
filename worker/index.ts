@@ -277,7 +277,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     if (studio) {
         const op = path.slice('/api/teacher/missions/'.length);
-        if (!(get && ['list', 'get', 'live', 'live-inspect'].includes(op)) && !(post && ['create', 'save', 'publish', 'delete', 'restore', 'live-preview', 'library-preview', 'live-release', 'live-withdraw', 'live-close', 'live-cancel'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
+        if (!(get && ['list', 'get', 'live', 'live-inspect'].includes(op)) && !(post && ['create', 'save', 'publish', 'delete', 'restore', 'live-preview', 'live-release', 'live-withdraw', 'live-close', 'live-cancel'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
         const args = get ? { id: new URL(request.url).searchParams.get('id') } : body;
         const result = await plaza(env).missionStudioSynced(request.headers.get('x-teacher-session') || '', op, args);
         return 'error' in result ? json(result, result.status) : json(result);
@@ -304,6 +304,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     if (questStudio) {
         const op = path.slice('/api/teacher/side-quests/'.length);
+        // The open game's side quest board: what is on it, and adding, closing and withdrawing quests.
+        if ((get && op === 'board') || (post && ['board-preview', 'board-release', 'board-cancel', 'board-close', 'board-withdraw'].includes(op))) {
+            const result = await plaza(env).sideQuestBoard(request.headers.get('x-teacher-session') || '', op, get ? {} : body);
+            return 'error' in result ? json({ error: result.error }, result.status) : json(result);
+        }
         if (!(get && op === 'list') && !(post && ['save', 'delete', 'restore', 'import'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
         const result = await plaza(env).sideQuestStudio(request.headers.get('x-teacher-session') || '', op, get ? {} : body);
         return 'error' in result ? json({ error: result.error }, result.status) : json(result);

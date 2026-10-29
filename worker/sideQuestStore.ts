@@ -60,6 +60,11 @@ export class SideQuestStore {
     quests(): SideQuest[] {
         return this.cached ??= this.rows(false).map(row => JSON.parse(row.content) as SideQuest);
     }
+    // The mission chapter a story quest belongs to, also in Trash; null for a generic quest or one not here.
+    chapterOf(id: string): string | null {
+        const row = this.row(id);
+        return row ? (JSON.parse(row.content) as SideQuest).chapter ?? null : null;
+    }
     private listing(): SideQuestResult {
         const versions = Object.fromEntries(this.sql.exec<{ id: string; version: number }>('SELECT quest_id AS id, version FROM side_quests').toArray().map(row => [row.id, row.version]));
         return { quests: this.quests(), trash: this.rows(true).map(row => JSON.parse(row.content) as SideQuest), versions };

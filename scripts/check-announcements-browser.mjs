@@ -69,7 +69,7 @@ try {
             chapter:{index:0,of:3,title:'The missing chestnuts',intro:'The festival chestnuts have disappeared. Explore the plaza and talk to your classmates to discover what happened.',ending:null},
             role:{id:'baker',name:'Baker',card:'You work in the bakery. Ask the villagers what they saw this morning.'},
             clues:[{id:'own',from:'job',text:'You saw someone carrying a blue bag near the fountain.'}],secret:null,thieves:null,
-            objectives:[{id:'bag',text:'What colour was the bag?',kind:'text',done:false,optional:false}],board:[],team:{done:0,total:3},recap:null,finale:null};
+            objectives:[{id:'bag',text:'What colour was the bag?',kind:'text',done:false,optional:false}],team:{done:0,total:3},recap:null,finale:null};
         window.__warmup={runId:'lesson:round1',kind:'facts',title:'Find someone who…',instructions:'Talk to your classmates. Ask questions in English to find the person described in your task. Type their name in the Warm-up panel.',fact:'You have a cat.',task:'Find someone who has a dog.',step:0,of:2,team:{done:0,total:4}};
         window.WebSocket=class {
             static OPEN=1; readyState=0;
@@ -111,7 +111,8 @@ try {
     const fits = () => evaluate(`(()=>{const d=document.querySelector('dialog').getBoundingClientRect(), b=document.querySelector('.activity-announcement-ok').getBoundingClientRect();return d.left>=0&&d.right<=innerWidth&&d.top>=0&&d.bottom<=innerHeight&&b.bottom<=innerHeight&&b.top>=0})()`);
     assert.ok(await fits(), 'mobile dialog and OK fit on screen');
     await ok();
-    await evaluate(`window.__quest.board=[{id:'side',text:'Interview a classmate about their favourite festival food. Write what you learned.',kind:'report',activity:'interview',state:'available',reason:null,partner:null}];window.__socket.receive({t:'quest',quest:window.__quest})`);
+    // The quest board comes in its own message, with or without a campaign.
+    await evaluate(`window.__socket.receive({t:'board',board:[{id:'side',text:'Interview a classmate about their favourite festival food. Write what you learned.',kind:'report',activity:'interview',state:'available',reason:null,partner:null}],sideQuests:{state:'empty',reason:null,waiting:0}})`);
     await waitFor(`document.querySelector('dialog:modal')?.textContent.includes('OPTIONAL SIDE QUESTS')`);
     await screenshot('mobile-side-quest');
     await ok();

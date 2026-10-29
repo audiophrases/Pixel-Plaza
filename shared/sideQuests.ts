@@ -111,6 +111,16 @@ export const GROUP_START_MS = 3 * 60_000;
 // The source a live release records for library quests. The colon keeps it apart from any Mission Studio draft ID.
 export const SIDE_QUEST_SOURCE = 'library:side-quests';
 
+// The open game's quest board, as the library page sees it: where side quests are added, with or without a mission.
+// `mission`: the mission chapter running, if any (a story quest fits only its own chapter, after its questions);
+// `quests`: every side quest the game was given, closed and withdrawn ones too.
+export type SideQuestTarget = { game: { id: string; name: string }; open: boolean; version: number;
+    mission: { title: string; chapter: { id: string; title: string; index: number }; questionIds: string[] } | null;
+    quests: { id: string; text: string; chapter: string | null; closed: boolean; withdrawn: boolean; started: boolean }[] };
+// A selection held for review before it reaches the board: who each quest is for and how many could take it now.
+export type SideQuestPreview = { id: string; game: { id: string; name: string }; expires: number; quests: { id: string; audience: string; eligibleNow: number }[] };
+export type SideQuestBoardResult = { target: SideQuestTarget | null; preview?: SideQuestPreview; released?: string[]; closed?: string; withdrawn?: string } | { error: string; status: number };
+
 // The quest-board objective a library quest becomes in a game.
 export function questObjective(quest: SideQuest): Objective {
     const players = FORMATS.find(format => format.id === quest.format)?.players ?? 1;

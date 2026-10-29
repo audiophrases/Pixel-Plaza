@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import type { QuestView } from '../../shared/campaign';
+import type { BoardView, QuestView } from '../../shared/campaign';
 import type { WarmupView } from '../../shared/warmup';
 import { activityAnnouncements, readAcknowledgements, saveAcknowledgements } from './announcementQueue';
 import './ActivityAnnouncements.css';
 
-export default function ActivityAnnouncements({ quest, warmup, storageKey, paused }: { quest: QuestView | null; warmup: WarmupView | null; storageKey: string; paused: boolean }) {
+export default function ActivityAnnouncements({ quest, board = null, warmup, storageKey, paused }: { quest: QuestView | null; board?: BoardView | null; warmup: WarmupView | null; storageKey: string; paused: boolean }) {
     const [seen, setSeen] = useState(() => readAcknowledgements(storageKey));
     const [reviewScope, setReviewScope] = useState<string | null>(null);
     const activityScope = JSON.stringify([quest?.runId ?? quest?.campaign.id, quest?.chapter.index, warmup?.runId ?? warmup?.kind]);
@@ -12,10 +12,10 @@ export default function ActivityAnnouncements({ quest, warmup, storageKey, pause
     const dialog = useRef<HTMLDialogElement>(null);
     const heading = useRef<HTMLHeadingElement>(null);
     const body = useRef<HTMLDivElement>(null);
-    const pending = activityAnnouncements(quest, warmup, seen);
-    const current = paused || (!quest && !warmup) ? null : review ? {
+    const pending = activityAnnouncements(quest, warmup, seen, board);
+    const current = paused || (!quest && !warmup && !board) ? null : review ? {
         id: 'review', kind: 'chapter', eyebrow: 'READ AGAIN', title: 'Your current instructions', acknowledge: [],
-        sections: activityAnnouncements(quest, warmup, new Set()).flatMap(item => [{ label: item.title, text: item.next }, ...item.sections]),
+        sections: activityAnnouncements(quest, warmup, new Set(), board).flatMap(item => [{ label: item.title, text: item.next }, ...item.sections]),
         next: 'Press OK to return to the game. Your tasks are still in the Journal and Warm-up panel.',
     } : pending[0];
     const currentId = current?.id;

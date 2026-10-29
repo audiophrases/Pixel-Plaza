@@ -29,23 +29,26 @@ Every quest card shows its kind (**Story** in orange, **Generic** in blue), its 
 
 ## Adding quests to a game
 
-1. In Teacher controls, open the game and start a campaign. Between chapters, or on any day without a story, start **Plaza Free Play: Side Quests**.
-2. In the library, select up to ten quests (or press **Pick 5 at random from these**) and choose **Review and add to the game**. The review shows how many students could accept each quest right now.
-3. Choose **Release to students**. The quests join the game's quest board; progress in the story is not touched. The review counts the students who could accept each quest right now.
+1. In Teacher controls, create or open the game. A campaign is not needed: a new class can have side quests straight away.
+2. In the library, select up to ten quests (or press **Pick 5 at random from these**) and choose **Review and add to the game**. The review shows who each quest is for and how many students could accept it right now.
+3. Choose **Release to students**. The quests join the game's quest board and stay there for the whole game, whichever chapter a campaign is on, until you close or withdraw them. A campaign's progress is not touched.
+
+A **story quest** continues one campaign chapter: it can be added only while that chapter runs, and it leaves the board when the next chapter starts. Generic quests work in any game, with or without a campaign.
 
 ## How students play them
 
-- These rules hold for every quest on the board: library quests, quests released from Mission Studio, and the partner quests written in a mission (such as the Castanyada interviews, which keep their assigned witness and the teacher-approved exchange).
-- **After the main work.** A student sees the side quests once they have finished the chapter's main questions (in Plaza Free Play, the check-in) and, while a warm-up runs, their warm-up task. Until then the Journal says what is left and how many side quests are waiting.
-- **Choose one.** When a student is free, a *Choose a side quest* message appears and the Journal opens at the quest board. They accept one quest.
+- These rules hold for every quest on the board: library quests, quests released from Mission Studio, and the partner quests written in a mission (such as the Castanyada interviews, which keep their assigned witness and the witness exchange).
+- **Open at once.** Side quests do not wait for a warm-up or for a campaign's main questions: a student can accept one whenever they like. Without a campaign the Journal shows only the quest board. A partner quest written in a mission keeps its own rule if its author set it to follow the main mystery.
+- **Choose one when there is nothing else to do.** A student with no warm-up part left and no main questions left sees a *Choose a side quest* message, and the Journal opens at the quest board. In a class with only side quests, that is everyone at once. A student still on the warm-up or the campaign is never asked or placed.
 - **One at a time.** While a student does a side quest, the others are out of sight. **Leave this quest and choose another** in the Journal gives it up and brings the choice back. After finishing one, they choose the next.
 - **Pairs and groups are real.** Accepting a pair or small-group quest puts the student in the pair or group for it that has waited longest, or opens a new one ("Join Ana" on the card shows who is waiting; those come first). The quest starts once the group is full. After three minutes, a group with at least two members can choose **Start with who's here**. Members find each other in the plaza; **one answer, or one report, counts for everyone in the group**, and each gets the XP. Under *What students wrote* a group report shows who else was in it.
 - **Mingles** (called "whole class" before) are done alone, by talking to several classmates; they need 4 students online.
-- **Nobody waits forever to choose.** A student who has not chosen within a minute is placed by the game: in a pair or group that is waiting, or else in a solo quest or mingle.
-- **Teacher controls** shows, under *Side quests*, who is free to choose, the pairs and groups (waiting or playing), who is doing which quest, and how many students are still on their main work. It warns when students are free and the chapter has no side quests. **Place in a side quest…** next to a free student puts them in a quest (or its waiting group).
-- **Close** (in the library, under *Added to this chapter*) stops new students taking a quest; those doing it can finish. **Withdraw** takes off a quest nobody has started.
+- **Nobody waits forever to choose.** A student asked to choose who has not chosen within a minute is placed by the game: in a pair or group that is waiting, or else in a solo quest or mingle.
+- **Teacher controls** has a *Side quests* tab in every open game: who is free to choose, the pairs and groups (waiting or playing), who is doing which quest, how many are still on the warm-up or campaign, and what students wrote. It warns when students are free and the game has no side quests. **Place in a side quest…** next to a free student puts them in a quest (or its waiting group).
+- **Close** (in the library, under *Added to this game*) stops new students taking a quest; those doing it can finish. **Withdraw** takes off a quest nobody has started.
+- **Erase campaign** keeps the game's side quests, who did them and what they wrote: they belong to the game. Deleting the game removes them.
 
-The server builds each quest from its own copy of the library, checks that it fits the chapter, and adds it once per game. A chapter can receive up to 40 live additions. In Plaza Free Play, **Start the next chapter** opens a new session with an empty board. Quests can be closed or (unstarted) withdrawn here or in Mission Studio.
+The server builds each quest from its own copy of the library, checks that a story quest fits the running chapter, and adds a quest once per game; a game holds up to 100. Side quests added to a campaign chapter by an older version move to their game when the server starts, with who finished them and who was doing them.
 
 **Download for Mission Studio** saves the selection as a campaign file. In Mission Studio, import it with "Extend the selected chapter" to make the quests part of your own campaign draft.
 
@@ -60,7 +63,7 @@ The server builds each quest from its own copy of the library, checks that it fi
 
 ## Plaza Free Play
 
-A campaign without a mystery, for short sessions between chapters and for any day of the year. Students get one of four light roles (Explorer, Reporter, Host, Artist), check in with one or two sentences, and then play the quests you add. It has eight sessions; each new session starts with an empty quest board.
+A campaign without a mystery: students get one of four light roles (Explorer, Reporter, Host, Artist) and check in with one or two sentences each session. Side quests no longer need it, since any game can have them, so use it only if you want the check-ins. You can move it to Trash in Mission Studio.
 
 ## Good to know
 
