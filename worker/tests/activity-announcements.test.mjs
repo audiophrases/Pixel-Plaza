@@ -7,7 +7,9 @@ const quest = () => ({ runId: 'lesson:run1', campaign: { id: 'mystery', title: '
     role: { id: 'baker', name: 'Baker', card: 'You work at the bakery.' },
     clues: [{ id: 'own', from: 'job', text: 'You saw a blue bag.' }], secret: null, thieves: null,
     objectives: [{ id: 'first', text: 'Where is the bag?', kind: 'text', done: false, optional: false }],
-    board: [], team: { done: 0, total: 3 }, recap: null, finale: null });
+    team: { done: 0, total: 3 }, recap: null, finale: null });
+// The quest board comes on its own, with or without a campaign.
+const board = () => ({ board: [], sideQuests: { state: 'empty', reason: 'Your teacher will add side quests soon.', waiting: 0 } });
 const warmup = () => ({ runId: 'lesson:round1', kind: 'identity', title: 'Secret identities', instructions: 'Ask yes/no questions.',
     fact: 'You are a dragon.', task: 'Find your partner’s identity.', step: 0, of: 2, team: { done: 0, total: 4 } });
 const acknowledge = (seen, announcement) => announcement.acknowledge.forEach(id => seen.add(id));
@@ -34,56 +36,67 @@ test('chapter instructions cover visible tasks once; newly unlocked tasks and re
 });
 
 test('side quests are offered separately from accepting, waiting quests stay quiet, news and endings announce once', () => {
-    const q = quest(), seen = new Set();
-    acknowledge(seen, activityAnnouncements(q, null, seen)[0]);
-    q.board.push({ id: 'side', text: 'Interview a classmate.', kind: 'report', activity: 'interview', state: 'waiting', reason: 'Wait', partner: null });
-    assert.deepEqual(activityAnnouncements(q, null, seen), []);
-    q.board[0].state = 'available';
-    const offered = activityAnnouncements(q, null, seen)[0];
+    const q = quest(), b = board(), seen = new Set();
+    acknowledge(seen, activityAnnouncements(q, null, seen, b)[0]);
+    b.board.push({ id: 'side', text: 'Interview a classmate.', kind: 'report', activity: 'interview', state: 'waiting', reason: 'Wait', partner: null });
+    assert.deepEqual(activityAnnouncements(q, null, seen, b), []);
+    b.board[0].state = 'available';
+    const offered = activityAnnouncements(q, null, seen, b)[0];
     assert.match(offered.next, /OK does not accept/);
     acknowledge(seen, offered);
-    q.board[0].state = 'active'; q.board[0].partner = { name: 'Sam', online: true };
-    const accepted = activityAnnouncements(q, null, seen)[0];
+    b.board[0].state = 'active'; b.board[0].partner = { name: 'Sam', online: true };
+    const accepted = activityAnnouncements(q, null, seen, b)[0];
     assert.match(accepted.title, /Sam/); acknowledge(seen, accepted);
-    q.board[0].partner.online = false;
-    assert.deepEqual(activityAnnouncements(q, null, seen), []);
+    b.board[0].partner.online = false;
+    assert.deepEqual(activityAnnouncements(q, null, seen, b), []);
     q.clues.push({ id: 'news1', from: 'news', text: 'The cellar is open.' });
-    const news = activityAnnouncements(q, null, seen)[0];
+    const news = activityAnnouncements(q, null, seen, b)[0];
     assert.equal(news.kind, 'news'); acknowledge(seen, news);
     q.chapter.ending = 'The chestnuts are safe.';
-    const ending = activityAnnouncements(q, null, seen)[0];
+    const ending = activityAnnouncements(q, null, seen, b)[0];
     assert.equal(ending.kind, 'ending'); acknowledge(seen, ending);
-    assert.deepEqual(activityAnnouncements(q, null, seen), []);
+    assert.deepEqual(activityAnnouncements(q, null, seen, b), []);
     q.status = 'campaign_complete'; q.finale = 'Happy festival!';
-    const finale = activityAnnouncements(q, null, seen);
+    const finale = activityAnnouncements(q, null, seen, b);
     assert.equal(finale.length, 1); assert.equal(finale[0].eyebrow, 'MISSION COMPLETE');
-    acknowledge(seen, finale[0]); assert.deepEqual(activityAnnouncements(q, null, seen), []);
+    acknowledge(seen, finale[0]); assert.deepEqual(activityAnnouncements(q, null, seen, b), []);
 });
 
-test('a student free for side quests is asked to choose one, again after each one finished; side quests are not offered twice', () => {
-    const q = quest(), seen = new Set();
-    acknowledge(seen, activityAnnouncements(q, null, seen)[0]);
-    q.sideQuests = { state: 'locked', reason: 'Side quests open when you finish your main questions.', waiting: 2 };
-    assert.deepEqual(activityAnnouncements(q, null, seen), [], 'locked side quests stay quiet');
-    q.board.push({ id: 'riddle', text: 'Riddle: what has keys?', kind: 'text', activity: null, state: 'available', reason: null, partner: null, sideQuest: true },
+test('a student with nothing else to do is asked to choose a side quest, again after each one finished; side quests are not offered twice', () => {
+    const q = quest(), b = board(), seen = new Set();
+    acknowledge(seen, activityAnnouncements(q, null, seen, b)[0]);
+    b.board.push({ id: 'riddle', text: 'Riddle: what has keys?', kind: 'text', activity: null, state: 'available', reason: null, partner: null, sideQuest: true },
         { id: 'chat', text: 'Chat: ask about hobbies.', kind: 'report', activity: null, state: 'available', reason: null, partner: null, sideQuest: true });
-    q.sideQuests = { state: 'choose', reason: null, waiting: 2 };
-    const choose = activityAnnouncements(q, null, seen);
+    b.sideQuests = { state: 'open', reason: null, waiting: 2 };
+    assert.deepEqual(activityAnnouncements(q, null, seen, b), [], 'a student with other work is not asked: open side quests stay quiet');
+    b.sideQuests = { state: 'choose', reason: null, waiting: 2 };
+    const choose = activityAnnouncements(q, null, seen, b);
     assert.equal(choose.length, 1, 'one prompt, not an offer as well');
     assert.equal(choose[0].title, 'Choose a side quest'); assert.equal(choose[0].sections.length, 2);
     acknowledge(seen, choose[0]);
-    assert.deepEqual(activityAnnouncements(q, null, seen), []);
-    q.board[0].state = 'active'; q.board.pop(); q.sideQuests = { state: 'active', reason: null, waiting: 1 };
-    acknowledge(seen, activityAnnouncements(q, null, seen)[0]);
-    q.board[0].state = 'done'; q.board.push({ id: 'chat', text: 'Chat: ask about hobbies.', kind: 'report', activity: null, state: 'available', reason: null, partner: null, sideQuest: true });
-    q.sideQuests = { state: 'choose', reason: null, waiting: 1 };
-    assert.equal(activityAnnouncements(q, null, seen)[0].title, 'Choose a side quest', 'asked again once free');
-    acknowledge(seen, activityAnnouncements(q, null, seen)[0]);
-    q.board[1].state = 'active'; q.board[1].group = { members: ['Ana'], size: 2, state: 'open', startAt: null };
-    acknowledge(seen, activityAnnouncements(q, null, seen)[0]);
-    q.board[1].group = { members: ['Ana', 'Ben'], size: 2, state: 'playing', startAt: null };
-    const ready = activityAnnouncements(q, null, seen);
+    assert.deepEqual(activityAnnouncements(q, null, seen, b), []);
+    b.board[0].state = 'active'; b.board.pop(); b.sideQuests = { state: 'active', reason: null, waiting: 1 };
+    acknowledge(seen, activityAnnouncements(q, null, seen, b)[0]);
+    b.board[0].state = 'done'; b.board.push({ id: 'chat', text: 'Chat: ask about hobbies.', kind: 'report', activity: null, state: 'available', reason: null, partner: null, sideQuest: true });
+    b.sideQuests = { state: 'choose', reason: null, waiting: 1 };
+    assert.equal(activityAnnouncements(q, null, seen, b)[0].title, 'Choose a side quest', 'asked again once free');
+    acknowledge(seen, activityAnnouncements(q, null, seen, b)[0]);
+    b.board[1].state = 'active'; b.board[1].group = { members: ['Ana'], size: 2, state: 'open', startAt: null };
+    acknowledge(seen, activityAnnouncements(q, null, seen, b)[0]);
+    b.board[1].group = { members: ['Ana', 'Ben'], size: 2, state: 'playing', startAt: null };
+    const ready = activityAnnouncements(q, null, seen, b);
     assert.equal(ready.length, 1); assert.equal(ready[0].eyebrow, 'YOUR PAIR IS READY'); assert.match(ready[0].title, /Ana, Ben/);
+});
+
+test('without a campaign the quest board alone asks to choose, and quests of an ended mission stay quiet', () => {
+    const b = board(), seen = new Set();
+    b.board.push({ id: 'riddle', text: 'Riddle: what has keys?', kind: 'text', activity: null, state: 'available', reason: null, partner: null, sideQuest: true });
+    b.sideQuests = { state: 'choose', reason: null, waiting: 1 };
+    const choose = activityAnnouncements(null, null, seen, b);
+    assert.deepEqual(choose.map(item => [item.eyebrow, item.title]), [['TIME FOR A SIDE QUEST', 'Choose a side quest']]);
+    acknowledge(seen, choose[0]);
+    b.board[0] = { ...b.board[0], state: 'active', ended: true }; b.sideQuests = { state: 'active', reason: null, waiting: 0 };
+    assert.deepEqual(activityAnnouncements(null, null, seen, b), [], 'a quest of an ended mission is not announced');
 });
 
 test('warm-up instructions precede chapters; progress, completion and new rounds have distinct acknowledgements', () => {

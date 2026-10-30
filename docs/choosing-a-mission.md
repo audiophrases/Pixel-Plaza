@@ -10,7 +10,7 @@ These are the five original mission variants found in the classroom copy. Missio
 | Castanyada: Side Mysteries | The same three-chapter main mystery, with two partner quests in chapter one. | An early expansion of the original. |
 | The Haunted Castanyada: Five Chapters | Five chapters; seventeen main tasks, six bonus tasks and ten partner quests. | Extends the story through the missing festival plan and haunted celebration. |
 | Castanyada: Witness Investigations | The five-chapter story and its ten partner quests. | All seventeen main tasks require witness exchanges with classmates before answering; the thief question requires two witnesses. More talking between students. |
-| Plaza Free Play: Side Quests | Eight sessions, each with one written check-in; no board quests included. | A starter for activities the teacher selects and adds. It is not a ready-made mystery. |
+| Plaza Free Play: Side Quests | Eight sessions, each with one written check-in; no board quests included. | Optional check-ins without a mystery. Side quests do not need it: any game can have them, with or without a campaign. |
 
 For a simpler library, Five Chapters is a useful main choice. Keep the original if you also want a shorter story. Side Mysteries overlaps with both. Witness Investigations is an alternative when you specifically want mandatory evidence exchanges. Free Play serves a different purpose and needs preparation.
 

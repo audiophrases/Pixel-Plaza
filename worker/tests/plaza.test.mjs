@@ -125,7 +125,9 @@ function openSocket(base, ticket) {
             waiter.resolve(inbox.splice(index, 1)[0]);
         }
     };
-    ws.onmessage = event => { if (event.data !== 'pong') { const message = JSON.parse(event.data); if (message.t === 'quest') state.quest = message.quest; if (message.t === 'board') state.board = message;
+    ws.onmessage = event => { if (event.data !== 'pong') { const message = JSON.parse(event.data); if (message.t === 'quest') state.quest = message.quest;
+        // A quest board comes right after the mission view of the same moment: each keeps the view it came with.
+        if (message.t === 'board') { state.board = message; message.quest = state.quest; }
         // Batched positions are checked as the single moves a student sees.
         if (message.t === 'moves') inbox.push(...message.moves.map(([id, x, y]) => ({ t: 'move', id, x, y }))); else inbox.push(message);
         deliver(); } };
@@ -1642,11 +1644,11 @@ test('Quest board: eligibility, release, assignments, partner replacement and re
         let partner = status.players.find(p => p.role === 'Witness');
         const spare = status.players.find(p => p.studentKey !== solver.studentKey && p.studentKey !== partner.studentKey);
         // A student's quest board, with their mission view as it was when the board came.
-        const view = (key, predicate) => byKey[key].next(m => m.t === 'board' && predicate(m), 'board update').then(m => ({ ...m, quest: byKey[key].state.quest }));
+        const view = (key, predicate) => byKey[key].next(m => m.t === 'board' && predicate(m), 'board update');
         const answer = async (key, objective, text) => {
             byKey[key].send({ t: 'answer', objective, text }); return byKey[key].next(m => m.t === 'answered' && m.objective === objective, 'answer');
         };
-        const initial = await view(solver.studentKey, q => !q.board.some(o => o.id === 'interview'));
+        const initial = await view(solver.studentKey, q => q.quest && !q.board.some(o => o.id === 'interview'));
         assert.ok(!initial.quest.objectives.some(o => o.id === 'time'), 'all prerequisite blocks time until location');
         assert.equal(JSON.stringify(initial).includes('"accept"'), false);
         assert.equal((await api(base, '/api/teacher/quest-release', { body: { objective: 'interview' } })).status, 401);
@@ -3272,7 +3274,9 @@ test('five-chapter Castanyada: new mysteries, private side notes, partnered repo
         PIN = (await teacher('game', { name: 'Five-chapter class', randomNames: false })).body.pin;
         const alex = await enter(base, 'signed-a', null); const sam = await enter(base, 'signed-b', null);
         sockets.push(alex, sam);
-        const view = (socket, index, predicate) => socket.next(m => m.t === 'quest' && m.quest?.chapter.index === index && predicate(m.quest), 'five-chapter journal').then(m => m.quest);
+        // The student's journal: the mission view with the quest board that came with it.
+        const journal = m => ({ ...m.quest, board: m.board });
+        const view = (socket, index, predicate) => socket.next(m => m.t === 'board' && m.quest?.chapter.index === index && predicate(journal(m)), 'five-chapter journal').then(journal);
         const answer = async (socket, objective, text) => {
             socket.send({ t: 'answer', objective, text });
             assert.equal((await socket.next(m => m.t === 'answered' && m.objective === objective, `answer ${objective}`)).correct, true);

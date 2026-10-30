@@ -1802,13 +1802,15 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     // Everyone in the game gets their own view again, after the story moved on.
-    private sendQuestToAll(game: string): void {
+    // Everyone's mission view and quest board. Without a mission only the board goes, unless `cleared`: the mission was
+    // just erased, and pages drop it.
+    private sendQuestToAll(game: string, cleared = false): void {
         for (const seat of this.seats()) {
             if (seat.game !== game) continue;
             const quest = this.questView(game, seat.studentKey); const board = this.boardView(game, seat.studentKey);
             for (const ws of this.ctx.getWebSockets(seat.studentKey)) {
                 try {
-                    ws.send(JSON.stringify({ t: 'quest', quest }));
+                    if (quest || cleared) ws.send(JSON.stringify({ t: 'quest', quest }));
                     if (board) ws.send(JSON.stringify({ t: 'board', ...board }));
                 } catch { /* closing */ }
             }
@@ -2175,7 +2177,7 @@ export class PlazaRoom extends DurableObject<Env> {
             this.sql.exec('DELETE FROM quest_releases WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM mission_live_quests WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM mission_live_previews WHERE game_id = ?', game);
-            this.sendQuestToAll(game);
+            this.sendQuestToAll(game, true);
             return null;
         }
         this.sendQuestToAll(game);
