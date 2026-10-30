@@ -182,6 +182,26 @@ export class GameAudio {
     this.enqueue({ kind: 'goal', path: `/sounds/pinplay/correct-${this.clip}.mp3` });
   }
 
+  // A soft two-note chime for a private message, made here and played alongside whatever is speaking: the message is
+  // still read aloud in its turn. Silent until the browser has allowed sound.
+  ping(): void {
+    if (this.disposed || this.silent) return;
+    try {
+      const audio = soundContext();
+      if (audio.state !== 'running') return;
+      [880, 1320].forEach((frequency, i) => {
+        const start = audio.currentTime + i * 0.12;
+        const tone = audio.createOscillator(); const gain = audio.createGain();
+        tone.type = 'sine'; tone.frequency.value = frequency;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.12, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.25);
+        tone.connect(gain).connect(audio.destination);
+        tone.start(start); tone.stop(start + 0.3);
+      });
+    } catch { /* no sound here: the card still shows */ }
+  }
+
   // Thunder starts alongside the bolt, even while a chat message is speaking.
   thunder(): void {
     if (this.disposed || this.silent) return;

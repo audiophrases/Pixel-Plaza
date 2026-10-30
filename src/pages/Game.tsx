@@ -139,7 +139,9 @@ export default function Game() {
   const [classmates, setClassmates] = useState<PlazaPlayer[]>([]); // everyone else here, nearest first
   const [earshot, setEarshot] = useState<string[]>([]); // who would hear nearby chat right now
   const [typing, setTyping] = useState<Record<string, Typing>>({}); // classmates writing a message that will reach this student, by id
-  const [peek, setPeek] = useState<{ key: string; message: ChatMessage } | null>(null); // a private message that came while another chat was open
+  // Conversations set aside with "Later": the time of their last message then. A new one brings the card back.
+  const [dismissed, setDismissed] = useState<Record<string, number>>({});
+  const [waitClock, setWaitClock] = useState(() => Date.now()); // the server's time, for "waiting 40 s"
   // Who the open conversation is with, and where its messages go.
   const partnerName = partnerOf(active);
   const partner = partnerName ? classmates.find(classmate => classmate.name === partnerName) ?? null : null;
@@ -219,6 +221,30 @@ export default function Game() {
   }, [active, openNewest]);
   const waitingKeys = [...byConv.keys()].filter(key => key !== '*' && key !== active);
   const unread = waitingKeys.reduce((sum, key) => sum + newIn(key).length, 0);
+  // Who is waiting for this student's reply: a private conversation, or the teacher, whose last word is theirs and came
+  // after any "Later". The open one shows itself; the others are cards above the chat, the longest waiting first.
+  const mineIn = (message: ChatMessage) => !message.teacher && message.sender === myName;
+  const waiting = [...byConv.entries()].flatMap(([key, list]) => {
+    if (key === active || (key !== TEACHER && !partnerOf(key))) return [];
+    const said = list.filter(message => !message.sender.startsWith('System'));
+    const last = said.at(-1);
+    if (!last || last.read || mineIn(last) || last.at <= (dismissed[key] ?? 0)) return [];
+    let since = last.at; // from their first message since this student last wrote
+    for (let i = said.length - 1; i >= 0 && !mineIn(said[i]); i--) since = said[i].at;
+    return [{ key, last, since }];
+  }).sort((a, b) => a.since - b.since);
+  const waitingCount = waiting.length;
+  useEffect(() => {
+    if (!waitingCount) return;
+    const tick = () => setWaitClock(Date.now() + clock.current);
+    const timer = window.setInterval(tick, 5000);
+    const first = window.setTimeout(tick, 0);
+    return () => { window.clearInterval(timer); window.clearTimeout(first); };
+  }, [waitingCount]);
+  const waitedFor = (since: number) => {
+    const seconds = Math.max(0, Math.round((waitClock - since) / 1000));
+    return seconds < 10 ? 'just now' : seconds < 60 ? `waiting ${seconds} s` : `waiting ${Math.floor(seconds / 60)} min`;
+  };
 
   // The conversation list: the ones always there (nearby, everyone, the teacher) in fixed places at the top, then the
   // private chats with the newest on top, right under the button that starts one.
@@ -246,12 +272,6 @@ export default function Game() {
       Math.max(0, next - Date.now()) + 50);
     return () => window.clearTimeout(timer);
   }, [typing]);
-  // A private message announced at the top of the chat goes away by itself; its conversation keeps it as new.
-  useEffect(() => {
-    if (!peek) return;
-    const timer = window.setTimeout(() => setPeek(null), 12000);
-    return () => window.clearTimeout(timer);
-  }, [peek]);
 
   // Classmates see "is writing" while a message for them is on its way, so they wait for it.
   const reportTyping = useCallback(() => {
@@ -418,16 +438,16 @@ export default function Game() {
       });
       return line;
     };
-    // A private message for a conversation that is not open opens by itself when nothing is being written and the
-    // open one has gone quiet; otherwise it is announced at the top of the chat. The group chats only count as new.
-    const arrived = (key: string, line: ChatMessage) => {
+    // A private message for a conversation that is not open chimes, and opens by itself when nothing is being written
+    // and the open one has gone quiet; otherwise its card waits above the chat. The group chats only count as new.
+    const arrived = (key: string) => {
       const open = activeRef.current;
       if (key === open || (key !== TEACHER && !partnerOf(key))) return;
+      audioRef.current?.ping();
       if (opensItself({ from: key, open, writing: composing.current, lastInOpen: newest.current[open] ?? 0, now: Date.now() + clock.current })) {
         setActive(key);
         setShowPeople(false);
-        setPeek(null);
-      } else setPeek({ key, message: line });
+      }
     };
     let joinedGame = '';
     const unsubscribe = plaza.subscribe(event => {
@@ -454,7 +474,7 @@ export default function Game() {
           setStarted(moveKeys);
           setLastSeen(moveKeys);
           newest.current = moveKeys(newest.current);
-          setPeek(prev => prev && { key: move(prev.key), message: renamedTogether([prev.message], changes)[0] });
+          setDismissed(moveKeys);
           if (pending.current) pending.current.conv = move(pending.current.conv);
         }
       }
@@ -498,10 +518,11 @@ export default function Game() {
           teacherMessageIds.current.add(message.id);
           say({ id: `teacher:${message.id}`, sender: 'Teacher', text: message.text, timestamp: message.timestamp, at: message.timestamp, teacher: true, read: !!event.history });
         }
-        // The teacher writing opens the chat on it, unless the student is in the middle of writing something.
+        // The teacher writing opens the chat on it, unless the student is in the middle of writing something: then its
+        // card waits above the chat.
         if (unseen.length && !event.history) {
-          if (composing.current) setPeek({ key: TEACHER, message: { sender: 'Teacher', text: unseen.at(-1)!.text, at: unseen.at(-1)!.timestamp, teacher: true } });
-          else { setActive(TEACHER); setShowPeople(false); }
+          if (activeRef.current !== TEACHER) audioRef.current?.ping();
+          if (!composing.current) { setActive(TEACHER); setShowPeople(false); }
         }
         return;
       }
@@ -532,7 +553,7 @@ export default function Game() {
         // Whoever was writing has written.
         const speaker = [...plaza.players.values()].find(player => player.name === event.sender);
         if (speaker) setTyping(current => without(current, speaker.id));
-        if (!mine && !event.history && event.sender !== 'System') arrived(conversationOf(line, me()), line);
+        if (!mine && !event.history && event.sender !== 'System') arrived(conversationOf(line, me()));
       }
       else if (event.t === 'retract') {
         audio.retract(event.id);
@@ -602,11 +623,15 @@ export default function Game() {
     if (partnerOf(key) && !byConv.has(key)) setStarted(current => key in current ? current : { ...current, [key]: Date.now() + clock.current });
     setActive(key);
     setShowPeople(false);
-    setPeek(current => current?.key === key ? null : current);
     setNudge(null);
     setSpelling([]);
     setSendError('');
     submissionAttemptId.current = null;
+  };
+  // Replying from a waiting card: its conversation opens at the chat's size, ready to type.
+  const reply = (key: string) => {
+    choose(key);
+    window.requestAnimationFrame(() => chatField.current?.focus());
   };
   // Opening a chat to talk in it: a compact box grows to show the conversations, and takes the keys.
   const talk = (key: string) => {
@@ -850,8 +875,23 @@ export default function Game() {
             sendRecorded(plaza, { t: 'answer', objective, text, attemptId }, attemptId);
           }} />}
 
-        <div className={`chat-container glass-panel chat-${chatSpot.size}`} ref={chatBox}
-          style={{ transform: `translate(${chatSpot.x}px, ${chatSpot.y}px)` }}>
+        <div className="chat-dock" style={{ transform: `translate(${chatSpot.x}px, ${chatSpot.y}px)` }}>
+        {/* Classmates (and the teacher) waiting for a reply, each a card to reply from; "Later" sets one aside. */}
+        {waiting.length > 0 && <div className="chat-waiting" role="region" aria-label="Waiting for your reply">
+          {waiting.slice(0, 3).map(item => <div key={item.key} className={`chat-wait-card${waitClock - item.since >= 60000 ? ' chat-wait-long' : ''}`}>
+            <button type="button" className="chat-wait-open" onClick={() => reply(item.key)} aria-label={`Reply to ${nameOf(item.key)}: ${item.last.text}`}>
+              <Face player={playerOf(item.key)} name={nameOf(item.key)} icon={item.key === TEACHER ? '🧑‍🏫' : undefined} />
+              <span className="chat-wait-text">
+                <span className="chat-wait-who"><b>{nameOf(item.key)}</b> · {waitedFor(item.since)}</span>
+                <span className="chat-wait-line">{readCorrection(item.last.text) ? `✏️ ${correctedSentence(readCorrection(item.last.text)!)}` : item.last.text}</span>
+              </span>
+            </button>
+            <button type="button" className="chat-wait-later" title="Later" aria-label={`Later: ${nameOf(item.key)}`}
+              onClick={() => setDismissed(current => ({ ...current, [item.key]: item.last.at }))}>×</button>
+          </div>)}
+          {waiting.length > 3 && <button type="button" className="chat-wait-more" onClick={() => reply(waiting[3].key)}>+{waiting.length - 3} more waiting</button>}
+        </div>}
+        <div className={`chat-container glass-panel chat-${chatSpot.size}`} ref={chatBox}>
           <div className="chat-handle" onPointerDown={dragChat} title="Drag to move the chat">
             <span className={unread ? 'chat-unread' : undefined}>
               {unread ? `Chat · ${unread} new` : 'Chat'}
@@ -892,10 +932,6 @@ export default function Game() {
                   <span className="chat-head-note">{partner ? '🔒 only you two (and your teacher)' : 'not in the Plaza now'}</span>
                 </>}
               </div>
-              {peek && peek.key !== active && <button type="button" className="chat-peek" onClick={() => talk(peek.key)}>
-                <Face player={playerOf(peek.key)} name={nameOf(peek.key)} icon={peek.key === TEACHER ? '🧑‍🏫' : undefined} />
-                <span><b>{nameOf(peek.key)}:</b> {readCorrection(peek.message.text) ? `✏️ ${correctedSentence(readCorrection(peek.message.text)!)}` : peek.message.text}</span>
-              </button>}
               {showPeople ? <div className="chat-people" role="menu" aria-label="Chat with">
                 {classmates.map(person => <button key={person.id} type="button" role="menuitem" onClick={() => talk(privateChat(person.name))}>
                   <Face player={person} name={person.name} /><span>{person.name}</span>
@@ -1001,6 +1037,7 @@ export default function Game() {
               </form>
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>

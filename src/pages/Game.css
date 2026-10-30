@@ -77,15 +77,21 @@
   background: #8a6d1f;
 }
 
-.chat-container {
+/* The chat and, above it, who is waiting for a reply: they move together. */
+.chat-dock {
+  position: relative;
   width: 100%;
   max-width: 470px; /* the level bar keeps clear of this */
+  margin-bottom: 1rem;
+}
+
+.chat-container {
+  width: 100%;
   height: 350px;
   display: flex;
   flex-direction: column;
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(12px);
-  margin-bottom: 1rem;
   overflow: hidden;
 }
 
@@ -191,9 +197,6 @@
 .chat-head-people small { margin-left: 2px; color: #6b7480; font-weight: 700; }
 .chat-head-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #6b7480; font-size: .78rem; }
 /* A private message that came while another chat was open */
-.chat-peek { flex: none; margin: 6px 8px 0; display: flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid #f0c36d; border-radius: 12px; background: #fff8e1; color: var(--text-dark); font: inherit; font-size: .85rem; text-align: left; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); cursor: pointer; animation: chat-drop .25s ease-out; }
-.chat-peek .chat-face { width: 26px; height: 26px; font-size: .8rem; }
-.chat-peek span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-people { flex: 1 1 0; min-height: 0; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; padding: 10px; overflow-y: auto; }
 .chat-people button { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--text-dark); font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; }
 .chat-people button:hover { border-color: #c9ced8; background: #f4f6fa; }
@@ -466,3 +469,24 @@ button.chat-sender:hover { text-decoration: underline; }
   letter-spacing: 0.02em;
 }
 
+
+/* A card for each classmate (or the teacher) waiting for a reply: tap to reply, "×" for later. Longer than a
+   minute, it asks a little louder. On a phone, one line each. */
+.chat-waiting { position: absolute; left: 0; bottom: calc(100% + 6px); width: min(100%, 340px); display: flex; flex-direction: column; gap: 6px; }
+.chat-wait-card { display: flex; align-items: stretch; border: 1px solid #f0c36d; border-radius: 12px; background: #fff8e1; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); overflow: hidden; animation: chat-drop .25s ease-out; }
+.chat-wait-long { border-color: #e8902a; background: #fff1d6; animation: chat-drop .25s ease-out, chat-wait-nudge 2.4s ease-in-out infinite; }
+.chat-wait-open { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 0; background: none; color: var(--text-dark); font: inherit; text-align: left; cursor: pointer; }
+.chat-wait-open .chat-face { width: 30px; height: 30px; }
+.chat-wait-text { min-width: 0; display: flex; flex-direction: column; }
+.chat-wait-who { font-size: .78rem; color: #7b5318; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-wait-who b { color: var(--text-dark); font-size: .85rem; }
+.chat-wait-line { font-size: .88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-wait-later { flex: none; padding: 0 12px; border: 0; border-left: 1px solid #f0c36d; background: none; color: #8a6d1f; font-size: 1.1rem; cursor: pointer; }
+.chat-wait-later:hover, .chat-wait-open:hover { background: rgba(0, 0, 0, .04); }
+.chat-wait-more { align-self: flex-start; padding: 4px 10px; border: 1px solid #f0c36d; border-radius: 999px; background: #fff8e1; color: #7b5318; font: inherit; font-size: .8rem; font-weight: 700; cursor: pointer; }
+@keyframes chat-wait-nudge { 50% { box-shadow: 0 4px 14px rgba(0, 0, 0, .18), 0 0 0 3px rgba(232, 144, 42, .35); } }
+@media (max-width: 640px) {
+  .chat-wait-line { display: none; }
+  .chat-wait-open { padding: 5px 8px; }
+  .chat-wait-open .chat-face { width: 24px; height: 24px; font-size: .75rem; }
+}
