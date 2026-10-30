@@ -88,6 +88,9 @@ const without = <T,>(record: Record<string, T>, key: string): Record<string, T> 
   return next;
 };
 const sameClassmates = (a: PlazaPlayer[], b: PlazaPlayer[]) => a.length === b.length && a.every((item, index) => item.id === b[index].id && item.name === b[index].name);
+// The chat box's sizes, smallest first.
+type ChatSize = 'compact' | 'normal' | 'tall';
+const CHAT_SIZES: ChatSize[] = ['compact', 'normal', 'tall'];
 
 export default function Game() {
   const location = useLocation();
@@ -162,11 +165,25 @@ export default function Game() {
   const [status, setStatus] = useState<PlazaStatus>({ state: 'connecting' });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatBox = useRef<HTMLDivElement>(null);
-  // The chat box can be dragged out of the way of the map and folded away; it remembers where.
-  const [chatSpot, setChatSpot] = useState<{ x: number; y: number; folded: boolean }>(() => {
-    try { return { x: 0, y: 0, folded: false, ...JSON.parse(localStorage.getItem('pixelplaza.chat') || '{}') }; }
-    catch { return { x: 0, y: 0, folded: false }; }
+  // The chat box can be dragged out of the way of the map, and made smaller or taller. It never folds away, since talking
+  // is the point of the game: compact still shows the newest lines and the type box. It remembers where, and how big; a
+  // short screen starts compact, and so does a box folded away before it had sizes.
+  const [chatSpot, setChatSpot] = useState<{ x: number; y: number; size: ChatSize }>(() => {
+    const start: ChatSize = window.innerHeight < 700 ? 'compact' : 'normal';
+    try {
+      const saved = JSON.parse(localStorage.getItem('pixelplaza.chat') || '{}');
+      return { x: Number.isFinite(saved.x) ? saved.x : 0, y: Number.isFinite(saved.y) ? saved.y : 0,
+        size: CHAT_SIZES.includes(saved.size) ? saved.size : saved.folded ? 'compact' : start };
+    } catch { return { x: 0, y: 0, size: start }; }
   });
+  // One size up or down. Grown taller, the box comes back down if its top would leave the screen.
+  const resizeChat = (step: number) => {
+    setChatSpot(spot => ({ ...spot, size: CHAT_SIZES[Math.min(CHAT_SIZES.length - 1, Math.max(0, CHAT_SIZES.indexOf(spot.size) + step))] }));
+    window.requestAnimationFrame(() => {
+      const top = chatBox.current?.getBoundingClientRect().top ?? 0;
+      if (top < 8) setChatSpot(spot => ({ ...spot, y: spot.y + 8 - top }));
+    });
+  };
   useEffect(() => {
     try { localStorage.setItem('pixelplaza.chat', JSON.stringify(chatSpot)); } catch { /* storage disabled */ }
   }, [chatSpot]);
@@ -195,14 +212,13 @@ export default function Game() {
   for (const list of byConv.values()) list.sort((a, b) => a.at - b.at);
   const fromOthers = (message: ChatMessage) => !message.sender.startsWith('System') && message.sender !== myName && !message.read;
   const newIn = (key: string) => (byConv.get(key) ?? []).filter(message => fromOthers(message) && message.at > (lastSeen[key] ?? 0));
-  // The open conversation counts as read; new messages in the others (or in all of them, folded) pile up.
+  // The open conversation counts as read, at any size; new messages in the others pile up.
   const openNewest = byConv.get(active)?.at(-1)?.at ?? 0;
   useEffect(() => {
-    if (!chatSpot.folded && openNewest) setLastSeen(seen => (seen[active] ?? 0) >= openNewest ? seen : { ...seen, [active]: openNewest });
-  }, [chatSpot.folded, active, openNewest]);
-  const waitingKeys = [...byConv.keys()].filter(key => key !== '*' && (chatSpot.folded || key !== active));
+    if (openNewest) setLastSeen(seen => (seen[active] ?? 0) >= openNewest ? seen : { ...seen, [active]: openNewest });
+  }, [active, openNewest]);
+  const waitingKeys = [...byConv.keys()].filter(key => key !== '*' && key !== active);
   const unread = waitingKeys.reduce((sum, key) => sum + newIn(key).length, 0);
-  const latest = chatSpot.folded ? waitingKeys.flatMap(newIn).sort((a, b) => b.at - a.at)[0] : undefined;
 
   // The conversation list: the ones always there (nearby, everyone, the teacher) in fixed places at the top, then the
   // private chats with the newest on top, right under the button that starts one.
@@ -484,7 +500,6 @@ export default function Game() {
         }
         // The teacher writing opens the chat on it, unless the student is in the middle of writing something.
         if (unseen.length && !event.history) {
-          setChatSpot(spot => ({ ...spot, folded: false }));
           if (composing.current) setPeek({ key: TEACHER, message: { sender: 'Teacher', text: unseen.at(-1)!.text, at: unseen.at(-1)!.timestamp, teacher: true } });
           else { setActive(TEACHER); setShowPeople(false); }
         }
@@ -579,7 +594,7 @@ export default function Game() {
   // Scroll chat to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, active, typing]);
+  }, [messages, active, typing, chatSpot.size]);
 
   // Opens a conversation, leaving whatever the last one was being told.
   const choose = (key: string) => {
@@ -593,9 +608,9 @@ export default function Game() {
     setSendError('');
     submissionAttemptId.current = null;
   };
-  // Opening a chat to talk in it: the box unfolds and takes the keys.
+  // Opening a chat to talk in it: a compact box grows to show the conversations, and takes the keys.
   const talk = (key: string) => {
-    setChatSpot(spot => ({ ...spot, folded: false }));
+    if (chatSpot.size === 'compact') resizeChat(1);
     choose(key);
     window.requestAnimationFrame(() => chatField.current?.focus());
   };
@@ -835,15 +850,17 @@ export default function Game() {
             sendRecorded(plaza, { t: 'answer', objective, text, attemptId }, attemptId);
           }} />}
 
-        <div className={`chat-container glass-panel${chatSpot.folded ? ' chat-folded' : ''}`} ref={chatBox}
+        <div className={`chat-container glass-panel chat-${chatSpot.size}`} ref={chatBox}
           style={{ transform: `translate(${chatSpot.x}px, ${chatSpot.y}px)` }}>
           <div className="chat-handle" onPointerDown={dragChat} title="Drag to move the chat">
             <span className={unread ? 'chat-unread' : undefined}>
               {unread ? `Chat · ${unread} new` : 'Chat'}
-              {latest && <em className="chat-handle-peek"> · {latest.sender}: {latest.text}</em>}
+              {chatSpot.size === 'compact' && <em className="chat-handle-peek"> · {nameOf(active)}</em>}
             </span>
-            <button type="button" aria-label={chatSpot.folded ? 'Show chat' : 'Hide chat'}
-              onClick={() => setChatSpot(spot => ({ ...spot, folded: !spot.folded }))}>{chatSpot.folded ? '▲' : '▼'}</button>
+            <span className="chat-size">
+              <button type="button" aria-label="Make the chat smaller" title="Smaller" disabled={chatSpot.size === 'compact'} onClick={() => resizeChat(-1)}>▼</button>
+              <button type="button" aria-label="Make the chat bigger" title="Bigger" disabled={chatSpot.size === 'tall'} onClick={() => resizeChat(1)}>▲</button>
+            </span>
           </div>
           <div className="chat-body">
             {/* Every conversation as a face, new private ones on top under ＋, so a student sees who is talking to them. */}
@@ -884,7 +901,8 @@ export default function Game() {
                   <Face player={person} name={person.name} /><span>{person.name}</span>
                 </button>)}
                 {classmates.length === 0 && <em>Nobody else is in the Plaza yet.</em>}
-              </div> : <div className="chat-messages">
+              </div> : <div className="chat-messages" onClick={chatSpot.size === 'compact' ? () => resizeChat(1) : undefined}
+                title={chatSpot.size === 'compact' ? 'Show more of the chat' : undefined}>
                 {shown.length === 0 && <p className="chat-empty">{active === NEAR ? (earshot.length ? '👋 Say hello!' : '🚶 Walk up to a classmate to talk.')
                   : active === ALL ? '📢 Say something to everyone!' : active === TEACHER ? 'Ask your teacher for help, in any language.' : `👋 Say hi to ${partnerName}!`}</p>}
                 {shown.map((msg, i) => {

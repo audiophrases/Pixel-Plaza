@@ -140,14 +140,16 @@
   color: inherit;
 }
 
-/* Folded, only the handle shows; the rest of the box is out of the way. */
-.chat-folded {
-  height: auto;
-}
-
-.chat-folded > :not(.chat-handle) {
-  display: none;
-}
+/* Three sizes, never folded away: talking is the point of the game. Compact keeps the newest lines and the type box
+   (the conversations, who reads and the emotes come back one size up); tall gives a long conversation room. */
+.chat-handle .chat-size { flex: none; display: flex; gap: 2px; }
+.chat-handle .chat-size button { padding: 0 4px; }
+.chat-handle .chat-size button:disabled { opacity: .3; cursor: default; }
+.chat-compact { height: auto; }
+.chat-compact .chat-body, .chat-compact .chat-pane { flex: none; }
+.chat-compact .chat-rail, .chat-compact .chat-head, .chat-compact .emote-bar { display: none; }
+.chat-compact .chat-messages { flex: none; height: 4.6rem; cursor: pointer; }
+.chat-tall { height: min(640px, calc(100vh - 2rem)); }
 
 .composer-error {
   margin: 0 12px 6px;
