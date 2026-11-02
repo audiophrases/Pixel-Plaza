@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { FIGURE_SCALE as S, renderFigureParts } from '../utils/AvatarRenderer';
-import type { AvatarConfig, FigurePartName } from '../utils/AvatarRenderer';
+import type { AvatarConfig, Dress, FigurePart, FigurePartName, FigureParts } from '../utils/AvatarRenderer';
 
 type Facing = 'down' | 'up' | 'left' | 'right';
 
@@ -15,6 +15,7 @@ const LEG_Y = px(0, 110).y;
 const FEET_Y = px(0, 142).y;
 
 export const FIGURE_TOP = px(0, -4).y; // above the tallest hat
+export const FIGURE_FEET = FEET_Y;
 export const FIGURE_BODY = { width: 26, height: 14, offsetX: -13, offsetY: -4 }; // what bumps into walls: the feet
 
 const STRIDE = 0.075;      // walk cycle radians per pixel travelled
@@ -39,6 +40,7 @@ export class AvatarFigure {
   private torso: Phaser.GameObjects.Sprite;
   private arms: Phaser.GameObjects.Sprite[];
   private legs: Phaser.GameObjects.Sprite[];
+  private cape: Phaser.GameObjects.Sprite | null;
 
   private facing: Facing = 'down';
   private shownFacing: Facing | null = null;
@@ -49,12 +51,12 @@ export class AvatarFigure {
   private amount = 0; // 0 standing, 1 walking; eased so starts and stops are soft
 
   // Returns null when the artwork is not loaded; the caller draws a stand-in.
-  static create(scene: Phaser.Scene, container: Phaser.GameObjects.Container, id: string, avatar: AvatarConfig): AvatarFigure | null {
-    const parts = renderFigureParts(avatar);
+  static create(scene: Phaser.Scene, container: Phaser.GameObjects.Container, id: string, avatar: AvatarConfig, dress: Dress = {}): AvatarFigure | null {
+    const parts = renderFigureParts(avatar, dress);
     return parts ? new AvatarFigure(scene, container, id, parts) : null;
   }
 
-  private constructor(scene: Phaser.Scene, container: Phaser.GameObjects.Container, id: string, parts: NonNullable<ReturnType<typeof renderFigureParts>>) {
+  private constructor(scene: Phaser.Scene, container: Phaser.GameObjects.Container, id: string, parts: FigureParts) {
     this.scene = scene;
     this.container = container;
     this.lastX = container.x;
@@ -68,9 +70,10 @@ export class AvatarFigure {
     this.torso = sprite();
     this.arms = [sprite(), sprite()];
     this.legs = [sprite(), sprite()];
-    container.add([this.shadow, this.legs[0], this.legs[1], this.torso, this.arms[0], this.arms[1], this.head]);
+    this.cape = parts.cape ? sprite() : null;
+    container.add([this.shadow, ...(this.cape ? [this.cape] : []), this.legs[0], this.legs[1], this.torso, this.arms[0], this.arms[1], this.head]);
 
-    for (const [name, art] of Object.entries(parts) as [FigurePartName, (typeof parts)[FigurePartName]][]) {
+    for (const [name, art] of Object.entries(parts) as [FigurePartName, FigurePart][]) {
       const key = `figure_${id}_${name}`;
       this.expected += 1;
       const img = new Image();
@@ -94,15 +97,16 @@ export class AvatarFigure {
     }
   }
 
-  private ready(parts: NonNullable<ReturnType<typeof renderFigureParts>>) {
+  private ready(parts: FigureParts) {
     const origin = (sprite: Phaser.GameObjects.Sprite, name: FigurePartName) => {
-      sprite.setOrigin(parts[name].ox, parts[name].oy);
+      sprite.setOrigin(parts[name]!.ox, parts[name]!.oy);
       this.show(sprite, name);
     };
     origin(this.head, 'headDown');
     origin(this.torso, 'torsoFront');
     for (const arm of this.arms) origin(arm, 'arm');
     for (const leg of this.legs) origin(leg, 'leg');
+    if (this.cape) origin(this.cape, 'cape');
     this.shownFacing = null; // dress the pieces for the current facing
     this.pose(0);
   }
@@ -149,6 +153,13 @@ export class AvatarFigure {
     this.head.rotation = side ? 0 : swing * 0.04;
     this.torso.y = TORSO.y + bob;
     this.shadow.setScale(1 - lift * 0.12, 1);
+    if (this.cape) {
+      // It hangs from the neck: still, it sways a little; walking side on, it streams out behind.
+      this.cape.y = TORSO.y + bob;
+      const flutter = Math.sin(time / 110) * 0.05 * this.amount;
+      const behind = facing === 'left' ? -1 : 1; // positive rotation swings the hem to the left
+      this.cape.rotation = side ? behind * (0.1 + 0.3 * this.amount + flutter) : Math.sin(time / 700) * 0.02 + swing * 0.03;
+    }
 
     if (side) {
       // Seen from the side the limbs swing back and forth like pendulums.
@@ -182,11 +193,17 @@ export class AvatarFigure {
     this.arms[0].x = -armX; this.arms[1].x = armX;
     this.legs[0].x = -legX; this.legs[1].x = legX;
     this.legs[0].rotation = this.legs[1].rotation = 0;
+    // Side on, the cape is seen edgewise, a little behind the back.
+    this.cape?.setScale(side ? 0.45 : 1, 1).setX(side ? (facing === 'left' ? 4 : -4) : 0);
 
-    // Side on, one arm is behind the body and one in front of it.
+    // Side on, one arm is behind the body and one in front of it. A cape is behind everything, except
+    // from behind, where it covers the back.
+    const cape = this.cape ? [this.cape] : [];
     const order = side
-      ? [this.shadow, this.arms[0], this.legs[0], this.legs[1], this.torso, this.arms[1], this.head]
-      : [this.shadow, this.legs[0], this.legs[1], this.torso, this.arms[0], this.arms[1], this.head];
+      ? [this.shadow, ...cape, this.arms[0], this.legs[0], this.legs[1], this.torso, this.arms[1], this.head]
+      : facing === 'up'
+        ? [this.shadow, this.legs[0], this.legs[1], this.torso, this.arms[0], this.arms[1], ...cape, this.head]
+        : [this.shadow, ...cape, this.legs[0], this.legs[1], this.torso, this.arms[0], this.arms[1], this.head];
     // The scene may move the pieces into a container of their own (to tip the figure over), so they are
     // reordered where they are now, not where they started.
     const layer = this.head.parentContainer ?? this.container;

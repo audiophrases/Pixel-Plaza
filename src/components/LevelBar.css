@@ -54,6 +54,35 @@
 }
 
 .level-bar:hover .level-track, .level-bar:focus-visible .level-track { outline: 2px solid #b9ff6a; }
+
+/* The next unlock waits, greyed, at the end of the bar. */
+.level-next {
+  position: absolute;
+  right: -30px;
+  bottom: -6px;
+  font-size: 18px;
+  line-height: 1;
+  filter: grayscale(.75) drop-shadow(0 0 2px #000);
+  opacity: .85;
+}
+
+/* Something new is open: a dot on the level until the student looks. */
+.level-number { position: relative; }
+.level-new {
+  position: absolute;
+  top: -5px;
+  right: -12px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid #000;
+  border-radius: 50%;
+  background: #ffe55c;
+  animation: level-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes level-pulse {
+  50% { transform: scale(1.35); }
+}
 .level-bar:focus-visible { outline: none; }
 
 .level-popup {
@@ -109,12 +138,18 @@
 .rewards-earn summary { cursor: pointer; font-weight: 600; }
 .rewards-earn ul { margin: .4rem 0 0 1.2rem; }
 .rewards-lock { padding: .05rem .4rem; border-radius: .4rem; background: #eef0f4; color: #5f6b7a; font-size: .75rem; font-weight: 600; }
-.rewards-row { display: flex; flex-wrap: wrap; gap: .35rem; }
+.rewards-row { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
 .rewards-swatch { width: 28px; height: 28px; border: 1px solid var(--line); border-radius: .4rem; cursor: pointer; }
 .rewards-flair { min-width: 34px; height: 32px; padding: 0 .4rem; border: 1px solid var(--line); border-radius: .4rem; background: #fff; font: inherit; font-size: 1.05rem; cursor: pointer; }
-.rewards-swatch.chosen, .rewards-flair.chosen { outline: 2px solid #4f9a12; outline-offset: 1px; }
-.rewards-swatch:disabled, .rewards-flair:disabled { opacity: .3; cursor: default; }
-.rewards-note { color: #5f6b7a; }
+/* "None": a white square struck through, as in drawing apps. */
+.rewards-none {
+  width: 28px; height: 28px; border: 1px solid var(--line); border-radius: .4rem; cursor: pointer;
+  background: linear-gradient(to top right, #fff calc(50% - 1.5px), #e53935 calc(50% - 1.5px) calc(50% + 1.5px), #fff calc(50% + 1.5px));
+}
+.rewards-emote { font-size: 1.2rem; }
+.rewards-swatch.chosen, .rewards-flair.chosen, .rewards-none.chosen { outline: 2px solid #4f9a12; outline-offset: 1px; }
+.rewards-swatch:disabled, .rewards-flair:disabled, .rewards-none:disabled, .rewards-step.locked .rewards-emote { opacity: .3; cursor: default; }
+.rewards-step.locked h3 { color: #8a94a3; }
 
 /* A narrow screen has no room beside the chat: the bar goes under the header instead. */
 @media (max-width: 760px) {

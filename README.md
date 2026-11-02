@@ -129,7 +129,7 @@ Students earn experience (XP) and levels, shown as a green bar at the bottom of 
 - **Automatic, once each:** a right journal answer (+2), a partner quest (+5), and finding everyone in a warm-up (+3). Writing more messages earns nothing by itself.
 - **Participation:** useful, varied questions and replies to classmates can earn +1, up to 8 per lesson when AI checks are enabled. See [Participation XP](#participation-xp-optional).
 
-Level 1 needs 10 XP and each level a little more (15, 20, 25...). Level 1 unlocks a name colour, level 2 a flair (a badge before the name) and level 3 four more emotes. Students choose them by clicking the bar. The teacher sees each student's level beside their name when their drawer is open. The rules are in `shared/levels.ts`.
+Level 1 needs only 3 XP, so the first unlock comes within minutes, and each level needs 2 more than the last (5, 7, 9...). Every level up to 10 opens one small reward: 1 a name colour, 2 trouser colours, 3 a flair (a badge before the name), 4 shoe colours, 5 four more emotes, 6 a glow under the feet, 7 a pet that follows you, 8 a cape, 9 a sparkle trail and 10 rare pets. Students choose them by clicking the bar; its far end shows the next reward's icon, and a dot on the level means something new is open. The teacher sees each student's level beside their name when their drawer is open. The rules are in `shared/levels.ts`.
 
 ## Chat voices and goal sounds
 
@@ -316,7 +316,7 @@ node scripts/check-student-support.mjs
 - There is one plaza. Every class shares it, so open it for one class at a time.
 - The word and phrase filter catches only a small set of obvious cases, and nothing waits for the teacher: set an `OPENAI_API_KEY` so every message also goes through OpenAI's moderation first (see below); the server-side English check runs only on the teacher's laptop.
 - Chat is nearby (heard by students within 350 map pixels of where the sender stood), for everyone in the plaza, or a whisper to one classmate; the chat box starts on nearby. All of it waits for teacher approval unless review mode posts it, and the teacher sees whispers too. Room decoration, items, and building interiors are not implemented.
-- On the map each avatar is a paper doll made from the same eight parts as the portrait: the head turns the way the student walks (the back of the head when walking away), the torso takes the shirt, and arms and legs swing as they walk. Pants and shoes are derived from the shirt choice, so the saved avatar format is unchanged. See `src/game/AvatarFigure.ts`.
+- On the map each avatar is a paper doll made from the same eight parts as the portrait: the head turns the way the student walks (the back of the head when walking away), the torso takes the shirt, and arms and legs swing as they walk. Pants and shoes are derived from the shirt choice, so the saved avatar format is unchanged; levels let a student recolour them and add a cape, saved with their style. See `src/game/AvatarFigure.ts`.
 - Browser controls cannot reliably stop screenshots or external translation tools.
 
 

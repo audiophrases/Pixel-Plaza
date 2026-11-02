@@ -13,8 +13,9 @@ export const XP = {
     warmup: 3,  // every classmate found in a warm-up
 } as const;
 
-// Each level needs a little more than the last: 10 experience for level 1, 15 more for level 2, then 20, 25...
-export const needFor = (level: number): number => 10 + 5 * level;
+// Each level needs a little more than the last: 3 experience for level 1, 5 more for level 2, then 7, 9...
+// The first unlock comes within minutes of a first lesson, and later ones still every lesson or so.
+export const needFor = (level: number): number => 3 + 2 * level;
 
 // Where a student is: their level, how far into the next one, and how much that one needs.
 export function levelOf(xp: number): { level: number; into: number; need: number } {
@@ -33,32 +34,60 @@ export const FLAIRS = ['🌟', '📚', '⚽', '🎵', '🐱', '🐶', '🎨', '�
 // Emotes everyone has, and more for later.
 export const BASE_EMOTES = ['🙋', '❓', '👍', '😂'] as const;
 export const EXTRA_EMOTES = ['❤️', '👋', '😮', '🎉'] as const;
+// Trousers, shoes and capes.
+export const CLOTH_COLOURS = ['#E53935', '#FDD835', '#43A047', '#1E88E5', '#8E24AA', '#EC407A', '#6D4C41', '#263238', '#F5F5F5'] as const; // one row with "none"
+// A glow under the feet, and the sparkles left behind when walking.
+export const LIGHT_COLOURS = ['#FFD54F', '#FFFFFF', '#4DD0E1', '#69F0AE', '#FF80AB', '#B388FF', '#FF9E40', '#FF5252'] as const;
+// A pet that follows its owner around the map.
+export const PETS = ['🐱', '🐶', '🐰', '🐤', '🐢', '🐹'] as const;
+export const RARE_PETS = ['🐉', '🦄', '🦖', '🦉', '🐙', '🦊'] as const;
 
-export type RewardId = 'colour' | 'flair' | 'emotes';
-export const REWARDS: { id: RewardId; level: number; name: string }[] = [
-    { id: 'colour', level: 1, name: 'Name colour' },
-    { id: 'flair', level: 2, name: 'Flair' },
-    { id: 'emotes', level: 3, name: 'More emotes' },
+// The parts of a look a student picks, each one of a reward's options or null for the usual look (or none).
+export const PICKS = ['flair', 'pants', 'shoes', 'glow', 'pet', 'cape', 'trail'] as const;
+export type Pick = typeof PICKS[number];
+
+export type RewardId = 'colour' | 'pants' | 'flair' | 'shoes' | 'emotes' | 'glow' | 'pet' | 'cape' | 'trail' | 'rarePets';
+// One small step per level. A later reward can add options to an earlier pick (rare pets).
+export const REWARDS: { id: RewardId; level: number; name: string; icon: string; pick?: Pick; options?: readonly string[] }[] = [
+    { id: 'colour', level: 1, name: 'Name colour', icon: '🎨' },
+    { id: 'pants', level: 2, name: 'Trousers', icon: '👖', pick: 'pants', options: CLOTH_COLOURS },
+    { id: 'flair', level: 3, name: 'Flair', icon: '🌟', pick: 'flair', options: FLAIRS },
+    { id: 'shoes', level: 4, name: 'Shoes', icon: '👟', pick: 'shoes', options: CLOTH_COLOURS },
+    { id: 'emotes', level: 5, name: 'More emotes', icon: '🎉' },
+    { id: 'glow', level: 6, name: 'Glow', icon: '✨', pick: 'glow', options: LIGHT_COLOURS },
+    { id: 'pet', level: 7, name: 'Pet', icon: '🐾', pick: 'pet', options: PETS },
+    { id: 'cape', level: 8, name: 'Cape', icon: '🦸', pick: 'cape', options: CLOTH_COLOURS },
+    { id: 'trail', level: 9, name: 'Sparkle trail', icon: '💫', pick: 'trail', options: LIGHT_COLOURS },
+    { id: 'rarePets', level: 10, name: 'Rare pets', icon: '🐉', pick: 'pet', options: RARE_PETS },
 ];
 export const unlocked = (reward: RewardId, level: number): boolean => level >= (REWARDS.find(item => item.id === reward)?.level ?? Infinity);
-// What a level newly unlocks, for the "Level up!" message.
-export const unlockedAt = (level: number): string[] => REWARDS.filter(item => item.level === level).map(item => item.name);
+// What going from one level to another newly unlocks, for the "Level up!" message.
+export const unlockedBetween = (from: number, to: number): string[] =>
+    REWARDS.filter(item => item.level > from && item.level <= to).map(item => `${item.icon} ${item.name}`);
+// The next thing to look forward to, or null when everything is open.
+export const nextReward = (level: number) => REWARDS.find(item => item.level > level) ?? null;
 
 export const emotesFor = (level: number): string[] => [...BASE_EMOTES, ...(unlocked('emotes', level) ? EXTRA_EMOTES : [])];
 
-// What a student chose to show: a name colour (an index into NAME_COLOURS) and a flair, or neither.
-export type Style = { colour: number; flair: string | null };
-export const DEFAULT_STYLE: Style = { colour: 0, flair: null };
+// What a student chose to show: a name colour (an index into NAME_COLOURS) and each pick, or null.
+export type Style = { colour: number } & Record<Pick, string | null>;
+export const DEFAULT_STYLE: Style = { colour: 0, flair: null, pants: null, shoes: null, glow: null, pet: null, cape: null, trail: null };
 
-// A chosen style, or null if it is not one or not unlocked yet at this level.
+// A chosen style, or null if it is not one or not unlocked yet at this level. Missing picks are the usual look.
 export function checkStyle(value: unknown, level: number): Style | null {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-    const { colour = 0, flair = null } = value as Record<string, unknown>;
+    const given = value as Record<string, unknown>;
+    const { colour = 0 } = given;
     if (typeof colour !== 'number' || !Number.isInteger(colour) || colour < 0 || colour >= NAME_COLOURS.length) return null;
-    if (flair !== null && (typeof flair !== 'string' || !(FLAIRS as readonly string[]).includes(flair))) return null;
     if (colour !== 0 && !unlocked('colour', level)) return null;
-    if (flair !== null && !unlocked('flair', level)) return null;
-    return { colour, flair };
+    const style: Style = { ...DEFAULT_STYLE, colour };
+    for (const pick of PICKS) {
+        const chosen = given[pick] ?? null;
+        if (chosen === null) continue;
+        if (typeof chosen !== 'string' || !REWARDS.some(item => item.pick === pick && level >= item.level && item.options!.includes(chosen))) return null;
+        style[pick] = chosen;
+    }
+    return style;
 }
 
 // A saved style as far as the level still allows (it always does: experience is never taken away).

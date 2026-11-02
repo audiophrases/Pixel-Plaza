@@ -39,7 +39,7 @@ export type PlazaEvent =
   | ({ t: 'answered' } & AnswerFeedback)
   | { t: 'support'; support: StudentSupport; history?: boolean }
   | { t: 'xp'; xp: number; gained?: number; reason?: string }            // this student's experience; gained and why when it grows
-  | { t: 'style'; id: string; style: Style }                             // a player chose a name colour or a flair
+  | { t: 'style'; id: string; style: Style }                             // a player changed what their levels show
   | { t: 'tab-switches'; count: number };                                // server-synced tab switch total
 
 // As in PinPlay's live-socket.js: a connection can die without closing (a laptop

@@ -80,7 +80,8 @@ export function renderAvatarSvg(avatar: Partial<AvatarConfig> = {}, crop?: strin
 // The portrait above is a bust. On the map each avatar is a paper doll: a head
 // that looks the way the student walks, a torso made from the chosen shirt,
 // two arms and two legs. Everything is derived from the same eight parts, so
-// the saved avatar (and PinPlay's part counts) do not change.
+// the saved avatar (and PinPlay's part counts) do not change; levels can add a
+// colour for the trousers, the shoes and a cape (Dress).
 //
 // All artwork shares the portrait's units (the head is a circle around 50,45).
 // FIGURE_SCALE turns a unit into a screen pixel; each piece is rasterised at
@@ -90,15 +91,20 @@ export const FIGURE_SCALE = 0.72;
 
 export type FigurePartName =
   | 'headDown' | 'headUp' | 'headLeft' | 'headRight' // which way the face points
-  | 'torsoFront' | 'torsoBack' | 'arm' | 'leg';
+  | 'torsoFront' | 'torsoBack' | 'arm' | 'leg'
+  | 'cape'; // only for a student who unlocked and chose one
 
 // ox, oy: where the sprite pivots, as a fraction of its size.
 export type FigurePart = { svg: string; ox: number; oy: number };
+export type FigureParts = Record<Exclude<FigurePartName, 'cape'>, FigurePart> & { cape?: FigurePart };
+
+// Colours a student chose with their levels (shared/levels.ts); left out, the usual look.
+export type Dress = { pants?: string | null; shoes?: string | null; cape?: string | null };
 
 const PANTS = ['#3D5A80', '#3A3F4B', '#B08D57', '#25304F', '#5B6B45', '#6B3A3A'];
 const SHOE = '#25283F';
 
-export function renderFigureParts(avatar: Partial<AvatarConfig> = {}): Record<FigurePartName, FigurePart> | null {
+export function renderFigureParts(avatar: Partial<AvatarConfig> = {}, dress: Dress = {}): FigureParts | null {
   const data = window.CUP_AVATAR;
   if (!data) return null;
 
@@ -114,7 +120,8 @@ export function renderFigureParts(avatar: Partial<AvatarConfig> = {}): Record<Fi
   const hair = part('hair');
   const shirt = part('shirt');
   const shirtColor: string = (shirt.svg || '').match(/fill="(#[0-9a-fA-F]{3,8})"/)?.[1] || '#638ECD';
-  const pants = PANTS[(avatar.shirt || 0) % PANTS.length];
+  const pants = dress.pants || PANTS[(avatar.shirt || 0) % PANTS.length];
+  const shoe = dress.shoes || SHOE;
 
   // A rasterised piece covering this box of the shared units.
   const piece = (x: number, y: number, w: number, h: number, anchorX: number, anchorY: number, inner: string): FigurePart => ({
@@ -157,6 +164,11 @@ export function renderFigureParts(avatar: Partial<AvatarConfig> = {}): Record<Fi
       `<rect x="2" y="13" width="10" height="20" rx="5" fill="#00FFFF"/><rect x="1" y="0" width="12" height="18" rx="5" fill="${shirtColor}"/>`),
     // Trousers over a shoe, pivoting at the hip.
     leg: piece(0, 0, 18, 34, 9, 2,
-      `<rect x="1" y="0" width="16" height="25" rx="4" fill="${pants}"/><rect x="0" y="23" width="18" height="11" rx="5" fill="${SHOE}"/><rect x="1" y="30" width="16" height="3" rx="1.5" fill="#FFFFFF" opacity=".5"/>`)
+      `<rect x="1" y="0" width="16" height="25" rx="4" fill="${pants}"/><rect x="0" y="23" width="18" height="11" rx="5" fill="${shoe}"/><rect x="1" y="30" width="16" height="3" rx="1.5" fill="#FFFFFF" opacity=".5"/>`),
+    // Hangs from the neck and flares to a wavy hem below the hips, pivoting at the neck. Behind the body it
+    // peeks out around the legs; from behind it covers the back.
+    ...(dress.cape ? { cape: piece(14, 66, 72, 72, 50, 70,
+      `<path d="M33 70 Q50 65 67 70 L81 130 Q73 135 65 130 Q57 136 50 130 Q43 136 35 130 Q27 135 19 130 Z" fill="${dress.cape}" stroke="#25283F" stroke-opacity=".3" stroke-width="1.5"/>
+      <path d="M50 72 L50 128 M40 74 L33 128 M60 74 L67 128" stroke="#25283F" stroke-opacity=".12" stroke-width="2"/>`) } : {})
   };
 }

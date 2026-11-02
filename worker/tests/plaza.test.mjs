@@ -20,6 +20,7 @@ import { legalMove } from '../../shared/plazaMap.ts';
 import { SIDE_QUEST_SOURCE, questObjective } from '../../shared/sideQuests.ts';
 import { getWorld } from '../../shared/themeCatalog.ts';
 import { makeWorld } from '../../shared/theme.ts';
+import { CLOTH_COLOURS, DEFAULT_STYLE } from '../../shared/levels.ts';
 import { createHash } from 'node:crypto';
 
 const root = path.join(import.meta.dirname, '..', '..');
@@ -2177,23 +2178,26 @@ test('OpenAI moderation blocks flagged messages and never holds up the rest', { 
         assert.equal((await star({ chatId: posted[0].id })).status, 400, 'a message earns one star');
         assert.equal((await star({ chatId: 'not-a-message' })).status, 400);
         assert.equal((await entries()).find(e => e.id === posted[0].id).starred, true);
-        // A name colour waits for level 1, a flair for level 2, and the extra emotes for level 3.
-        alex.send({ t: 'style', colour: 2, flair: null });
+        // One star is already level 1 (3 XP): a name colour. A flair waits for level 3, trousers for level 2 and
+        // the extra emotes for level 5.
+        alex.send({ t: 'style', colour: 2, flair: '⚽' });
         alex.send({ t: 'emote', emote: '🎉' });
         alex.send({ t: 'emote', emote: '👍' });
         assert.equal((await alex.next(m => m.t === 'emote', 'emote')).emote, '👍', 'a locked emote is not sent');
-        await star({ chatId: posted[1].id });
-        assert.equal((await alex.next(m => m.t === 'xp' && m.gained, 'level 1')).xp, 10);
-        alex.send({ t: 'style', colour: 2, flair: '⚽' });
+        alex.send({ t: 'style', colour: 2, pants: CLOTH_COLOURS[4] });
         alex.send({ t: 'style', colour: 2, flair: null });
-        assert.deepEqual((await alex.next(m => m.t === 'style', 'style')).style, { colour: 2, flair: null }, 'the flair is refused, the colour shown');
+        assert.deepEqual((await alex.next(m => m.t === 'style', 'style')).style, { ...DEFAULT_STYLE, colour: 2 }, 'the flair and trousers are refused, the colour shown');
+        await star({ chatId: posted[1].id });
+        assert.equal((await alex.next(m => m.t === 'xp' && m.gained, 'level 2')).xp, 10);
+        alex.send({ t: 'style', colour: 2, pants: CLOTH_COLOURS[4] });
+        assert.deepEqual((await alex.next(m => m.t === 'style', 'trousers')).style, { ...DEFAULT_STYLE, colour: 2, pants: CLOTH_COLOURS[4] }, 'level 2 opens trousers');
         // It stays for good: back in the plaza, everyone sees it, and the experience is there.
         alex.ws.close();
         await pause(300);
         alex = await enter(base, 'signed-a', null);
-        assert.deepEqual(alex.me.style, { colour: 2, flair: null });
+        assert.deepEqual(alex.me.style, { ...DEFAULT_STYLE, colour: 2, pants: CLOTH_COLOURS[4] });
         assert.equal((await alex.next(m => m.t === 'xp', 'experience on joining')).xp, 10);
-        assert.equal((await api(base, '/api/teacher/status', { session })).body.online.find(s => s.studentKey === 'stu_a').level, 1);
+        assert.equal((await api(base, '/api/teacher/status', { session })).body.online.find(s => s.studentKey === 'stu_a').level, 2);
 
         // The class report: this lesson's log for each student, with the teacher's stars.
         const report = await fetch(`${base}/api/teacher/report?scope=lesson`, { headers: { 'x-teacher-session': session } }).then(r => r.json());

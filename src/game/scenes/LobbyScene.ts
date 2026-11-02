@@ -1,13 +1,22 @@
 import Phaser from 'phaser';
-import { AvatarFigure, FIGURE_BODY, FIGURE_TOP } from '../AvatarFigure';
+import { AvatarFigure, FIGURE_BODY, FIGURE_FEET, FIGURE_TOP } from '../AvatarFigure';
 import { makeWorld, type Theme } from '../../../shared/theme';
 import type { PlazaConnection, PlazaEvent, PlazaPlayer } from '../../plaza';
+import type { Dress } from '../../utils/AvatarRenderer';
 import { NAME_COLOURS } from '../../../shared/levels';
 import { TYPING_SHOWN_MS } from '../../../shared/chat';
 
 // A nameplate: the flair a student chose, then their name, in the colour they chose.
 const plateText = (player: PlazaPlayer) => (player.style?.flair ? `${player.style.flair} ` : '') + player.name;
 const plateColour = (player: PlazaPlayer) => NAME_COLOURS[player.style?.colour ?? 0] ?? NAME_COLOURS[0];
+// The colours a student's levels put on the figure itself.
+const dressOf = (player: PlazaPlayer): Dress => ({ pants: player.style?.pants, shoes: player.style?.shoes, cape: player.style?.cape });
+const colourOf = (hex: string) => Phaser.Display.Color.HexStringToColor(hex).color;
+
+// What levels add around a figure: a glow at its feet, a pet at its heels and sparkles where it walks.
+type Look = { glow?: Phaser.GameObjects.Image; pet?: Phaser.GameObjects.Text; petAt: { x: number; y: number }; side: number; lastX: number; sparkAt: { x: number; y: number } };
+const PET_BEHIND = 26;  // pixels to the side of its owner
+const SPARK_EVERY = 18; // pixels walked between sparkles
 
 // Position updates go out at most this often (the server passes them on in batches as
 // often). Remote avatars glide a little longer than that, so an update that arrives late
@@ -31,6 +40,8 @@ export default class LobbyScene extends Phaser.Scene {
 
   private playerEntities: { [id: string]: Phaser.GameObjects.Container } = {};
   private figures: { [id: string]: AvatarFigure } = {};
+  private dressed: { [id: string]: string } = {}; // the colours each figure was drawn with
+  private looks: { [id: string]: Look } = {};
   private appearanceVersion = 0;
   private nameplates: { [id: string]: Phaser.GameObjects.Text } = {};
   private fog?: Phaser.GameObjects.Image;
@@ -230,6 +241,10 @@ export default class LobbyScene extends Phaser.Scene {
     else if (event.t === 'rename' || event.t === 'style') {
       const player = this.connection.players.get(event.id);
       if (player) this.nameplates[event.id]?.setText(plateText(player)).setColor(plateColour(player));
+      if (player && event.t === 'style') {
+        if (this.dressed[event.id] !== JSON.stringify(dressOf(player))) this.updateAvatar(event.id);
+        this.applyLook(event.id);
+      }
     }
     else if (event.t === 'vision') this.setVision(event.radius);
     else if (event.t === 'snap' && this.localPlayerContainer?.body) {
@@ -334,7 +349,8 @@ export default class LobbyScene extends Phaser.Scene {
 
     const container = this.add.container(player.x, player.y);
     this.playerEntities[player.id] = container;
-    const figure = AvatarFigure.create(this, container, player.id, player);
+    const figure = AvatarFigure.create(this, container, player.id, player, dressOf(player));
+    this.dressed[player.id] = JSON.stringify(dressOf(player));
     if (figure) this.figures[player.id] = figure;
     else {
       // Fallback graphic if the avatar artwork has not loaded
@@ -358,6 +374,7 @@ export default class LobbyScene extends Phaser.Scene {
     }).setOrigin(0.5);
     container.add(nameText);
     this.nameplates[player.id] = nameText;
+    this.applyLook(player.id);
 
     if (isLocal) {
       this.localPlayerContainer = container;
@@ -384,13 +401,74 @@ export default class LobbyScene extends Phaser.Scene {
     this.figures[id]?.destroy();
     delete this.figures[id];
     const existing = new Set(container.list);
-    const figure = AvatarFigure.create(this, container, `${id}_look_${++this.appearanceVersion}`, player);
+    const figure = AvatarFigure.create(this, container, `${id}_look_${++this.appearanceVersion}`, player, dressOf(player));
+    this.dressed[id] = JSON.stringify(dressOf(player));
     if (figure) {
       this.figures[id] = figure;
       const pieces = container.list.filter(piece => !existing.has(piece));
       container.remove(pieces);
       artwork.add(pieces);
     } else artwork.add(this.add.rectangle(0, -16, 32, 64, id === this.connection.selfId ? 0xFF5A5F : 0x4285F4));
+  }
+
+  // Puts a player's glow and pet as their style says, keeping a pet that has not changed where it is.
+  private applyLook(id: string) {
+    const player = this.connection.players.get(id), container = this.playerEntities[id];
+    if (!player || !container) return;
+    const at = { x: container.x, y: container.y };
+    const look = this.looks[id] ??= { petAt: { x: at.x - PET_BEHIND, y: at.y + FIGURE_FEET }, side: -1, lastX: at.x, sparkAt: at };
+    const { glow = null, pet = null } = player.style ?? {};
+
+    if (look.glow) { this.tweens.killTweensOf(look.glow); look.glow.destroy(); look.glow = undefined; }
+    if (glow) {
+      if (!this.textures.exists('look_glow')) {
+        const canvas = this.textures.createCanvas('look_glow', 64, 64);
+        if (canvas) {
+          const context = canvas.getContext();
+          const light = context.createRadialGradient(32, 32, 0, 32, 32, 32);
+          light.addColorStop(0, 'rgba(255,255,255,1)');
+          light.addColorStop(0.45, 'rgba(255,255,255,.65)');
+          light.addColorStop(1, 'rgba(255,255,255,0)');
+          context.fillStyle = light;
+          context.fillRect(0, 0, 64, 64);
+          canvas.refresh();
+        }
+      }
+      look.glow = this.add.image(0, FIGURE_FEET - 1, 'look_glow').setTint(colourOf(glow)).setDisplaySize(64, 24).setAlpha(0.9);
+      container.addAt(look.glow, 0); // under the feet
+      this.tweens.add({ targets: look.glow, alpha: 0.45, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    }
+
+    if (look.pet && look.pet.text !== pet) { look.pet.destroy(); look.pet = undefined; }
+    if (pet && !look.pet) look.pet = this.add.text(look.petAt.x, look.petAt.y, pet, { fontSize: '22px', fontFamily: 'sans-serif' }).setOrigin(0.5, 1);
+  }
+
+  // The pet trots after its owner and waits at their heels, on the side they came from; the trail leaves a
+  // sparkle every few steps. Both fade with their owner at the edge of what the student sees.
+  private followLook(id: string, container: Phaser.GameObjects.Container, trail: string | null | undefined, time: number, delta: number) {
+    const look = this.looks[id];
+    if (!look) return;
+    const dx = container.x - look.lastX;
+    look.lastX = container.x;
+    if (Math.abs(dx) > 0.3) look.side = dx > 0 ? -1 : 1;
+
+    if (look.pet) {
+      const target = { x: container.x + look.side * PET_BEHIND, y: container.y + FIGURE_FEET + 2 };
+      const away = Math.hypot(target.x - look.petAt.x, target.y - look.petAt.y);
+      const pull = away > 300 ? 1 : 1 - Math.pow(0.004, delta / 1000); // a long way off: back with its owner at once
+      look.petAt.x += (target.x - look.petAt.x) * pull;
+      look.petAt.y += (target.y - look.petAt.y) * pull;
+      const hop = away > 4 ? Math.abs(Math.sin(time / 90)) * 5 : 0;
+      look.pet.setPosition(look.petAt.x, look.petAt.y - hop).setDepth(look.petAt.y - FIGURE_FEET)
+        .setAlpha(container.alpha).setVisible(container.visible);
+    }
+
+    if (!trail || !container.visible) { look.sparkAt = { x: container.x, y: container.y }; return; }
+    if (Math.hypot(container.x - look.sparkAt.x, container.y - look.sparkAt.y) < SPARK_EVERY) return;
+    look.sparkAt = { x: container.x, y: container.y };
+    const spark = this.add.star(container.x + Phaser.Math.Between(-8, 8), container.y + FIGURE_FEET - Phaser.Math.Between(0, 6), 4, 2, 6, colourOf(trail), container.alpha)
+      .setDepth(container.y - 1);
+    this.tweens.add({ targets: spark, alpha: 0, scale: 0.3, angle: 90, y: spark.y - 8, duration: 700, onComplete: () => spark.destroy() });
   }
 
   private removePlayer(id: string) {
@@ -408,6 +486,10 @@ export default class LobbyScene extends Phaser.Scene {
     delete this.writing[id];
     delete this.artwork[id];
     delete this.nameplates[id];
+    delete this.dressed[id];
+    if (this.looks[id]?.glow) this.tweens.killTweensOf(this.looks[id].glow);
+    this.looks[id]?.pet?.destroy();
+    delete this.looks[id];
     this.figures[id]?.destroy(); // after the container, which still shows its pictures
     delete this.figures[id];
   }
@@ -435,7 +517,7 @@ export default class LobbyScene extends Phaser.Scene {
     });
   }
 
-  update(time: number) {
+  update(time: number, delta: number) {
     // Walk cycles, and whoever stands lower on the map is drawn in front.
     const me = this.localPlayerContainer;
     for (const [id, container] of Object.entries(this.playerEntities)) {
@@ -453,6 +535,7 @@ export default class LobbyScene extends Phaser.Scene {
         const alpha = Phaser.Math.Clamp((this.vision - Phaser.Math.Distance.Between(me.x, me.y, container.x, container.y)) / (this.vision * 0.3), 0, 1);
         container.setAlpha(alpha).setVisible(alpha > 0);
       } else if (container.alpha !== 1 || !container.visible) container.setAlpha(1).setVisible(true);
+      this.followLook(id, container, player?.style?.trail, time, delta);
     }
     this.rainGraphic ??= this.add.graphics().setScrollFactor(0).setDepth(1000001);
     this.rainGraphic.clear();

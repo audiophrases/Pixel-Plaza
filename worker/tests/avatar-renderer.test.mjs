@@ -33,6 +33,12 @@ test('every PinPlay character survives validation and uses its selected head in 
                 assert.equal(broken?.textContent, undefined, `${key} ${index}, ${name}`);
             }
         }
+        // Levels add colours: trousers, shoes and a cape, each still a well-formed piece.
+        const dressed = renderFigureParts({}, { pants: '#E53935', shoes: '#1E88E5', cape: '#8E24AA' });
+        assert.ok(dressed.leg.svg.includes('#E53935') && dressed.leg.svg.includes('#1E88E5'));
+        assert.ok(dressed.cape.svg.includes('#8E24AA'));
+        assert.equal(parser.parseFromString(dressed.cape.svg, 'image/svg+xml').getElementsByTagName('parsererror')[0]?.textContent, undefined);
+        assert.equal(renderFigureParts({}).cape, undefined, 'no cape unless chosen');
         assert.equal(balanced('<g><g></g></g></g>'), '<g><g></g></g>');
         assert.equal(balanced('<g><rect/>'), '<g><rect/></g>');
     } finally {

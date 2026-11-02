@@ -8,7 +8,7 @@ import { IDENTITY_NAMES } from '../../shared/warmupKinds';
 import NamePicker from '../components/NamePicker';
 import HelpRequest from '../components/HelpRequest';
 import { LevelBar, Rewards } from '../components/LevelBar';
-import { DEFAULT_STYLE, emotesFor, levelOf, type Style } from '../../shared/levels';
+import { DEFAULT_STYLE, REWARDS, emotesFor, levelOf, type Style } from '../../shared/levels';
 import { correctedSentence, readCorrection, wordDiff } from '../../shared/diff';
 import Correction from '../components/Correction';
 import { firstName } from '../../shared/names';
@@ -162,6 +162,11 @@ export default function Game() {
   const [xpReason, setXpReason] = useState<string | undefined>();
   const [myStyle, setMyStyle] = useState<Style>(DEFAULT_STYLE);
   const [showRewards, setShowRewards] = useState(false);
+  // The highest level whose unlocks this student has looked at, so the bar can show that something new waits.
+  const seenKey = `pixelplaza.rewards-seen:${session?.student.studentKey}`;
+  const [rewardsSeen, setRewardsSeen] = useState(() => { try { return Number(localStorage.getItem(seenKey)) || 0; } catch { return 0; } });
+  const myLevel = levelOf(xp).level;
+  const freshRewards = REWARDS.some(reward => reward.level > rewardsSeen && reward.level <= myLevel);
   const [connection, setConnection] = useState<PlazaConnection | null>(null);
   const [mapKey, setMapKey] = useState(0); // a new map from the teacher builds the game view again
   const [status, setStatus] = useState<PlazaStatus>({ state: 'connecting' });
@@ -800,7 +805,13 @@ export default function Game() {
           {!sound.muted && !sound.locked && sound.error && <p className="sound-error" role="status">{sound.error}</p>}
         </header>
 
-        <LevelBar xp={xp} reason={xpReason} onOpen={() => setShowRewards(open => !open)} />
+        <LevelBar xp={xp} reason={xpReason} fresh={freshRewards} onOpen={() => {
+          setShowRewards(open => !open);
+          if (myLevel > rewardsSeen) {
+            setRewardsSeen(myLevel);
+            try { localStorage.setItem(seenKey, String(myLevel)); } catch { /* storage disabled */ }
+          }
+        }} />
         {showRewards && <Rewards xp={xp} style={myStyle} onClose={() => setShowRewards(false)}
           onChoose={style => { setMyStyle(style); connection?.send({ t: 'style', ...style }); }} />}
 

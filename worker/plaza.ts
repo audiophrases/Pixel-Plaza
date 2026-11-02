@@ -1449,7 +1449,7 @@ export class PlazaRoom extends DurableObject<Env> {
         } else if (data?.t === 'emote' && typeof data.emote === 'string' && emotesFor(levelOf(this.xpOf(seat.studentKey)).level).includes(data.emote)) {
             this.broadcast({ t: 'emote', id: seat.id, emote: data.emote });
         } else if (data?.t === 'style') {
-            // A name colour and a flair, as far as the student's level allows.
+            // A name colour, a flair, clothes, a pet and the rest, as far as the student's level allows.
             const style = checkStyle(data, levelOf(this.xpOf(seat.studentKey)).level);
             if (!style) return;
             this.sql.exec('UPDATE students SET style = ? WHERE student_key = ?', JSON.stringify(style), seat.studentKey);
