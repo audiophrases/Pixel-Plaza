@@ -1541,6 +1541,77 @@ test('Side quests once added to a mission chapter move to the game, with who fin
     }
 });
 
+test('Season 2 imports as data and sends Catalan help only with each student’s visible evidence', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-season-2-'));
+    let plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, {}, { content: false });
+    const sockets = [];
+    try {
+        let base = plaza.base;
+        const session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+        const pack = JSON.parse(fs.readFileSync(path.join(root, 'content/season-2/campaign.json'), 'utf8'));
+        const campaign = pack.campaign;
+        assert.equal((await teacher('missions/list')).body.library.length, 0, 'the season is not seeded or built in');
+        const picture = fs.readFileSync(path.join(root, 'content/season-2/art/campus.png'));
+        const upload = await fetch(`${base}/api/teacher/theme-asset`, { method: 'POST', headers: { 'x-teacher-session': session }, body: picture });
+        assert.equal(upload.status, 200);
+        const stored = await upload.json();
+        const theme = { ...JSON.parse(fs.readFileSync(path.join(root, 'content/season-2/theme.json'), 'utf8')), image: stored.url };
+        const map = await teacher('themes/save', { theme, create: true });
+        assert.equal(map.status, 200, JSON.stringify(map.body));
+        assert.equal((await teacher('themes/publish', { id: theme.id, version: map.body.map.version })).status, 200);
+        const draft = (await teacher('missions/create', { id: campaign.id })).body.draft;
+        const saved = await teacher('missions/save', { id: campaign.id, version: draft.version, envelope: pack });
+        assert.equal(saved.status, 200, JSON.stringify(saved.body));
+        assert.equal((await teacher('missions/publish', { id: campaign.id, version: saved.body.draft.version })).status, 200);
+        PIN = (await teacher('game', { name: 'Protocol QA', randomNames: false, themeId: theme.id })).body.pin;
+        const a = await enter(base, 'signed-a', null), b = await enter(base, 'signed-b', null); sockets.push(a, b);
+        assert.equal((await teacher('campaign', { op: 'start', campaign: campaign.id })).status, 200);
+        const view = socket => socket.next(m => m.t === 'quest' && m.quest?.campaign.id === campaign.id).then(m => m.quest);
+        const own = await view(a), other = await view(b);
+        assert.notEqual(own.role.id, other.role.id);
+        assert.equal(own.chapter.help.intro.ca, campaign.chapters[0].help.intro.ca);
+        assert.deepEqual(own.vocabulary, campaign.vocabulary, 'public story vocabulary comes from the imported campaign');
+        const role = campaign.roles.find(r => r.id === own.role.id), otherRole = campaign.roles.find(r => r.id === other.role.id);
+        assert.deepEqual(own.role.help, role.help.card);
+        assert.deepEqual(own.clues.find(c => c.from === 'job').help, role.help.clue);
+        assert.ok(!JSON.stringify(own).includes(otherRole.help.clue.ca), 'another present role’s private translation stays private');
+        for (const hidden of [campaign.chapters[0].help.ending.ca, campaign.chapters[1].help.intro.ca, campaign.help.finale.ca,
+            campaign.chapters[0].objectives[1].help.ca, campaign.chapters[0].reveals[0].help.ca, campaign.chapters[0].discoveries[0].help.ca]) {
+            assert.ok(!JSON.stringify(own).includes(hidden), `not sent early: ${hidden}`);
+        }
+        assert.deepEqual(own.objectives.map(o => o.help), [campaign.chapters[0].objectives[0].help]);
+        a.send({ t: 'answer', objective: 'p815-c1-messages', text: 'sports hall' });
+        assert.equal((await a.next(m => m.t === 'answered' && m.objective === 'p815-c1-messages')).correct, true);
+        const unlocked = await a.next(m => m.t === 'quest' && m.quest?.objectives.some(o => o.id === 'p815-c1-passage'));
+        assert.deepEqual(unlocked.quest.objectives.find(o => o.id === 'p815-c1-passage').help, campaign.chapters[0].objectives[1].help);
+        await teacher('campaign', { op: 'reveal' });
+        const news = await a.next(m => m.t === 'quest' && m.quest?.clues.some(c => c.from === 'news'));
+        assert.deepEqual(news.quest.clues.find(c => c.from === 'news').help, campaign.chapters[0].reveals[0].help);
+        await teacher('campaign', { op: 'next' });
+        const second = await a.next(m => m.t === 'quest' && m.quest?.chapter.index === 1);
+        assert.deepEqual(second.quest.clues.find(c => c.from === 'job').help, campaign.chapters[1].roleClueHelp[own.role.id]);
+        assert.ok(!JSON.stringify(second.quest).includes(campaign.chapters[1].help.ending.ca));
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, {}, { content: false }); base = plaza.base;
+        const restored = (await teacher(`missions/get?id=${campaign.id}`)).body.draft;
+        assert.deepEqual(restored.campaign, campaign, 'authored translations survive publication and restart');
+        assert.ok(Buffer.from(await (await fetch(base + stored.url)).arrayBuffer()).equals(picture), 'art lives in server storage');
+        const resumed = await enter(base, 'signed-a', null); sockets.push(resumed);
+        const resume = await view(resumed);
+        assert.deepEqual(resume.recapHelp, campaign.chapters[0].help.ending, 'returning students get the translated previous ending');
+        await teacher('campaign', { op: 'next' });
+        await resumed.next(m => m.t === 'quest' && m.quest?.chapter.index === 2);
+        await teacher('campaign', { op: 'next' });
+        const finale = await resumed.next(m => m.t === 'quest' && m.quest?.status === 'campaign_complete');
+        assert.deepEqual(finale.quest.finaleHelp, campaign.help.finale);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('Side quest library: teachers write, change, delete, restore and import quests, and an old library becomes records', { timeout: 120000 }, async () => {
     const { DatabaseSync } = await import('node:sqlite');
     const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-quest-editor-'));

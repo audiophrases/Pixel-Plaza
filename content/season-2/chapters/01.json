@@ -1,0 +1,210 @@
+{
+  "format": "pixel-plaza-campaign",
+  "schemaVersion": 2,
+  "campaign": {
+    "id": "protocol-815-chapter-1",
+    "title": "Protocol 8:15 · 1. The Missing Student",
+    "finale": "New CCTV: at 8:07, Ms Diop entered the sports hall with Karina. Ms Diop said she had not seen her. Why did she lie?",
+    "roles": [
+      {
+        "id": "media-analyst",
+        "name": "Media analyst",
+        "card": "Check screenshots and times. Ask classmates what their evidence shows.",
+        "clue": "Laia saved two messages at 8:15: “Stay inside” and “Go to the sports hall.” Both use the school account.",
+        "help": {
+          "card": {
+            "ca": "Comprova les captures de pantalla i les hores. Pregunta als companys què mostren les seves proves."
+          },
+          "clue": {
+            "ca": "La Laia va guardar dos missatges de les 8:15: «Quedeu-vos a dins» i «Aneu al pavelló». Tots dos utilitzen el compte de l’institut."
+          }
+        }
+      },
+      {
+        "id": "witness-interviewer",
+        "name": "Witness interviewer",
+        "card": "Compare what people say. Ask a follow-up question before deciding who to trust.",
+        "clue": "Youssef says, “I have not seen Karina.” Laia remembers them talking before lessons. You do not know when they last met.",
+        "help": {
+          "card": {
+            "ca": "Compara què diu cadascú. Fes una pregunta més abans de decidir de qui et fies."
+          },
+          "clue": {
+            "ca": "En Youssef diu: «No he vist la Karina». La Laia recorda que parlaven abans de classe. No saps quan es van veure per última vegada."
+          }
+        }
+      },
+      {
+        "id": "records-researcher",
+        "name": "Records researcher",
+        "card": "Check documents and their dates. Separate a fact from a guess.",
+        "clue": "At 8:16, Karina was absent from roll call. The office calls its emergency plan “Protocol 8:15”. The messages disagree.",
+        "help": {
+          "card": {
+            "ca": "Comprova els documents i les dates. Distingeix un fet d’una suposició."
+          },
+          "clue": {
+            "ca": "A les 8:16, la Karina no hi era quan van passar llista. El pla d’emergència de secretaria es diu «Protocol 8:15». Els missatges es contradiuen."
+          }
+        }
+      },
+      {
+        "id": "site-observer",
+        "name": "Site observer",
+        "card": "Read evidence at the marked places. Stay outside the blocked passage and report risks to staff.",
+        "clue": "Chidi saw a fallen roof panel blocking the covered passage. Ms Diop told everyone to stay away from the sports hall.",
+        "help": {
+          "card": {
+            "ca": "Llegeix les proves als llocs indicats. No entris al passadís tallat i comunica els riscos al professorat."
+          },
+          "clue": {
+            "ca": "En Chidi va veure una placa del sostre caiguda que bloquejava el passadís cobert. La senyora Diop va dir a tothom que s’allunyés del pavelló."
+          }
+        }
+      }
+    ],
+    "chapters": [
+      {
+        "id": "p815-missing-student",
+        "title": "1. The Missing Student",
+        "intro": "A storm hits Coma-ruga. At 8:15, two school messages give opposite instructions. Karina is missing. Compare evidence at safe locations; let staff handle the emergency.",
+        "recap": "Karina missed roll call. The 8:15 messages disagree. Check facts before blaming anyone.",
+        "ending": "New CCTV: at 8:07, Ms Diop entered the sports hall with Karina. Ms Diop said she had not seen her. Why did she lie?",
+        "share": 0.7,
+        "objectives": [
+          {
+            "id": "p815-c1-messages",
+            "text": "Compare the two messages. Which place do they disagree about?",
+            "accept": [
+              "sports hall",
+              "the sports hall",
+              "gym"
+            ],
+            "help": {
+              "ca": "Compara els dos missatges. Sobre quin lloc es contradiuen?"
+            }
+          },
+          {
+            "id": "p815-c1-passage",
+            "text": "Ask about Chidi’s evidence. What blocked the covered passage?",
+            "accept": [
+              "roof panel",
+              "fallen roof panel",
+              "a roof panel"
+            ],
+            "help": {
+              "ca": "Pregunta per les proves d’en Chidi. Què bloquejava el passadís cobert?"
+            },
+            "after": "p815-c1-messages"
+          },
+          {
+            "id": "p815-c1-briefing",
+            "text": "Exchange evidence with a classmate. Write two facts and one question you still cannot answer.",
+            "accept": [],
+            "help": {
+              "ca": "Intercanvia proves amb un company. Escriu dos fets i una pregunta que encara no pots respondre."
+            },
+            "after": "p815-c1-passage",
+            "kind": "report",
+            "successCriteria": "Two supported facts from this chapter and one unresolved question. Valid facts include contradictory 8:15 messages, Karina missing at 8:16, a fallen roof panel, or Diop keeping students away. Do not require a culprit or Karina’s location.",
+            "level": "A2",
+            "conversation": {
+              "witnesses": 1
+            }
+          },
+          {
+            "id": "p815-c1-rumour",
+            "text": "Write a short group-chat message that corrects a rumour without blaming anyone.",
+            "accept": [],
+            "help": {
+              "ca": "Escriu un missatge breu per al xat del grup que corregeixi un rumor sense culpar ningú."
+            },
+            "optional": true,
+            "after": "p815-c1-briefing",
+            "kind": "report",
+            "successCriteria": "A short English message distinguishing a confirmed fact from uncertainty; no invented accusation. This is a written exercise, not a message sent to another app.",
+            "level": "A2"
+          }
+        ],
+        "discoveries": [
+          {
+            "id": "p815-c1-office",
+            "zone": "admin-office",
+            "text": "Office printout, 8:15: “Stay in classrooms. Do not go to the sports hall.” Another 8:15 message says, “Go to the sports hall.”",
+            "help": {
+              "ca": "Full de secretaria, 8:15: «Quedeu-vos a les aules. No aneu al pavelló». Un altre missatge de les 8:15 diu: «Aneu al pavelló»."
+            }
+          },
+          {
+            "id": "p815-c1-roof",
+            "zone": "sports-hall",
+            "text": "Chidi’s statement: “A roof panel fell across the covered passage. I stayed outside and told a teacher.”",
+            "help": {
+              "ca": "Declaració d’en Chidi: «Una placa del sostre va caure al passadís cobert. Em vaig quedar a fora i vaig avisar un professor»."
+            }
+          },
+          {
+            "id": "p815-c1-register",
+            "zone": "courtyard",
+            "text": "Roll call, 8:16: Karina Gonzalvez is missing. Staff are checking the safe rooms. Nobody has confirmed where she is.",
+            "help": {
+              "ca": "Llista d’assistència, 8:16: falta la Karina Gonzalvez. El personal està comprovant les sales segures. Ningú no ha confirmat on és."
+            }
+          },
+          {
+            "id": "p815-c1-library",
+            "zone": "library",
+            "text": "Laia: “I saved both messages before one disappeared. The same school account posted them.”",
+            "help": {
+              "ca": "La Laia: «Vaig guardar tots dos missatges abans que un desaparegués. Es van publicar des del mateix compte de l’institut»."
+            }
+          }
+        ],
+        "reveals": [
+          {
+            "id": "p815-c1-news-a",
+            "text": "Compare Laia’s screenshot with the office printout. The two messages disagree about the sports hall.",
+            "help": {
+              "ca": "Compara la captura de la Laia amb el full de secretaria. Els dos missatges es contradiuen sobre el pavelló."
+            }
+          },
+          {
+            "id": "p815-c1-news-b",
+            "text": "Chidi saw a fallen roof panel. A blocked route is a fact; an accusation is not proof.",
+            "help": {
+              "ca": "En Chidi va veure una placa del sostre caiguda. Que una ruta estigui tallada és un fet; una acusació no és una prova."
+            }
+          }
+        ],
+        "help": {
+          "intro": {
+            "ca": "Una tempesta arriba a Coma-ruga. A les 8:15, dos missatges de l’institut donen instruccions contràries. La Karina ha desaparegut. Compareu proves en llocs segurs; deixeu l’emergència en mans del personal."
+          },
+          "recap": {
+            "ca": "La Karina no hi era quan van passar llista. Els missatges de les 8:15 es contradiuen. Comproveu els fets abans de culpar ningú."
+          },
+          "ending": {
+            "ca": "Nova gravació de seguretat: a les 8:07, la senyora Diop va entrar al pavelló amb la Karina. Havia dit que no l’havia vista. Per què va mentir?"
+          }
+        }
+      }
+    ],
+    "help": {
+      "finale": {
+        "ca": "Nova gravació de seguretat: a les 8:07, la senyora Diop va entrar al pavelló amb la Karina. Havia dit que no l’havia vista. Per què va mentir?"
+      }
+    },
+    "vocabulary": [
+      "Karina Gonzalvez",
+      "Youssef El Amrani",
+      "Awa Diop",
+      "Andreea Ionescu",
+      "El Idrissi",
+      "Laia Garcia",
+      "Chidi Okafor",
+      "Irina Sokolova",
+      "Coma-ruga",
+      "CCTV"
+    ]
+  }
+}

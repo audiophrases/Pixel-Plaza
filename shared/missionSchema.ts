@@ -1,4 +1,4 @@
-import { isUnlocked, prerequisiteIds, type Campaign, type Chapter, type Objective, type Role } from './campaign.ts';
+import { isUnlocked, prerequisiteIds, type Campaign, type Chapter, type Objective, type Role, type TextHelp } from './campaign.ts';
 
 export const MISSION_MAX_BYTES = 512_000;
 export type MissionEnvelope = { format: 'pixel-plaza-campaign'; schemaVersion: 1 | 2; campaign: Campaign };
@@ -49,6 +49,19 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
         if (Object.keys(value).length > 20) fail(path, 'Use at most 20 role clues.');
         return Object.fromEntries(Object.entries(value).slice(0, 20).map(([key, text]) => [id(key, `${path}.${key}`), str(text, `${path}.${key}`)]));
     };
+    const textHelp = (value: unknown, path: string): TextHelp => {
+        const h = obj(value, path, ['ca']);
+        return h.ca === undefined ? {} : { ca: str(h.ca, `${path}.ca`, 6000, false) };
+    };
+    const fieldHelp = <K extends string>(value: unknown, path: string, fields: readonly K[]): Partial<Record<K, TextHelp>> => {
+        const h = obj(value, path, [...fields]);
+        return Object.fromEntries(fields.filter(key => h[key] !== undefined).map(key => [key, textHelp(h[key], `${path}.${key}`)])) as Partial<Record<K, TextHelp>>;
+    };
+    const roleHelp = (value: unknown, path: string): Record<string, TextHelp> => {
+        if (!record(value)) { fail(path, 'Expected role IDs mapped to language help.'); return {}; }
+        if (Object.keys(value).length > 20) fail(path, 'Use at most 20 role translations.');
+        return Object.fromEntries(Object.entries(value).slice(0, 20).map(([key, help]) => [id(key, `${path}.${key}`), textHelp(help, `${path}.${key}`)]));
+    };
     try {
         if (new TextEncoder().encode(JSON.stringify(input)).length > MISSION_MAX_BYTES) {
             fail('file', 'Campaign exceeds the 512 KB limit.'); return { campaign: null, errors, warnings };
@@ -57,19 +70,22 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
     const envelope = obj(input, 'file', ['format', 'schemaVersion', 'campaign']);
     if (envelope.format !== 'pixel-plaza-campaign') fail('format', 'Expected pixel-plaza-campaign.');
     if (envelope.schemaVersion !== 1 && envelope.schemaVersion !== 2) fail('schemaVersion', 'Only schema versions 1 and 2 are supported.');
-    const raw = obj(envelope.campaign, 'campaign', ['id', 'title', 'roles', 'chapters', 'finale']);
+    const raw = obj(envelope.campaign, 'campaign', ['id', 'title', 'roles', 'chapters', 'finale', 'help', 'vocabulary']);
     const roles: Role[] = list(raw.roles, 'roles', 20).map((value, i) => {
         const path = `roles[${i}]`;
-        const r = obj(value, path, ['id', 'name', 'card', 'clue']);
-        return { id: id(r.id, `${path}.id`), name: str(r.name, `${path}.name`, 120), card: str(r.card, `${path}.card`), clue: str(r.clue, `${path}.clue`) };
+        const r = obj(value, path, ['id', 'name', 'card', 'clue', 'help']);
+        return { id: id(r.id, `${path}.id`), name: str(r.name, `${path}.name`, 120), card: str(r.card, `${path}.card`), clue: str(r.clue, `${path}.clue`),
+            ...(r.help !== undefined ? { help: fieldHelp(r.help, `${path}.help`, ['card', 'clue']) } : {}) };
     });
     const chapters: Chapter[] = list(raw.chapters, 'chapters', 20).map((value, i) => {
         const path = `chapters[${i}]`;
-        const c = obj(value, path, ['id', 'title', 'intro', 'recap', 'ending', 'share', 'objectives', 'discoveries', 'reveals', 'roleClues', 'thieves']);
+        const c = obj(value, path, ['id', 'title', 'intro', 'recap', 'ending', 'share', 'objectives', 'discoveries', 'reveals', 'roleClues', 'thieves', 'help', 'roleClueHelp']);
         const objectives: Objective[] = list(c.objectives, `${path}.objectives`, 100).map((value, j) => {
             const p = `${path}.objectives[${j}]`;
-            const o = obj(value, p, ['id', 'text', 'accept', 'answerThief', 'thiefKnows', 'answerRole', 'kind', 'after', 'optional', 'rewards', 'requires', 'board', 'activity', 'conversation', 'successCriteria', 'level']);
+            const o = obj(value, p, ['id', 'text', 'accept', 'answerThief', 'thiefKnows', 'answerRole', 'kind', 'after', 'optional', 'rewards', 'requires', 'board', 'activity', 'conversation', 'successCriteria', 'level', 'help', 'rewardHelp']);
             const result: Objective = { id: id(o.id, `${p}.id`), text: str(o.text, `${p}.text`), accept: list(o.accept, `${p}.accept`, 30).map((v, k) => str(v, `${p}.accept[${k}]`, 120)) };
+            if (o.help !== undefined) result.help = textHelp(o.help, `${p}.help`);
+            if (o.rewardHelp !== undefined) result.rewardHelp = roleHelp(o.rewardHelp, `${p}.rewardHelp`);
             for (const key of ['answerThief', 'thiefKnows', 'optional'] as const) if (o[key] !== undefined) result[key] = boolean(o[key], `${p}.${key}`);
             for (const key of ['after', 'answerRole'] as const) if (o[key] !== undefined) result[key] = id(o[key], `${p}.${key}`);
             if (o.kind !== undefined) { if (o.kind !== 'report') fail(`${p}.kind`, 'Only report is supported; omit kind for typed or name answers.'); else result.kind = 'report'; }
@@ -116,23 +132,28 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
         if (!Number.isFinite(share) || share <= 0 || share > 1) fail(`${path}.share`, 'Readiness share must be greater than zero and at most 1.');
         const chapter: Chapter = { id: id(c.id, `${path}.id`), title: str(c.title, `${path}.title`, 120), intro: str(c.intro, `${path}.intro`), recap: str(c.recap, `${path}.recap`), ending: str(c.ending, `${path}.ending`), share, objectives,
             discoveries: list(c.discoveries, `${path}.discoveries`, 100).map((value, j) => {
-                const p = `${path}.discoveries[${j}]`; const d = obj(value, p, ['id', 'zone', 'text']);
-                return { id: id(d.id, `${p}.id`), zone: id(d.zone, `${p}.zone`), text: str(d.text, `${p}.text`) };
+                const p = `${path}.discoveries[${j}]`; const d = obj(value, p, ['id', 'zone', 'text', 'help']);
+                return { id: id(d.id, `${p}.id`), zone: id(d.zone, `${p}.zone`), text: str(d.text, `${p}.text`), ...(d.help !== undefined ? { help: textHelp(d.help, `${p}.help`) } : {}) };
             }),
             reveals: list(c.reveals, `${path}.reveals`, 100).map((value, j) => {
-                const p = `${path}.reveals[${j}]`; const r = obj(value, p, ['id', 'text']);
-                return { id: id(r.id, `${p}.id`), text: str(r.text, `${p}.text`) };
+                const p = `${path}.reveals[${j}]`; const r = obj(value, p, ['id', 'text', 'help']);
+                return { id: id(r.id, `${p}.id`), text: str(r.text, `${p}.text`), ...(r.help !== undefined ? { help: textHelp(r.help, `${p}.help`) } : {}) };
             }) };
         if (c.roleClues !== undefined) chapter.roleClues = clues(c.roleClues, `${path}.roleClues`);
+        if (c.help !== undefined) chapter.help = fieldHelp(c.help, `${path}.help`, ['intro', 'recap', 'ending']);
+        if (c.roleClueHelp !== undefined) chapter.roleClueHelp = roleHelp(c.roleClueHelp, `${path}.roleClueHelp`);
         if (c.thieves !== undefined) {
-            const t = obj(c.thieves, `${path}.thieves`, ['card', 'story', 'label', 'carry']);
+            const t = obj(c.thieves, `${path}.thieves`, ['card', 'story', 'label', 'carry', 'help']);
             chapter.thieves = { card: str(t.card, `${path}.thieves.card`), story: str(t.story, `${path}.thieves.story`) };
             if (t.label !== undefined) chapter.thieves.label = str(t.label, `${path}.thieves.label`, 120);
             if (t.carry !== undefined) chapter.thieves.carry = boolean(t.carry, `${path}.thieves.carry`);
+            if (t.help !== undefined) chapter.thieves.help = fieldHelp(t.help, `${path}.thieves.help`, ['card', 'story']);
         }
         return chapter;
     });
     const campaign: Campaign = { id: id(raw.id, 'campaign.id'), title: str(raw.title, 'campaign.title', 120), finale: str(raw.finale, 'campaign.finale'), roles, chapters };
+    if (raw.help !== undefined) campaign.help = fieldHelp(raw.help, 'campaign.help', ['finale']);
+    if (raw.vocabulary !== undefined) campaign.vocabulary = [...new Set(list(raw.vocabulary, 'campaign.vocabulary', 100).map((value, i) => str(value, `campaign.vocabulary[${i}]`, 120, false).trim()).filter(Boolean))];
     const unique = (ids: string[], path: string) => { if (new Set(ids).size !== ids.length) fail(path, 'IDs must be unique.'); };
     unique(roles.map(r => r.id), 'roles'); unique(chapters.map(c => c.id), 'chapters');
     // Progress arrays and report rows are campaign-wide, not scoped to a chapter.
@@ -178,8 +199,10 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
             if (o.activity && (!o.board || o.kind !== 'report' || o.answerRole || o.answerThief)) content(`${p}.activity`, 'Social activities require an optional board quest with report answers.');
             if (o.activity && o.conversation?.witnesses === 2) content(`${p}.conversation`, 'Assigned-partner activities support one witness. Use two witnesses on a main or optional question.');
             for (const role of Object.keys(o.rewards ?? {})) if (!roleIds.has(role)) content(`${p}.rewards.${role}`, 'Role does not exist.');
+            for (const role of Object.keys(o.rewardHelp ?? {})) if (!o.rewards?.[role]) content(`${p}.rewardHelp.${role}`, 'Language help needs a matching English reward clue.');
         }
         for (const role of Object.keys(c.roleClues ?? {})) if (!roleIds.has(role)) content(`${path}.roleClues.${role}`, 'Role does not exist.');
+        for (const role of Object.keys(c.roleClueHelp ?? {})) if (!c.roleClues?.[role]) content(`${path}.roleClueHelp.${role}`, 'Language help needs a matching English chapter clue.');
         if (zones) c.discoveries.forEach((d, j) => { if (!zones.has(d.zone)) content(`${path}.discoveries[${j}].zone`, 'Choose a place that is on one of the maps.'); });
         if (c.thieves?.carry && (i === 0 || !chapters[i - 1].thieves)) content(`${path}.thieves.carry`, 'Carry requires a preceding thief chapter.');
     });

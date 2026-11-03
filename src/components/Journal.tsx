@@ -4,6 +4,7 @@ import { REPORT_MAX_LENGTH } from '../../shared/campaign';
 import { AUTO_PICK_MS } from '../../shared/sideQuests';
 import './Journal.css';
 import { Investigation, WitnessInbox, type InvestigationTurn } from './Investigation';
+import LanguageHelp from './LanguageHelp';
 
 type Props = {
   quest: QuestView | null; // the mission, if one is running
@@ -42,6 +43,7 @@ function Question({ objective, feedback, onAnswer, onUndoReport, shared = false,
   return <section className={`journal-block journal-question${objective.optional ? ' journal-bonus' : ''}`}>
     <h3>{heading ?? (objective.optional ? 'Bonus question' : 'Question')}</h3>
     <p className="journal-ask">{objective.text}</p>
+    <LanguageHelp help={objective.help} answer />
     {objective.done ? <>
       <p className="journal-right">{report ? check ? 'Quest complete.' : 'Sent to your teacher.' : 'Correct.'}</p>
       {check && check.feedback !== 'Quest complete.' && <p className="journal-report-feedback" role="status">{check.feedback}</p>}
@@ -133,11 +135,13 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
         <h3>Secret</h3>
         <p className="journal-role">{quest.secret.title}</p>
         <p>{quest.secret.text}</p>
+        <LanguageHelp help={quest.secret.help} />
       </section>}
 
       {quest.recap && !recapSeen && <section className="journal-block journal-recap">
         <h3>Previously</h3>
         <p>{quest.recap}</p>
+        <LanguageHelp help={quest.recapHelp} />
         <button type="button" className="journal-dismiss" onClick={() => setRecapSeen(true)}>OK</button>
       </section>}
 
@@ -152,12 +156,14 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
       {quest.status !== 'campaign_complete' && <section className="journal-block journal-task">
         <h3>Task</h3>
         <p>{quest.chapter.intro}</p>
+        <LanguageHelp help={quest.chapter.help?.intro} />
       </section>}
 
       <section className="journal-block">
         <h3>You are</h3>
         <p className="journal-role">{quest.role.name}</p>
         <p>{quest.role.card}</p>
+        <LanguageHelp help={quest.role.help} />
       </section>
 
       <section className="journal-block">
@@ -166,6 +172,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
           {quest.clues.map(clue => <li key={clue.id}>
             <span className="journal-source">{SOURCE[clue.from] ?? `Found: ${clue.from}`}</span>
             {clue.text}
+            <LanguageHelp help={clue.help} />
           </li>)}
         </ul>
       </section>
@@ -182,6 +189,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
         <h3>{quest.status === 'chapter_complete' ? 'The class is ready to advance' : 'Chapter complete'}</h3>
         {quest.status === 'chapter_complete' && <p>You can keep working until your teacher starts the next chapter.</p>}
         <p>{quest.chapter.ending}</p>
+        <LanguageHelp help={quest.chapter.help?.ending} />
       </section>}
 
       {bonus.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} closed={ended} quest={quest} onTurn={onTurn} />)}
@@ -200,14 +208,14 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
             {item.group && <p className="journal-partner">Your {item.group.size === 2 ? 'pair' : 'group'}: <strong>{item.group.members.join(', ')}</strong>
               {item.group.state === 'open' ? ` · waiting for ${item.group.size - item.group.members.length} more` : '. One answer counts for everyone; work it out together.'}
               {item.group.state === 'open' && item.group.startAt !== null && item.group.startAt <= now && <button className="journal-choice" onClick={() => onStart?.(item.id)}>Start with who&rsquo;s here</button>}</p>}
-            {item.group?.state === 'open' && item.state === 'active' ? <p className="journal-ask">{item.text}</p>
-              : <Question objective={{ id: item.id, text: item.text, kind: item.kind, optional: true, done: item.state === 'done', conversation: item.conversation, report: item.report }} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} closed={!!item.ended} quest={quest} onTurn={onTurn} heading={item.sideQuest ? 'Side quest' : undefined} shared={!!item.group} />}
+            {item.group?.state === 'open' && item.state === 'active' ? <><p className="journal-ask">{item.text}</p><LanguageHelp help={item.help} answer /></>
+              : <Question objective={{ id: item.id, text: item.text, help: item.help, kind: item.kind, optional: true, done: item.state === 'done', conversation: item.conversation, report: item.report }} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} closed={!!item.ended} quest={quest} onTurn={onTurn} heading={item.sideQuest ? 'Side quest' : undefined} shared={!!item.group} />}
             {item.sideQuest && item.state === 'active' && !item.ended && <button type="button" className="journal-dismiss" onClick={() => onLeave?.(item.id)}>Leave this quest and choose another</button>}
-          </> : <><p className="journal-ask">{item.text}</p>{item.activity && <p>{item.activity === 'interview' ? 'Interview a classmate' : 'Exchange information with a classmate'}</p>}
+          </> : <><p className="journal-ask">{item.text}</p><LanguageHelp help={item.help} answer />{item.activity && <p>{item.activity === 'interview' ? 'Interview a classmate' : 'Exchange information with a classmate'}</p>}
             {item.reason && <p>{item.reason}</p>}<button className="journal-choice" disabled={item.state !== 'available'} onClick={() => onAccept?.(item.id)}>{item.joining?.length ? `Join ${item.joining.join(', ')}` : 'Accept quest'}</button></>}
         </article>)}
       </section>}
-      {quest?.finale && <section className="journal-block journal-ending"><p>{quest.finale}</p></section>}
+      {quest?.finale && <section className="journal-block journal-ending"><p>{quest.finale}</p><LanguageHelp help={quest.finaleHelp} /></section>}
     </div>}
   </aside>;
 }

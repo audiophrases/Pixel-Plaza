@@ -65,6 +65,7 @@ export default function MissionStepEditor({ objective, chapter, campaign, onChan
             <label className="mission-field"><span>Evidence exchanges before answering</span><select value={objective.conversation?.witnesses ?? (objective.activity ? 1 : 0)} onChange={e => onChange({ conversation: Number(e.target.value) ? { witnesses: Number(e.target.value) as 1 | 2 } : undefined })}>{!objective.activity && <option value={0}>No exchange required</option>}<option value={1}>One witness</option>{!objective.activity && <option value={2}>Two witnesses</option>}</select></label>
             {chapter.thieves && !objective.board && !objective.answerThief && <label><input type="checkbox" checked={!!objective.thiefKnows} onChange={e => onChange({ thiefKnows: e.target.checked })} />The thief already knows this answer (skip it for them)</label>}
         </details>
-        <RoleClues roles={campaign.roles} value={objective.rewards} label="Give new clues after this step (optional)" onChange={rewards => onChange({ rewards })} />
+        <RoleClues roles={campaign.roles} value={objective.rewards} label="Give new clues after this step (optional)" onChange={rewards => onChange({ rewards,
+            ...(objective.rewardHelp ? { rewardHelp: Object.fromEntries(Object.entries(objective.rewardHelp).filter(([id]) => rewards[id])) } : {}) })} />
     </>;
 }

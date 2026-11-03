@@ -11,6 +11,7 @@ export function importMission(current: Campaign, text: string, mode: 'replace' |
         return { ...validateMission(missionEnvelope(campaign)), changes: [`Replace draft content with ${campaign.chapters.length} chapters and ${campaign.roles.length} roles. Existing games keep their published revision.`] };
     }
     const candidate = structuredClone(current);
+    if (incoming.campaign.vocabulary?.length) candidate.vocabulary = [...new Set([...(candidate.vocabulary ?? []), ...incoming.campaign.vocabulary])];
     const changes: string[] = [];
     const target = mode === 'extend' ? candidate.chapters.find(c => c.id === chapterId) : undefined;
     if (mode === 'extend' && (!target || incoming.campaign.chapters.length !== 1)) return { campaign: null, errors: [{ path: 'chapters', message: 'To extend the selected chapter, import exactly one chapter containing the new quests, discoveries and news.' }], warnings: [], changes };

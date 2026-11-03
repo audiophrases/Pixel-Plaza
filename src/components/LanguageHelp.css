@@ -1,0 +1,5 @@
+.language-help { margin: .5rem 0 .75rem; padding: .45rem .7rem; border-left: 3px solid #69a3a5; border-radius: 5px; background: #eaf4f433; font-size: .88em; line-height: 1.5; }
+.language-help summary { cursor: pointer; font-weight: 600; }
+.language-help summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.language-help p { margin: .6rem 0 .25rem; white-space: pre-line; }
+.language-help small { display: block; margin-top: .45rem; }

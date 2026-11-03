@@ -9,6 +9,7 @@ import type { MissionDraft } from '../shared/missionTypes';
 import type { LiveMissionTarget } from '../shared/missionTypes';
 import { missionOverview } from '../shared/missionOverview';
 import { themes } from '../shared/themeCatalog';
+import season2 from '../content/season-2/campaign.json';
 
 const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true, url: 'http://localhost/mission-studio' });
 const g = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean };
@@ -449,6 +450,44 @@ await renderJournal(); assert.equal(field('Your report').value, latestSharedWrit
 board.board[0].state = 'done'; board.board[0].report!.submitted = true; board.board[0].ended = true;
 await renderJournal(); assert.equal([...document.querySelectorAll('button')].some(item => item.textContent?.trim() === 'Undo submission'), false, 'an ended mission cannot reopen reports');
 await act(async () => { journalRoot.unmount(); });
+
+// Authored help remains editable and is optional beside the original student text.
+const { default: MissionLanguageHelp } = await import('../src/components/MissionLanguageHelp');
+const translatedRoot = createRoot(document.getElementById('root')!);
+let translated = parseSeason();
+function parseSeason() {
+    const result = validateMission(season2); assert.ok(result.campaign); return result.campaign;
+}
+const renderHelpEditor = (chapterIndex?: number) => act(async () => {
+    translatedRoot.render(<MissionLanguageHelp campaign={translated} chapterIndex={chapterIndex} onChange={next => { translated = next; }} />);
+});
+await renderHelpEditor();
+await edit('Catalan · Mission ending', 'Final revisat pel professor.');
+assert.equal(translated.help?.finale?.ca, 'Final revisat pel professor.');
+await renderHelpEditor(0);
+const originalAnswers = translated.chapters[0].objectives[0].accept;
+await edit('Catalan · Step 1', 'Compara els dos avisos.');
+assert.equal(translated.chapters[0].objectives[0].help?.ca, 'Compara els dos avisos.');
+assert.deepEqual(translated.chapters[0].objectives[0].accept, originalAnswers, 'editing help does not change English answer keys');
+assert.deepEqual(validateMission(missionEnvelope(translated)).errors, []);
+const c = translated.chapters[0], r = translated.roles[0], o = c.objectives[0];
+const translatedQuest: QuestView = { campaign: { id: translated.id, title: translated.title }, status: 'active',
+    chapter: { index: 0, of: 3, title: c.title, intro: c.intro, ending: null, help: { intro: c.help?.intro } },
+    role: { id: r.id, name: r.name, card: r.card, help: r.help?.card },
+    clues: [{ id: 'role', from: 'job', text: r.clue, help: r.help?.clue }], secret: null, thieves: null,
+    objectives: [{ id: o.id, text: o.text, help: o.help, kind: 'text', optional: false, done: false }],
+    recap: null, finale: null, team: { done: 0, total: 3 } };
+await act(async () => translatedRoot.render(<Journal quest={translatedQuest} board={null} feedback={null} onAnswer={() => {}} />));
+const supports = [...document.querySelectorAll<HTMLDetailsElement>('.language-help')];
+assert.equal(supports.length, 4, 'story, role, earned clue and current task each have help');
+assert.ok(supports.every(d => !d.open && d.lang === 'ca'), 'Catalan is closed by default and tagged for assistive technology');
+await edit('Your answer', 'sports hall');
+await act(async () => supports.at(-1)!.querySelector('summary')!.click());
+assert.equal(supports.at(-1)!.open, true);
+assert.match(supports.at(-1)!.textContent!, /respon en anglès/);
+assert.equal(field('Your answer').value, 'sports hall', 'opening help preserves an unfinished answer');
+assert.ok(document.body.textContent!.includes(o.text), 'English stays visible');
+await act(async () => translatedRoot.unmount());
 
 const { default: Warmup } = await import('../src/components/Warmup');
 const warmupRoot = createRoot(document.getElementById('root')!);

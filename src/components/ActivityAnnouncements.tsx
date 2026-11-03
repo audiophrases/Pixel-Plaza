@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { BoardView, QuestView } from '../../shared/campaign';
 import type { WarmupView } from '../../shared/warmup';
-import { activityAnnouncements, readAcknowledgements, saveAcknowledgements } from './announcementQueue';
+import { activityAnnouncements, readAcknowledgements, saveAcknowledgements, type ActivityAnnouncement } from './announcementQueue';
+import LanguageHelp from './LanguageHelp';
 import './ActivityAnnouncements.css';
 
 export default function ActivityAnnouncements({ quest, board = null, warmup, storageKey, paused }: { quest: QuestView | null; board?: BoardView | null; warmup: WarmupView | null; storageKey: string; paused: boolean }) {
@@ -13,7 +14,7 @@ export default function ActivityAnnouncements({ quest, board = null, warmup, sto
     const heading = useRef<HTMLHeadingElement>(null);
     const body = useRef<HTMLDivElement>(null);
     const pending = activityAnnouncements(quest, warmup, seen, board);
-    const current = paused || (!quest && !warmup && !board) ? null : review ? {
+    const current: ActivityAnnouncement | null | undefined = paused || (!quest && !warmup && !board) ? null : review ? {
         id: 'review', kind: 'chapter', eyebrow: 'READ AGAIN', title: 'Your current instructions', acknowledge: [],
         sections: activityAnnouncements(quest, warmup, new Set(), board).flatMap(item => [{ label: item.title, text: item.next }, ...item.sections]),
         next: 'Press OK to return to the game. Your tasks are still in the Journal and Warm-up panel.',
@@ -46,7 +47,7 @@ export default function ActivityAnnouncements({ quest, board = null, warmup, sto
         <dialog ref={dialog} className={`activity-announcement activity-${current?.kind ?? 'chapter'}`} aria-labelledby="activity-announcement-title" aria-describedby="activity-announcement-next"
             onKeyDown={event => { if (event.key === 'Escape') event.preventDefault(); event.stopPropagation(); }}>
             {current && <><header><span className="activity-announcement-icon" aria-hidden="true">{current.kind === 'warmup' ? '☀' : current.kind === 'board' ? '✦' : current.kind === 'ending' ? '✓' : current.kind === 'news' ? '!' : '▤'}</span><div><p>{current.eyebrow}</p><h2 id="activity-announcement-title" tabIndex={-1} ref={heading}>{current.title}</h2></div></header>
-                <div className="activity-announcement-body" ref={body}>{current.sections.filter(section => section.text.trim()).map((section, index) => <section key={index}><h3>{section.label}</h3><p>{section.text}</p></section>)}</div>
+                <div className="activity-announcement-body" ref={body}>{current.sections.filter(section => section.text.trim()).map((section, index) => <section key={index}><h3>{section.label}</h3><p>{section.text}</p><LanguageHelp help={section.help} answer={section.answer} /></section>)}</div>
                 <footer><p id="activity-announcement-next">{current.next}</p><div><small>{!review && pending.length > 1 ? `${pending.length - 1} more ${pending.length === 2 ? 'announcement' : 'announcements'} after this` : 'Read again anytime with Instructions'}</small><button type="button" className="activity-announcement-ok" onClick={acknowledge}>OK</button></div></footer></>}
         </dialog>
     </>;

@@ -142,6 +142,7 @@ export class QuestBoard {
             const group = sideQuest && groupSize(o) > 1 ? this.groupOf(ctx.game, o.id, ctx.player.student_key) : undefined;
             const joining = sideQuest && groupSize(o) > 1 && !assignment && !done ? this.waitingGroups(ctx, o.id)[0] : undefined;
             return [{ id: o.id, text: o.text, kind: o.kind === 'report' ? 'report' as const : o.answerRole ? 'name' as const : 'text' as const, activity: o.activity ?? null,
+                ...(o.help ? { help: o.help } : {}),
                 state: done ? 'done' as const : assignment ? 'active' as const : reason ? 'waiting' as const : 'available' as const, reason,
                 partner: assignment?.partner_key ? { name: name(assignment.partner_key), online: ctx.online.has(assignment.partner_key) } : null,
                 ...(sideQuest ? { sideQuest: true } : {}),

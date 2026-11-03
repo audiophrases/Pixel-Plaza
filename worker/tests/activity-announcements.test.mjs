@@ -14,6 +14,18 @@ const warmup = () => ({ runId: 'lesson:round1', kind: 'identity', title: 'Secret
     fact: 'You are a dragon.', task: 'Find your partner’s identity.', step: 0, of: 2, team: { done: 0, total: 4 } });
 const acknowledge = (seen, announcement) => announcement.acknowledge.forEach(id => seen.add(id));
 
+test('announcements retain only the language help attached to the visible student view', () => {
+    const q = quest();
+    q.chapter.help = { intro: { ca: 'Compara les proves.' } };
+    q.role.help = { ca: 'Fes preguntes als companys.' };
+    q.clues[0].help = { ca: 'Has vist una bossa blava.' };
+    q.objectives[0].help = { ca: 'On és la bossa?' };
+    const first = activityAnnouncements(q, null, new Set())[0];
+    assert.deepEqual(first.sections.map(s => s.help?.ca), ['Compara les proves.', 'Fes preguntes als companys.', 'Has vist una bossa blava.', 'On és la bossa?']);
+    assert.equal(first.sections.at(-1).answer, true);
+    assert.ok(!first.sections.some(s => s.label === 'The ending'));
+});
+
 test('chapter instructions cover visible tasks once; newly unlocked tasks and restarted stories announce again', () => {
     const q = quest(), seen = new Set();
     const first = activityAnnouncements(q, null, seen);

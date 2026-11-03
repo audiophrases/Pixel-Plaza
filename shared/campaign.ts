@@ -13,11 +13,15 @@
 
 import type { ReportCheck, ReportLevel } from './reportFeedback.ts';
 export const REPORT_MAX_LENGTH = 1000;
+// Optional, author-written language support travels with the content. English stays the answer language.
+export type TextHelp = { ca?: string };
 
 // The student types the answer. `accept` lists the words or short phrases that make an answer right;
 // "the park", "In the park!" and a small spelling slip in a long word all count for "park".
 export type Objective = {
     id: string; text: string; accept: string[];
+    help?: TextHelp;
+    rewardHelp?: Record<string, TextHelp>;
     answerThief?: boolean;            // the answer is the name of the chapter's thief (the thief does not get this question)
     thiefKnows?: boolean;             // the thief already knows the answer, so is not asked
     answerRole?: string;              // the answer is the name of a classmate who has this role (so students must meet people)
@@ -33,26 +37,28 @@ export type Objective = {
     rewards?: Record<string, string>; // the new clue each role earns by answering, by role id
 };
 // A clue everyone finds by standing in a named place: a zone of the game's map.
-export type Discovery = { id: string; zone: string; text: string };
+export type Discovery = { id: string; zone: string; text: string; help?: TextHelp };
 export type Chapter = {
     id: string; title: string;
     intro: string;       // read when the chapter opens
     recap: string;       // "Previously": what the class was doing, shown when a game reopens mid-chapter
     ending: string;      // read when the class has done it: the hook for next time
+    help?: { intro?: TextHelp; recap?: TextHelp; ending?: TextHelp };
+    roleClueHelp?: Record<string, TextHelp>;
     objectives: Objective[];
     share: number;       // the fraction of the class that must finish every main question (0 to 1)
     discoveries: Discovery[];
-    reveals: { id: string; text: string }[]; // news the teacher releases to everyone, in this order
+    reveals: { id: string; text: string; help?: TextHelp }[]; // news the teacher releases to everyone, in this order
     // Each student's own clue for this chapter, instead of the one their role brings. {hat}, {glasses} and {hair} are filled
     // in with how the thief looks, so the clues point at a real avatar in the plaza.
     roleClues?: Record<string, string>;
     // A secret thief among the students: one for a class, two above fifteen, chosen at random. The thief gets this card
     // and this story to tell, and never sees the question about who took the chestnuts.
     // `carry` keeps the thieves of the chapter before; `label` heads the thief's own clue ("Your story" by default).
-    thieves?: { card: string; story: string; label?: string; carry?: boolean };
+    thieves?: { card: string; story: string; label?: string; carry?: boolean; help?: { card?: TextHelp; story?: TextHelp } };
 };
-export type Role = { id: string; name: string; card: string; clue: string };
-export type Campaign = { id: string; title: string; roles: Role[]; chapters: Chapter[]; finale: string };
+export type Role = { id: string; name: string; card: string; clue: string; help?: { card?: TextHelp; clue?: TextHelp } };
+export type Campaign = { id: string; title: string; roles: Role[]; chapters: Chapter[]; finale: string; help?: { finale?: TextHelp }; vocabulary?: string[] };
 export type AnswerFeedback = { objective: string; correct: boolean; wait: boolean; message?: string };
 export type ReportSubmission = { text: string; version: number; submitted: boolean; check?: ReportCheck };
 
@@ -60,22 +66,26 @@ export type ReportSubmission = { text: string; version: number; submitted: boole
 export type QuestView = {
     runId?: string; // Stable across reconnects; new when the teacher restarts this campaign.
     campaign: { id: string; title: string };
+    vocabulary?: string[]; // Public story names/terms accepted by the English chat check; never secret answers.
     status: 'active' | 'chapter_complete' | 'campaign_complete';
-    chapter: { index: number; of: number; title: string; intro: string; ending: string | null };
-    role: { id: string; name: string; card: string };
+    chapter: { index: number; of: number; title: string; intro: string; ending: string | null; help?: { intro?: TextHelp; ending?: TextHelp } };
+    role: { id: string; name: string; card: string; help?: TextHelp };
     // `from` says where a clue came from: "job", a place, "reward" or "news"
-    clues: { id: string; text: string; from: string }[];
-    secret: { title: string; text: string } | null; // only for the thief
+    clues: { id: string; text: string; from: string; help?: TextHelp }[];
+    secret: { title: string; text: string; help?: TextHelp } | null; // only for the thief
     thieves: string[] | null; // who it was, once the chapter is over
-    objectives: { id: string; text: string; done: boolean; optional: boolean; kind: 'text' | 'name' | 'report'; conversation?: ConversationView; report?: ReportSubmission }[];
+    objectives: { id: string; text: string; done: boolean; optional: boolean; kind: 'text' | 'name' | 'report'; help?: TextHelp; conversation?: ConversationView; report?: ReportSubmission }[];
     interviews?: InterviewView[];
     team: { done: number; total: number }; // how far the whole class is through this chapter's main questions
     recap: string | null; // sent when the student comes back to a story already under way
     finale: string | null;
+    recapHelp?: TextHelp;
+    finaleHelp?: TextHelp;
 };
 
 export type BoardQuestView = {
     id: string; text: string; kind: 'text' | 'name' | 'report'; activity: Objective['activity'] | null;
+    help?: TextHelp;
     state: 'available' | 'active' | 'done' | 'waiting'; reason: string | null;
     partner: { name: string; online: boolean } | null;
     conversation?: ConversationView;
@@ -146,10 +156,11 @@ export function chapterDone(chapter: Chapter, players: readonly { done: readonly
 }
 
 // The clues a student has earned by answering questions, for their role.
-export function rewardClues(chapter: Chapter, roleId: string, done: readonly string[]): { id: string; text: string }[] {
+export function rewardClues(chapter: Chapter, roleId: string, done: readonly string[]): { id: string; text: string; help?: TextHelp }[] {
     return chapter.objectives.flatMap(objective => {
         const text = objective.rewards?.[roleId];
-        return text && done.includes(objective.id) ? [{ id: `reward-${objective.id}`, text }] : [];
+        const help = objective.rewardHelp?.[roleId];
+        return text && done.includes(objective.id) ? [{ id: `reward-${objective.id}`, text, ...(help ? { help } : {}) }] : [];
     });
 }
 
@@ -158,7 +169,8 @@ export function rewardClues(chapter: Chapter, roleId: string, done: readonly str
 export function absentRoleClues(campaign: Campaign, chapter: Chapter, roleId: string, done: readonly string[], startingRoles: readonly string[], rewardRoles: readonly string[]) {
     return campaign.roles.flatMap(role => [
         ...(!startingRoles.includes(role.id) && role.id !== roleId
-            ? [{ id: `fallback-role-${role.id}`, text: chapter.roleClues?.[role.id] ?? role.clue, from: 'town notice' }] : []),
+            ? [{ id: `fallback-role-${role.id}`, text: chapter.roleClues?.[role.id] ?? role.clue, from: 'town notice',
+                ...((chapter.roleClues?.[role.id] !== undefined ? chapter.roleClueHelp?.[role.id] : role.help?.clue) ? { help: chapter.roleClues?.[role.id] !== undefined ? chapter.roleClueHelp?.[role.id] : role.help?.clue } : {}) }] : []),
         ...(!rewardRoles.includes(role.id) && role.id !== roleId
             ? rewardClues(chapter, role.id, done).map(clue => ({ ...clue, id: `fallback-${role.id}-${clue.id}`, from: 'town notice' })) : []),
     ]);

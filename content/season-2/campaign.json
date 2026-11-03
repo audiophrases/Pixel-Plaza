@@ -1,0 +1,495 @@
+{
+  "format": "pixel-plaza-campaign",
+  "schemaVersion": 2,
+  "campaign": {
+    "id": "protocol-815",
+    "title": "Protocol 8:15 — The Missing Student",
+    "finale": "Karina is safe. El Idrissi’s ignored warning and cover-up are exposed. Youssef apologises. Ms Diop and Ms Ionescu speak openly. Trust takes longer to repair. When telling the truth costs you something, will you still do it?",
+    "roles": [
+      {
+        "id": "media-analyst",
+        "name": "Media analyst",
+        "card": "Check screenshots and times. Ask classmates what their evidence shows.",
+        "clue": "Laia saved two messages at 8:15: “Stay inside” and “Go to the sports hall.” Both use the school account.",
+        "help": {
+          "card": {
+            "ca": "Comprova les captures de pantalla i les hores. Pregunta als companys què mostren les seves proves."
+          },
+          "clue": {
+            "ca": "La Laia va guardar dos missatges de les 8:15: «Quedeu-vos a dins» i «Aneu al pavelló». Tots dos utilitzen el compte de l’institut."
+          }
+        }
+      },
+      {
+        "id": "witness-interviewer",
+        "name": "Witness interviewer",
+        "card": "Compare what people say. Ask a follow-up question before deciding who to trust.",
+        "clue": "Youssef says, “I have not seen Karina.” Laia remembers them talking before lessons. You do not know when they last met.",
+        "help": {
+          "card": {
+            "ca": "Compara què diu cadascú. Fes una pregunta més abans de decidir de qui et fies."
+          },
+          "clue": {
+            "ca": "En Youssef diu: «No he vist la Karina». La Laia recorda que parlaven abans de classe. No saps quan es van veure per última vegada."
+          }
+        }
+      },
+      {
+        "id": "records-researcher",
+        "name": "Records researcher",
+        "card": "Check documents and their dates. Separate a fact from a guess.",
+        "clue": "At 8:16, Karina was absent from roll call. The office calls its emergency plan “Protocol 8:15”. The messages disagree.",
+        "help": {
+          "card": {
+            "ca": "Comprova els documents i les dates. Distingeix un fet d’una suposició."
+          },
+          "clue": {
+            "ca": "A les 8:16, la Karina no hi era quan van passar llista. El pla d’emergència de secretaria es diu «Protocol 8:15». Els missatges es contradiuen."
+          }
+        }
+      },
+      {
+        "id": "site-observer",
+        "name": "Site observer",
+        "card": "Read evidence at the marked places. Stay outside the blocked passage and report risks to staff.",
+        "clue": "Chidi saw a fallen roof panel blocking the covered passage. Ms Diop told everyone to stay away from the sports hall.",
+        "help": {
+          "card": {
+            "ca": "Llegeix les proves als llocs indicats. No entris al passadís tallat i comunica els riscos al professorat."
+          },
+          "clue": {
+            "ca": "En Chidi va veure una placa del sostre caiguda que bloquejava el passadís cobert. La senyora Diop va dir a tothom que s’allunyés del pavelló."
+          }
+        }
+      }
+    ],
+    "chapters": [
+      {
+        "id": "p815-missing-student",
+        "title": "1. The Missing Student",
+        "intro": "A storm hits Coma-ruga. At 8:15, two school messages give opposite instructions. Karina is missing. Compare evidence at safe locations; let staff handle the emergency.",
+        "recap": "Karina missed roll call. The 8:15 messages disagree. Check facts before blaming anyone.",
+        "ending": "New CCTV: at 8:07, Ms Diop entered the sports hall with Karina. Ms Diop said she had not seen her. Why did she lie?",
+        "share": 0.7,
+        "objectives": [
+          {
+            "id": "p815-c1-messages",
+            "text": "Compare the two messages. Which place do they disagree about?",
+            "accept": [
+              "sports hall",
+              "the sports hall",
+              "gym"
+            ],
+            "help": {
+              "ca": "Compara els dos missatges. Sobre quin lloc es contradiuen?"
+            }
+          },
+          {
+            "id": "p815-c1-passage",
+            "text": "Ask about Chidi’s evidence. What blocked the covered passage?",
+            "accept": [
+              "roof panel",
+              "fallen roof panel",
+              "a roof panel"
+            ],
+            "help": {
+              "ca": "Pregunta per les proves d’en Chidi. Què bloquejava el passadís cobert?"
+            },
+            "after": "p815-c1-messages"
+          },
+          {
+            "id": "p815-c1-briefing",
+            "text": "Exchange evidence with a classmate. Write two facts and one question you still cannot answer.",
+            "accept": [],
+            "help": {
+              "ca": "Intercanvia proves amb un company. Escriu dos fets i una pregunta que encara no pots respondre."
+            },
+            "after": "p815-c1-passage",
+            "kind": "report",
+            "successCriteria": "Two supported facts from this chapter and one unresolved question. Valid facts include contradictory 8:15 messages, Karina missing at 8:16, a fallen roof panel, or Diop keeping students away. Do not require a culprit or Karina’s location.",
+            "level": "A2",
+            "conversation": {
+              "witnesses": 1
+            }
+          },
+          {
+            "id": "p815-c1-rumour",
+            "text": "Write a short group-chat message that corrects a rumour without blaming anyone.",
+            "accept": [],
+            "help": {
+              "ca": "Escriu un missatge breu per al xat del grup que corregeixi un rumor sense culpar ningú."
+            },
+            "optional": true,
+            "after": "p815-c1-briefing",
+            "kind": "report",
+            "successCriteria": "A short English message distinguishing a confirmed fact from uncertainty; no invented accusation. This is a written exercise, not a message sent to another app.",
+            "level": "A2"
+          }
+        ],
+        "discoveries": [
+          {
+            "id": "p815-c1-office",
+            "zone": "admin-office",
+            "text": "Office printout, 8:15: “Stay in classrooms. Do not go to the sports hall.” Another 8:15 message says, “Go to the sports hall.”",
+            "help": {
+              "ca": "Full de secretaria, 8:15: «Quedeu-vos a les aules. No aneu al pavelló». Un altre missatge de les 8:15 diu: «Aneu al pavelló»."
+            }
+          },
+          {
+            "id": "p815-c1-roof",
+            "zone": "sports-hall",
+            "text": "Chidi’s statement: “A roof panel fell across the covered passage. I stayed outside and told a teacher.”",
+            "help": {
+              "ca": "Declaració d’en Chidi: «Una placa del sostre va caure al passadís cobert. Em vaig quedar a fora i vaig avisar un professor»."
+            }
+          },
+          {
+            "id": "p815-c1-register",
+            "zone": "courtyard",
+            "text": "Roll call, 8:16: Karina Gonzalvez is missing. Staff are checking the safe rooms. Nobody has confirmed where she is.",
+            "help": {
+              "ca": "Llista d’assistència, 8:16: falta la Karina Gonzalvez. El personal està comprovant les sales segures. Ningú no ha confirmat on és."
+            }
+          },
+          {
+            "id": "p815-c1-library",
+            "zone": "library",
+            "text": "Laia: “I saved both messages before one disappeared. The same school account posted them.”",
+            "help": {
+              "ca": "La Laia: «Vaig guardar tots dos missatges abans que un desaparegués. Es van publicar des del mateix compte de l’institut»."
+            }
+          }
+        ],
+        "reveals": [
+          {
+            "id": "p815-c1-news-a",
+            "text": "Compare Laia’s screenshot with the office printout. The two messages disagree about the sports hall.",
+            "help": {
+              "ca": "Compara la captura de la Laia amb el full de secretaria. Els dos missatges es contradiuen sobre el pavelló."
+            }
+          },
+          {
+            "id": "p815-c1-news-b",
+            "text": "Chidi saw a fallen roof panel. A blocked route is a fact; an accusation is not proof.",
+            "help": {
+              "ca": "En Chidi va veure una placa del sostre caiguda. Que una ruta estigui tallada és un fet; una acusació no és una prova."
+            }
+          }
+        ],
+        "help": {
+          "intro": {
+            "ca": "Una tempesta arriba a Coma-ruga. A les 8:15, dos missatges de l’institut donen instruccions contràries. La Karina ha desaparegut. Compareu proves en llocs segurs; deixeu l’emergència en mans del personal."
+          },
+          "recap": {
+            "ca": "La Karina no hi era quan van passar llista. Els missatges de les 8:15 es contradiuen. Comproveu els fets abans de culpar ningú."
+          },
+          "ending": {
+            "ca": "Nova gravació de seguretat: a les 8:07, la senyora Diop va entrar al pavelló amb la Karina. Havia dit que no l’havia vista. Per què va mentir?"
+          }
+        }
+      },
+      {
+        "id": "p815-everyone-secret",
+        "title": "2. Everyone Has a Secret",
+        "intro": "CCTV links Ms Diop to Karina. Ms Ionescu defends her. Youssef admits Karina was investigating a safety problem. Find out what the school knew before the storm.",
+        "recap": "Ms Diop entered the sports hall with Karina at 8:07, then denied seeing her. A camera shows where they went, not why.",
+        "ending": "8:28. Karina’s account sends: “I’m safe. But the person you should be afraid of isn’t Ms Diop. It’s the person who told her to keep quiet.”",
+        "share": 0.7,
+        "objectives": [
+          {
+            "id": "p815-c2-warning",
+            "text": "Check the dated notice. Which teacher reported the danger before the storm?",
+            "accept": [
+              "Ms Diop",
+              "Diop",
+              "Awa Diop",
+              "Ms Awa Diop"
+            ],
+            "help": {
+              "ca": "Comprova l’avís amb data. Quina professora va informar del perill abans de la tempesta?"
+            }
+          },
+          {
+            "id": "p815-c2-receipt",
+            "text": "Compare the notice and receipt. At what time on Friday did the office receive the warning?",
+            "accept": [
+              "09:45",
+              "9:45",
+              "quarter to ten",
+              "nine forty-five"
+            ],
+            "help": {
+              "ca": "Compara l’avís amb el rebut. A quina hora de divendres va rebre secretaria l’avís?"
+            },
+            "after": "p815-c2-warning"
+          },
+          {
+            "id": "p815-c2-reconsider",
+            "text": "Exchange evidence. Use two sources to explain why blaming Ms Diop may be too early.",
+            "accept": [],
+            "help": {
+              "ca": "Intercanvia proves. Fes servir dues fonts per explicar per què pot ser massa aviat per culpar la senyora Diop."
+            },
+            "after": "p815-c2-receipt",
+            "kind": "report",
+            "successCriteria": "Use two sources, such as Sokolova’s dated warning, the office receipt, Youssef’s admission or Ionescu’s account. Explain uncertainty or evidence that Diop reported danger or tried to help. Do not demand knowledge of Karina’s location or the final confession.",
+            "level": "A2",
+            "conversation": {
+              "witnesses": 1
+            }
+          },
+          {
+            "id": "p815-c2-friend",
+            "text": "Youssef left Karina alone. Write what he should say to her now, and why.",
+            "accept": [],
+            "help": {
+              "ca": "En Youssef va deixar sola la Karina. Escriu què li hauria de dir ara i per què."
+            },
+            "optional": true,
+            "after": "p815-c2-reconsider",
+            "kind": "report",
+            "successCriteria": "An English response acknowledging Youssef’s choice and offering a reasoned apology or next step. Accept different thoughtful opinions.",
+            "level": "A2"
+          }
+        ],
+        "discoveries": [
+          {
+            "id": "p815-c2-notice",
+            "zone": "library",
+            "text": "Ms Sokolova’s copy: “Friday, 09:20. Covered-passage roof unsafe. Keep it closed until repaired. Reported by Awa Diop.”",
+            "help": {
+              "ca": "Còpia de la senyora Sokolova: «Divendres, 09:20. El sostre del passadís cobert és insegur. Manteniu-lo tancat fins que es repari. Avís de l’Awa Diop»."
+            }
+          },
+          {
+            "id": "p815-c2-office-log",
+            "zone": "admin-office",
+            "text": "Receipt: “Friday, 09:45 — warning received by school management.” A later note says, “Repair delayed.” There is no completion record.",
+            "help": {
+              "ca": "Rebut: «Divendres, 09:45 — la direcció rep l’avís». Una nota posterior diu: «Reparació ajornada». No hi ha cap registre que indiqui que s’hagi reparat."
+            }
+          },
+          {
+            "id": "p815-c2-clip",
+            "zone": "sports-hall",
+            "text": "CCTV summary: 8:07, Ms Diop and Karina enter. The camera does not show the back exit. The clip alone cannot explain what happened next.",
+            "help": {
+              "ca": "Resum de la gravació: a les 8:07 entren la senyora Diop i la Karina. La càmera no mostra la sortida del darrere. Aquest fragment no explica què va passar després."
+            }
+          }
+        ],
+        "reveals": [
+          {
+            "id": "p815-c2-news-a",
+            "text": "The notice is signed by Awa Diop. Its time is 09:20; the office receipt is 09:45. These are different events.",
+            "help": {
+              "ca": "L’avís està signat per l’Awa Diop. La seva hora és les 09:20; el rebut de secretaria és de les 09:45. Són dos fets diferents."
+            }
+          },
+          {
+            "id": "p815-c2-news-b",
+            "text": "A teacher can lie and still have tried to protect someone. Compare the warning, CCTV and witness accounts.",
+            "help": {
+              "ca": "Una professora pot haver mentit i, alhora, haver intentat protegir algú. Compara l’avís, la gravació i els testimonis."
+            }
+          }
+        ],
+        "roleClues": {
+          "media-analyst": "Laia’s screenshot shows both 8:15 messages came from the office account. It does not identify who used that account.",
+          "witness-interviewer": "Youssef admits: “Karina wanted to report the unsafe passage. She asked me to help. I got scared and left her alone.”",
+          "records-researcher": "Ms Sokolova kept the warning: Friday, 09:20, signed Awa Diop. Office receipt: Friday, 09:45. The repair was delayed.",
+          "site-observer": "Ms Ionescu says: “Awa warned us about the passage before the storm. She was trying to help Karina. I cannot say more yet.”"
+        },
+        "help": {
+          "intro": {
+            "ca": "Una gravació relaciona la senyora Diop amb la Karina. La senyora Ionescu la defensa. En Youssef admet que la Karina investigava un problema de seguretat. Esbrineu què sabia l’institut abans de la tempesta."
+          },
+          "recap": {
+            "ca": "La senyora Diop va entrar al pavelló amb la Karina a les 8:07 i després va negar haver-la vista. Una càmera mostra on van anar, però no per què."
+          },
+          "ending": {
+            "ca": "8:28. El compte de la Karina envia: «Estic bé. Però la persona que us hauria de fer por no és la senyora Diop. És qui li va dir que callés»."
+          }
+        },
+        "roleClueHelp": {
+          "media-analyst": {
+            "ca": "La captura de la Laia mostra que els dos missatges de les 8:15 provenien del compte de secretaria. No identifica qui el va utilitzar."
+          },
+          "witness-interviewer": {
+            "ca": "En Youssef admet: «La Karina volia denunciar el mal estat del passadís. Em va demanar ajuda. Vaig tenir por i la vaig deixar sola»."
+          },
+          "records-researcher": {
+            "ca": "La senyora Sokolova va conservar l’avís: divendres, 09:20, signat per l’Awa Diop. Rebut de secretaria: divendres, 09:45. La reparació es va ajornar."
+          },
+          "site-observer": {
+            "ca": "La senyora Ionescu diu: «L’Awa ens va avisar del passadís abans de la tempesta. Intentava ajudar la Karina. Encara no puc dir res més»."
+          }
+        }
+      },
+      {
+        "id": "p815-truth",
+        "title": "3. The Truth",
+        "intro": "Karina says she is safe. Check where the message came from. Rebuild the timeline and send your findings to staff. Evidence matters more than rumours.",
+        "recap": "Ms Diop warned the school on Friday. The office delayed repairs. Karina’s message says someone ordered Ms Diop to stay quiet.",
+        "ending": "Staff confirm Karina is safe and close the damaged passage. The evidence exposes Mr El Idrissi’s cover-up. Ms Diop and Ms Ionescu agree to tell the whole truth.",
+        "share": 0.7,
+        "objectives": [
+          {
+            "id": "p815-c3-safe",
+            "text": "Check the message record and staff statement. Where is Karina now?",
+            "accept": [
+              "first aid room",
+              "the first aid room",
+              "medical room",
+              "nurse room",
+              "nurses room"
+            ],
+            "help": {
+              "ca": "Comprova el registre del missatge i la declaració del personal. On és ara la Karina?"
+            }
+          },
+          {
+            "id": "p815-c3-order",
+            "text": "Compare the email and Ms Diop’s account. Who ordered her to hide the warning?",
+            "accept": [
+              "El Idrissi",
+              "Mr El Idrissi",
+              "the deputy head",
+              "deputy head"
+            ],
+            "help": {
+              "ca": "Compara el correu amb la declaració de la senyora Diop. Qui li va ordenar que amagués l’avís?"
+            },
+            "after": "p815-c3-safe"
+          },
+          {
+            "id": "p815-c3-report",
+            "text": "Exchange evidence. Report the unsafe place, two facts, and one safe next step for staff.",
+            "accept": [],
+            "help": {
+              "ca": "Intercanvia proves. Informa del lloc insegur, de dos fets i d’un pas segur que ha de fer el personal."
+            },
+            "after": "p815-c3-order",
+            "kind": "report",
+            "successCriteria": "Identify the covered passage near the sports hall as unsafe; give two supported facts from the warning, receipt, email, CCTV, staff statements or Karina’s location; suggest a safe staff-led action such as keeping the passage closed, checking attendance or arranging repairs. Do not require entering the damaged area.",
+            "level": "A2",
+            "conversation": {
+              "witnesses": 1
+            }
+          },
+          {
+            "id": "p815-c3-trust",
+            "text": "Choose Youssef, Ms Diop or Ms Ionescu. What should they do to rebuild trust? Give a reason.",
+            "accept": [],
+            "help": {
+              "ca": "Tria en Youssef, la senyora Diop o la senyora Ionescu. Què hauria de fer per recuperar la confiança? Dona una raó."
+            },
+            "optional": true,
+            "after": "p815-c3-report",
+            "kind": "report",
+            "successCriteria": "A reasoned English opinion about one named character, with an action and a reason. Accept different defensible views; no single moral answer.",
+            "level": "A2"
+          }
+        ],
+        "discoveries": [
+          {
+            "id": "p815-c3-confirmation",
+            "zone": "first-aid",
+            "text": "Staff statement: “Karina is safe in the first-aid room. She arrived with Ms Diop at 8:12. Her phone was wet; we lent her a laptop.”",
+            "help": {
+              "ca": "Declaració del personal: «La Karina està bé a la infermeria. Va arribar amb la senyora Diop a les 8:12. Tenia el mòbil mullat; li vam deixar un portàtil»."
+            }
+          },
+          {
+            "id": "p815-c3-email",
+            "zone": "admin-office",
+            "text": "Saved email — Mr El Idrissi, deputy head: “Delay the repair.” Monday, 8:14: “Do not mention Friday’s warning. Say it is new storm damage.”",
+            "help": {
+              "ca": "Correu guardat — senyor El Idrissi, cap d’estudis: «Ajorneu la reparació». Dilluns, 8:14: «No esmenteu l’avís de divendres. Digueu que són danys nous de la tempesta»."
+            }
+          },
+          {
+            "id": "p815-c3-timeline",
+            "zone": "library",
+            "text": "Records: Friday 09:20 warning; 09:45 receipt. Monday 8:07 CCTV; 8:12 safe-room arrival; 8:14 concealment order; 8:15 conflicting messages; 8:16 roll call; 8:28 Karina’s message.",
+            "help": {
+              "ca": "Registres: divendres, 09:20 avís; 09:45 rebut. Dilluns, 8:07 gravació; 8:12 arribada a la sala segura; 8:14 ordre d’encobrir; 8:15 missatges contradictoris; 8:16 llista; 8:28 missatge de la Karina."
+            }
+          },
+          {
+            "id": "p815-c3-route",
+            "zone": "sports-hall",
+            "text": "Chidi’s photo matches Ms Diop’s warning: the damaged roof is over the covered passage. The safe back route to first aid does not use that passage.",
+            "help": {
+              "ca": "La foto d’en Chidi coincideix amb l’avís de la senyora Diop: el sostre danyat és el del passadís cobert. La ruta segura del darrere fins a la infermeria no passa per aquest passadís."
+            }
+          }
+        ],
+        "reveals": [
+          {
+            "id": "p815-c3-news-a",
+            "text": "Karina’s phone failed, but her account still worked on the borrowed laptop. Check the first-aid statement and message record.",
+            "help": {
+              "ca": "El mòbil de la Karina no funcionava, però el compte sí que funcionava al portàtil que li van deixar. Comprova la declaració d’infermeria i el registre del missatge."
+            }
+          },
+          {
+            "id": "p815-c3-news-b",
+            "text": "El Idrissi’s email links the delayed repair to the attempt to hide the warning. Report evidence to staff and keep away from the blocked passage.",
+            "help": {
+              "ca": "El correu d’El Idrissi relaciona l’ajornament de la reparació amb l’intent d’amagar l’avís. Comunica les proves al personal i no t’acostis al passadís tallat."
+            }
+          }
+        ],
+        "roleClues": {
+          "media-analyst": "The 8:28 message came from a school laptop in the first-aid room. Karina logged in there after her wet phone stopped working.",
+          "witness-interviewer": "Ms Ionescu admits: “Awa took Karina through the back exit to the first-aid room at 8:12. I knew, but I was afraid to challenge management.”",
+          "records-researcher": "An email from deputy head Mr El Idrissi says: “Delay the repair.” His Monday message says: “Do not mention Friday’s warning. Say it is new storm damage.”",
+          "site-observer": "Ms Diop admits: “I saw the danger and moved Karina to safety. El Idrissi told me to keep quiet. I lied because I was afraid of losing my job.”"
+        },
+        "help": {
+          "intro": {
+            "ca": "La Karina diu que està bé. Comprova d’on ve el missatge. Reconstrueix la cronologia i envia les conclusions al professorat. Les proves compten més que els rumors."
+          },
+          "recap": {
+            "ca": "La senyora Diop va avisar l’institut divendres. Secretaria va ajornar les reparacions. El missatge de la Karina diu que algú va ordenar a la senyora Diop que callés."
+          },
+          "ending": {
+            "ca": "El personal confirma que la Karina està bé i tanca el passadís danyat. Les proves destapen l’encobriment del senyor El Idrissi. Les senyores Diop i Ionescu accepten explicar tota la veritat."
+          }
+        },
+        "roleClueHelp": {
+          "media-analyst": {
+            "ca": "El missatge de les 8:28 es va enviar des d’un portàtil de l’institut a la infermeria. La Karina hi va iniciar sessió després que el mòbil, mullat, deixés de funcionar."
+          },
+          "witness-interviewer": {
+            "ca": "La senyora Ionescu admet: «L’Awa va portar la Karina a la infermeria per la sortida del darrere a les 8:12. Ho sabia, però tenia por d’enfrontar-me a la direcció»."
+          },
+          "records-researcher": {
+            "ca": "Un correu del cap d’estudis, el senyor El Idrissi, diu: «Ajorneu la reparació». El missatge de dilluns diu: «No esmenteu l’avís de divendres. Digueu que són danys nous de la tempesta»."
+          },
+          "site-observer": {
+            "ca": "La senyora Diop admet: «Vaig veure el perill i vaig portar la Karina a un lloc segur. El Idrissi em va dir que callés. Vaig mentir perquè tenia por de perdre la feina»."
+          }
+        }
+      }
+    ],
+    "help": {
+      "finale": {
+        "ca": "La Karina està bé. Queden al descobert l’avís ignorat i l’encobriment d’El Idrissi. En Youssef demana perdó. Les senyores Diop i Ionescu parlen obertament. Recuperar la confiança costa més. Si dir la veritat et fa perdre alguna cosa, la diràs igualment?"
+      }
+    },
+    "vocabulary": [
+      "Karina Gonzalvez",
+      "Youssef El Amrani",
+      "Awa Diop",
+      "Andreea Ionescu",
+      "El Idrissi",
+      "Laia Garcia",
+      "Chidi Okafor",
+      "Irina Sokolova",
+      "Coma-ruga",
+      "CCTV"
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "format": "pixel-plaza-season-pack",
+  "version": 1,
+  "id": "protocol-815",
+  "season": 2,
+  "title": "Protocol 8:15 — The Missing Student",
+  "level": "A2–B1",
+  "minutesPerChapter": [
+    20,
+    25
+  ],
+  "campaign": "campaign.json",
+  "chapters": [
+    "chapters/01.json",
+    "chapters/02.json",
+    "chapters/03.json"
+  ],
+  "theme": "theme.json",
+  "background": "art/campus.png",
+  "instructions": "README.md",
+  "teacherGuide": "teacher-guide.md",
+  "source": "storyline.txt",
+  "languages": [
+    "en",
+    "ca"
+  ],
+  "installation": "Import the map and background through Map Studio; import the campaign or separate chapters through Mission Studio. No runtime registration or built-in content."
+}

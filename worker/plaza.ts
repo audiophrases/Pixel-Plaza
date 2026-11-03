@@ -1589,23 +1589,32 @@ export class PlazaRoom extends DurableObject<Env> {
             present.filter(item => !chapter.thieves || !thieves.includes(item.student_key)).map(item => item.role_id),
             present.map(item => item.role_id));
         const showResolution = row.status === 'campaign_complete' || mainFinished(chapter, player.done);
+        const ending = row.status === 'active' || !showResolution ? null : chapter.ending;
+        const recap = !withRecap || row.status !== 'active' ? null
+            : row.chapter > 0 ? campaign.chapters[row.chapter - 1].ending
+            : player.clues.length || player.done.length ? chapter.recap : null;
+        const recapHelp = row.chapter > 0 ? campaign.chapters[row.chapter - 1].help?.ending : chapter.help?.recap;
+        const roleHelp = isThief && chapter.thieves ? chapter.thieves.help?.story
+            : chapter.roleClues?.[role.id] !== undefined ? chapter.roleClueHelp?.[role.id] : role.help?.clue;
         return {
             runId: `${game}:${row.live_epoch ?? row.revision_id ?? campaign.id}`,
             campaign: { id: campaign.id, title: campaign.title },
+            ...(campaign.vocabulary?.length ? { vocabulary: campaign.vocabulary } : {}),
             status: row.status,
             chapter: { index: row.chapter, of: campaign.chapters.length, title: chapter.title, intro: chapter.intro,
-                ending: row.status === 'active' || !showResolution ? null : chapter.ending },
-            role: { id: role.id, name: role.name, card: role.card },
+                ending, ...(chapter.help ? { help: { intro: chapter.help.intro, ...(ending ? { ending: chapter.help.ending } : {}) } } : {}) },
+            role: { id: role.id, name: role.name, card: role.card, ...(role.help?.card ? { help: role.help.card } : {}) },
             clues: [
                 { id: `role-${role.id}`, from: 'job',
+                    ...(roleHelp?.ca ? { help: { ca: fillThiefClue(roleHelp.ca, looks) } } : {}),
                     text: isThief && chapter.thieves ? `${chapter.thieves.label ?? 'Your story'}: ${chapter.thieves.story}` : fillThiefClue(chapter.roleClues?.[role.id] ?? role.clue, looks) },
-                ...found.map(item => ({ id: item.id, text: item.text, from: item.zone })),
+                ...found.map(item => ({ id: item.id, text: item.text, from: item.zone, ...(item.help ? { help: item.help } : {}) })),
                 ...rewardClues(chapter, role.id, player.done).map(item => ({ ...item, from: 'reward' })),
-                ...fallback.map(item => ({ ...item, text: fillThiefClue(item.text, looks) })),
-                ...chapter.reveals.slice(0, row.revealed).map(item => ({ id: `news-${item.id}`, text: item.text, from: 'news' })),
+                ...fallback.map(item => ({ ...item, text: fillThiefClue(item.text, looks), ...(item.help?.ca ? { help: { ca: fillThiefClue(item.help.ca, looks) } } : {}) })),
+                ...chapter.reveals.slice(0, row.revealed).map(item => ({ id: `news-${item.id}`, text: item.text, from: 'news', ...(item.help ? { help: item.help } : {}) })),
             ],
             // Reaching the class threshold does not close questions; the teacher advances the chapter.
-            secret: isThief && chapter.thieves ? { title: 'You are the thief', text: chapter.thieves.card } : null,
+            secret: isThief && chapter.thieves ? { title: 'You are the thief', text: chapter.thieves.card, ...(chapter.thieves.help?.card ? { help: chapter.thieves.help.card } : {}) } : null,
             thieves: chapter.thieves && row.status !== 'active' && showResolution ? thieves.map(key => names.get(key) ?? 'Student') : null,
             objectives: chapter.objectives.filter(objective => !objective.board && isUnlocked(objective, player.done) && (row.status !== 'campaign_complete' || objective.optional)
                 && !(isThief && (objective.answerThief || objective.thiefKnows)))
@@ -1615,16 +1624,17 @@ export class PlazaRoom extends DurableObject<Env> {
                         ? ` ${role.id === objective.answerRole ? 'You have this role, and no other student with it is online.' : 'No classmate with this role is available.'} Type the role name (${fallback}) to continue with the town notice.`
                         : objective.answerRole && role.id === objective.answerRole ? ' You have this role. Find another student with the same role and enter their displayed name.' : ''), done: player.done.includes(objective.id), optional: !!objective.optional,
                         kind: objective.kind === 'report' ? 'report' as const : objective.answerRole ? 'name' as const : 'text' as const,
+                        ...(objective.help?.ca ? { help: { ca: objective.help.ca + (fallback ? ` No hi ha cap company disponible amb aquest rol. Escriu el nom del rol (${fallback}) per continuar.`
+                            : objective.answerRole && role.id === objective.answerRole ? ' Tens aquest rol. Busca un altre alumne amb el mateix rol i escriu el nom que es veu al seu avatar.' : '') } } : {}),
                         ...(objective.kind === 'report' ? { report: this.reportView(game, objective, studentKey) } : {}),
                         ...(objective.conversation ? { conversation: this.conversation(game, studentKey, objective) } : {}) };
                 }),
             interviews: this.interviews.view(game, row.chapter, studentKey, names, new Map(chapter.objectives.map(o => [o.id, o.text]))),
             team: teamProgress(chapter, this.campaignPlayers(game).map(item => ({ done: item.done, thief: thieves.includes(item.student_key) }))),
             // "Previously", for a student coming back to a story that is already under way
-            recap: !withRecap || row.status !== 'active' ? null
-                : row.chapter > 0 ? campaign.chapters[row.chapter - 1].ending
-                : player.clues.length || player.done.length ? chapter.recap : null,
-            finale: row.status === 'campaign_complete' ? campaign.finale : null
+            recap, ...(recap && recapHelp ? { recapHelp } : {}),
+            finale: row.status === 'campaign_complete' ? campaign.finale : null,
+            ...(row.status === 'campaign_complete' && campaign.help?.finale ? { finaleHelp: campaign.help.finale } : {})
         };
     }
 
@@ -2836,7 +2846,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // Names and other words the English check takes besides the dictionary's.
     private englishNames(game: string): string[] {
-        return [...this.rosterNames(game).values(), ...IDENTITY_NAMES, ...warmupVocabulary(this.warmupDefinition(game)), ...warmupVocabulary(this.savedWarmup('identity').definition)];
+        return [...this.rosterNames(game).values(), ...IDENTITY_NAMES, ...warmupVocabulary(this.warmupDefinition(game)), ...warmupVocabulary(this.savedWarmup('identity').definition), ...(this.gameCampaign(game)?.vocabulary ?? [])];
     }
 
     // On the teacher's laptop, whether the English check takes a word. A blocked word is then also found inside

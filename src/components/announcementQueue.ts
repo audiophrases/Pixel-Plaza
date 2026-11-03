@@ -1,8 +1,8 @@
-import type { BoardView, QuestView } from '../../shared/campaign';
+import type { BoardView, QuestView, TextHelp } from '../../shared/campaign';
 import type { WarmupView } from '../../shared/warmup';
 import { IDENTITY_CHAT_REMINDER } from '../../shared/activityChat.ts';
 
-export type ActivityInstruction = { label: string; text: string };
+export type ActivityInstruction = { label: string; text: string; help?: TextHelp; answer?: boolean };
 export type ActivityAnnouncement = {
     id: string; acknowledge: string[]; kind: 'chapter' | 'warmup' | 'task' | 'board' | 'news' | 'ending';
     eyebrow: string; title: string; sections: ActivityInstruction[]; next: string;
@@ -10,8 +10,9 @@ export type ActivityAnnouncement = {
 const key = (...parts: unknown[]) => JSON.stringify(parts);
 const witnessText = (count: number) => `In the Journal, use Choose a witness to exchange evidence with ${count === 1 ? 'one classmate' : `${count} different classmates`}. When they have replied, submit your answer in the Journal.`;
 const taskInstructions = (objective: QuestView['objectives'][number]): ActivityInstruction[] => [
-    { label: objective.optional ? 'Optional task' : 'Your task', text: objective.text },
-    ...(objective.conversation ? [{ label: 'Talk before answering', text: witnessText(objective.conversation.required) }] : []),
+    { label: objective.optional ? 'Optional task' : 'Your task', text: objective.text, help: objective.help, answer: true },
+    ...(objective.conversation ? [{ label: 'Talk before answering', text: witnessText(objective.conversation.required),
+        ...(objective.help?.ca ? { help: { ca: `Al Journal, prem «Choose a witness» i intercanvia proves amb ${objective.conversation.required === 1 ? 'un company' : `${objective.conversation.required} companys diferents`}. Quan hagin respost, envia la teva resposta en anglès.` } } : {}) }] : []),
 ];
 
 // Build only from the server's private view for this student. The browser never
@@ -42,11 +43,11 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
     if (quest && quest.status !== 'campaign_complete' && !seen.has(intro)) {
         add(intro, { kind: 'chapter', eyebrow: `CHAPTER ${quest.chapter.index + 1} OF ${quest.chapter.of}`, title: quest.chapter.title,
             sections: [
-                ...(quest.recap ? [{ label: 'Previously', text: quest.recap }] : []),
-                { label: 'The story', text: quest.chapter.intro },
-                { label: `You are ${quest.role.name}`, text: quest.role.card },
-                ...(quest.secret ? [{ label: quest.secret.title, text: quest.secret.text }] : []),
-                ...quest.clues.filter(c => c.from === 'job').map(c => ({ label: 'Your private clue', text: c.text })),
+                ...(quest.recap ? [{ label: 'Previously', text: quest.recap, help: quest.recapHelp }] : []),
+                { label: 'The story', text: quest.chapter.intro, help: quest.chapter.help?.intro },
+                { label: `You are ${quest.role.name}`, text: quest.role.card, help: quest.role.help },
+                ...(quest.secret ? [{ label: quest.secret.title, text: quest.secret.text, help: quest.secret.help }] : []),
+                ...quest.clues.filter(c => c.from === 'job').map(c => ({ label: 'Your private clue', text: c.text, help: c.help })),
                 ...current.flatMap(taskInstructions),
             ], next: 'Press OK, then use chat to talk to classmates. Your clues, tasks and answer boxes are in the Journal.' }, current.map(o => taskKey(o.id)));
     } else if (quest && quest.status !== 'campaign_complete') {
@@ -60,31 +61,31 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
         if (board.sideQuests.state === 'choose') {
             const open = items.filter(o => o.sideQuest && o.state === 'available');
             add(key('choose', 'board', items.filter(o => o.sideQuest && o.state === 'done').length), { kind: 'board', eyebrow: 'TIME FOR A SIDE QUEST', title: 'Choose a side quest',
-                sections: open.slice(0, 5).map(o => ({ label: 'Side quest', text: o.text })), next: `Press OK, then accept one in the Journal${open.length > 5 ? ` (${open.length} to choose from)` : ''}. You do one side quest at a time.` });
+                sections: open.slice(0, 5).map(o => ({ label: 'Side quest', text: o.text, help: o.help, answer: true })), next: `Press OK, then accept one in the Journal${open.length > 5 ? ` (${open.length} to choose from)` : ''}. You do one side quest at a time.` });
         }
         const available = items.filter(o => o.state === 'available' && !o.sideQuest && !seen.has(key('offer', run, o.id)));
         if (available.length) add(key('offer', run, available[0].id), { kind: 'board', eyebrow: 'OPTIONAL SIDE QUESTS', title: available.length === 1 ? 'A side quest is available' : `${available.length} side quests are available`,
-            sections: available.map(o => ({ label: o.activity ? 'Partner activity' : 'Optional activity', text: o.text })),
+            sections: available.map(o => ({ label: o.activity ? 'Partner activity' : 'Optional activity', text: o.text, help: o.help, answer: true })),
             next: 'These are optional. Press OK, then open Journal → Quest board and choose Accept quest if you want to join. OK does not accept a quest.' }, available.slice(1).map(o => key('offer', run, o.id)));
         for (const item of items) if (item.state === 'active') {
             add(key('accepted', 'board', item.id), { kind: 'board', eyebrow: 'SIDE QUEST ACCEPTED', title: item.partner ? `Work with ${item.partner.name}` : 'Your side quest is ready',
-                sections: [{ label: 'What to do', text: item.text }, ...(item.partner ? [{ label: 'Your partner', text: `${item.partner.name}${item.partner.online ? '' : ' is away from the plaza. You can wait or choose Find another partner in the Journal.'}` }] : []),
+                sections: [{ label: 'What to do', text: item.text, help: item.help, answer: true }, ...(item.partner ? [{ label: 'Your partner', text: `${item.partner.name}${item.partner.online ? '' : ' is away from the plaza. You can wait or choose Find another partner in the Journal.'}` }] : []),
                     ...(item.conversation ? [{ label: 'Exchange evidence', text: witnessText(item.conversation.required) }] : []),
                     ...(item.kind === 'report' ? [{ label: 'Your report', text: 'Write what you learned in the Journal. Your teacher will read your response.' }] : [])], next: 'Your side quest and its answer box are in the Journal.' }, [key('offer', run, item.id)]);
         }
         for (const item of items) if (item.state === 'active' && item.group?.state === 'playing') {
             add(key('group', 'board', item.id), { kind: 'board', eyebrow: item.group.size === 2 ? 'YOUR PAIR IS READY' : 'YOUR GROUP IS READY', title: `Work with ${item.group.members.join(', ')}`,
-                sections: [{ label: 'What to do', text: item.text }, { label: 'Together', text: 'Find each other in the plaza and talk. One answer in the Journal counts for everyone.' }],
+                sections: [{ label: 'What to do', text: item.text, help: item.help, answer: true }, { label: 'Together', text: 'Find each other in the plaza and talk. One answer in the Journal counts for everyone.' }],
                 next: 'The quest and its answer box are in the Journal.' });
         }
     }
     if (!quest) return result;
     if (quest.status !== 'campaign_complete') {
         const news = quest.clues.filter(c => c.from === 'news' && !seen.has(key('news', run, c.id)));
-        if (news.length) add(key('news', run, news[0].id), { kind: 'news', eyebrow: 'FROM YOUR TEACHER', title: 'New information for the class', sections: news.map(c => ({ label: 'Teacher announcement', text: c.text })), next: 'You can read this again in your Journal clues.' }, news.slice(1).map(c => key('news', run, c.id)));
+        if (news.length) add(key('news', run, news[0].id), { kind: 'news', eyebrow: 'FROM YOUR TEACHER', title: 'New information for the class', sections: news.map(c => ({ label: 'Teacher announcement', text: c.text, help: c.help })), next: 'You can read this again in your Journal clues.' }, news.slice(1).map(c => key('news', run, c.id)));
     }
-    if (quest.status === 'campaign_complete' && quest.finale) add(key('finale', run), { kind: 'ending', eyebrow: 'MISSION COMPLETE', title: quest.campaign.title, sections: [{ label: 'The ending', text: quest.finale }], next: 'Your Journal keeps the story and your discoveries.' });
-    else if (quest.chapter.ending) add(key('ending', run), { kind: 'ending', eyebrow: 'CHAPTER COMPLETE', title: quest.chapter.title, sections: [{ label: 'What happens next', text: quest.chapter.ending }], next: 'You can keep helping classmates and doing optional quests until your teacher starts the next chapter.' });
+    if (quest.status === 'campaign_complete' && quest.finale) add(key('finale', run), { kind: 'ending', eyebrow: 'MISSION COMPLETE', title: quest.campaign.title, sections: [{ label: 'The ending', text: quest.finale, help: quest.finaleHelp }], next: 'Your Journal keeps the story and your discoveries.' });
+    else if (quest.chapter.ending) add(key('ending', run), { kind: 'ending', eyebrow: 'CHAPTER COMPLETE', title: quest.chapter.title, sections: [{ label: 'What happens next', text: quest.chapter.ending, help: quest.chapter.help?.ending }], next: 'You can keep helping classmates and doing optional quests until your teacher starts the next chapter.' });
     return result;
 }
 
