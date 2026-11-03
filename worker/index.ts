@@ -317,7 +317,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             const result = await plaza(env).sideQuestBoard(request.headers.get('x-teacher-session') || '', op, get ? {} : body);
             return 'error' in result ? json({ error: result.error }, result.status) : json(result);
         }
-        if (!(get && op === 'list') && !(post && ['save', 'delete', 'restore', 'import'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
+        if (!(get && op === 'list') && !(post && ['save', 'delete', 'delete-many', 'restore', 'import'].includes(op))) return json({ error: 'That request is not valid.' }, 400);
         const result = await plaza(env).sideQuestStudio(request.headers.get('x-teacher-session') || '', op, get ? {} : body);
         return 'error' in result ? json({ error: result.error }, result.status) : json(result);
     }

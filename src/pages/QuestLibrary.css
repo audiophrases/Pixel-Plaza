@@ -57,6 +57,12 @@
 .ql-actions { border: 0; padding: 0; margin: .8rem 0; display: grid; gap: .5rem; }
 .ql-added, .ql-help { margin-top: 1rem; font-size: .85rem; }
 .ql-tools { display: flex; flex-wrap: wrap; gap: .5rem; }
+.ql-bulk { margin-bottom: 1rem; }
+.ql-bulk p { margin: .5rem 0 0; }
+.ql-delete-confirm { border-color: #dfaaaa; margin-bottom: 1rem; }
+.ql-delete-confirm h3 { margin-top: 0; }
+.ql-delete-confirm details { margin-bottom: 1rem; }
+.ql-delete-confirm ul { max-height: 14rem; overflow: auto; }
 .ql-added-list { padding-left: 1.1rem; }
 .ql-added-list li { margin: .35rem 0; }
 .ql-added-list li > span:first-child { display: block; }

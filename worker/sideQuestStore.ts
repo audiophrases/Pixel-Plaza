@@ -107,6 +107,22 @@ export class SideQuestStore {
             if (here.content !== content) this.write('UPDATE side_quests SET content = ?, version = version + 1, updated = ? WHERE quest_id = ?', content, Date.now(), here.quest_id);
             return { ...this.listing(), quest: checked.quest };
         }
+        if (op === 'delete-many') {
+            if (!Array.isArray(b.quests) || !b.quests.length || b.quests.length > QUEST_LIMIT) return { error: `Select between 1 and ${QUEST_LIMIT} quests to delete.`, status: 400 };
+            const rows: QuestRow[] = []; const ids = new Set<string>();
+            // Validate the entire selection before writing. The caller runs this synchronously in one transaction.
+            for (const item of b.quests) {
+                if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !Number.isSafeInteger(item.version) || item.version < 1 || ids.has(item.id)) return { error: 'Each selected quest needs a unique ID and its current version.', status: 400 };
+                ids.add(item.id);
+                const here = this.row(item.id);
+                if (!here) return { error: 'A selected quest was not found. Refresh the library and try again. No quests were moved.', status: 404 };
+                if (here.version !== item.version || here.deleted) return { error: 'A selected quest changed somewhere else. Refresh the library and try again. No quests were moved.', status: 409 };
+                rows.push(here);
+            }
+            const updated = Date.now();
+            for (const row of rows) this.write('UPDATE side_quests SET deleted = 1, version = version + 1, updated = ? WHERE quest_id = ?', updated, row.quest_id);
+            return this.listing();
+        }
         if (op === 'delete' || op === 'restore') {
             const here = typeof b.id === 'string' ? this.row(b.id) : undefined;
             if (!here) return { error: 'Quest not found.', status: 404 };

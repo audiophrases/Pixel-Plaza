@@ -60,6 +60,7 @@ The server builds each quest from its own copy of the library, checks that a sto
 - **Edit** on a card changes that quest. **Duplicate** opens a copy to make a variant (an easier level, another topic). Games that already have a quest keep the version they got.
 - A **story** quest belongs to one chapter. The editor lists the chapters of the published missions; it can be limited to some roles, unlock after a main question (its ID), or only after the student finishes the main mystery.
 - **Delete** moves a quest to **Trash**, out of the library and out of reach of new releases. **Restore quest** in Trash brings it back.
+- To delete a group, filter the library (for example, choose **Story quests**), click **Select all results**, then **Delete selected** and confirm **Move to Trash**. Select all replaces your selection with every matching quest, including those beyond **Show more**. You can also select cards individually. Deletion has no ten-quest limit; that limit only applies when adding quests to a game. The confirmation lists exactly which quests will move, and games that already have them keep them.
 - **Export** saves the quests you see (all, or those your search shows) as a file. **Import file** adds the quests in such a file and updates those with the same ID; nothing is imported from a file with a broken quest.
 - Each quest is kept on the online Pixel Plaza and travels to and from the class laptop on its own, like a mission. A quest changed in both places while the laptop was offline is kept twice, the laptop's marked *(laptop)*.
 

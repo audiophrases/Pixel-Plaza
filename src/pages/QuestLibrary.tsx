@@ -74,6 +74,7 @@ export default function QuestLibrary() {
     const [trash, setTrash] = useState<SideQuest[]>([]); const [versions, setVersions] = useState<Record<string, number>>({});
     const [sync, setSync] = useState<MissionSync | null>(null);
     const [showTrash, setShowTrash] = useState(false); const [confirming, setConfirming] = useState<string | null>(null);
+    const [deleting, setDeleting] = useState<{ id: string; title: string; version: number }[] | null>(null);
     // The quest open in the editor, new or stored; `saved` once it is stored, until the next edit.
     const [editing, setEditing] = useState<{ quest: SideQuest; creating: boolean; saved: boolean; key: number } | null>(null);
     const fileInput = useRef<HTMLInputElement>(null);
@@ -89,6 +90,7 @@ export default function QuestLibrary() {
     };
     const apply = (result: Listing) => {
         setLibrary({ chapters: result.chapters, quests: result.quests }); setTrash(result.trash); setVersions(result.versions);
+        setSelected(current => current.filter(id => result.quests.some(quest => quest.id === id)));
         if (result.sync) {
             setSync(result.sync);
             if (result.sync.questsKeptBoth?.length) setNotice(`Changed online too, so both versions are kept. Yours is now “${result.sync.questsKeptBoth.map(item => item.title).join('”, “')}”.`);
@@ -130,13 +132,16 @@ export default function QuestLibrary() {
     const categories = useMemo(() => questCategories(quests), [quests]);
     const usedChapters = useMemo(() => new Set(quests.map(quest => quest.chapter)), [quests]);
     const chosen = selected.map(id => quests.find(quest => quest.id === id)).filter((quest): quest is SideQuest => !!quest);
+    const hiddenSelected = chosen.filter(quest => !results.some(result => result.id === quest.id)).length;
     const setFilter = (next: QuestFilters) => { setFilters(next); setShown(PAGE); };
-    const pick = (quest: SideQuest) => { setPreview(null); setSelected(current => current.includes(quest.id) ? current.filter(id => id !== quest.id) : [...current, quest.id]); };
+    const pick = (quest: SideQuest) => { setPreview(null); setDeleting(null); setSelected(current => current.includes(quest.id) ? current.filter(id => id !== quest.id) : [...current, quest.id]); };
+    const selectResults = () => { setPreview(null); setDeleting(null); setSelected(results.map(quest => quest.id)); };
+    const clearSelection = () => { setPreview(null); setDeleting(null); setSelected([]); };
     const surprise = (n: number) => {
         const pool = results.filter(quest => !selected.includes(quest.id) && !blocked(quest));
         const picks: string[] = [];
         while (picks.length < n && pool.length) picks.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0].id);
-        setPreview(null); setSelected(current => [...current, ...picks]);
+        setPreview(null); setDeleting(null); setSelected(current => [...current, ...picks]);
     };
     const presets: { label: string; apply: () => void }[] = [
         { label: 'Warm-ups (5 min)', apply: () => { setQuery(''); setFilter({ maxMinutes: 5 }); } },
@@ -150,7 +155,7 @@ export default function QuestLibrary() {
     const anyFilter = !!query || fitsOnly || playFilter !== 'all' || Object.values(filters).some(value => Array.isArray(value) ? value.length : !!value);
 
     // Writing, changing, deleting and restoring quests. Every answer brings the whole library back.
-    const edit = (quest: SideQuest, creating = false) => { setConfirming(null); setEditing({ quest, creating, saved: false, key: Date.now() }); };
+    const edit = (quest: SideQuest, creating = false) => { setConfirming(null); setDeleting(null); setEditing({ quest, creating, saved: false, key: Date.now() }); };
     const save = (quest: { id: string }) => run(async () => {
         const result = await request<Listing & { quest: SideQuest }>(token, 'side-quests/save', editing?.creating ? { quest, create: true } : { quest, version: versions[quest.id] });
         apply(result);
@@ -158,9 +163,21 @@ export default function QuestLibrary() {
     });
     const remove = (quest: SideQuest) => run(async () => {
         apply(await request<Listing>(token, 'side-quests/delete', { id: quest.id, version: versions[quest.id] }));
-        setConfirming(null); setSelected(current => current.filter(id => id !== quest.id)); if (editing?.quest.id === quest.id) setEditing(null);
+        setConfirming(null); setPreview(null); setSelected(current => current.filter(id => id !== quest.id)); if (editing?.quest.id === quest.id) setEditing(null);
         setNotice(`“${quest.title}” moved to Trash. Restore it from Trash whenever you need it.`);
     });
+    const removeSelected = () => {
+        if (!deleting?.length) return;
+        const selection = deleting;
+        void run(async () => {
+            const result = await request<Listing>(token, 'side-quests/delete-many', { quests: selection.map(({ id, version }) => ({ id, version })) });
+            apply(result);
+            setDeleting(null); setPreview(null);
+            setSelected(current => current.filter(id => !selection.some(quest => quest.id === id)));
+            if (editing && !editing.creating && selection.some(quest => quest.id === editing.quest.id)) setEditing(null);
+            if (!result.sync?.questsKeptBoth?.length) setNotice(`${selection.length} ${selection.length === 1 ? 'quest' : 'quests'} moved to Trash. Restore them from Trash whenever you need them.`);
+        });
+    };
     const restore = (quest: SideQuest) => run(async () => {
         apply(await request<Listing>(token, 'side-quests/restore', { id: quest.id, version: versions[quest.id] }));
         setNotice(`“${quest.title}” is back in the library.`);
@@ -226,13 +243,28 @@ export default function QuestLibrary() {
                         <button type="button" className="mission-button" disabled={busy || library === null} onClick={() => fileInput.current?.click()}>Import file</button>
                         <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void importFile(file); }} />
                         <button type="button" className="mission-button" disabled={!results.length} onClick={() => download(JSON.stringify({ quests: results }, null, 2), 'side-quests.json')}>Export {results.length === quests.length ? 'all' : 'these'}</button>
-                        <button type="button" className="mission-button" aria-pressed={showTrash} onClick={() => setShowTrash(!showTrash)}>{showTrash ? 'Back to the library' : `Trash (${trash.length})`}</button>
-                        {!showTrash && <button type="button" className="mission-button" disabled={!results.length || selected.length >= MAX_RELEASE} onClick={() => surprise(Math.min(5, MAX_RELEASE - selected.length))}>Pick 5 at random from these</button>}
+                        <button type="button" className="mission-button" disabled={busy} aria-pressed={showTrash} onClick={() => { setShowTrash(!showTrash); setDeleting(null); }}>{showTrash ? 'Back to the library' : `Trash (${trash.length})`}</button>
+                        {!showTrash && <button type="button" className="mission-button" disabled={busy || !results.length || selected.length >= MAX_RELEASE} onClick={() => surprise(Math.min(5, MAX_RELEASE - selected.length))}>Pick 5 at random from these</button>}
                     </div></div>
                 {showTrash ? <div className="mission-card">{trash.length ? trash.map(quest => <div className="mission-trash-row" key={quest.id}><span><strong>{quest.title}</strong> <small className="mission-muted">{quest.category} · {levelName(quest.level)}</small></span>
                     <button type="button" className="mission-button" disabled={busy} onClick={() => void restore(quest)}>Restore quest</button></div>)
                     : <p>Trash is empty.</p>}<p className="mission-muted">A quest in Trash cannot be added to games. Games that already have it keep it.</p></div>
                 : <>
+                <div className="ql-bulk" role="group" aria-label="Select and delete quests">
+                    <div className="ql-tools">
+                        <button type="button" className="mission-button" disabled={busy || !results.length} onClick={selectResults}>Select all {results.length} results</button>
+                        <button type="button" className="mission-button danger" disabled={busy || !chosen.length} onClick={() => { setConfirming(null); setPreview(null); setDeleting(chosen.map(quest => ({ id: quest.id, title: quest.title, version: versions[quest.id] }))); }}>Delete selected ({chosen.length})</button>
+                        {!!chosen.length && <button type="button" className="mission-button" disabled={busy} onClick={clearSelection}>Clear selection</button>}
+                    </div>
+                    <p className="mission-muted">{chosen.length} selected{hiddenSelected ? ` (${hiddenSelected} outside the current filters)` : ''}. Select all includes matching quests beyond “Show more”.</p>
+                </div>
+                {deleting && <div className="mission-card ql-delete-confirm" role="alert" aria-label="Confirm deleting selected quests">
+                    <h3>Move {deleting.length} selected {deleting.length === 1 ? 'quest' : 'quests'} to Trash?</h3>
+                    <p>You can restore them from Trash. Games that already have these quests keep them.</p>
+                    <details><summary>Quests to delete ({deleting.length})</summary><ul>{deleting.map(quest => <li key={quest.id}>{quest.title}</li>)}</ul></details>
+                    <div className="ql-tools"><button type="button" className="mission-button danger" disabled={busy} onClick={removeSelected}>Move {deleting.length} {deleting.length === 1 ? 'quest' : 'quests'} to Trash</button>
+                        <button type="button" className="mission-button" disabled={busy} onClick={() => setDeleting(null)}>Keep quests</button></div>
+                </div>}
                 {library !== null && !quests.length && <p className="mission-card ql-empty">The library is empty. On the class laptop the quests arrive from the online Pixel Plaza once you sign in to Teacher controls with internet. You can also write a quest or import a file.</p>}
                 {!!quests.length && !results.length && <p className="mission-card ql-empty">No quests match. Try fewer words or clear a filter.</p>}
                 <div className="ql-results">{results.slice(0, shown).map(quest => {
@@ -257,9 +289,9 @@ export default function QuestLibrary() {
                         </details>
                         {confirming === quest.id
                             ? <div className="ql-confirm" role="alert"><span>Move to Trash?</span><button type="button" className="mission-button danger" disabled={busy} onClick={() => void remove(quest)}>Move to Trash</button><button type="button" className="mission-button" onClick={() => setConfirming(null)}>Keep</button></div>
-                            : <div className="ql-edit-row"><button type="button" onClick={() => edit(quest)}>Edit</button><button type="button" onClick={() => edit({ ...quest, title: `${quest.title.slice(0, 110)} (copy)` }, true)}>Duplicate</button><button type="button" className="danger" onClick={() => setConfirming(quest.id)}>Delete</button></div>}
+                            : <div className="ql-edit-row"><button type="button" disabled={busy} onClick={() => edit(quest)}>Edit</button><button type="button" disabled={busy} onClick={() => edit({ ...quest, title: `${quest.title.slice(0, 110)} (copy)` }, true)}>Duplicate</button><button type="button" className="danger" disabled={busy} onClick={() => { setDeleting(null); setConfirming(quest.id); }}>Delete</button></div>}
                         <footer>{reason ? <span className="ql-reason">{reason}</span> : <span />}
-                            <button type="button" className={`mission-button${on ? ' primary' : ''}`} disabled={!on && (!!reason || selected.length >= MAX_RELEASE)} onClick={() => pick(quest)}>{on ? 'Selected ✓' : 'Select'}</button></footer>
+                            <button type="button" className={`mission-button${on ? ' primary' : ''}`} disabled={busy} aria-pressed={on} onClick={() => pick(quest)}>{on ? 'Selected ✓' : 'Select'}</button></footer>
                     </article>;
                 })}</div>
                 {results.length > shown && <button type="button" className="mission-button ql-more" onClick={() => setShown(shown + PAGE)}>Show {Math.min(PAGE, results.length - shown)} more</button>}
@@ -275,16 +307,17 @@ export default function QuestLibrary() {
                 {target ? <p className="ql-target"><strong>{target.game.name}</strong>{target.mission ? <> · {target.mission.title}<br />Chapter {target.mission.chapter.index + 1}: {target.mission.chapter.title}</> : <> · no campaign: side quests only</>}
                     {!target.open && <><br /><em>Open this game in Teacher controls to add quests.</em></>}</p>
                     : <p className="ql-target">No game yet. In Teacher controls, create or open a game to add quests; a campaign is not needed. You can still browse, write and download.</p>}
-                <p className="mission-muted">{selected.length} of {MAX_RELEASE} chosen. The game adds up to {MAX_RELEASE} at a time.</p>
+                <p className="mission-muted">{chosen.length} selected. The game adds up to {MAX_RELEASE} at a time. You can delete any number of selected quests.</p>
+                {chosen.length > MAX_RELEASE && <p className="ql-reason">Choose {MAX_RELEASE} or fewer quests to add to the game.</p>}
                 {chosen.length ? <ol className="ql-chosen">{chosen.map(quest => <li key={quest.id}><span>{quest.title} <small>{quest.level} · {quest.theme === 'story' ? chapterName(quest.chapter) : THEMES.find(t => t.id === quest.theme)!.name}</small></span>
-                    <button type="button" aria-label={`Remove ${quest.title}`} onClick={() => pick(quest)}>×</button></li>)}</ol> : <p>Select quests from the results.</p>}
+                    <button type="button" disabled={busy} aria-label={`Remove ${quest.title}`} onClick={() => pick(quest)}>×</button></li>)}</ol> : <p>Select quests from the results.</p>}
                 <fieldset className="ql-actions" disabled={busy}>
-                    <button type="button" className="mission-button primary" disabled={!target?.open || !chosen.length || chosen.some(quest => !!blocked(quest))} onClick={() => void run(async () => {
+                    <button type="button" className="mission-button primary" disabled={!target?.open || !chosen.length || chosen.length > MAX_RELEASE || chosen.some(quest => !!blocked(quest))} onClick={() => void run(async () => {
                         const result = await request<{ target: SideQuestTarget; preview: SideQuestPreview }>(token, 'side-quests/board-preview', { gameId: target!.game.id, version: target!.version, questIds: selected });
                         setTarget(result.target); setPreview(result.preview);
                     })}>Review and add to the game</button>
                     <button type="button" className="mission-button" disabled={!chosen.length} onClick={() => download(missionPack(chosen), 'side-quest-pack.json')}>Download for Mission Studio</button>
-                    {!!selected.length && <button type="button" className="mission-button" onClick={() => { setSelected([]); setPreview(null); }}>Clear selection</button>}
+                    {!!selected.length && <button type="button" className="mission-button" onClick={clearSelection}>Clear selection</button>}
                 </fieldset>
                 {preview && <div className="mission-import-preview"><h3>Ready to add to {preview.game.name}</h3>
                     <p className="mission-muted">This review expires at {new Date(preview.expires).toLocaleTimeString()}. Students who can accept now:</p>
@@ -307,6 +340,7 @@ export default function QuestLibrary() {
                     <p>Levels: {LEVELS.map(l => `${l.id} ${l.name}: ${l.description}`).join(' ')}</p>
                     <p>Students can take a side quest straight away, beside a warm-up or campaign, and do one at a time; a student with nothing else to do is asked to choose, and the game chooses after a minute. The game forms pairs and groups; one answer counts for the whole group. Typed answers are checked by the game; written reports receive an automatic task check and one short hint. You can read submitted reports and review uncertain answers in Teacher controls.</p>
                     <p>Every quest is yours to change: <strong>Edit</strong> it, <strong>Duplicate</strong> it to make a variant, or <strong>Delete</strong> it (it goes to Trash). <strong>Export</strong> saves quests as a file; <strong>Import file</strong> adds the quests in a file and updates those with the same ID.</p>
+                    <p>To delete a group, filter the library (for example, <strong>Story quests</strong>), choose <strong>Select all results</strong>, then <strong>Delete selected</strong>. Review the list and move it to Trash.</p>
                 </details>
             </aside>}
         </div>}

@@ -1587,6 +1587,28 @@ test('Side quest library: teachers write, change, delete, restore and import que
         assert.equal(imported.quests.find(q => q.id === 'sq-imported-mingle').format, 'mingle');
         assert.equal((await quests('import', { quests: [{ ...draft, level: 'C2' }] })).status, 400, 'nothing from a broken file');
 
+        // Delete an entire filtered group, including quests beyond the page and release limits.
+        listed = (await quests('list')).body;
+        const story = listed.quests.filter(q => q.chapter !== null).map(q => ({ id: q.id, version: listed.versions[q.id] }));
+        assert.ok(story.length > 40);
+        assert.equal((await api(base, '/api/teacher/side-quests/delete-many', { body: { quests: story } })).status, 401, 'bulk deletion is teacher-only');
+        for (const selection of [[], [story[0], story[0]], [story[0], null], [story[0], { id: story[1].id }], [story[0], { ...story[1], version: '1' }]]) {
+            assert.equal((await quests('delete-many', { quests: selection })).status, 400, 'malformed selections are rejected');
+        }
+        assert.equal((await quests('delete-many', { quests: [story[0], { id: 'sq-missing', version: 1 }] })).status, 404);
+        assert.equal((await quests('delete-many', { quests: [story[0], { ...story[1], version: story[1].version + 1 }] })).status, 409);
+        assert.deepEqual((await quests('list')).body, listed, 'a bad or stale item leaves every quest and version unchanged');
+        const deleted = await quests('delete-many', { quests: story });
+        assert.equal(deleted.status, 200);
+        assert.deepEqual(deleted.body.quests, listed.quests.filter(q => q.chapter === null), 'generic quests are untouched');
+        assert.deepEqual(deleted.body.trash.map(q => q.id), story.map(q => q.id));
+        for (const item of story) assert.equal(deleted.body.versions[item.id], item.version + 1);
+        assert.equal((await quests('delete-many', { quests: story })).status, 409, 'a repeated request cannot mutate the same quests twice');
+        const restored = await quests('restore', { id: story[0].id, version: deleted.body.versions[story[0].id] });
+        assert.equal(restored.status, 200);
+        assert.ok(restored.body.quests.some(q => q.id === story[0].id));
+        assert.equal(restored.body.trash.length, story.length - 1);
+
         // Before quests had a record each, the library was one file. On the next start its quests become records, once.
         await plaza.stop();
         const files = directory => fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);
@@ -1596,6 +1618,7 @@ test('Side quest library: teachers write, change, delete, restore and import que
             const db = new DatabaseSync(file);
             try {
                 if (!db.prepare("SELECT name FROM sqlite_master WHERE name = 'side_quests'").get()) continue;
+                assert.equal(db.prepare('SELECT COUNT(*) AS n FROM side_quests WHERE deleted = 1').get().n, story.length - 1, 'bulk deletion persists to storage');
                 const old = { chapters: library.chapters, quests: [pair, { ...mingle, format: 'class' }, { id: 'broken' }] };
                 db.exec(`DROP TABLE side_quests; CREATE TABLE quest_library (id INTEGER PRIMARY KEY CHECK (id = 1), content TEXT NOT NULL, version INTEGER NOT NULL, synced INTEGER, updated INTEGER NOT NULL)`);
                 db.prepare('INSERT INTO quest_library (id, content, version, synced, updated) VALUES (1, ?, 3, NULL, 0)').run(JSON.stringify(old));
