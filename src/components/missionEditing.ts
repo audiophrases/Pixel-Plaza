@@ -61,6 +61,15 @@ export function missionIssueText(issue: MissionIssue) {
 export function focusMissionIssue(path: string) {
     const editor = document.querySelector<HTMLElement>('.mission-editor');
     if (!editor) return;
+    const picturePath = path.replace(/\[(\d+)\]/g, '.$1').replace(/\.(src|alt)$/, '');
+    const picture = [...editor.querySelectorAll<HTMLElement>('[data-evidence-path]')].find(item => item.dataset.evidencePath === picturePath);
+    if (picture) {
+        let parent: HTMLElement | null = picture;
+        while (parent && parent !== editor) { if (parent.tagName === 'DETAILS') (parent as HTMLDetailsElement).open = true; parent = parent.parentElement; }
+        picture.scrollIntoView?.({ block: 'center' });
+        picture.querySelector<HTMLInputElement>(path.endsWith('.alt') ? 'input:not([type=file])' : 'input[type=file]')?.focus({ preventScroll: true });
+        return;
+    }
     const role = path.match(/^roles\[(\d+)\]/);
     const discovery = path.match(/discoveries\[(\d+)\]/);
     const news = path.match(/reveals\[(\d+)\]/);

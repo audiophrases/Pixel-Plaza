@@ -489,6 +489,19 @@ assert.equal(field('Your answer').value, 'sports hall', 'opening help preserves 
 assert.ok(document.body.textContent!.includes(o.text), 'English stays visible');
 await act(async () => translatedRoot.unmount());
 
+const { default: MissionEvidence } = await import('../src/components/MissionEvidence');
+const pictureRoot = createRoot(document.getElementById('root')!);
+const renderPictures = () => act(async () => pictureRoot.render(<MissionEvidence campaign={translated} chapterIndex={0} onChange={next => { translated = next; }} />));
+await renderPictures();
+await edit('Picture description · Chapter ending', 'A teacher and student enter the hall at 08:07.');
+assert.equal(translated.chapters[0].endingImage?.alt, 'A teacher and student enter the hall at 08:07.');
+assert.deepEqual(validateMission(missionEnvelope(translated)).errors, []);
+await renderPictures();
+await click('Remove picture · Chapter ending');
+assert.equal(translated.chapters[0].endingImage, undefined);
+assert.ok(translated.chapters[0].ending, 'removing the picture keeps its story text');
+await act(async () => pictureRoot.unmount());
+
 const { default: Warmup } = await import('../src/components/Warmup');
 const warmupRoot = createRoot(document.getElementById('root')!);
 let warmup: WarmupView = { runId: 'round-1', kind: 'identity', fact: 'You are Elsa.', task: 'Find Sam’s secret identity.', step: 0, of: 1, team: { done: 0, total: 2 } };

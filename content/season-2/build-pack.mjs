@@ -157,6 +157,19 @@ const campaign = {
     finale: 'Karina is safe. El Idrissi’s ignored warning and cover-up are exposed. Youssef apologises. Ms Diop and Ms Ionescu speak openly. Trust takes longer to repair. When telling the truth costs you something, will you still do it?',
     help: { finale: help('La Karina està bé. Queden al descobert l’avís ignorat i l’encobriment d’El Idrissi. En Youssef demana perdó. Les senyores Diop i Ionescu parlen obertament. Recuperar la confiança costa més. Si dir la veritat et fa perdre alguna cosa, la diràs igualment?') },
 };
+const evidence = (name, alt) => {
+    const extension = name === 'cctv' ? 'jpg' : 'png';
+    const bytes = fs.readFileSync(path.join(directory, `art/evidence/${name}.${extension}`));
+    return { src: `data:image/${extension === 'jpg' ? 'jpeg' : 'png'};base64,${bytes.toString('base64')}`, alt };
+};
+chapters[0].discoveries[0].image = evidence('messages', 'Two messages from the school account at 08:15 give conflicting instructions about the sports hall.');
+chapters[0].endingImage = evidence('cctv', 'CCTV at 08:07 shows a teacher and a student entering the sports hall. The back exit is outside the frame.');
+chapters[1].discoveries[0].image = evidence('warning', 'Awa Diop’s safety warning, Friday 09:20, says to close the unsafe covered passage until repaired.');
+chapters[1].discoveries[1].image = evidence('receipt', 'The office receipt is stamped Friday 09:45. A later note says repair delayed.');
+chapters[1].discoveries[2].image = chapters[0].endingImage;
+chapters[1].endingImage = evidence('karina-message', 'At 08:28, Karina’s account says she is safe and points to the person who told Ms Diop to stay quiet.');
+chapters[2].discoveries[1].image = evidence('email', 'El Idrissi’s saved email delays the repair; his Monday 08:14 message orders staff to hide Friday’s warning.');
+chapters[2].discoveries[2].image = evidence('timeline', 'The records list Friday’s warning and receipt, then Monday’s CCTV, safe-room arrival, concealment order, conflicting messages, roll call and Karina’s message.');
 const writeJson = (file, value) => fs.writeFileSync(path.join(directory, file), JSON.stringify(value, null, 2) + '\n');
 const theme = parseTheme(JSON.parse(fs.readFileSync(path.join(directory, 'theme.json'), 'utf8')));
 const paths = walkReport(theme);
@@ -172,11 +185,12 @@ for (const [i, chapter] of chapters.entries()) {
     if (!validated.campaign) throw new Error(JSON.stringify(validated.errors));
     writeJson(`chapters/0${i + 1}.json`, missionEnvelope(validated.campaign));
 }
-writeJson('manifest.json', { format: 'pixel-plaza-season-pack', version: 1, id: 'protocol-815', season: 2,
+writeJson('manifest.json', { format: 'pixel-plaza-season-pack', version: 2, id: 'protocol-815', season: 2,
     title: campaign.title, level: 'A2–B1', minutesPerChapter: [20, 25], campaign: 'campaign.json', chapters: ['chapters/01.json', 'chapters/02.json', 'chapters/03.json'],
     theme: 'theme.json', background: 'art/campus.png', instructions: 'README.md', teacherGuide: 'teacher-guide.md', source: 'storyline.txt', languages: ['en', 'ca'],
     installation: 'Import the map and background through Map Studio; import the campaign or separate chapters through Mission Studio. No runtime registration or built-in content.' });
-const files = ['manifest.json', 'campaign.json', 'theme.json', 'chapters/01.json', 'chapters/02.json', 'chapters/03.json', 'art/campus.png', 'art/layout.png', 'art/prompt.md', 'README.md', 'teacher-guide.md', 'storyline.txt', 'build-pack.mjs'];
+const files = ['manifest.json', 'campaign.json', 'theme.json', 'chapters/01.json', 'chapters/02.json', 'chapters/03.json', 'art/campus.png', 'art/layout.png', 'art/prompt.md', 'README.md', 'teacher-guide.md', 'storyline.txt', 'build-pack.mjs', 'build-evidence.mjs',
+    ...fs.readdirSync(path.join(directory, 'art/evidence')).map(file => `art/evidence/${file}`)];
 if (files.every(file => fs.existsSync(path.join(directory, file)))) {
     fs.writeFileSync(path.join(directory, 'protocol-815-season-2.zip'), zipFiles(Object.fromEntries(files.map(file => [file, new Uint8Array(fs.readFileSync(path.join(directory, file)))]))));
 }

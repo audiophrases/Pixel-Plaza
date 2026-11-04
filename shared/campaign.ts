@@ -12,6 +12,7 @@
 // class is stuck, the teacher can reveal a prepared piece of news to everyone.
 
 import type { ReportCheck, ReportLevel } from './reportFeedback.ts';
+import type { EvidenceImage } from './evidence.ts';
 export const REPORT_MAX_LENGTH = 1000;
 // Optional, author-written language support travels with the content. English stays the answer language.
 export type TextHelp = { ca?: string };
@@ -37,18 +38,20 @@ export type Objective = {
     rewards?: Record<string, string>; // the new clue each role earns by answering, by role id
 };
 // A clue everyone finds by standing in a named place: a zone of the game's map.
-export type Discovery = { id: string; zone: string; text: string; help?: TextHelp };
+export type Discovery = { id: string; zone: string; text: string; help?: TextHelp; image?: EvidenceImage };
 export type Chapter = {
     id: string; title: string;
     intro: string;       // read when the chapter opens
     recap: string;       // "Previously": what the class was doing, shown when a game reopens mid-chapter
     ending: string;      // read when the class has done it: the hook for next time
+    introImage?: EvidenceImage;
+    endingImage?: EvidenceImage;
     help?: { intro?: TextHelp; recap?: TextHelp; ending?: TextHelp };
     roleClueHelp?: Record<string, TextHelp>;
     objectives: Objective[];
     share: number;       // the fraction of the class that must finish every main question (0 to 1)
     discoveries: Discovery[];
-    reveals: { id: string; text: string; help?: TextHelp }[]; // news the teacher releases to everyone, in this order
+    reveals: { id: string; text: string; help?: TextHelp; image?: EvidenceImage }[]; // news the teacher releases to everyone, in this order
     // Each student's own clue for this chapter, instead of the one their role brings. {hat}, {glasses} and {hair} are filled
     // in with how the thief looks, so the clues point at a real avatar in the plaza.
     roleClues?: Record<string, string>;
@@ -68,10 +71,10 @@ export type QuestView = {
     campaign: { id: string; title: string };
     vocabulary?: string[]; // Public story names/terms accepted by the English chat check; never secret answers.
     status: 'active' | 'chapter_complete' | 'campaign_complete';
-    chapter: { index: number; of: number; title: string; intro: string; ending: string | null; help?: { intro?: TextHelp; ending?: TextHelp } };
+    chapter: { index: number; of: number; title: string; intro: string; ending: string | null; introImage?: EvidenceImage; endingImage?: EvidenceImage; help?: { intro?: TextHelp; ending?: TextHelp } };
     role: { id: string; name: string; card: string; help?: TextHelp };
     // `from` says where a clue came from: "job", a place, "reward" or "news"
-    clues: { id: string; text: string; from: string; help?: TextHelp }[];
+    clues: { id: string; text: string; from: string; help?: TextHelp; image?: EvidenceImage }[];
     secret: { title: string; text: string; help?: TextHelp } | null; // only for the thief
     thieves: string[] | null; // who it was, once the chapter is over
     objectives: { id: string; text: string; done: boolean; optional: boolean; kind: 'text' | 'name' | 'report'; help?: TextHelp; conversation?: ConversationView; report?: ReportSubmission }[];
@@ -80,6 +83,7 @@ export type QuestView = {
     recap: string | null; // sent when the student comes back to a story already under way
     finale: string | null;
     recapHelp?: TextHelp;
+    recapImage?: EvidenceImage;
     finaleHelp?: TextHelp;
 };
 

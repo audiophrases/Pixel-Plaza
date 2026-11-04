@@ -27,6 +27,18 @@ For a standalone lesson, import one file from `chapters/` into its own new missi
 
 Do not run the old map-registry installer for this pack: that installs map files into application source. Use the studios to keep the season entirely in content storage. No deploy is needed for future edits to this season after support for the help fields is deployed.
 
+## Evidence pictures
+
+The campaign and individual chapter files include seven evidence pictures: conflicting messages, CCTV, a safety warning, an office receipt, Karina’s message, an email and the timeline. They are embedded in the JSON; no separate picture upload or asset registration is needed. The campus theme is unchanged by this addition.
+
+In Mission Studio, select a chapter and open **Evidence pictures** to replace or remove a picture, or edit its screen-reader description. Attachments are supported on chapter openings/endings, map clues and teacher news. Choose PNG, JPEG or WebP; the editor reduces large uploads. The mission remains subject to its 512 KB limit, so use focused evidence images instead of full-page scans.
+
+Students use **Enlarge evidence** in the Journal or instruction pop-ups. The enlarged view includes the matching English text and expandable Catalan help. Escape or **Close picture** returns to the card without clearing an answer. Pictures follow the same discovery, news-release and ending rules as their text.
+
+Editable document sources and the preserved generated CCTV original are in `art/evidence/`. Run `node content/season-2/build-evidence.mjs` before `build-pack.mjs` when changing the art sources. The exact CCTV prompt is in `art/evidence/prompt.md`.
+
+This update needs the app version with evidence-picture support. Re-import the updated campaign into a draft, review and publish; existing games retain their pinned revision. You do not need to re-import the theme.
+
 ## Where Catalan appears
 
 English stays visible. **Ajuda en català** is closed by default immediately below each available story, private role card, clue, task, teacher news and ending in the **Journal** and **instruction pop-ups**. Students can open it by mouse or keyboard. Tasks include the reminder **Parla amb els companys i respon en anglès**. Typed answers, reports and evidence exchanges remain in English.

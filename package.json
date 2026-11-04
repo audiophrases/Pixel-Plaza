@@ -17,6 +17,7 @@
     "check:missions": "node scripts/check-mission-studio.mjs",
     "check:missions:browser": "node scripts/check-mission-browser.mjs",
     "check:announcements:browser": "node scripts/check-announcements-browser.mjs",
+    "check:evidence:browser": "node scripts/check-evidence-browser.mjs",
     "check:teacher-guide": "node scripts/check-teacher-guide.mjs",
     "check:teacher-character": "node scripts/check-teacher-character.mjs",
     "check:report-feedback": "node scripts/check-report-feedback.mjs",

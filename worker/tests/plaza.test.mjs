@@ -1551,6 +1551,8 @@ test('Season 2 imports as data and sends Catalan help only with each student’s
         const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
         const pack = JSON.parse(fs.readFileSync(path.join(root, 'content/season-2/campaign.json'), 'utf8'));
         const campaign = pack.campaign;
+        // Exercise news attachments too, without adding an extra repeated clue to the authored pack.
+        campaign.chapters[0].reveals[0].image = campaign.chapters[0].discoveries[0].image;
         assert.equal((await teacher('missions/list')).body.library.length, 0, 'the season is not seeded or built in');
         const picture = fs.readFileSync(path.join(root, 'content/season-2/art/campus.png'));
         const upload = await fetch(`${base}/api/teacher/theme-asset`, { method: 'POST', headers: { 'x-teacher-session': session }, body: picture });
@@ -1572,6 +1574,9 @@ test('Season 2 imports as data and sends Catalan help only with each student’s
         assert.notEqual(own.role.id, other.role.id);
         assert.equal(own.chapter.help.intro.ca, campaign.chapters[0].help.intro.ca);
         assert.deepEqual(own.vocabulary, campaign.vocabulary, 'public story vocabulary comes from the imported campaign');
+        for (const image of [campaign.chapters[0].endingImage, campaign.chapters[0].discoveries[0].image, campaign.chapters[2].discoveries[1].image]) {
+            assert.ok(!JSON.stringify(own).includes(image.src), 'locked pictures are not sent to the browser');
+        }
         const role = campaign.roles.find(r => r.id === own.role.id), otherRole = campaign.roles.find(r => r.id === other.role.id);
         assert.deepEqual(own.role.help, role.help.card);
         assert.deepEqual(own.clues.find(c => c.from === 'job').help, role.help.clue);
@@ -1588,6 +1593,10 @@ test('Season 2 imports as data and sends Catalan help only with each student’s
         await teacher('campaign', { op: 'reveal' });
         const news = await a.next(m => m.t === 'quest' && m.quest?.clues.some(c => c.from === 'news'));
         assert.deepEqual(news.quest.clues.find(c => c.from === 'news').help, campaign.chapters[0].reveals[0].help);
+        assert.deepEqual(news.quest.clues.find(c => c.from === 'news').image, campaign.chapters[0].reveals[0].image);
+        a.send({ t: 'move', x: 400, y: 760 });
+        const discovered = await a.next(m => m.t === 'quest' && m.quest?.clues.some(c => c.id === 'p815-c1-office'));
+        assert.deepEqual(discovered.quest.clues.find(c => c.id === 'p815-c1-office').image, campaign.chapters[0].discoveries[0].image, 'finding evidence releases its picture');
         await teacher('campaign', { op: 'next' });
         const second = await a.next(m => m.t === 'quest' && m.quest?.chapter.index === 1);
         assert.deepEqual(second.quest.clues.find(c => c.from === 'job').help, campaign.chapters[1].roleClueHelp[own.role.id]);
@@ -1601,6 +1610,7 @@ test('Season 2 imports as data and sends Catalan help only with each student’s
         const resumed = await enter(base, 'signed-a', null); sockets.push(resumed);
         const resume = await view(resumed);
         assert.deepEqual(resume.recapHelp, campaign.chapters[0].help.ending, 'returning students get the translated previous ending');
+        assert.deepEqual(resume.recapImage, campaign.chapters[0].endingImage, 'the previous ending picture travels with the recap');
         await teacher('campaign', { op: 'next' });
         await resumed.next(m => m.t === 'quest' && m.quest?.chapter.index === 2);
         await teacher('campaign', { op: 'next' });

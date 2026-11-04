@@ -1,5 +1,6 @@
 import { isUnlocked, prerequisiteIds, type Campaign, type Chapter, type Objective, type Role, type TextHelp } from './campaign.ts';
 
+import { evidenceSource, EVIDENCE_MAX_CHARS, type EvidenceImage } from './evidence.ts';
 export const MISSION_MAX_BYTES = 512_000;
 export type MissionEnvelope = { format: 'pixel-plaza-campaign'; schemaVersion: 1 | 2; campaign: Campaign };
 export type MissionIssue = { path: string; message: string };
@@ -53,6 +54,12 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
         const h = obj(value, path, ['ca']);
         return h.ca === undefined ? {} : { ca: str(h.ca, `${path}.ca`, 6000, false) };
     };
+    const image = (value: unknown, path: string): EvidenceImage => {
+        const item = obj(value, path, ['src', 'alt']);
+        const src = str(item.src, `${path}.src`, EVIDENCE_MAX_CHARS);
+        if (!evidenceSource(src)) fail(`${path}.src`, 'Use a small embedded PNG, JPEG or WebP picture (up to 75 KB).');
+        return { src, alt: str(item.alt, `${path}.alt`, 500) };
+    };
     const fieldHelp = <K extends string>(value: unknown, path: string, fields: readonly K[]): Partial<Record<K, TextHelp>> => {
         const h = obj(value, path, [...fields]);
         return Object.fromEntries(fields.filter(key => h[key] !== undefined).map(key => [key, textHelp(h[key], `${path}.${key}`)])) as Partial<Record<K, TextHelp>>;
@@ -79,7 +86,7 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
     });
     const chapters: Chapter[] = list(raw.chapters, 'chapters', 20).map((value, i) => {
         const path = `chapters[${i}]`;
-        const c = obj(value, path, ['id', 'title', 'intro', 'recap', 'ending', 'share', 'objectives', 'discoveries', 'reveals', 'roleClues', 'thieves', 'help', 'roleClueHelp']);
+        const c = obj(value, path, ['id', 'title', 'intro', 'recap', 'ending', 'share', 'objectives', 'discoveries', 'reveals', 'roleClues', 'thieves', 'help', 'roleClueHelp', 'introImage', 'endingImage']);
         const objectives: Objective[] = list(c.objectives, `${path}.objectives`, 100).map((value, j) => {
             const p = `${path}.objectives[${j}]`;
             const o = obj(value, p, ['id', 'text', 'accept', 'answerThief', 'thiefKnows', 'answerRole', 'kind', 'after', 'optional', 'rewards', 'requires', 'board', 'activity', 'conversation', 'successCriteria', 'level', 'help', 'rewardHelp']);
@@ -132,14 +139,16 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
         if (!Number.isFinite(share) || share <= 0 || share > 1) fail(`${path}.share`, 'Readiness share must be greater than zero and at most 1.');
         const chapter: Chapter = { id: id(c.id, `${path}.id`), title: str(c.title, `${path}.title`, 120), intro: str(c.intro, `${path}.intro`), recap: str(c.recap, `${path}.recap`), ending: str(c.ending, `${path}.ending`), share, objectives,
             discoveries: list(c.discoveries, `${path}.discoveries`, 100).map((value, j) => {
-                const p = `${path}.discoveries[${j}]`; const d = obj(value, p, ['id', 'zone', 'text', 'help']);
-                return { id: id(d.id, `${p}.id`), zone: id(d.zone, `${p}.zone`), text: str(d.text, `${p}.text`), ...(d.help !== undefined ? { help: textHelp(d.help, `${p}.help`) } : {}) };
+                const p = `${path}.discoveries[${j}]`; const d = obj(value, p, ['id', 'zone', 'text', 'help', 'image']);
+                return { id: id(d.id, `${p}.id`), zone: id(d.zone, `${p}.zone`), text: str(d.text, `${p}.text`), ...(d.help !== undefined ? { help: textHelp(d.help, `${p}.help`) } : {}), ...(d.image !== undefined ? { image: image(d.image, `${p}.image`) } : {}) };
             }),
             reveals: list(c.reveals, `${path}.reveals`, 100).map((value, j) => {
-                const p = `${path}.reveals[${j}]`; const r = obj(value, p, ['id', 'text', 'help']);
-                return { id: id(r.id, `${p}.id`), text: str(r.text, `${p}.text`), ...(r.help !== undefined ? { help: textHelp(r.help, `${p}.help`) } : {}) };
+                const p = `${path}.reveals[${j}]`; const r = obj(value, p, ['id', 'text', 'help', 'image']);
+                return { id: id(r.id, `${p}.id`), text: str(r.text, `${p}.text`), ...(r.help !== undefined ? { help: textHelp(r.help, `${p}.help`) } : {}), ...(r.image !== undefined ? { image: image(r.image, `${p}.image`) } : {}) };
             }) };
         if (c.roleClues !== undefined) chapter.roleClues = clues(c.roleClues, `${path}.roleClues`);
+        if (c.introImage !== undefined) chapter.introImage = image(c.introImage, `${path}.introImage`);
+        if (c.endingImage !== undefined) chapter.endingImage = image(c.endingImage, `${path}.endingImage`);
         if (c.help !== undefined) chapter.help = fieldHelp(c.help, `${path}.help`, ['intro', 'recap', 'ending']);
         if (c.roleClueHelp !== undefined) chapter.roleClueHelp = roleHelp(c.roleClueHelp, `${path}.roleClueHelp`);
         if (c.thieves !== undefined) {

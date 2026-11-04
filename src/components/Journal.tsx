@@ -5,6 +5,7 @@ import { AUTO_PICK_MS } from '../../shared/sideQuests';
 import './Journal.css';
 import { Investigation, WitnessInbox, type InvestigationTurn } from './Investigation';
 import LanguageHelp from './LanguageHelp';
+import EvidencePicture from './EvidencePicture';
 
 type Props = {
   quest: QuestView | null; // the mission, if one is running
@@ -142,6 +143,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
         <h3>Previously</h3>
         <p>{quest.recap}</p>
         <LanguageHelp help={quest.recapHelp} />
+        <EvidencePicture image={quest.recapImage} text={quest.recap ?? ''} help={quest.recapHelp} />
         <button type="button" className="journal-dismiss" onClick={() => setRecapSeen(true)}>OK</button>
       </section>}
 
@@ -157,6 +159,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
         <h3>Task</h3>
         <p>{quest.chapter.intro}</p>
         <LanguageHelp help={quest.chapter.help?.intro} />
+        <EvidencePicture image={quest.chapter.introImage} text={quest.chapter.intro} help={quest.chapter.help?.intro} />
       </section>}
 
       <section className="journal-block">
@@ -173,6 +176,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
             <span className="journal-source">{SOURCE[clue.from] ?? `Found: ${clue.from}`}</span>
             {clue.text}
             <LanguageHelp help={clue.help} />
+            <EvidencePicture image={clue.image} text={clue.text} help={clue.help} />
           </li>)}
         </ul>
       </section>
@@ -190,6 +194,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
         {quest.status === 'chapter_complete' && <p>You can keep working until your teacher starts the next chapter.</p>}
         <p>{quest.chapter.ending}</p>
         <LanguageHelp help={quest.chapter.help?.ending} />
+        <EvidencePicture image={quest.chapter.endingImage} text={quest.chapter.ending ?? ''} help={quest.chapter.help?.ending} />
       </section>}
 
       {bonus.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} closed={ended} quest={quest} onTurn={onTurn} />)}

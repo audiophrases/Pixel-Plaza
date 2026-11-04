@@ -1602,16 +1602,16 @@ export class PlazaRoom extends DurableObject<Env> {
             ...(campaign.vocabulary?.length ? { vocabulary: campaign.vocabulary } : {}),
             status: row.status,
             chapter: { index: row.chapter, of: campaign.chapters.length, title: chapter.title, intro: chapter.intro,
-                ending, ...(chapter.help ? { help: { intro: chapter.help.intro, ...(ending ? { ending: chapter.help.ending } : {}) } } : {}) },
+                ending, ...(chapter.introImage ? { introImage: chapter.introImage } : {}), ...(ending && chapter.endingImage ? { endingImage: chapter.endingImage } : {}), ...(chapter.help ? { help: { intro: chapter.help.intro, ...(ending ? { ending: chapter.help.ending } : {}) } } : {}) },
             role: { id: role.id, name: role.name, card: role.card, ...(role.help?.card ? { help: role.help.card } : {}) },
             clues: [
                 { id: `role-${role.id}`, from: 'job',
                     ...(roleHelp?.ca ? { help: { ca: fillThiefClue(roleHelp.ca, looks) } } : {}),
                     text: isThief && chapter.thieves ? `${chapter.thieves.label ?? 'Your story'}: ${chapter.thieves.story}` : fillThiefClue(chapter.roleClues?.[role.id] ?? role.clue, looks) },
-                ...found.map(item => ({ id: item.id, text: item.text, from: item.zone, ...(item.help ? { help: item.help } : {}) })),
+                ...found.map(item => ({ id: item.id, text: item.text, from: item.zone, ...(item.help ? { help: item.help } : {}), ...(item.image ? { image: item.image } : {}) })),
                 ...rewardClues(chapter, role.id, player.done).map(item => ({ ...item, from: 'reward' })),
                 ...fallback.map(item => ({ ...item, text: fillThiefClue(item.text, looks), ...(item.help?.ca ? { help: { ca: fillThiefClue(item.help.ca, looks) } } : {}) })),
-                ...chapter.reveals.slice(0, row.revealed).map(item => ({ id: `news-${item.id}`, text: item.text, from: 'news', ...(item.help ? { help: item.help } : {}) })),
+                ...chapter.reveals.slice(0, row.revealed).map(item => ({ id: `news-${item.id}`, text: item.text, from: 'news', ...(item.help ? { help: item.help } : {}), ...(item.image ? { image: item.image } : {}) })),
             ],
             // Reaching the class threshold does not close questions; the teacher advances the chapter.
             secret: isThief && chapter.thieves ? { title: 'You are the thief', text: chapter.thieves.card, ...(chapter.thieves.help?.card ? { help: chapter.thieves.help.card } : {}) } : null,
@@ -1633,6 +1633,7 @@ export class PlazaRoom extends DurableObject<Env> {
             team: teamProgress(chapter, this.campaignPlayers(game).map(item => ({ done: item.done, thief: thieves.includes(item.student_key) }))),
             // "Previously", for a student coming back to a story that is already under way
             recap, ...(recap && recapHelp ? { recapHelp } : {}),
+            ...(recap && row.chapter > 0 && campaign.chapters[row.chapter - 1].endingImage ? { recapImage: campaign.chapters[row.chapter - 1].endingImage } : {}),
             finale: row.status === 'campaign_complete' ? campaign.finale : null,
             ...(row.status === 'campaign_complete' && campaign.help?.finale ? { finaleHelp: campaign.help.finale } : {})
         };

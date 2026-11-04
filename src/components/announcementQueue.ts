@@ -1,8 +1,9 @@
 import type { BoardView, QuestView, TextHelp } from '../../shared/campaign';
 import type { WarmupView } from '../../shared/warmup';
 import { IDENTITY_CHAT_REMINDER } from '../../shared/activityChat.ts';
+import type { EvidenceImage } from '../../shared/evidence';
 
-export type ActivityInstruction = { label: string; text: string; help?: TextHelp; answer?: boolean };
+export type ActivityInstruction = { label: string; text: string; help?: TextHelp; image?: EvidenceImage; answer?: boolean };
 export type ActivityAnnouncement = {
     id: string; acknowledge: string[]; kind: 'chapter' | 'warmup' | 'task' | 'board' | 'news' | 'ending';
     eyebrow: string; title: string; sections: ActivityInstruction[]; next: string;
@@ -43,8 +44,8 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
     if (quest && quest.status !== 'campaign_complete' && !seen.has(intro)) {
         add(intro, { kind: 'chapter', eyebrow: `CHAPTER ${quest.chapter.index + 1} OF ${quest.chapter.of}`, title: quest.chapter.title,
             sections: [
-                ...(quest.recap ? [{ label: 'Previously', text: quest.recap, help: quest.recapHelp }] : []),
-                { label: 'The story', text: quest.chapter.intro, help: quest.chapter.help?.intro },
+                ...(quest.recap ? [{ label: 'Previously', text: quest.recap, help: quest.recapHelp, image: quest.recapImage }] : []),
+                { label: 'The story', text: quest.chapter.intro, help: quest.chapter.help?.intro, image: quest.chapter.introImage },
                 { label: `You are ${quest.role.name}`, text: quest.role.card, help: quest.role.help },
                 ...(quest.secret ? [{ label: quest.secret.title, text: quest.secret.text, help: quest.secret.help }] : []),
                 ...quest.clues.filter(c => c.from === 'job').map(c => ({ label: 'Your private clue', text: c.text, help: c.help })),
@@ -82,10 +83,10 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
     if (!quest) return result;
     if (quest.status !== 'campaign_complete') {
         const news = quest.clues.filter(c => c.from === 'news' && !seen.has(key('news', run, c.id)));
-        if (news.length) add(key('news', run, news[0].id), { kind: 'news', eyebrow: 'FROM YOUR TEACHER', title: 'New information for the class', sections: news.map(c => ({ label: 'Teacher announcement', text: c.text, help: c.help })), next: 'You can read this again in your Journal clues.' }, news.slice(1).map(c => key('news', run, c.id)));
+        if (news.length) add(key('news', run, news[0].id), { kind: 'news', eyebrow: 'FROM YOUR TEACHER', title: 'New information for the class', sections: news.map(c => ({ label: 'Teacher announcement', text: c.text, help: c.help, image: c.image })), next: 'You can read this again in your Journal clues.' }, news.slice(1).map(c => key('news', run, c.id)));
     }
     if (quest.status === 'campaign_complete' && quest.finale) add(key('finale', run), { kind: 'ending', eyebrow: 'MISSION COMPLETE', title: quest.campaign.title, sections: [{ label: 'The ending', text: quest.finale, help: quest.finaleHelp }], next: 'Your Journal keeps the story and your discoveries.' });
-    else if (quest.chapter.ending) add(key('ending', run), { kind: 'ending', eyebrow: 'CHAPTER COMPLETE', title: quest.chapter.title, sections: [{ label: 'What happens next', text: quest.chapter.ending, help: quest.chapter.help?.ending }], next: 'You can keep helping classmates and doing optional quests until your teacher starts the next chapter.' });
+    else if (quest.chapter.ending) add(key('ending', run), { kind: 'ending', eyebrow: 'CHAPTER COMPLETE', title: quest.chapter.title, sections: [{ label: 'What happens next', text: quest.chapter.ending, help: quest.chapter.help?.ending, image: quest.chapter.endingImage }], next: 'You can keep helping classmates and doing optional quests until your teacher starts the next chapter.' });
     return result;
 }
 

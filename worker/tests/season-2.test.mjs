@@ -7,12 +7,30 @@ import { absentRoleClues, rewardClues } from '../../shared/campaign.ts';
 import { parseTheme } from '../../shared/theme.ts';
 import { walkReport } from '../../shared/walk.ts';
 import { createChecker } from '../../src/spelling.ts';
+import { evidenceSource } from '../../shared/evidence.ts';
+import { buildMissionPrompt } from '../../shared/missionPrompt.ts';
 
 const read = file => JSON.parse(fs.readFileSync(new URL(`../../content/season-2/${file}`, import.meta.url), 'utf8'));
 const envelope = read('campaign.json');
 const campaign = envelope.campaign;
 const theme = parseTheme(read('theme.json'));
 const words = text => text.trim().split(/\s+/).length;
+
+test('evidence pictures are portable, bounded raster data with required descriptions', () => {
+    const images = campaign.chapters.flatMap(c => [c.introImage, c.endingImage, ...c.discoveries.map(d => d.image), ...c.reveals.map(r => r.image)]).filter(Boolean);
+    assert.equal(new Set(images.map(image => image.src)).size, 7);
+    assert.ok(images.every(image => evidenceSource(image.src) && image.alt.trim()));
+    for (const bad of ['https://example.com/picture.png', 'javascript:alert(1)', 'data:image/svg+xml;base64,PHN2Zz4=', 'data:image/png;base64,YWJjZA==', 'data:image/png;base64,' + 'a'.repeat(100000)]) {
+        const copy = structuredClone(campaign); copy.chapters[0].endingImage.src = bad;
+        assert.equal(validateMission(missionEnvelope(copy)).campaign, null);
+    }
+    const copy = structuredClone(campaign); copy.chapters[0].endingImage.alt = '';
+    assert.equal(validateMission(missionEnvelope(copy), 'publish').campaign, null);
+    assert.ok(validateMission(missionEnvelope(copy), 'draft').campaign, 'a teacher can save while writing the description');
+    const prompt = buildMissionPrompt(campaign, 'Add another investigation.', 'A2', 'extend');
+    assert.ok(!prompt.includes('data:image/'), 'text authoring prompts do not contain encoded picture payloads');
+    assert.ok(prompt.includes(campaign.chapters[0].discoveries[0].text));
+});
 
 test('Season 2 is a valid modular three-chapter pack with concise bilingual student content and reachable map clues', () => {
     assert.equal(campaign.chapters.length, 3);
@@ -44,6 +62,8 @@ test('chapter copies retain translations when append remaps duplicate IDs', () =
     const copy = appended.campaign.chapters.at(-1), original = campaign.chapters[1];
     assert.notEqual(copy.id, original.id);
     assert.deepEqual(copy.help, original.help);
+    assert.deepEqual(copy.endingImage, original.endingImage);
+    assert.deepEqual(copy.discoveries.map(d => d.image), original.discoveries.map(d => d.image));
     assert.deepEqual(copy.roleClueHelp, original.roleClueHelp);
     assert.deepEqual(copy.objectives.map(o => o.help), original.objectives.map(o => o.help));
     assert.equal(copy.objectives[1].after, copy.objectives[0].id);

@@ -1,5 +1,5 @@
 import type { Campaign } from './campaign.ts';
-import { clueZones, missionEnvelope, missionJson } from './missionSchema.ts';
+import { clueZones, missionEnvelope } from './missionSchema.ts';
 import type { Theme } from './theme.ts';
 import { sceneryPrompts } from './sceneryPrompts.ts';
 
@@ -32,6 +32,8 @@ export function buildMissionPrompt(campaign: Campaign, brief: string, level: str
         'For guessing games, state separate rules for the clue-giver and guesser: the clue-giver keeps the secret/forbidden words out of hints; the guesser may name guesses; correct guesses can be confirmed. Preserve ordinary evidence sharing in mystery missions. Only the built-in Who am I? warm-up automatically blocks its assigned secret identity in chat. Student-chosen secrets in report quests are not registered or automatically checked: do not promise a word block or secret tracking for those quests.',
         'The teacher decides when to advance chapters. Never include executable code, HTML, external links, or unsupported fields. Limits: 20 roles, 20 chapters, 100 objectives/discoveries/news per chapter, 30 accepted phrases per question, 6000 characters per story text, total 512 KB.',
         'Valid example:', JSON.stringify(missionEnvelope(example), null, 2),
-        mode !== 'create' ? 'Existing campaign (reference content; preserve roles exactly):' : 'Current draft (reference for style only):', missionJson(campaign)
+        'Evidence pictures are omitted from this text prompt. Do not invent encoded images or image URLs. Append/extend keeps existing pictures; after replacing a draft, add or review its pictures in Mission Studio’s Evidence pictures panel.',
+        mode !== 'create' ? 'Existing campaign (reference content; preserve roles exactly):' : 'Current draft (reference for style only):',
+        JSON.stringify(missionEnvelope(campaign), (_key, value) => value && typeof value === 'object' && typeof value.src === 'string' && value.src.startsWith('data:image/') ? undefined : value, 2)
     ].join('\n\n');
 }
