@@ -9,8 +9,9 @@ export type Point = readonly [x: number, y: number];
 
 // Something tall that a player can walk behind: its picture is drawn again on top of players standing north of
 // `sortY` (the line where it meets the ground), so a tree crown or a lamp post hides them. The shape is cut out of the
-// artwork: an ellipse inside `rect`, or a polygon.
+// artwork: a rectangle `rect`, an ellipse inside it, or a polygon.
 export type WalkBehind =
+    | { shape: 'rect'; rect: Rect; sortY: number }
     | { shape: 'ellipse'; rect: Rect; sortY: number }
     | { shape: 'poly'; points: readonly Point[]; sortY: number };
 
@@ -153,7 +154,7 @@ export function validateTheme(theme: Theme): { errors: string[]; warnings: strin
     theme.walkBehind.forEach((piece, index) => {
         const label = `Walk-behind area ${index + 1}`;
         if (piece.shape === 'poly' && piece.points.length < 3) errors.push(`${label} needs at least three corners.`);
-        if (piece.shape === 'ellipse' && !(piece.rect[2] > 0 && piece.rect[3] > 0)) errors.push(`${label} has no size.`);
+        if (piece.shape !== 'poly' && !(piece.rect[2] > 0 && piece.rect[3] > 0)) errors.push(`${label} has no size.`);
         if (!(piece.sortY >= 0 && piece.sortY <= theme.art)) errors.push(`${label} has its ground line outside the picture.`);
     });
     const seen = new Set<string>();
@@ -201,7 +202,7 @@ export function parseTheme(value: unknown): Theme {
         || !t.spawn || !Number.isFinite(t.spawn.x) || !Number.isFinite(t.spawn.y)
         || !list(t.blocked) || !t.blocked.every(rect)
         || t.blockedShapes !== undefined && (!list(t.blockedShapes) || !t.blockedShapes.every(shape))
-        || !list(t.walkBehind) || !t.walkBehind.every(p => shape(p) && Number.isFinite((p as WalkBehind).sortY))
+        || !list(t.walkBehind) || !t.walkBehind.every(p => (p?.shape === 'rect' ? rect(p.rect) : shape(p)) && Number.isFinite((p as WalkBehind).sortY))
         || !list(t.zones) || !t.zones.every(z => z && typeof z.id === 'string' && rect(z.rect))
         || t.layout !== undefined && typeof t.layout !== 'string'
         || t.scenery !== undefined && (!t.scenery || typeof t.scenery !== 'object')

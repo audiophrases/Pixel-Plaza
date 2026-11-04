@@ -28,7 +28,7 @@ function syncText(sync: MissionSync): string {
   return sync.waiting ? `No internet: ${waiting} on this laptop and go online when the connection is back.` : 'No internet: showing the maps this laptop has.';
 }
 
-type Tool = 'select' | 'block' | 'bellipse' | 'bpoly' | 'zone' | 'ellipse' | 'poly' | 'spawn';
+type Tool = 'select' | 'block' | 'bellipse' | 'bpoly' | 'zone' | 'rect' | 'ellipse' | 'poly' | 'spawn';
 type Selection = { kind: 'block' | 'shape' | 'behind' | 'zone'; index: number } | { kind: 'spawn' } | null;
 type Corner = 'nw' | 'ne' | 'sw' | 'se';
 type Drag =
@@ -42,6 +42,7 @@ const TOOLS: [Tool, string, string][] = [
   ['block', 'Block', 'Draw a rectangle nobody can walk through'],
   ['bellipse', 'Block (oval)', 'Draw an oval nobody can walk through, such as a fountain'],
   ['bpoly', 'Block (shape)', 'Click the corners of a place nobody can walk through, such as a curved edge; double-click to finish'],
+  ['rect', 'Walk-behind', 'Draw a rectangle over something tall, such as a wall or a building'],
   ['ellipse', 'Walk-behind (oval)', 'Draw an oval over something tall, such as a tree crown'],
   ['poly', 'Walk-behind (shape)', 'Click the corners of something tall; double-click to finish'],
   ['zone', 'Zone', 'Draw a named place for the story'],
@@ -59,7 +60,7 @@ const guideUrl = (theme: Theme) => `data:image/svg+xml;charset=utf-8,${encodeURI
 
 // The box a walk-behind shape sits in, for its ground line and handles
 function bounds(piece: WalkBehind): Rect {
-  if (piece.shape === 'ellipse') return piece.rect;
+  if (piece.shape !== 'poly') return piece.rect;
   const xs = piece.points.map(point => point[0]);
   const ys = piece.points.map(point => point[1]);
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
@@ -150,7 +151,7 @@ export default function Studio() {
     if (selection.kind === 'spawn') { next.spawn = { x: next.spawn.x + dx, y: next.spawn.y + dy }; }
     else if (selection.kind === 'behind') {
       const piece = next.walkBehind[selection.index];
-      if (piece.shape === 'ellipse') piece.rect = [piece.rect[0] + dx, piece.rect[1] + dy, piece.rect[2], piece.rect[3]];
+      if (piece.shape !== 'poly') piece.rect = [piece.rect[0] + dx, piece.rect[1] + dy, piece.rect[2], piece.rect[3]];
       else piece.points = piece.points.map(([x, y]) => [x + dx, y + dy]);
       piece.sortY += dy;
     } else if (selection.kind === 'shape') {
@@ -276,7 +277,7 @@ export default function Studio() {
       else if (selection?.kind === 'behind') {
         const piece = next.walkBehind[selection.index];
         const original = current.start.walkBehind[selection.index];
-        if (piece.shape === 'ellipse' && original.shape === 'ellipse') piece.rect = [original.rect[0] + dx, original.rect[1] + dy, original.rect[2], original.rect[3]];
+        if (piece.shape !== 'poly' && original.shape !== 'poly') piece.rect = [original.rect[0] + dx, original.rect[1] + dy, original.rect[2], original.rect[3]];
         else if (piece.shape === 'poly' && original.shape === 'poly') piece.points = original.points.map(([x, y]) => [x + dx, y + dy]);
         piece.sortY = original.sortY + dy;
       }
@@ -284,7 +285,7 @@ export default function Studio() {
       if (selection.kind === 'block') next.blocked[selection.index] = resized(current.start.blocked[selection.index], current.corner, at[0], at[1]);
       else if (selection.kind === 'zone') next.zones[selection.index].rect = resized(current.start.zones[selection.index].rect, current.corner, at[0], at[1]);
       else if (selection.kind === 'shape') { const piece = next.blockedShapes?.[selection.index]; if (piece && piece.shape === 'ellipse') piece.rect = resized((current.start.blockedShapes?.[selection.index] as { rect: Rect }).rect, current.corner, at[0], at[1]); }
-      else if (selection.kind === 'behind') { const piece = next.walkBehind[selection.index]; if (piece.shape === 'ellipse') piece.rect = resized((current.start.walkBehind[selection.index] as { rect: Rect }).rect, current.corner, at[0], at[1]); }
+      else if (selection.kind === 'behind') { const piece = next.walkBehind[selection.index]; if (piece.shape !== 'poly') piece.rect = resized((current.start.walkBehind[selection.index] as { rect: Rect }).rect, current.corner, at[0], at[1]); }
     } else if (current.type === 'vertex' && (selection?.kind === 'behind' || selection?.kind === 'shape')) {
       const piece = selection.kind === 'shape' ? next.blockedShapes?.[selection.index] : next.walkBehind[selection.index];
       if (piece && piece.shape === 'poly') piece.points = piece.points.map((point, index) => (index === current.vertex ? [at[0], at[1]] : point));
@@ -311,8 +312,8 @@ export default function Studio() {
         const shapes = (next.blockedShapes ??= []);
         shapes.push({ shape: 'ellipse', rect: shape });
         setSelection({ kind: 'shape', index: shapes.length - 1 });
-      } else if (tool === 'ellipse') {
-        next.walkBehind.push({ shape: 'ellipse', rect: shape, sortY: round(shape[1] + shape[3]) });
+      } else if (tool === 'rect' || tool === 'ellipse') {
+        next.walkBehind.push({ shape: tool, rect: shape, sortY: round(shape[1] + shape[3]) });
         setSelection({ kind: 'behind', index: next.walkBehind.length - 1 });
       }
       setTool('select');
@@ -539,7 +540,7 @@ export default function Studio() {
   const pickedRect: Rect | null = !selection || selection.kind === 'spawn' ? null
     : selection.kind === 'block' ? theme.blocked[selection.index] ?? null
     : selection.kind === 'zone' ? theme.zones[selection.index]?.rect ?? null
-    : pickedPiece?.shape === 'ellipse' ? pickedPiece.rect : null;
+    : pickedPiece && pickedPiece.shape !== 'poly' ? pickedPiece.rect : null;
   const pickedPolygon = pickedPiece?.shape === 'poly' ? pickedPiece.points : null;
 
   const setField = (patch: Partial<Theme>) => change({ ...theme, ...patch });
@@ -553,7 +554,7 @@ export default function Studio() {
     if (selection.kind === 'block') next.blocked[selection.index] = rect;
     else if (selection.kind === 'zone') next.zones[selection.index].rect = rect;
     else if (selection.kind === 'shape') { const piece = next.blockedShapes![selection.index]; if (piece.shape === 'ellipse') piece.rect = rect; }
-    else { const piece = next.walkBehind[selection.index]; if (piece.shape === 'ellipse') piece.rect = rect; }
+    else { const piece = next.walkBehind[selection.index]; if (piece.shape !== 'poly') piece.rect = rect; }
     change(next);
   };
   const areaOptions = [
@@ -577,7 +578,9 @@ export default function Studio() {
           onDoubleClick={() => { if (tool === 'poly' || tool === 'bpoly') finishPolygon(); }}>
           <defs>
             {theme.walkBehind.map((piece, index) => <clipPath key={index} id={`behind-${index}`}>
-              {piece.shape === 'ellipse'
+              {piece.shape === 'rect'
+                ? <rect x={piece.rect[0]} y={piece.rect[1]} width={piece.rect[2]} height={piece.rect[3]} />
+                : piece.shape === 'ellipse'
                 ? <ellipse cx={piece.rect[0] + piece.rect[2] / 2} cy={piece.rect[1] + piece.rect[3] / 2} rx={piece.rect[2] / 2} ry={piece.rect[3] / 2} />
                 : <polygon points={polygon(piece.points)} />}
             </clipPath>)}
@@ -600,7 +603,10 @@ export default function Studio() {
           {layers.behind && !preview && theme.walkBehind.map((piece, index) => {
             const box = bounds(piece);
             return <g key={index}>
-              {piece.shape === 'ellipse'
+              {piece.shape === 'rect'
+                ? <rect className={`behind${edited('behind', index) ? ' picked' : ''}`} x={piece.rect[0]} y={piece.rect[1]} width={piece.rect[2]} height={piece.rect[3]}
+                    onPointerDown={event => grab(event, 'behind', index)} />
+                : piece.shape === 'ellipse'
                 ? <ellipse className={`behind${edited('behind', index) ? ' picked' : ''}`} cx={piece.rect[0] + piece.rect[2] / 2} cy={piece.rect[1] + piece.rect[3] / 2}
                     rx={piece.rect[2] / 2} ry={piece.rect[3] / 2} onPointerDown={event => grab(event, 'behind', index)} />
                 : <polygon className={`behind${edited('behind', index) ? ' picked' : ''}`} points={polygon(piece.points)} onPointerDown={event => grab(event, 'behind', index)} />}

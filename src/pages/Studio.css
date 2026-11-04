@@ -2,7 +2,7 @@
 .studio-stage { flex: 1; min-width: 0; }
 .studio-scroll { width: 100%; height: 100%; overflow: auto; background: #171f25; display: grid; justify-items: center; align-items: start; padding: 1.5rem; box-sizing: border-box; }
 .studio-canvas { display: block; touch-action: none; }
-.studio-canvas.tool-block, .studio-canvas.tool-zone, .studio-canvas.tool-ellipse, .studio-canvas.tool-poly, .studio-canvas.tool-spawn { cursor: crosshair; }
+.studio-canvas.tool-block, .studio-canvas.tool-zone, .studio-canvas.tool-rect, .studio-canvas.tool-ellipse, .studio-canvas.tool-poly, .studio-canvas.tool-spawn { cursor: crosshair; }
 
 .studio-canvas .block { fill: rgba(255, 0, 0, 0.3); stroke: rgba(255, 220, 0, 0.9); stroke-width: 1; cursor: move; }
 .studio-canvas .zone { fill: rgba(60, 140, 255, 0.08); stroke: rgba(60, 140, 255, 0.95); stroke-width: 2; cursor: move; }

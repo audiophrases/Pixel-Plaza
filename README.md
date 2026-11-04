@@ -214,7 +214,7 @@ Open `/studio` (for example `http://localhost:8787/studio`). It starts with a ne
 
 Your chosen AI creates **one complete background**. Use **Import AI background**, then **Adjust an area** to move/resize the small number of collision and hiding areas. Check paths and walk around it, then save and publish it. Studio prepares the brief, guides and preview; art creation happens outside the app. Original maps and older Commons treatments remain available. See the [external art workflow](docs/seasonal-art.md).
 
-Studio's original tools remain available: draw or move **blocks** (rectangles, ovals or free shapes), **walk-behind areas**, **zones** and the **start**. **Check where students can walk** shows places that are cut off. **Open a picture** replaces the background without changing the logical coordinate size; nonsquare pictures are rejected. **Download the theme file** saves the map as a file, and **Open a theme file** brings one back. To change a map the server already has, open it here and publish it; **Discard draft** throws away changes that are not published yet.
+Studio's original tools remain available: draw or move **blocks** and **walk-behind areas** (rectangles, ovals or free shapes), **zones** and the **start**. **Check where students can walk** shows places that are cut off. **Open a picture** replaces the background without changing the logical coordinate size; nonsquare pictures are rejected. **Download the theme file** saves the map as a file, and **Open a theme file** brings one back. To change a map the server already has, open it here and publish it; **Discard draft** throws away changes that are not published yet.
 
 ## Names in the plaza
 

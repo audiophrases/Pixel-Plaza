@@ -1,11 +1,13 @@
 import { COMMONS_LAYOUT } from './commons.ts';
-import { formatTheme, type Theme } from './theme.ts';
+import { formatTheme, type BlockShape, type Theme, type WalkBehind } from './theme.ts';
 import { BACKGROUND_BOUNDARY_PROMPT, sceneryPrompts } from './sceneryPrompts.ts';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]!);
 
 export function layoutGuide(theme: Theme): string {
-    const shape = (piece: NonNullable<Theme['blockedShapes']>[number], colour: string) => piece.shape === 'ellipse'
+    const shape = (piece: BlockShape | WalkBehind, colour: string) => piece.shape === 'rect'
+        ? `<rect x="${piece.rect[0]}" y="${piece.rect[1]}" width="${piece.rect[2]}" height="${piece.rect[3]}" fill="${colour}"/>`
+        : piece.shape === 'ellipse'
         ? `<ellipse cx="${piece.rect[0] + piece.rect[2] / 2}" cy="${piece.rect[1] + piece.rect[3] / 2}" rx="${piece.rect[2] / 2}" ry="${piece.rect[3] / 2}" fill="${colour}"/>`
         : `<polygon points="${piece.points.map(p => p.join(',')).join(' ')}" fill="${colour}"/>`;
     // An annotation over the blocked perimeter can look like an exit to an art AI. Keep the boundary unobscured.
@@ -15,7 +17,7 @@ ${theme.blocked.map(([x, y, w, h]) => `<rect x="${x}" y="${y}" width="${w}" heig
 ${(theme.blockedShapes ?? []).map(p => shape(p, '#b96358')).join('')}
 ${theme.walkBehind.map(p => shape(p, '#7b9cd488')).join('')}
 ${theme.walkBehind.map(p => {
-        const xs = p.shape === 'ellipse' ? [p.rect[0], p.rect[0] + p.rect[2]] : p.points.map(point => point[0]);
+        const xs = p.shape !== 'poly' ? [p.rect[0], p.rect[0] + p.rect[2]] : p.points.map(point => point[0]);
         return `<path d="M${Math.min(...xs)} ${p.sortY}H${Math.max(...xs)}" stroke="#28598d" stroke-width="3"/>`;
     }).join('')}
 ${(theme.layers ?? []).filter(p => p.sortY !== undefined).map(p => `<rect x="${p.rect[0]}" y="${p.rect[1]}" width="${p.rect[2]}" height="${p.rect[3]}" fill="#80a9db66"/><path d="M${p.rect[0]} ${p.sortY}h${p.rect[2]}" stroke="#28598d" stroke-width="3"/>`).join('')}

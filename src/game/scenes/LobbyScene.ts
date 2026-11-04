@@ -123,6 +123,7 @@ export default class LobbyScene extends Phaser.Scene {
     overlay.lineStyle(3, 0x00ff66, 1);
     for (const piece of plazaMap.walkBehind) {
       if (piece.shape === 'ellipse') overlay.strokeEllipse((piece.rect[0] + piece.rect[2] / 2) * SCALE, (piece.rect[1] + piece.rect[3] / 2) * SCALE, piece.rect[2] * SCALE, piece.rect[3] * SCALE);
+      else if (piece.shape === 'rect') overlay.strokeRect(piece.rect[0] * SCALE, piece.rect[1] * SCALE, piece.rect[2] * SCALE, piece.rect[3] * SCALE);
       else overlay.strokePoints(piece.points.map(([x, y]) => new Phaser.Math.Vector2(x * SCALE, y * SCALE)), true);
     }
     this.input.keyboard?.on('keydown-F2', () => overlay.setVisible(!overlay.visible));
@@ -155,7 +156,7 @@ export default class LobbyScene extends Phaser.Scene {
     const pixels = source.width / ART; // the picture's own pixels per art pixel
     plazaMap.walkBehind.forEach((piece, index) => {
       const points = piece.shape === 'poly' ? piece.points : null;
-      const [x, y, w, h] = piece.shape === 'ellipse' ? piece.rect : [
+      const [x, y, w, h] = piece.shape !== 'poly' ? piece.rect : [
         Math.min(...points!.map(point => point[0])), Math.min(...points!.map(point => point[1])),
         Math.max(...points!.map(point => point[0])) - Math.min(...points!.map(point => point[0])),
         Math.max(...points!.map(point => point[1])) - Math.min(...points!.map(point => point[1]))
@@ -166,6 +167,7 @@ export default class LobbyScene extends Phaser.Scene {
       const context = canvas.getContext();
       context.beginPath();
       if (piece.shape === 'ellipse') context.ellipse(canvas.width / 2, canvas.height / 2, canvas.width / 2, canvas.height / 2, 0, 0, Math.PI * 2);
+      else if (piece.shape === 'rect') context.rect(0, 0, canvas.width, canvas.height);
       else piece.points.forEach(([px, py], i) => context[i ? 'lineTo' : 'moveTo']((px - x) * SCALE, (py - y) * SCALE));
       context.closePath();
       context.clip();

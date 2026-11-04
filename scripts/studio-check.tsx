@@ -87,6 +87,26 @@ for (const [x, y] of [[500, 500], [560, 500], [560, 560]]) await act(async () =>
 await act(async () => { fire(svg(), 'dblclick', ...at(560, 560)); });
 check('a walk-behind polygon is added', count('polygon.behind') === behindBefore + 1);
 
+// 5a. A walk-behind rectangle, drawn and resized the same way as a block
+const rectBehindBefore = count('rect.behind');
+await act(async () => { button('Walk-behind').click(); });
+await act(async () => { fire(svg(), 'pointerdown', ...at(400, 700)); });
+await act(async () => { fire(svg(), 'pointermove', ...at(480, 760)); });
+await act(async () => { fire(svg(), 'pointerup', ...at(480, 760)); });
+check('a walk-behind rectangle is added', count('rect.behind') === rectBehindBefore + 1);
+check('its ground line starts at the bottom edge', (document.querySelector('input[type="number"][value="760"]') as HTMLInputElement | null) !== null);
+const southEast = [...document.querySelectorAll('rect.handle')].at(-1)!;
+await act(async () => { fire(southEast, 'pointerdown', ...at(480, 760)); });
+await act(async () => { fire(svg(), 'pointermove', ...at(520, 800)); });
+await act(async () => { fire(svg(), 'pointerup', ...at(520, 800)); });
+const behindRect = [...document.querySelectorAll('rect.behind')].at(-1)!;
+check('dragging a handle resizes it and it stays a rectangle', behindRect.getAttribute('width') === '120' && behindRect.getAttribute('height') === '100');
+check('its size shows in the panel, as for a block', (document.querySelector('input[aria-label="Area Width"]') as HTMLInputElement | null)?.value === '120');
+await act(async () => { fire(behindRect, 'pointerdown', ...at(450, 750)); });
+await act(async () => { fire(svg(), 'pointermove', ...at(460, 770)); });
+await act(async () => { fire(svg(), 'pointerup', ...at(460, 770)); });
+check('dragging moves it', [...document.querySelectorAll('rect.behind')].at(-1)!.getAttribute('x') === '410');
+
 // 5b. Blocks that are not rectangles: an oval, and a free shape with a corner that can be dragged
 const ovalBefore = count('ellipse.block'), polyBefore = count('polygon.block');
 await act(async () => { button('Block (oval)').click(); });

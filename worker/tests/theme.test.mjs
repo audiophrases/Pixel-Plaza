@@ -3,7 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { formatTheme, makeWorld, validateTheme } from '../../shared/theme.ts';
+import { layoutGuide } from '../../shared/artTemplate.ts';
+import { formatTheme, makeWorld, parseTheme, validateTheme } from '../../shared/theme.ts';
 import { feetBlocked, reachability, walkReport } from '../../shared/walk.ts';
 import { themes } from '../../shared/plazaMap.ts';
 
@@ -31,9 +32,18 @@ test('a theme with problems is told so, in plain words', () => {
     assert.match(messages(field({ blocked: [[10, 10, 0, 5]] })), /Block 1 has no size/);
     assert.match(messages(field({ walkBehind: [{ shape: 'poly', points: [[1, 1], [5, 5]], sortY: 50 }] })), /three corners/);
     assert.match(messages(field({ walkBehind: [{ shape: 'ellipse', rect: [10, 10, 20, 20], sortY: 900 }] })), /ground line/);
+    assert.match(messages(field({ walkBehind: [{ shape: 'rect', rect: [10, 10, 0, 20], sortY: 50 }] })), /Walk-behind area 1 has no size/);
     assert.match(messages(field({ zones: [{ id: 'a', rect: [0, 0, 5, 5] }, { id: 'a', rect: [9, 9, 5, 5] }] })), /Two zones are called "a"/);
     assert.match(messages(field({ blocked: [[90, 10, 20, 20]] })), /start position is inside a block/);
     assert.match(validateTheme(field({ blocked: [[500, 500, 10, 10]] })).warnings.join(' '), /outside the picture/);
+});
+
+test('a walk-behind can be a rectangle, in the theme file and on the layout guide', () => {
+    const theme = field({ walkBehind: [{ shape: 'rect', rect: [10, 10, 30, 20], sortY: 30 }] });
+    assert.deepEqual(parseTheme(JSON.parse(formatTheme(theme))), theme);
+    assert.match(layoutGuide(theme), /<rect x="10" y="10" width="30" height="20" fill="#7b9cd488"\/>/);
+    assert.throws(() => parseTheme(field({ walkBehind: [{ shape: 'rect', sortY: 30 }] })));
+    assert.throws(() => parseTheme(field({ blockedShapes: [{ shape: 'rect', rect: [10, 10, 30, 20] }] })), 'a rectangular block belongs in blocked');
 });
 
 test('the world is the picture scaled up, with the checks the server makes', () => {
