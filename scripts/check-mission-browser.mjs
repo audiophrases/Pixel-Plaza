@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { castanyada, castanyadaComplete, plazaFreePlay } from '../worker/tests/fixtures/season-1.mjs';
 import { missionOverview } from '../shared/missionOverview.ts';
+import { themes } from '../shared/themeCatalog.ts';
 
 const root = path.join(import.meta.dirname, '..');
 const origin = process.argv[2] ?? 'http://127.0.0.1:5173';
@@ -66,14 +67,17 @@ try {
         const drafts=fixtures.map(campaign=>({campaign,version:1,publishedRevision:'builtin',updated:0}));
         const library=(deleted=false)=>drafts.filter(d=>!!d.deleted===deleted).map(d=>({id:d.campaign.id,title:d.campaign.title,version:d.version,publishedRevision:d.publishedRevision,updated:0,overview:descriptions[d.campaign.id]}));
         window.__missionWrites=[];
+        window.__missionImports=[];
+        const availableMaps=${JSON.stringify([...Object.values(themes), JSON.parse(fs.readFileSync(path.join(root, 'content/season-2/theme.json'), 'utf8'))])};
         const original=window.fetch.bind(window);
         window.fetch=async(url,init)=>{
-            const route=String(url);if(!route.startsWith('/api/teacher/missions/'))return original(url,init);
+            const route=String(url);if(route==='/api/themes')return Response.json({themes:availableMaps,trash:[],default:'plaza'});if(!route.startsWith('/api/teacher/missions/'))return original(url,init);
             if(init.headers['x-teacher-session']!=='browser-test')throw Error('Missing teacher session');
             const body=init.body?JSON.parse(init.body):{};
             if(route.endsWith('/list'))return Response.json({library:library(),trash:library(true)});
             if(route.endsWith('/live'))return Response.json({target:null});
             if(route.includes('/get?'))return Response.json({draft:drafts.find(d=>d.campaign.id===new URL(route,location.origin).searchParams.get('id'))});
+            if(route.endsWith('/import')){const campaign=structuredClone(body.envelope.campaign);if(drafts.some(d=>d.campaign.id===campaign.id))campaign.id+='-copy';const draft={campaign,version:1,publishedRevision:body.publish?'imported-test':null,updated:0};drafts.push(draft);window.__missionImports.push(body);return Response.json({draft,library:library()})}
             if(route.endsWith('/create')){const campaign=structuredClone(drafts.find(d=>d.campaign.id===body.source)?.campaign??fixtures[0]);campaign.id=body.id;const draft={campaign,version:1,publishedRevision:null,updated:0};drafts.push(draft);return Response.json({draft,library:library()})}
             const draft=drafts.find(d=>d.campaign.id===body.id);if(!draft||draft.version!==body.version)throw Error('Stale write');
             if(route.endsWith('/save'))draft.campaign=body.envelope.campaign;
@@ -150,8 +154,26 @@ try {
     await waitFor(`document.querySelector('.mission-trash-row')`);
     await evaluate(`document.querySelector('.mission-trash').open=true`); await click('Restore mission');
     assert.equal(await evaluate(`document.querySelectorAll('.mission-trash-row').length`), 0);
+    // The complete ZIP can be chosen from the library without a starter or extraction.
+    await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
+    await send('DOM.enable');
+    const doc=await send('DOM.getDocument');
+    const picker=await send('DOM.querySelector',{nodeId:doc.root.nodeId,selector:'input[aria-label="Import mission file"]'});
+    await send('DOM.setFileInputFiles',{nodeId:picker.nodeId,files:[path.join(root,'content/season-2/protocol-815-season-2.zip')]});
+    await waitFor(`document.querySelector('.mission-file-preview')`);
+    assert.equal(await evaluate(`window.__missionImports.length`),0,'choosing a file only previews it');
+    assert.ok(await evaluate(`document.querySelector('.mission-file-preview').textContent.includes('Map ready: Protocol 8:15')`));
+    await noOverflow(); await screenshot('desktop-import-preview');
+    await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await noOverflow(); await screenshot('phone-import-preview');
+    await click('Import & publish');
+    await waitFor(`!document.querySelector('.mission-file-preview')`);
+    assert.equal(await evaluate(`window.__missionImports.length`),1);
+    assert.equal(await evaluate(`window.__missionImports[0].publish`),true);
+    assert.equal(await evaluate(`document.querySelector('.mission-savebar strong').textContent`),'Protocol 8:15 — The Missing Student');
+    assert.ok(await evaluate(`document.body.textContent.includes('imported and published')`));
     assert.deepEqual(errors, [], 'no uncaught browser exceptions');
-    console.log('PASS: real Chrome desktop and phone editing, ordering, removal/undo, saving, publishing and named creation.');
+    console.log('PASS: real Chrome desktop and phone editing, ordering, removal/undo, saving, publishing, named creation and direct season ZIP import.');
     console.log(`Screenshots: ${qa}`);
     await send('Browser.close');
 } finally {

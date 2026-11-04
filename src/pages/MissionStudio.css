@@ -402,6 +402,10 @@
 .mission-delete-confirm { border-color: #e4bdae; background: #fff7f2; scroll-margin-top: 1rem; }
 .mission-delete-confirm p { font-size: .9rem; margin-bottom: 1rem; }
 .mission-trash-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .9rem 0; border-top: 1px solid #dbe5dc; font-size: .9rem; }
+.mission-import-hint { margin: .8rem 0 0; }
+.mission-file-preview { border: 2px solid #88b4a5; scroll-margin-top: 1rem; }
+.mission-import-source { overflow-wrap: anywhere; }
+.mission-import-chapters { list-style: none; padding-left: 0; margin: 1rem 0; line-height: 1.8; }
 .mission-copy-label { display: block; font-size: .6rem; color: #657661; letter-spacing: .04em; margin: .4rem 0; }
 @media (max-width: 1000px) {
     .mission-play-path { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }

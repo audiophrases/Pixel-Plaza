@@ -16,7 +16,7 @@ export function MissionLibrary({ library, onOpen, onDelete }: { library: Mission
                 {!!similar.length && <details className="mission-overlap"><summary>Compare with {similar.length} similar {similar.length === 1 ? 'mission' : 'missions'}</summary>{similar.map(other => <p key={other.id}><strong>{other.title}</strong><br />Matching main questions in the first {matchingChapters(overview, other.overview)} {matchingChapters(overview, other.overview) === 1 ? 'chapter' : 'chapters'}. {other.overview!.chapters.length} chapters · {other.overview!.board} board quests · {other.overview!.witnesses} main tasks need a witness exchange.</p>)}<p>Clues, stories and other settings can differ. Open both before deciding which to keep.</p></details>}</>}
                 <div className="mission-toolbar"><button type="button" className="mission-button primary" onClick={() => onOpen(item.id)}>Open mission</button><button type="button" className="mission-button danger" onClick={() => onDelete(item)} aria-label={`Delete ${item.title || 'untitled mission'}`}>Delete</button></div>
             </article>;
-        })}</div>{!library.length && <p>No missions yet. Create a mission above or restore one from Trash.</p>}
+        })}</div>{!library.length && <p>No missions yet. Import a mission file, create a mission above or restore one from Trash.</p>}
     </section>;
 }
 

@@ -101,6 +101,22 @@ export class MissionRepository {
     execute(op: string, body: unknown): MissionResult {
         const b = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
         if (op === 'list') return { library: this.list(), trash: this.list(true) };
+        if (op === 'import') {
+            if (typeof b.publish !== 'boolean') return { error: 'Choose whether to publish this import or save a draft.', status: 400 };
+            const checked = validateMission(b.envelope, b.publish ? 'publish' : 'draft', b.publish ? this.zones?.() : undefined);
+            if (!checked.campaign) return { error: 'Fix the mission file before importing.', errors: checked.errors, status: 400 };
+            if (this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM mission_drafts').toArray()[0].n >= 100) return { error: 'The library limit is 100 campaigns, including Trash.', status: 400 };
+            const campaign = checked.campaign;
+            // Import is additive, including when a matching ID is in Trash or arrives in another tab.
+            if (this.row(campaign.id)) {
+                const base = campaign.id.slice(0, 45);
+                do { campaign.id = `${base}-${crypto.randomUUID().slice(0, 8)}`; } while (this.row(campaign.id));
+            }
+            const content = JSON.stringify(campaign), now = Date.now(), revision = b.publish ? crypto.randomUUID() : null;
+            if (revision) this.sql.exec('INSERT INTO mission_revisions (revision_id, campaign_id, content, published) VALUES (?, ?, ?, ?)', revision, campaign.id, content, now);
+            this.sql.exec('INSERT INTO mission_drafts (campaign_id, content, version, published_revision, updated, created) VALUES (?, ?, 1, ?, ?, ?)', campaign.id, content, revision, now, now);
+            return { draft: this.draft(campaign.id)!, library: this.list(), warnings: checked.warnings, ...(revision ? { revision } : {}) };
+        }
         const id = typeof b.id === 'string' ? b.id : '';
         if (!missionId(id)) return { error: 'Choose a valid campaign ID.', status: 400 };
         const existing = this.draft(id);

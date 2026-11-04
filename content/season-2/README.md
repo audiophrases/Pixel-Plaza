@@ -12,14 +12,14 @@ A fictional school suspense mystery for teenage English learners, based on the s
 - `art/layout.png` and `art/prompt.md`: geometry guide and exact art brief for future variants.
 - `manifest.json`: an inventory of this pack, not an application registration file.
 
-The app does not import this directory, seed this mission, register this map or hardcode its characters. The files become ordinary editable server content only when you import and publish them. The ZIP is a transport bundle; extract it before using the existing studios.
+The app does not import this directory, seed this mission, register this map or hardcode its characters. The files become ordinary editable server content only when you import and publish them. Mission Studio accepts the complete ZIP directly. Extract the pack to import its theme and background in Map Studio or use individual chapter files.
 
 ## Install through the teacher studios
 
-Use an app version with the optional `help` fields and expandable Catalan UI from this change.
+Use an app version with **Import mission**, evidence pictures and expandable Catalan help.
 
 1. Open **Map Studio** (`/studio`) and sign in. Use **Open a theme file** to open `theme.json`, then **Import AI background** to open `art/campus.png`. Check the paths and walking preview. Save the map draft and **Publish to games**. The studio uploads the picture with the map into server storage.
-2. Open **Mission Studio**, create a new mission with an unused ID such as `protocol-815`, and import `campaign.json` using the replace-draft option. Review the chapter order and publish the mission.
+2. Open **Mission Studio** (`/mission-studio`) and click **Import mission**. Choose `protocol-815-season-2.zip` or `campaign.json`. The preview shows three chapters, twelve tasks, four roles, seven pictures and whether the map is ready. Click **Import & publish**. No empty mission or extraction is needed. Use **Save as draft** if you want to edit before publishing. Importing again creates a separate copy.
 3. Create a new game on **Protocol 8:15 · Storm campus**. Start **Protocol 8:15 — The Missing Student** from Teacher controls.
 4. Advance chapters manually after the class discussion. Use teacher news if students need a clue. Check written reports and accept uncertain or unavailable automatic checks in Teacher controls.
 

@@ -22,11 +22,13 @@ const summary = () => ({ id: saved.campaign.id, title: saved.campaign.title, ver
 let liveTarget: LiveMissionTarget = { game: { id: 'live-game', name: 'Class 3A' }, campaign: { id: castanyada.id, title: castanyada.title, revision: 'builtin' }, chapter: { id: castanyada.chapters[0].id, title: castanyada.chapters[0].title, index: 0 }, version: 0, epoch: 'session-1', open: true, ended: false, objectiveIds: castanyada.chapters.flatMap(c => c.objectives.map(o => o.id)), additions: [] };
 let liveReleased = 0; let livePreview = false;
 let failSave = false;
+let failImport = false;
+let failMapCheck = false;
 g.fetch = async (url, init) => {
     const route = String(url); const body = init?.body ? JSON.parse(String(init.body)) : {};
     if (route === '/api/teacher/login') return Response.json({ token: 'teacher-test' });
     // The maps on the server, as any page reads them: here, the starter maps.
-    if (route === '/api/themes') return Response.json({ themes: Object.values(themes), trash: [], default: 'plaza', version: '1.plaza' });
+    if (route === '/api/themes') return failMapCheck ? Response.json({ error: 'Map check failed.' }, { status: 500 }) : Response.json({ themes: Object.values(themes), trash: [], default: 'plaza', version: '1.plaza' });
     assert.equal((init?.headers as Record<string, string> | undefined)?.['x-teacher-session'], 'teacher-test');
     if (route.endsWith('/list')) return Response.json({ library: saved.deleted ? [] : [summary()], trash: saved.deleted ? [summary()] : [] });
     if (route.endsWith('/live')) return Response.json({ target: liveTarget });
@@ -51,6 +53,13 @@ g.fetch = async (url, init) => {
         return Response.json({ target: liveTarget, inspection: { id: 'hotel-interview', definition: saved.campaign.chapters[0].objectives.find(o => o.id === 'hotel-interview'), sourceId: saved.campaign.id, sourceVersion: saved.version, created: Date.now(), withdrawn: false } });
     }
     if (route.includes('/get?')) return Response.json({ draft: saved });
+    if (route.endsWith('/import')) {
+        if (failImport) return Response.json({ error: 'Import connection failed. Try again.' }, { status: 500 });
+        assert.deepEqual(validateMission(body.envelope, body.publish ? 'publish' : 'draft').errors, []);
+        writes.push({ op: 'import', body });
+        saved = { campaign: body.envelope.campaign, version: 1, publishedRevision: body.publish ? 'imported-revision' : null, updated: 0 };
+        return Response.json({ draft: saved, library: [summary()] });
+    }
     if (route.endsWith('/create')) {
         assert.ok(missionId(body.id), 'creation assigns a valid internal ID');
         saved = { campaign: { ...structuredClone(castanyada), id: body.id, title: 'New campaign' }, version: 1, publishedRevision: null, updated: 0 };
@@ -308,6 +317,51 @@ assert.equal(saved.deleted, true); assert.equal(document.querySelectorAll('.miss
 assert.ok(document.querySelector('.mission-trash-row'), 'deleted missions can be restored');
 await click('Restore mission'); assert.equal(saved.deleted, false);
 assert.equal(document.querySelectorAll('.mission-library-tile').length, 1);
+
+// A new mission can be imported directly from the library, without an empty starter.
+const chooseImport = async (contents: string) => {
+    const input = field('Import mission file') as HTMLInputElement;
+    Object.defineProperty(input, 'files', { configurable: true, value: [new File([contents], 'lesson.json')] });
+    await act(async () => { input.dispatchEvent(new dom.window.Event('change', { bubbles: true })); });
+};
+const beforeImport = writes.length;
+await chooseImport('broken JSON');
+assert.ok(document.querySelector('[role="alert"]')?.textContent?.includes('Invalid JSON'));
+assert.equal(writes.length, beforeImport, 'invalid files never create a starter mission');
+await chooseImport(missionJson(castanyada));
+assert.ok(document.querySelector('.mission-file-preview'));
+assert.equal(button('Import & publish').disabled, false, 'the existing map has this mission’s places');
+failMapCheck = true; await click('Refresh maps');
+assert.ok(document.querySelector('.mission-file-preview')?.textContent?.includes('Could not check available maps'));
+assert.equal(button('Import & publish').disabled, true);
+failMapCheck = false; await click('Refresh maps');
+assert.equal(button('Import & publish').disabled, false, 'retrying the map check keeps the selected import');
+await click('Cancel import');
+assert.equal(writes.length, beforeImport, 'canceling a preview writes nothing');
+assert.equal(document.activeElement, button('Import mission'));
+await chooseImport(JSON.stringify(season2));
+assert.equal(button('Import & publish').disabled, true, 'an unavailable map is explained before publishing');
+assert.ok(document.querySelector('.mission-file-preview')?.textContent?.includes('Missing places:'));
+assert.equal(button('Save as draft').disabled, false);
+await click('Cancel import');
+await chooseImport(missionJson(castanyada));
+await edit('Imported mission name', 'Imported mystery');
+failImport = true; await click('Import & publish');
+assert.ok(document.body.textContent?.includes('Import connection failed. Try again.'));
+assert.equal(field('Imported mission name').value, 'Imported mystery', 'a failed request keeps the preview and name');
+failImport = false; await click('Import & publish');
+assert.equal(writes.length, beforeImport + 1, 'a single request imports and publishes');
+assert.equal(writes.at(-1)?.op, 'import');
+assert.equal(writes.at(-1)?.body.publish, true);
+assert.equal(saved.campaign.title, 'Imported mystery');
+assert.equal(document.querySelector('.mission-file-preview'), null);
+assert.ok(document.body.textContent?.includes('imported and published'));
+assert.ok(saved.publishedRevision);
+await chooseImport(missionJson(castanyada));
+assert.ok(document.querySelector('.mission-file-preview')?.textContent?.includes('separate copy'));
+await click('Save as draft');
+assert.equal(saved.publishedRevision, null);
+assert.equal(writes.at(-1)?.body.publish, false);
 await act(async () => { root.unmount(); });
 
 // A branching story must preview its real rules, including optional clue rewards.

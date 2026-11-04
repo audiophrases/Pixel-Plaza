@@ -1554,6 +1554,10 @@ test('Season 2 imports as data and sends Catalan help only with each student’s
         // Exercise news attachments too, without adding an extra repeated clue to the authored pack.
         campaign.chapters[0].reveals[0].image = campaign.chapters[0].discoveries[0].image;
         assert.equal((await teacher('missions/list')).body.library.length, 0, 'the season is not seeded or built in');
+        assert.equal((await api(base, '/api/teacher/missions/import', { body: { envelope: pack, publish: true } })).status, 401);
+        const premature = await teacher('missions/import', { envelope: pack, publish: true });
+        assert.equal(premature.status, 400, 'publishing needs the matching map');
+        assert.equal((await teacher('missions/list')).body.library.length, 0, 'a rejected import leaves no empty draft');
         const picture = fs.readFileSync(path.join(root, 'content/season-2/art/campus.png'));
         const upload = await fetch(`${base}/api/teacher/theme-asset`, { method: 'POST', headers: { 'x-teacher-session': session }, body: picture });
         assert.equal(upload.status, 200);
@@ -1562,10 +1566,18 @@ test('Season 2 imports as data and sends Catalan help only with each student’s
         const map = await teacher('themes/save', { theme, create: true });
         assert.equal(map.status, 200, JSON.stringify(map.body));
         assert.equal((await teacher('themes/publish', { id: theme.id, version: map.body.map.version })).status, 200);
-        const draft = (await teacher('missions/create', { id: campaign.id })).body.draft;
-        const saved = await teacher('missions/save', { id: campaign.id, version: draft.version, envelope: pack });
-        assert.equal(saved.status, 200, JSON.stringify(saved.body));
-        assert.equal((await teacher('missions/publish', { id: campaign.id, version: saved.body.draft.version })).status, 200);
+        const imported = await teacher('missions/import', { envelope: pack, publish: true });
+        assert.equal(imported.status, 200, JSON.stringify(imported.body));
+        assert.deepEqual(imported.body.draft.campaign, campaign);
+        assert.ok(imported.body.draft.publishedRevision, 'one action creates a saved, published mission');
+        const duplicate = await teacher('missions/import', { envelope: pack, publish: false });
+        assert.equal(duplicate.status, 200); assert.notEqual(duplicate.body.draft.campaign.id, campaign.id);
+        assert.equal(duplicate.body.draft.publishedRevision, null, 'save as draft does not publish');
+        const original = (await teacher(`missions/get?id=${campaign.id}`)).body.draft;
+        assert.deepEqual(original, imported.body.draft, 'duplicate imports never overwrite the first mission');
+        const trashed = await teacher('missions/delete', { id: duplicate.body.draft.campaign.id, version: duplicate.body.draft.version });
+        const fromTrash = await teacher('missions/import', { envelope: missionEnvelope(trashed.body.draft.campaign), publish: false });
+        assert.equal(fromTrash.status, 200); assert.notEqual(fromTrash.body.draft.campaign.id, trashed.body.draft.campaign.id, 'Trash also reserves its mission ID');
         PIN = (await teacher('game', { name: 'Protocol QA', randomNames: false, themeId: theme.id })).body.pin;
         const a = await enter(base, 'signed-a', null), b = await enter(base, 'signed-b', null); sockets.push(a, b);
         assert.equal((await teacher('campaign', { op: 'start', campaign: campaign.id })).status, 200);

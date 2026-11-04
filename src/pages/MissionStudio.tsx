@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { Theme } from '../../shared/theme';
 import type { Campaign } from '../../shared/campaign';
@@ -13,6 +13,8 @@ import { MissionLibrary, MissionPlayGuide } from '../components/MissionGuide';
 import { focusMissionIssue, issueLocation, missionIssueText } from '../components/missionEditing';
 import LiveMissionPanel from '../components/LiveMissionPanel';
 import { readTeacherSession, storeTeacherSession } from '../teacherSession';
+import { readMissionFile } from '../../shared/missionFile';
+import MissionFileImport, { type MissionFilePreview } from '../components/MissionFileImport';
 import './MissionStudio.css';
 
 async function request<T>(token: string, op: string, body?: object): Promise<T> {
@@ -37,6 +39,12 @@ export default function MissionStudio() {
     const [params] = useSearchParams();
     // The maps are on the server: the one chosen here gives the editor its places and the AI prompt its place names.
     const [maps, setMaps] = useState<{ themes: Theme[]; trash: Theme[]; default: string }>({ themes: [], trash: [], default: '' });
+    const [mapsReady, setMapsReady] = useState(false);
+    const [mapsFailed, setMapsFailed] = useState(false);
+    const [mapRefresh, setMapRefresh] = useState(0);
+    const [filePreview, setFilePreview] = useState<MissionFilePreview | null>(null);
+    const importPicker = useRef<HTMLInputElement>(null);
+    const importButton = useRef<HTMLButtonElement>(null);
     const [promptThemeId, setPromptThemeId] = useState(() => params.get('theme') ?? '');
     const promptTheme = maps.themes.find(theme => theme.id === promptThemeId) ?? maps.themes.find(theme => theme.id === maps.default) ?? maps.themes[0];
     // A map clue can be in a place on any of the maps, as the server checks when the mission is published.
@@ -82,11 +90,13 @@ export default function MissionStudio() {
     }, [token]);
     useEffect(() => {
         let active = true;
+        setMapsReady(false); setMapsFailed(false);
         fetch('/api/themes').then(response => response.json()).then(body => {
-            if (active && Array.isArray(body.themes)) setMaps({ themes: body.themes, trash: Array.isArray(body.trash) ? body.trash : [], default: typeof body.default === 'string' ? body.default : '' });
-        }).catch(() => { /* the editor offers the places the mission already uses */ });
+            if (!Array.isArray(body.themes)) throw new Error('Could not check maps.');
+            if (active) { setMaps({ themes: body.themes, trash: Array.isArray(body.trash) ? body.trash : [], default: typeof body.default === 'string' ? body.default : '' }); setMapsReady(true); }
+        }).catch(() => { if (active) setMapsFailed(true); });
         return () => { active = false; };
-    }, []);
+    }, [mapRefresh]);
     useEffect(() => {
         if (!dirty) return;
         const prevent = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
@@ -114,6 +124,14 @@ export default function MissionStudio() {
     const openMission = (id: string) => { if (!id || !mayLeave()) return; void run(async () => { const result = await call<{ draft: MissionDraft }>(`get?id=${encodeURIComponent(id)}`); if (result.draft.deleted) { const latest = await call<{ library: MissionSummary[] }>('list'); setLibrary(latest.library); setShowLibrary(true); setNotice('This mission is in Trash. Restore it below to edit it.'); return; } applyDraft(result.draft); setNotice(''); }); };
     const selectChapter = (index: number) => { setChapterIndex(index); setSelectedId(null); setCandidate(null); setPrompt(''); };
     const askDelete = (item: MissionSummary) => { setDeleteTarget(item); window.requestAnimationFrame(() => document.querySelector<HTMLElement>('.mission-delete-confirm')?.focus()); };
+    const importFile = (next: Campaign, publish: boolean) => {
+        if (!mayLeave()) return;
+        void run(async () => {
+            const result = await call<{ draft: MissionDraft; library: MissionSummary[] }>('import', { envelope: missionEnvelope(next), publish });
+            applyDraft(result.draft); setLibrary(result.library); setFilePreview(null); setView(publish ? 'map' : 'review');
+            setNotice(publish ? `“${result.draft.campaign.title}” imported and published. Choose it in Teacher controls to start a game.` : `“${result.draft.campaign.title}” imported as a draft. Edit it and publish when ready.`);
+        });
+    };
     return <main className="mission-page mission-studio-page">
         <header className="mission-header"><div><p className="mission-eyebrow">PIXEL PLAZA · TEACHER WORKSPACE</p><h1>Mission Studio<span className="mission-header-mark" aria-hidden="true"><MissionIcon name="map" /></span></h1><p>Bring your story to life. One discovery at a time.</p>{sync && sync.state !== 'home' && <p className={`mission-sync mission-sync-${sync.state}`} role="status">{syncText(sync)}</p>}</div>
             <Link to="/teacher" onClick={e => { if (!mayLeave()) e.preventDefault(); }}>Teacher controls</Link></header>
@@ -125,7 +143,13 @@ export default function MissionStudio() {
         }); }}><h2>Teacher sign-in</h2><label className="mission-field"><span>Teacher password</span><input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label><button className="mission-button primary" disabled={busy}>Open Mission Studio</button></form>
         : <fieldset className="mission-workspace" disabled={busy} aria-busy={busy}>
             <section className="mission-library mission-card"><div className="mission-library-bar"><label className="mission-field"><span>Your missions</span><select value={campaign?.id ?? ''} onChange={e => openMission(e.target.value)}><option value="" disabled>Choose a mission to edit…</option>{library.map(item => <option key={item.id} value={item.id}>{item.title || 'Untitled mission'}{item.publishedRevision ? ' · Published' : ' · Draft'}</option>)}</select></label>
-                <button className="mission-button" aria-expanded={creating} onClick={() => setCreating(!creating)}>+ New mission</button>{campaign && <button className="mission-button" aria-pressed={showLibrary} onClick={() => setShowLibrary(!showLibrary)}>{showLibrary ? 'Back to editor' : 'Compare missions'}</button>}<button className="mission-button mission-signout" onClick={() => { if (!mayLeave()) return; storeTeacherSession(''); setToken(''); setCampaign(null); setDraft(null); setLibrary([]); setTrash([]); setDeleteTarget(null); }}>Sign out</button></div>
+                <button type="button" ref={importButton} className="mission-button primary" onClick={() => importPicker.current?.click()}>Import mission</button>
+                <input ref={importPicker} type="file" accept=".json,.txt,.zip,application/json,application/zip" hidden aria-label="Import mission file" onChange={event => {
+                    const file = event.target.files?.[0]; event.target.value = ''; if (!file) return;
+                    setFilePreview(null); setNotice(''); void run(async () => setFilePreview(await readMissionFile(file)));
+                }} />
+                <button className="mission-button" aria-expanded={creating} onClick={() => setCreating(!creating)}>+ New mission</button>{campaign && <button className="mission-button" aria-pressed={showLibrary} onClick={() => setShowLibrary(!showLibrary)}>{showLibrary ? 'Back to editor' : 'Compare missions'}</button>}<button className="mission-button mission-signout" onClick={() => { if (!mayLeave()) return; storeTeacherSession(''); setToken(''); setCampaign(null); setDraft(null); setLibrary([]); setTrash([]); setDeleteTarget(null); setFilePreview(null); }}>Sign out</button></div>
+                <p className="mission-muted mission-import-hint">Have a mission file? Import its JSON or season ZIP, then publish it for your class.</p>
                 {creating && <div className="mission-create"><h2>Create your mission</h2><p className="mission-muted">Give it a name, then start with an example you can change or adapt an existing mission.</p><div className="mission-two-columns"><MissionField label="New mission name" value={newName} maxLength={120} placeholder="For example: The missing festival lights" onChange={setNewName} /><label className="mission-field"><span>Start from</span><select value={source} onChange={e => setSource(e.target.value)}><option value="">Simple starter · one question to adapt</option>{library.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label></div>
                     <div className="mission-toolbar"><button className="mission-button primary" disabled={!newName.trim()} onClick={() => { if (!mayLeave()) return; void run(async () => {
                         const base = newName.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -137,6 +161,7 @@ export default function MissionStudio() {
                     }); }}>Create mission</button><button className="mission-button" onClick={() => setCreating(false)}>Cancel</button></div>
                 </div>}
             </section>
+            {filePreview && <MissionFileImport key={filePreview.source} preview={filePreview} maps={maps.themes} mapsReady={mapsReady} mapsFailed={mapsFailed} onRefreshMaps={() => setMapRefresh(value => value + 1)} duplicate={[...library, ...trash].some(item => item.id === filePreview.campaign.id)} busy={busy} onImport={importFile} onCancel={() => { setFilePreview(null); importButton.current?.focus(); }} />}
             {deleteTarget && <section className="mission-card mission-delete-confirm" tabIndex={-1} role="alert" aria-label="Confirm mission deletion"><h2>Move “{deleteTarget.title}” to Trash?</h2><p>It will leave the mission library and the choices for new games. Games already using it keep their story and progress. You can restore it from Trash.</p>{dirty && campaign?.id === deleteTarget.id && <p><strong>Unsaved edits will be discarded.</strong> Download a backup first to keep them.</p>}<div className="mission-toolbar"><button type="button" className="mission-button danger" onClick={() => void run(async () => {
                 const result = await call<{ draft: MissionDraft; library: MissionSummary[]; sync?: MissionSync }>('delete', { id: deleteTarget.id, version: draft && campaign?.id === deleteTarget.id ? draft.version : deleteTarget.version });
                 setLibrary(result.library); if (campaign?.id === deleteTarget.id) { setCampaign(null); setDraft(null); setCandidate(null); }
