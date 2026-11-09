@@ -1,0 +1,52 @@
+{
+  "format": "pixel-plaza-warmup",
+  "schemaVersion": 1,
+  "definition": {
+    "title": "Help Me!",
+    "instructions": "Read your card. Ask: “What do you need?” or “Can this help?” Match a problem with its solution. Type that classmate’s name.",
+    "level": "A1",
+    "kind": "pairs",
+    "pairs": [
+      [
+        "It is raining.",
+        "☂️ An umbrella"
+      ],
+      [
+        "My phone has no power.",
+        "A phone charger"
+      ],
+      [
+        "I cannot see in the dark.",
+        "🔦 A torch"
+      ],
+      [
+        "My hands are dirty.",
+        "🧼 Soap"
+      ],
+      [
+        "My trousers are falling down.",
+        "A belt"
+      ],
+      [
+        "My hair is messy.",
+        "A hairbrush"
+      ],
+      [
+        "My pencil has no point.",
+        "A pencil sharpener"
+      ],
+      [
+        "I need to cut paper.",
+        "✂️ Scissors"
+      ],
+      [
+        "I am thirsty.",
+        "💧 A glass of water"
+      ],
+      [
+        "I need to know the time.",
+        "⌚ A watch"
+      ]
+    ]
+  }
+}

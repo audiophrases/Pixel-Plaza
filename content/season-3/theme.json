@@ -1,0 +1,132 @@
+{
+  "id": "protocol-815-campus",
+  "name": "Protocol 8:15 · Storm campus",
+  "image": "/assets/maps/protocol-815-campus.png",
+  "art": 1024,
+  "world": 2048,
+  "spawn": {
+    "x": 490,
+    "y": 520
+  },
+  "blocked": [
+    [
+      0,
+      0,
+      1024,
+      32
+    ],
+    [
+      0,
+      32,
+      32,
+      960
+    ],
+    [
+      992,
+      32,
+      32,
+      960
+    ],
+    [
+      0,
+      992,
+      1024,
+      32
+    ],
+    [
+      80,
+      64,
+      240,
+      262
+    ],
+    [
+      392,
+      64,
+      240,
+      262
+    ],
+    [
+      704,
+      64,
+      240,
+      262
+    ],
+    [
+      110,
+      640,
+      230,
+      182
+    ],
+    [
+      734,
+      586,
+      122,
+      254
+    ]
+  ],
+  "walkBehind": [],
+  "zones": [
+    {
+      "id": "admin-office",
+      "name": "Office",
+      "rect": [
+        80,
+        330,
+        240,
+        100
+      ]
+    },
+    {
+      "id": "library",
+      "name": "Library",
+      "rect": [
+        392,
+        330,
+        240,
+        100
+      ]
+    },
+    {
+      "id": "sports-hall",
+      "name": "Sports hall · safe entrance",
+      "rect": [
+        704,
+        330,
+        240,
+        100
+      ]
+    },
+    {
+      "id": "courtyard",
+      "name": "Courtyard",
+      "rect": [
+        380,
+        460,
+        270,
+        190
+      ]
+    },
+    {
+      "id": "first-aid",
+      "name": "First-aid room",
+      "rect": [
+        110,
+        832,
+        230,
+        88
+      ]
+    }
+  ],
+  "scenery": {
+    "format": "background",
+    "setting": "Fictional school campus during a Mediterranean winter storm; Protocol 8:15",
+    "ground": "Wet concrete, restrained puddles, broad accessible routes, continuous perimeter walls",
+    "objects": [
+      "School office",
+      "Library",
+      "Sports hall",
+      "First-aid room",
+      "Closed covered passage"
+    ]
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "format": "pixel-plaza-season-pack",
+  "version": 2,
+  "id": "the-trophy-that-walked",
+  "season": 3,
+  "title": "The Trophy That Walked",
+  "level": "A1–A2",
+  "minutesPerChapter": [
+    15,
+    20
+  ],
+  "campaign": "campaign.json",
+  "chapters": [
+    "chapters/01.json",
+    "chapters/02.json",
+    "chapters/03.json",
+    "chapters/04.json"
+  ],
+  "theme": "theme.json",
+  "background": "art/campus.png",
+  "instructions": "README.md",
+  "teacherGuide": "teacher-guide.md",
+  "source": "storyline.txt",
+  "languages": [
+    "en",
+    "ca"
+  ],
+  "warmups": [
+    {
+      "file": "warmups/01-bag-detectives.json",
+      "title": "Bag Detectives",
+      "kind": "facts",
+      "minutes": [
+        3,
+        5
+      ],
+      "goal": "Describe an object; ask and answer with have."
+    },
+    {
+      "file": "warmups/02-wild-weekend.json",
+      "title": "My Very Strange Weekend",
+      "kind": "facts",
+      "minutes": [
+        3,
+        5
+      ],
+      "goal": "Ask about past events; practise a short follow-up aloud."
+    },
+    {
+      "file": "warmups/03-mystery-objects.json",
+      "title": "What Object Am I?",
+      "kind": "identity",
+      "minutes": [
+        3,
+        5
+      ],
+      "goal": "Describe shape, size and use without saying the secret word."
+    },
+    {
+      "file": "warmups/04-secret-animals.json",
+      "title": "Secret Animals",
+      "kind": "identity",
+      "minutes": [
+        3,
+        5
+      ],
+      "goal": "Ask about abilities and appearance; narrow down a guess."
+    },
+    {
+      "file": "warmups/05-perfect-pairs.json",
+      "title": "Find My Other Half",
+      "kind": "pairs",
+      "minutes": [
+        3,
+        5
+      ],
+      "goal": "Ask for missing information and agree on a match."
+    },
+    {
+      "file": "warmups/06-problem-solvers.json",
+      "title": "Help Me!",
+      "kind": "pairs",
+      "minutes": [
+        3,
+        5
+      ],
+      "goal": "Make a request, offer help and confirm a solution."
+    }
+  ],
+  "installation": "Use the existing Season 2 map. Import the campaign ZIP in Mission Studio. Import warm-up JSONs separately in the matching Warm-up editor type."
+}

@@ -1,0 +1,52 @@
+{
+  "format": "pixel-plaza-warmup",
+  "schemaVersion": 1,
+  "definition": {
+    "title": "Find My Other Half",
+    "instructions": "Read your word. Ask: “What do you have?” Find the word that goes with yours. Type that classmate’s name.",
+    "level": "A1",
+    "kind": "pairs",
+    "pairs": [
+      [
+        "🔑 Key",
+        "🔒 Lock"
+      ],
+      [
+        "🪥 Toothbrush",
+        "Toothpaste"
+      ],
+      [
+        "Needle",
+        "Thread"
+      ],
+      [
+        "Salt",
+        "Pepper"
+      ],
+      [
+        "Bow",
+        "Arrow"
+      ],
+      [
+        "Cup",
+        "Saucer"
+      ],
+      [
+        "Hammer",
+        "Nail"
+      ],
+      [
+        "Knife",
+        "Fork"
+      ],
+      [
+        "Bat",
+        "Ball"
+      ],
+      [
+        "Letter",
+        "Envelope"
+      ]
+    ]
+  }
+}

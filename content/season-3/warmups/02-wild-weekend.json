@@ -1,0 +1,73 @@
+{
+  "format": "pixel-plaza-warmup",
+  "schemaVersion": 1,
+  "definition": {
+    "title": "My Very Strange Weekend",
+    "instructions": "These stories are pretend. Ask: “Did you…?” Answer from your card. Find each person. Type their name.",
+    "level": "A2",
+    "kind": "facts",
+    "facts": [
+      {
+        "id": "moon",
+        "mine": "🌙 You visited the moon.",
+        "find": "visited the moon"
+      },
+      {
+        "id": "dragon",
+        "mine": "🐉 You fed a dragon.",
+        "find": "fed a dragon"
+      },
+      {
+        "id": "penguin",
+        "mine": "🐧 You danced with a penguin.",
+        "find": "danced with a penguin"
+      },
+      {
+        "id": "pizza",
+        "mine": "🍕 You made a giant pizza.",
+        "find": "made a giant pizza"
+      },
+      {
+        "id": "fish",
+        "mine": "🐟 You talked to a fish.",
+        "find": "talked to a fish"
+      },
+      {
+        "id": "castle",
+        "mine": "🏰 You slept in a castle.",
+        "find": "slept in a castle"
+      },
+      {
+        "id": "robot",
+        "mine": "🤖 You taught a robot to sing.",
+        "find": "taught a robot to sing"
+      },
+      {
+        "id": "cloud",
+        "mine": "☁️ You sat on a cloud.",
+        "find": "sat on a cloud"
+      },
+      {
+        "id": "dinosaur",
+        "mine": "🦕 You met a dinosaur.",
+        "find": "met a dinosaur"
+      },
+      {
+        "id": "cake",
+        "mine": "🎂 You ate a blue cake.",
+        "find": "ate a blue cake"
+      },
+      {
+        "id": "cat",
+        "mine": "🐈 You played chess with a cat.",
+        "find": "played chess with a cat"
+      },
+      {
+        "id": "rocket",
+        "mine": "🚀 You flew a rocket.",
+        "find": "flew a rocket"
+      }
+    ],
+    "rounds": 3
+  }
+}

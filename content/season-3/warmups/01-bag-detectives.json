@@ -1,0 +1,73 @@
+{
+  "format": "pixel-plaza-warmup",
+  "schemaVersion": 1,
+  "definition": {
+    "title": "Bag Detectives",
+    "instructions": "Read your pretend card. Ask: “Do you have…?” Find each person. Type their name.",
+    "level": "A2",
+    "kind": "facts",
+    "facts": [
+      {
+        "id": "key",
+        "mine": "🔑 You have a key.",
+        "find": "has a key"
+      },
+      {
+        "id": "apple",
+        "mine": "🍎 You have an apple.",
+        "find": "has an apple"
+      },
+      {
+        "id": "ball",
+        "mine": "⚽ You have a football.",
+        "find": "has a football"
+      },
+      {
+        "id": "book",
+        "mine": "📚 You have a book.",
+        "find": "has a book"
+      },
+      {
+        "id": "umbrella",
+        "mine": "☂️ You have an umbrella.",
+        "find": "has an umbrella"
+      },
+      {
+        "id": "camera",
+        "mine": "📷 You have a camera.",
+        "find": "has a camera"
+      },
+      {
+        "id": "pizza",
+        "mine": "🍕 You have a slice of pizza.",
+        "find": "has a slice of pizza"
+      },
+      {
+        "id": "sock",
+        "mine": "🧦 You have one sock.",
+        "find": "has one sock"
+      },
+      {
+        "id": "crown",
+        "mine": "👑 You have a crown.",
+        "find": "has a crown"
+      },
+      {
+        "id": "banana",
+        "mine": "🍌 You have a banana.",
+        "find": "has a banana"
+      },
+      {
+        "id": "bell",
+        "mine": "🔔 You have a bell.",
+        "find": "has a bell"
+      },
+      {
+        "id": "pencil",
+        "mine": "✏️ You have a pencil.",
+        "find": "has a pencil"
+      }
+    ],
+    "rounds": 3
+  }
+}

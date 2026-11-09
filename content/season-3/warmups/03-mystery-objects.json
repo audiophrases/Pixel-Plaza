@@ -1,0 +1,108 @@
+{
+  "format": "pixel-plaza-warmup",
+  "schemaVersion": 1,
+  "definition": {
+    "title": "What Object Am I?",
+    "instructions": "Keep your object secret. Ask your named classmate yes/no questions: “Are you small?” “Can I wear you?” Type your guess.",
+    "level": "A1",
+    "kind": "identity",
+    "identities": [
+      {
+        "id": "umbrella",
+        "name": "Umbrella",
+        "accept": [
+          "Umbrella",
+          "umbrella"
+        ]
+      },
+      {
+        "id": "pencil",
+        "name": "Pencil",
+        "accept": [
+          "Pencil",
+          "pencil"
+        ]
+      },
+      {
+        "id": "bicycle",
+        "name": "Bicycle",
+        "accept": [
+          "Bicycle",
+          "bicycle"
+        ]
+      },
+      {
+        "id": "shoe",
+        "name": "Shoe",
+        "accept": [
+          "Shoe",
+          "shoe"
+        ]
+      },
+      {
+        "id": "clock",
+        "name": "Clock",
+        "accept": [
+          "Clock",
+          "clock"
+        ]
+      },
+      {
+        "id": "camera",
+        "name": "Camera",
+        "accept": [
+          "Camera",
+          "camera"
+        ]
+      },
+      {
+        "id": "spoon",
+        "name": "Spoon",
+        "accept": [
+          "Spoon",
+          "spoon"
+        ]
+      },
+      {
+        "id": "backpack",
+        "name": "Backpack",
+        "accept": [
+          "Backpack",
+          "backpack"
+        ]
+      },
+      {
+        "id": "guitar",
+        "name": "Guitar",
+        "accept": [
+          "Guitar",
+          "guitar"
+        ]
+      },
+      {
+        "id": "key",
+        "name": "Key",
+        "accept": [
+          "Key",
+          "key"
+        ]
+      },
+      {
+        "id": "book",
+        "name": "Book",
+        "accept": [
+          "Book",
+          "book"
+        ]
+      },
+      {
+        "id": "chair",
+        "name": "Chair",
+        "accept": [
+          "Chair",
+          "chair"
+        ]
+      }
+    ]
+  }
+}
