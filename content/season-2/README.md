@@ -53,6 +53,10 @@ Its editable `cast` lists the eight story characters, each with one public line 
 
 ## Running the lessons
 
+The student copy uses short story summaries, directions to each clue and sentence starters for chat and reports, with matching Catalan help. Start with: “Karina is missing. You are detectives. Share clues to find out what happened.” The teacher guide includes a brief walkthrough. Reports still need **Choose a witness** in the Journal; ordinary chat alone does not complete that step.
+
+To use this revised wording, import the rebuilt ZIP or campaign JSON in Mission Studio, review and publish it, then start a new game with that mission. Importing creates a separate copy; existing published missions and running games are not changed by rebuilding these files.
+
 Use at least two students: the main report in each chapter requires one in-game witness exchange. Four or more lets the four investigator roles distribute naturally. Started in case teams (on by default), each team of three or four holds the investigator roles between its members, talks in its own Team chat and answers once for the whole team. Missing-role evidence uses the app’s existing fallback notices. Players are investigators; the named story characters are witnesses in the fictional documents, not roles assigned to real classmates.
 
 Keep the unsafe passage blocked. Evidence is collected from the open ground outside buildings. Students investigate information; staff handle the emergency. A teacher may adapt names, setting, stakes and translations like any other mission.

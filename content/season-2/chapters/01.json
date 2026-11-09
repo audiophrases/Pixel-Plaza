@@ -4,16 +4,16 @@
   "campaign": {
     "id": "protocol-815-chapter-1",
     "title": "Protocol 8:15 · 1. The Missing Student",
-    "finale": "New CCTV: at 8:07, Ms Diop entered the sports hall with Karina. Ms Diop said she had not seen her. Why did she lie?",
+    "finale": "A security video shows Ms Diop, the PE teacher, with Karina at 8:07. Ms Diop said she had not seen her. Why did she lie?",
     "roles": [
       {
         "id": "media-analyst",
-        "name": "Media analyst",
-        "card": "Check screenshots and times. Ask classmates what their evidence shows.",
+        "name": "Message checker",
+        "card": "Read your clue. Tell a classmate: “My clue says…” Ask: “What does yours say?”",
         "clue": "Laia saved two messages at 8:15: “Stay inside” and “Go to the sports hall.” Both use the school account.",
         "help": {
           "card": {
-            "ca": "Comprova les captures de pantalla i les hores. Pregunta als companys què mostren les seves proves."
+            "ca": "Llegeix la teva pista. Digues a un company: «La meva pista diu…» Pregunta: «Què diu la teva?»"
           },
           "clue": {
             "ca": "La Laia va guardar dos missatges de les 8:15: «Quedeu-vos a dins» i «Aneu al pavelló». Tots dos utilitzen el compte de l’institut."
@@ -22,43 +22,43 @@
       },
       {
         "id": "witness-interviewer",
-        "name": "Witness interviewer",
-        "card": "Compare what people say. Ask a follow-up question before deciding who to trust.",
-        "clue": "Youssef says, “I have not seen Karina.” Laia remembers them talking before lessons. You do not know when they last met.",
+        "name": "People checker",
+        "card": "Read your clue. Tell a classmate: “My clue says…” Ask: “What does yours say?”",
+        "clue": "Youssef is Karina’s friend. He says, “I have not seen her.” Laia says they talked before class.",
         "help": {
           "card": {
-            "ca": "Compara què diu cadascú. Fes una pregunta més abans de decidir de qui et fies."
+            "ca": "Llegeix la teva pista. Digues a un company: «La meva pista diu…» Pregunta: «Què diu la teva?»"
           },
           "clue": {
-            "ca": "En Youssef diu: «No he vist la Karina». La Laia recorda que parlaven abans de classe. No saps quan es van veure per última vegada."
+            "ca": "En Youssef és amic de la Karina. Diu: «No l’he vista». La Laia diu que van parlar abans de classe."
           }
         }
       },
       {
         "id": "records-researcher",
-        "name": "Records researcher",
-        "card": "Check documents and their dates. Separate a fact from a guess.",
-        "clue": "At 8:16, Karina was absent from roll call. The office calls its emergency plan “Protocol 8:15”. The messages disagree.",
+        "name": "Document checker",
+        "card": "Read your clue. Tell a classmate: “My clue says…” Ask: “What does yours say?”",
+        "clue": "At 8:16, teachers checked who was in class. Karina was not there. Nobody knew where she was.",
         "help": {
           "card": {
-            "ca": "Comprova els documents i les dates. Distingeix un fet d’una suposició."
+            "ca": "Llegeix la teva pista. Digues a un company: «La meva pista diu…» Pregunta: «Què diu la teva?»"
           },
           "clue": {
-            "ca": "A les 8:16, la Karina no hi era quan van passar llista. El pla d’emergència de secretaria es diu «Protocol 8:15». Els missatges es contradiuen."
+            "ca": "A les 8:16, el professorat va comprovar qui era a classe. La Karina no hi era. Ningú sabia on era."
           }
         }
       },
       {
         "id": "site-observer",
-        "name": "Site observer",
-        "card": "Read evidence at the marked places. Stay outside the blocked passage and report risks to staff.",
-        "clue": "Chidi saw a fallen roof panel blocking the covered passage. Ms Diop told everyone to stay away from the sports hall.",
+        "name": "Place checker",
+        "card": "Read your clue. Tell a classmate: “My clue says…” Ask: “What does yours say?”",
+        "clue": "Chidi saw a roof panel fall and block the passage near the sports hall. Ms Diop said, “Stay away.”",
         "help": {
           "card": {
-            "ca": "Llegeix les proves als llocs indicats. No entris al passadís tallat i comunica els riscos al professorat."
+            "ca": "Llegeix la teva pista. Digues a un company: «La meva pista diu…» Pregunta: «Què diu la teva?»"
           },
           "clue": {
-            "ca": "En Chidi va veure una placa del sostre caiguda que bloquejava el passadís cobert. La senyora Diop va dir a tothom que s’allunyés del pavelló."
+            "ca": "En Chidi va veure caure una placa del sostre que va bloquejar el passadís prop del pavelló. La senyora Diop va dir: «No us hi acosteu»."
           }
         }
       }
@@ -67,42 +67,42 @@
       {
         "id": "p815-missing-student",
         "title": "1. The Missing Student",
-        "intro": "A storm hits Coma-ruga. At 8:15, two school messages give opposite instructions. Karina is missing. Compare evidence at safe locations; let staff handle the emergency.",
-        "recap": "Karina missed roll call. The 8:15 messages disagree. Check facts before blaming anyone.",
-        "ending": "New CCTV: at 8:07, Ms Diop entered the sports hall with Karina. Ms Diop said she had not seen her. Why did she lie?",
+        "intro": "A storm hits the school. Karina, a student, is missing. Two school messages say different things. Your mission: find out what happened. First, read your clue in the Journal. Tell a classmate: “My clue says…”",
+        "recap": "Karina is missing. The school messages disagree. What do we know so far?",
+        "ending": "A security video shows Ms Diop, the PE teacher, with Karina at 8:07. Ms Diop said she had not seen her. Why did she lie?",
         "share": 0.7,
         "objectives": [
           {
             "id": "p815-c1-messages",
-            "text": "Compare the two messages. Which place do they disagree about?",
+            "text": "Go to the office. Read both messages. Which place is in both? Write the place.",
             "accept": [
               "sports hall",
               "the sports hall",
               "gym"
             ],
             "help": {
-              "ca": "Compara els dos missatges. Sobre quin lloc es contradiuen?"
+              "ca": "Ves a secretaria. Llegeix els dos missatges. Quin lloc surt a tots dos? Escriu el lloc."
             }
           },
           {
             "id": "p815-c1-passage",
-            "text": "Ask about Chidi’s evidence. What blocked the covered passage?",
+            "text": "Go outside the sports hall. Read Chidi’s clue. What fell from the roof?",
             "accept": [
               "roof panel",
               "fallen roof panel",
               "a roof panel"
             ],
             "help": {
-              "ca": "Pregunta per les proves d’en Chidi. Què bloquejava el passadís cobert?"
+              "ca": "Ves a fora del pavelló. Llegeix la pista d’en Chidi. Què va caure del sostre?"
             },
             "after": "p815-c1-messages"
           },
           {
             "id": "p815-c1-briefing",
-            "text": "Exchange evidence with a classmate. Write two facts and one question you still cannot answer.",
+            "text": "Use “Choose a witness”. Ask: “What do you know?” After their reply, write: “We know… Also… Our question is…”",
             "accept": [],
             "help": {
-              "ca": "Intercanvia proves amb un company. Escriu dos fets i una pregunta que encara no pots respondre."
+              "ca": "Fes servir «Choose a witness». Pregunta: «Què saps?» Quan respongui, escriu: «Sabem… També… La nostra pregunta és…»"
             },
             "after": "p815-c1-passage",
             "kind": "report",
@@ -114,10 +114,10 @@
           },
           {
             "id": "p815-c1-rumour",
-            "text": "Write a short group-chat message that corrects a rumour without blaming anyone.",
+            "text": "Bonus: someone says, “Karina is in the sports hall.” We do not know that. Write: “We only know…”",
             "accept": [],
             "help": {
-              "ca": "Escriu un missatge breu per al xat del grup que corregeixi un rumor sense culpar ningú."
+              "ca": "Extra: algú diu: «La Karina és al pavelló». No ho sabem. Escriu: «Només sabem…»"
             },
             "optional": true,
             "after": "p815-c1-briefing",
@@ -142,17 +142,17 @@
           {
             "id": "p815-c1-roof",
             "zone": "sports-hall",
-            "text": "Chidi’s statement: “A roof panel fell across the covered passage. I stayed outside and told a teacher.”",
+            "text": "Chidi: “A roof panel fell. It blocked this passage. I stayed outside and told a teacher.”",
             "help": {
-              "ca": "Declaració d’en Chidi: «Una placa del sostre va caure al passadís cobert. Em vaig quedar a fora i vaig avisar un professor»."
+              "ca": "En Chidi: «Va caure una placa del sostre. Va bloquejar aquest passadís. Em vaig quedar a fora i vaig avisar un professor»."
             }
           },
           {
             "id": "p815-c1-register",
             "zone": "courtyard",
-            "text": "Roll call, 8:16: Karina Gonzalvez is missing. Staff are checking the safe rooms. Nobody has confirmed where she is.",
+            "text": "Class list, 8:16: Karina is not in class. Teachers are looking for her.",
             "help": {
-              "ca": "Llista d’assistència, 8:16: falta la Karina Gonzalvez. El personal està comprovant les sales segures. Ningú no ha confirmat on és."
+              "ca": "Llista de classe, 8:16: la Karina no és a classe. El professorat la busca."
             }
           },
           {
@@ -167,16 +167,16 @@
         "reveals": [
           {
             "id": "p815-c1-news-a",
-            "text": "Compare Laia’s screenshot with the office printout. The two messages disagree about the sports hall.",
+            "text": "Need help? Read the two messages at the office. Ask a classmate: “Which place is in both?”",
             "help": {
-              "ca": "Compara la captura de la Laia amb el full de secretaria. Els dos missatges es contradiuen sobre el pavelló."
+              "ca": "Necessites ajuda? Llegeix els dos missatges a secretaria. Pregunta a un company: «Quin lloc surt a tots dos?»"
             }
           },
           {
             "id": "p815-c1-news-b",
-            "text": "Chidi saw a fallen roof panel. A blocked route is a fact; an accusation is not proof.",
+            "text": "Chidi saw what fell. Read his clue outside the sports hall. Stay out of the blocked passage.",
             "help": {
-              "ca": "En Chidi va veure una placa del sostre caiguda. Que una ruta estigui tallada és un fet; una acusació no és una prova."
+              "ca": "En Chidi va veure què va caure. Llegeix la seva pista a fora del pavelló. No entris al passadís tallat."
             }
           }
         ],
@@ -186,20 +186,20 @@
         },
         "help": {
           "intro": {
-            "ca": "Una tempesta arriba a Coma-ruga. A les 8:15, dos missatges de l’institut donen instruccions contràries. La Karina ha desaparegut. Compareu proves en llocs segurs; deixeu l’emergència en mans del personal."
+            "ca": "Hi ha una tempesta a l’institut. Falta la Karina, una alumna. Dos missatges de l’institut diuen coses diferents. Missió: descobrir què ha passat. Primer, llegeix la teva pista al Journal. Digues a un company: «La meva pista diu…»"
           },
           "recap": {
-            "ca": "La Karina no hi era quan van passar llista. Els missatges de les 8:15 es contradiuen. Comproveu els fets abans de culpar ningú."
+            "ca": "Falta la Karina. Els missatges de l’institut diuen coses diferents. Què sabem fins ara?"
           },
           "ending": {
-            "ca": "Nova gravació de seguretat: a les 8:07, la senyora Diop va entrar al pavelló amb la Karina. Havia dit que no l’havia vista. Per què va mentir?"
+            "ca": "Un vídeo de seguretat mostra la senyora Diop, professora d’educació física, amb la Karina a les 8:07. Havia dit que no l’havia vista. Per què va mentir?"
           }
         }
       }
     ],
     "help": {
       "finale": {
-        "ca": "Nova gravació de seguretat: a les 8:07, la senyora Diop va entrar al pavelló amb la Karina. Havia dit que no l’havia vista. Per què va mentir?"
+        "ca": "Un vídeo de seguretat mostra la senyora Diop, professora d’educació física, amb la Karina a les 8:07. Havia dit que no l’havia vista. Per què va mentir?"
       }
     },
     "vocabulary": [
