@@ -115,10 +115,12 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     if (path === '/api/teacher/warmup' && (body?.op === 'start' || body?.op === 'end')) {
         return { kind: 'warmup', op: body.op, ...(['facts', 'identity', 'pairs'].includes(body.type) ? { type: body.type } : {}) };
     }
-    if (path === '/api/teacher/campaign' && ['start', 'next', 'reveal', 'reset', 'team'].includes(body?.op)) {
+    if (path === '/api/teacher/campaign' && ['start', 'next', 'reveal', 'reset', 'team', 'end'].includes(body?.op)) {
         return { kind: 'campaign', op: body.op, ...(typeof body.campaign === 'string' ? { campaign: body.campaign } : {}), confirm: body.confirm === true, teams: body.teams === true,
+            ...(typeof body.themeId === 'string' ? { themeId: body.themeId } : {}),
             ...(typeof body.studentKey === 'string' ? { studentKey: body.studentKey } : {}), ...(body.team === 'new' || Number.isInteger(body.team) ? { team: body.team } : {}) };
     }
+    if (path === '/api/teacher/game-map' && typeof body?.themeId === 'string') return { kind: 'gameMap', themeId: body.themeId };
     if (path === '/api/teacher/quest-release' && typeof body?.objective === 'string') return { kind: 'questRelease', objective: body.objective };
     if (path === '/api/teacher/quest-place' && typeof body?.objective === 'string' && typeof body?.studentKey === 'string') return { kind: 'questPlace', objective: body.objective, studentKey: body.studentKey };
     // Nothing waits for the teacher's approval; a message that posted can be taken down.
@@ -325,6 +327,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (path === '/api/teacher/student' && get) {
         const query = new URL(request.url).searchParams;
         const result = await plaza(env).studentProfile(request.headers.get('x-teacher-session') || '', query.get('gameId') || '', query.get('studentKey') || '');
+        return 'error' in result ? json({ error: result.error }, result.status) : json(result);
+    }
+    if (path === '/api/teacher/campaign-history' && get) {
+        const result = await plaza(env).earlierCampaign(request.headers.get('x-teacher-session') || '', new URL(request.url).searchParams.get('id') || '');
         return 'error' in result ? json({ error: result.error }, result.status) : json(result);
     }
     if (path === '/api/teacher/conversations' && get) {

@@ -40,16 +40,20 @@ type CampaignInfo = {
   reports: { studentKey: string; objective: string; text: string; partner?: string; starred?: boolean; version: number; check?: ReportCheck }[];
   interviews?: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
   castClashes?: string[]; // story characters called like a student here
+  endedEarly?: boolean; // ended before its last chapter
   teams?: { team: number; name: string; done: number; total: number; members: { studentKey: string; name: string; role: string; online: boolean }[] }[];
   board?: { id: string; text: string; teacherReleased: boolean; released: boolean; accepted: number; completed: number }[];
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
 };
 type Game = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean; themeId?: string };
+// A campaign the open game played before, kept when the next one started.
+type EarlierCampaign = { id: string; title: string; started: number; ended: number | null; chapter: number; chapters: number; early: boolean; teams: boolean; students: number; reports: number };
+type EarlierDetail = EarlierCampaign & { players: { name: string; role: string; answered: number; team?: string }[]; writing: { name: string; question: string; text: string; partner?: string }[] };
 type LiveStudent = { studentKey: string; name: string; x: number; y: number; zone: string | null; level?: number; look?: Partial<AvatarConfig>; inTab?: boolean; tabSwitches?: number; tabAwayAt?: number | null };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
   warmupPlays?: Partial<Record<WarmupKind, PlayStats>>;
-  campaign: CampaignInfo | null; campaigns: CampaignChoice[];
+  campaign: CampaignInfo | null; campaigns: CampaignChoice[]; earlierCampaigns?: EarlierCampaign[];
   sideQuests?: SideQuestPanel | null; // the open game's side quests, with or without a campaign
   warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
   incidents?: Incident[];
@@ -105,8 +109,17 @@ export default function Teacher() {
   const MAP_SIZE = plazaMap?.world ?? 2048;
   const newTheme = themeOf(newThemeId || defaultMap);
   // Map clues in places the open game's map does not have: students could not find them there.
-  const notOnMap = (zones?: string[]) => plazaMap && zones ? zones.filter(zone => !plazaMap.zones.some(item => item.id === zone)) : [];
-  const mapWarning = (zones?: string[]) => { const missing = notOnMap(zones); return missing.length > 0 && <p className="teacher-flag">⚠ Not on {plazaMap!.name}: {missing.join(', ')}. Students cannot find the map clues there; choose a map with these places for this game.</p>; };
+  const notOnMap = (zones?: string[], map = plazaMap) => map && zones ? zones.filter(zone => !map.zones.some(item => item.id === zone)) : [];
+  const mapWarning = (zones?: string[], map = plazaMap) => {
+    const missing = notOnMap(zones, map);
+    const better = themes.filter(theme => notOnMap(zones, theme).length === 0).map(theme => theme.name);
+    return missing.length > 0 && <p className="teacher-flag">⚠ Not on {map!.name}: {missing.join(', ')}. Students cannot find the map clues there; {better.length ? `${better.join(' or ')} ${better.length === 1 ? 'has' : 'have'} them` : 'choose a map with these places'}.</p>;
+  };
+  // The map the next campaign starts on ('' keeps the game's own), and the map a game can change to at any time.
+  const [startMapId, setStartMapId] = useState('');
+  const startMap = themeOf(startMapId || status?.game?.themeId);
+  const [mapPick, setMapPick] = useState('');
+  const pickedMap = themeOf(mapPick || status?.game?.themeId);
   const [warmupKind, setWarmupKind] = useState<WarmupKind>('facts');
   const [inTeams, setInTeams] = useState(true); // the next campaign is played in case teams, where the mission allows
   const [copyNote, setCopyNote] = useState(''); // shown when the browser would not copy
@@ -263,6 +276,12 @@ export default function Teacher() {
     } catch (cause) { onError?.(cause); failed(cause); return false; }
   };
 
+  // Ending a campaign before its last chapter keeps everything students did; the story stops without its ending.
+  const endCampaign = () => {
+    const running = status?.campaign;
+    if (running && window.confirm(`End ${running.title} now, at chapter ${running.chapter + 1} of ${running.chapters}? Students keep what they found, wrote and earned; the story stops here without its ending. Then you can start another campaign, on any map, with the same PIN.`)) void action('campaign', { op: 'end' });
+  };
+
   // Saved classmates remain available for private help even when they are offline or have no alert.
   const supportStudents = new Map<string, Support['students'][number]>();
   if (status) {
@@ -313,7 +332,7 @@ export default function Teacher() {
       { id: 'blocked' as const, icon: '🚫', title: 'Blocked words', label: status.blocked?.words.length ? `${status.blocked.words.length}` : undefined },
       { id: 'map' as const, icon: '🗺', title: 'Map & spells', label: `${status.online.length} online` },
       { id: 'warmup' as const, icon: '🧩', title: 'Warm-up', label: status.warmup?.active ? 'running' : undefined },
-      { id: 'campaign' as const, icon: '📖', title: 'Campaign', label: campaign ? `chapter ${campaign.chapter + 1} of ${campaign.chapters}` : undefined },
+      { id: 'campaign' as const, icon: '📖', title: 'Campaign', label: campaign ? campaign.status === 'campaign_complete' ? 'ended' : `chapter ${campaign.chapter + 1} of ${campaign.chapters}` : undefined },
       { id: 'side' as const, icon: '✦', title: 'Side quests', label: side?.quests ? `${side.doing.length} doing` : undefined },
       { id: 'history' as const, icon: '🗂', title: 'Message history' },
     ] : []),
@@ -446,7 +465,8 @@ export default function Teacher() {
           <button className="btn btn-secondary btn-sm" onClick={showGuide}>Teacher guide</button>
           {campaign.reveals.next && <button className="btn btn-secondary btn-sm" title={campaign.reveals.next} onClick={() => void action('campaign', { op: 'reveal' })}>📰 Next news</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => { if (window.confirm(`${nextStep(campaign)}?`)) void action('campaign', { op: 'next' }); }}>
-            {campaign.chapter + 1 < campaign.chapters ? '▶ Next chapter' : '🏁 End campaign'}</button></span>}
+            {campaign.chapter + 1 < campaign.chapters ? '▶ Next chapter' : '🏁 Finish the story'}</button>
+          {campaign.chapter + 1 < campaign.chapters && <button className="btn btn-secondary btn-sm" onClick={endCampaign}>⏹ End campaign</button>}</span>}
       </section>}
       {status.game && <LiveClass gameId={status.game.id} alerts={status.support?.alerts ?? []} incidents={status.incidents ?? []}
         repeats={status.blocked?.repeats ?? []} online={status.online.map(s => ({ ...s, zone: placeName(s.zone) }))}
@@ -465,6 +485,15 @@ export default function Teacher() {
         {shown === 'blocked' && status.blocked && <BlockedWords blocked={status.blocked} open={status.open} who={who} action={action} onSelect={setSelectedStudent} />}
 
         {shown === 'map' && status.game && <>
+          <div className="teacher-map-choice">
+            <label>Map for {status.game.name} <select aria-label="Map for this game" value={pickedMap?.id ?? ''} onChange={event => setMapPick(event.target.value)}>
+              {themes.map(theme => <option key={theme.id} value={theme.id}>{theme.name}{theme.id === status.game!.themeId ? ' · now' : ''}</option>)}
+            </select></label>
+            <button className="btn btn-secondary btn-sm" disabled={!pickedMap || pickedMap.id === status.game.themeId} onClick={() => {
+              if (pickedMap && window.confirm(`Move ${status.game!.name} to ${pickedMap.name}? Everyone here goes to its start. The PIN, link, chat and progress stay.`)) void action('game-map', { themeId: pickedMap.id }).then(done => { if (done) setMapPick(''); });
+            }}>Change map</button>
+            {campaign && campaign.status !== 'campaign_complete' && pickedMap && pickedMap.id !== status.game.themeId && mapWarning(campaign.zones, pickedMap)}
+          </div>
           <div className="teacher-actions">
             <button className="btn btn-sm" onClick={() => void action('magic', { power: 'rain' })}>🌧 Make it rain (15s)</button>
             <button className="btn btn-sm" disabled={!selectedOnline} onClick={() => setMovingStudent(!movingStudent)} aria-pressed={movingStudent}>{movingStudent ? 'Cancel move' : 'Move selected student'}</button>
@@ -517,8 +546,17 @@ export default function Teacher() {
           </>}
         </>}
 
-        {shown === 'campaign' && status.game && (!campaign ? <>
-          <p>Start a story for <strong>{status.game.name}</strong>. Each student gets a role at random and keeps it for the whole campaign. Closing the game saves it, and reopening picks the story up again.</p>
+        {shown === 'campaign' && status.game && <>
+          {(!campaign || campaign.status === 'campaign_complete') && <>
+          {campaign ? <p className="teacher-ended"><strong>{campaign.title}</strong> {campaign.endedEarly ? `ended at chapter ${campaign.chapter + 1} of ${campaign.chapters}` : 'is finished'}. Students keep what they found, wrote and earned. Start another campaign when you are ready, on this map or another: same PIN and link, and {campaign.title} moves to <em>Earlier campaigns</em>.</p>
+            : <p>Start a story for <strong>{status.game.name}</strong>. Each student gets a role at random and keeps it for the whole campaign. Closing the game saves it, and reopening picks the story up again.</p>}
+          <div className="teacher-map-choice">
+            <label>Map <select aria-label="Map for the campaign" value={startMap?.id ?? ''} onChange={event => setStartMapId(event.target.value)}>
+              {themes.map(theme => <option key={theme.id} value={theme.id}>{theme.name}{theme.id === status.game!.themeId ? ' · this game’s map now' : ''}</option>)}
+            </select></label>
+            {startMap && <ThemePicture theme={startMap} />}
+            <small>{startMap && startMap.id !== status.game.themeId ? `Starting moves ${status.game.name} to ${startMap.name}: everyone here goes to its start. The PIN and link stay the same.` : 'The campaign starts on this game’s map.'}</small>
+          </div>
           <label className="teacher-toggle"><input type="checkbox" checked={inTeams} onChange={event => setInTeams(event.target.checked)} />
             Play in teams of 3–4: the game forms the teams, each member holds a different clue, the team has its own chat, and one answer counts for the whole team.</label>
           <ul className="teacher-campaign-choices">{status.campaigns.map(choice => <li key={choice.id}>
@@ -526,15 +564,17 @@ export default function Teacher() {
               <strong>{choice.title}</strong>
               <small>{choice.chapters.length} {choice.chapters.length === 1 ? 'chapter' : 'chapters'} · {features(choice)}</small>
               <ol className="teacher-chapter-line">{chapterPreview(choice.chapters).map(([number, title]) => <li key={title}>{number > 0 && <span>{number}.</span>}{title}</li>)}</ol>
-              {mapWarning(choice.zones)}
+              {mapWarning(choice.zones, startMap)}
             </div>
             <button className="btn btn-primary btn-sm" title={inTeams && !choice.teams ? 'This mission has a secret thief, so it is played by the whole class.' : undefined}
-              onClick={() => void action('campaign', { op: 'start', campaign: choice.id, teams: inTeams && choice.teams })}>{inTeams && choice.teams ? 'Start in teams' : inTeams ? 'Start (whole class)' : 'Start'}</button>
+              onClick={() => void action('campaign', { op: 'start', campaign: choice.id, teams: inTeams && choice.teams, ...(startMap && startMap.id !== status.game!.themeId ? { themeId: startMap.id } : {}) }).then(done => { if (done) setStartMapId(''); })}>{inTeams && choice.teams ? 'Start in teams' : inTeams ? 'Start (whole class)' : 'Start'}</button>
             <TeacherMissionGuide token={token} campaignId={choice.id} refreshKey={choice.revision} />
           </li>)}</ul>
           <p className="teacher-muted">Change these chapters or write your own campaign in <Link to="/mission-studio">Mission Studio</Link>.</p>
-        </> : <>
-          <p><strong>{campaign.title}</strong> · {{ active: 'in progress', chapter_complete: 'ready for the next chapter: students can keep working', campaign_complete: 'finished' }[campaign.status]}</p>
+          </>}
+          {campaign && <>
+          {campaign.status === 'campaign_complete' && <h3>How {campaign.title} went</h3>}
+          <p><strong>{campaign.title}</strong> · {{ active: 'in progress', chapter_complete: 'ready for the next chapter: students can keep working', campaign_complete: campaign.endedEarly ? `ended at chapter ${campaign.chapter + 1} of ${campaign.chapters}` : 'finished' }[campaign.status]}</p>
           {mapWarning(campaign.zones)}
           {!!campaign.castClashes?.length && <p className="teacher-muted">📖 {campaign.castClashes.join(', ')} {campaign.castClashes.length === 1 ? 'is a story character who shares a name' : 'are story characters who share names'} with students here. Students see characters marked 📖 in the Journal and the instructions; it may help to point that out.</p>}
           <ol className="teacher-chapter-steps">{(campaign.chapterTitles ?? []).map((title, index) => {
@@ -561,6 +601,7 @@ export default function Teacher() {
             {campaign.reveals.next && <button className="btn btn-secondary" title={campaign.reveals.next}
               onClick={() => void action('campaign', { op: 'reveal' })}>Reveal the next news ({campaign.reveals.shown} of {campaign.reveals.total} shown)</button>}
             <button className="btn btn-primary" onClick={() => void action('campaign', { op: 'next' })}>{nextStep(campaign)}</button>
+            {campaign.chapter + 1 < campaign.chapters && <button className="btn btn-secondary" onClick={endCampaign}>⏹ End campaign now</button>}
           </div>}
           {campaign.status !== 'campaign_complete' && campaign.reveals.next && <p>Next news: <em>{campaign.reveals.next}</em></p>}
           {campaign.players.length > 0 && <><h3>Students</h3><ul>
@@ -597,9 +638,11 @@ export default function Teacher() {
           </details>}
           <p className="teacher-muted">Side quests for early finishers have their own tab, with or without a campaign. Change chapters in <Link to="/mission-studio">Mission Studio</Link>.</p>
           <button className="btn btn-secondary btn-sm teacher-danger" onClick={() => {
-            if (window.confirm('Erase the campaign for this game, including every role and clue?')) void action('campaign', { op: 'reset', confirm: true });
+            if (window.confirm('Erase the campaign for this game, including every role, clue and report? It will not be kept in Earlier campaigns. Students keep their XP.')) void action('campaign', { op: 'reset', confirm: true });
           }}>Erase campaign</button>
-        </>)}
+          </>}
+          {!!status.earlierCampaigns?.length && <EarlierCampaigns token={token} items={status.earlierCampaigns} />}
+        </>}
 
         {shown === 'side' && status.game && side && <>
           <p>{side.free.length} free to choose · {side.doing.length} doing one · {side.busy} on the warm-up or campaign · {side.quests} side quest{side.quests === 1 ? '' : 's'} on the board</p>
@@ -719,7 +762,33 @@ function readTab(): TabId | null {
 
 // The campaign's next step: a chapter to start, or the end.
 function nextStep(campaign: CampaignInfo): string {
-  return campaign.chapter + 1 < campaign.chapters ? `Start chapter ${campaign.chapter + 2}: ${campaign.chapterTitles?.[campaign.chapter + 1] ?? ''}` : 'End the campaign';
+  return campaign.chapter + 1 < campaign.chapters ? `Start chapter ${campaign.chapter + 2}: ${campaign.chapterTitles?.[campaign.chapter + 1] ?? ''}` : 'Finish the story: students see its ending';
+}
+
+// The campaigns this game played before, newest first: each opens to who played which role and what they wrote.
+function EarlierCampaigns({ token, items }: { token: string; items: EarlierCampaign[] }) {
+  const [open, setOpen] = useState<Record<string, EarlierDetail | 'loading' | string>>({});
+  const show = (id: string) => {
+    if (open[id]) { setOpen(({ [id]: _closed, ...rest }) => rest); return; }
+    setOpen(state => ({ ...state, [id]: 'loading' }));
+    call<EarlierDetail>(`campaign-history?id=${encodeURIComponent(id)}`, { headers: { 'x-teacher-session': token } })
+      .then(detail => setOpen(state => ({ ...state, [id]: detail })))
+      .catch((cause: Error) => setOpen(state => ({ ...state, [id]: cause.message || 'Could not load it.' })));
+  };
+  const day = (ts: number | null) => ts ? new Date(ts).toLocaleDateString() : '';
+  return <section className="teacher-earlier">
+    <h3>Earlier campaigns</h3>
+    <ul>{items.map(item => { const detail = open[item.id]; return <li key={item.id}>
+      <span><strong>{item.title}</strong> · {day(item.started)}{item.ended && day(item.ended) !== day(item.started) ? `–${day(item.ended)}` : ''} · {item.early ? `ended at chapter ${item.chapter + 1} of ${item.chapters}` : `all ${item.chapters} ${item.chapters === 1 ? 'chapter' : 'chapters'}`}{item.teams ? ' · in teams' : ''} · {item.students} {item.students === 1 ? 'student' : 'students'} · {item.reports} {item.reports === 1 ? 'report' : 'reports'}</span>
+      <button className="btn btn-secondary btn-sm" aria-expanded={!!detail} onClick={() => show(item.id)}>{detail ? 'Hide' : 'Show'}</button>
+      {detail === 'loading' && <p className="teacher-muted">Loading…</p>}
+      {typeof detail === 'string' && detail !== 'loading' && <p className="teacher-error">{detail}</p>}
+      {detail && typeof detail === 'object' && <div className="teacher-earlier-detail">
+        <ul>{detail.players.map((player, i) => <li key={i}>{player.name} · {player.role}{player.team ? ` · ${player.team}` : ''} · answered {player.answered}</li>)}</ul>
+        {detail.writing.length > 0 && <><h4>What students wrote</h4><ul>{detail.writing.map((report, i) => <li key={i}><span><strong>{report.name}</strong>{report.partner ? ` · partner: ${report.partner}` : ''} · <em>{report.question}</em><br />{report.text}</span></li>)}</ul></>}
+      </div>}
+    </li>; })}</ul>
+  </section>;
 }
 
 // The teacher's star: experience for a good message or report, once each.

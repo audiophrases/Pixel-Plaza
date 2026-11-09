@@ -100,7 +100,8 @@ export type TeacherAction =
     | { kind: 'deleteGame'; game: string; confirm?: boolean } // erases a game and everything saved in it
     | { kind: 'vision'; radius: number }                // how far a student sees, in map pixels; 0 shows everyone
     | { kind: 'warmup'; op: 'start' | 'end'; type?: WarmupKind } // a get-to-know-you warm-up at the start of a lesson
-    | { kind: 'campaign'; op: 'start' | 'next' | 'reveal' | 'reset' | 'team'; campaign?: string; confirm?: boolean; teams?: boolean; studentKey?: string; team?: number | 'new' }
+    | { kind: 'campaign'; op: 'start' | 'next' | 'reveal' | 'reset' | 'team' | 'end'; campaign?: string; confirm?: boolean; teams?: boolean; studentKey?: string; team?: number | 'new'; themeId?: string }
+    | { kind: 'gameMap'; themeId: string } // the open game moves to another map
     | { kind: 'questRelease'; objective: string }
     | { kind: 'questPlace'; objective: string; studentKey: string }
     | { kind: 'reportAccept'; gameId: string; studentKey: string; objective: string; version: number }
@@ -119,7 +120,14 @@ export type TeacherAction =
 export type GameSummary = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean; themeId: string };
 
 // Where this game's campaign stands, and what every student has done in it.
-type CampaignRow = { campaign_id: string; chapter: number; status: QuestView['status']; revealed: number; revision_id: string | null; live_version: number; live_epoch: string | null; teams: number };
+type CampaignRow = { campaign_id: string; chapter: number; status: QuestView['status']; revealed: number; revision_id: string | null; live_version: number; live_epoch: string | null; teams: number;
+    started: number; ended: number | null; early: number; run: number };
+// A campaign a game played before its current one, kept when the teacher started another: what the teacher can look back on.
+export type EarlierCampaign = { id: string; title: string; started: number; ended: number | null; chapter: number; chapters: number; early: boolean; teams: boolean; students: number; reports: number };
+export type EarlierCampaignDetail = EarlierCampaign & {
+    players: { name: string; role: string; answered: number; team?: string }[];
+    writing: { name: string; question: string; text: string; partner?: string }[]; // what students wrote, oldest first
+};
 export type CampaignStatus = {
     guideVersion: string;
     id: string; title: string; status: QuestView['status']; chapter: number; chapters: number; chapterTitle: string; chapterTitles: string[];
@@ -127,6 +135,7 @@ export type CampaignStatus = {
     reveals: { shown: number; total: number; next: string | null }; // prepared news the teacher can release
     players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
     castClashes?: string[]; // story characters called like a student in this game, whose names students might mix up
+    endedEarly?: boolean; // the teacher ended the campaign before its last chapter
     reports: { studentKey: string; objective: string; text: string; partner?: string; starred: boolean; version: number; check?: ReportCheck }[];
     interviews: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
     board?: ReturnType<QuestBoard['summary']>;
@@ -148,6 +157,7 @@ export type TeacherStatus = {
     blocked: BlockedStatus; // words blocked for this lesson, and what the whole plaza is repeating
     warmup: { active: boolean; kind: WarmupKind; title?: string; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
     campaign: CampaignStatus | null; // the open game's campaign, once started
+    earlierCampaigns: EarlierCampaign[]; // the open game's campaigns before this one, newest first
     sideQuests: SideQuestStatus | null; // the open game's side quests, with or without a campaign
     campaigns: CampaignChoice[]; // those that can be started, in the order to offer them
     open: boolean;
@@ -287,6 +297,15 @@ export class PlazaRoom extends DurableObject<Env> {
             this.sql.exec('ALTER TABLE campaigns ADD COLUMN teams INTEGER NOT NULL DEFAULT 0');
         }
         this.sql.exec('CREATE TABLE IF NOT EXISTS campaign_teams (game_id TEXT NOT NULL, student_key TEXT NOT NULL, team INTEGER NOT NULL, PRIMARY KEY (game_id, student_key))');
+        // A campaign can end at any chapter (early: before its last), and a game plays one campaign after another: `run`
+        // counts the campaigns before this one, and each one finished is kept in campaign_history.
+        for (const [column, type] of [['ended', 'INTEGER'], ['early', 'INTEGER NOT NULL DEFAULT 0'], ['run', 'INTEGER NOT NULL DEFAULT 0']]) {
+            if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaigns')").toArray().some(row => row.name === column)) this.sql.exec(`ALTER TABLE campaigns ADD COLUMN ${column} ${type}`);
+        }
+        this.sql.exec(`CREATE TABLE IF NOT EXISTS campaign_history (id TEXT PRIMARY KEY, game_id TEXT NOT NULL, campaign_id TEXT NOT NULL, title TEXT NOT NULL,
+            started INTEGER NOT NULL, ended INTEGER, chapter INTEGER NOT NULL, chapters INTEGER NOT NULL, early INTEGER NOT NULL DEFAULT 0, teams INTEGER NOT NULL DEFAULT 0,
+            students INTEGER NOT NULL DEFAULT 0, reports INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL)`);
+        this.sql.exec('CREATE INDEX IF NOT EXISTS campaign_history_game ON campaign_history (game_id, ended)');
         // Games from before limited vision show everyone.
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('games')").toArray().some(row => row.name === 'vision')) {
             this.sql.exec('ALTER TABLE games ADD COLUMN vision INTEGER NOT NULL DEFAULT 0');
@@ -458,8 +477,7 @@ export class PlazaRoom extends DurableObject<Env> {
             const seat = ws.deserializeAttachment() as Seat | null;
             if (!seat || seat.left || seat.themeId !== id) continue;
             if (world.isBlocked(seat.x, seat.y)) {
-                const tries = Array.from({ length: 12 }, () => ({ x: world.SPAWN.x + Math.round(Math.random() * 100 - 50), y: world.SPAWN.y + Math.round(Math.random() * 100 - 50) }));
-                const spot = tries.find(point => !world.isBlocked(point.x, point.y)) ?? world.SPAWN;
+                const spot = this.startSpot(world);
                 seat.x = spot.x; seat.y = spot.y; seat.movedAt = Date.now();
                 this.moves.delete(seat.id);
                 ws.serializeAttachment(seat);
@@ -734,6 +752,12 @@ export class PlazaRoom extends DurableObject<Env> {
             if (!this.game(action.game)) return { error: 'That game does not exist.', status: 400 };
             this.deleteGame(action.game);
         }
+        if (action.kind === 'gameMap') {
+            const game = this.activeGame();
+            if (game === null) return { error: 'Open a game first.', status: 400 };
+            if (!this.themes.has(action.themeId)) return { error: 'Choose an available map.', status: 400 };
+            if (this.game(game)?.themeId !== action.themeId) this.switchMap(game, action.themeId);
+        }
         if (action.kind === 'vision') {
             const game = this.activeGame();
             if (game === null || !Number.isFinite(action.radius)) return { error: 'Open a game first.', status: 400 };
@@ -832,6 +856,7 @@ export class PlazaRoom extends DurableObject<Env> {
                     tabSwitches: tabStats.get(studentKey)?.tab_switches ?? 0, tabAwayAt: tabStats.get(studentKey)?.last_away ?? null })) : [] },
             warmup: this.warmupStatus(current?.id ?? null),
             campaign: this.campaignStatus(current?.id ?? null),
+            earlierCampaigns: current ? this.earlierCampaigns(current.id) : [],
             sideQuests: this.sideQuestStatus(current?.id ?? null),
             campaigns: this.missions.published(),
             open: this.isOpen(),
@@ -1500,7 +1525,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
     private campaignRow(game: string | null): CampaignRow | null {
         return game === null ? null : this.sql.exec<CampaignRow>(
-            'SELECT campaign_id, chapter, status, revealed, revision_id, live_version, live_epoch, teams FROM campaigns WHERE game_id = ?', game).toArray()[0] ?? null;
+            'SELECT campaign_id, chapter, status, revealed, revision_id, live_version, live_epoch, teams, started, ended, early, run FROM campaigns WHERE game_id = ?', game).toArray()[0] ?? null;
     }
 
     private campaignPlayers(game: string): { student_key: string; role_id: string; clues: string[]; done: string[]; last_wrong: number }[] {
@@ -1686,7 +1711,9 @@ export class PlazaRoom extends DurableObject<Env> {
         const fallback = absentRoleClues(campaign, chapter, role.id, player.done,
             present.filter(item => !chapter.thieves || !thieves.includes(item.student_key)).map(item => item.role_id),
             present.map(item => item.role_id));
-        const showResolution = row.status === 'campaign_complete' || mainFinished(chapter, player.done);
+        // Ended early, the story stops where it was: no ending the class has not reached, and no finale.
+        const early = row.status === 'campaign_complete' && row.early === 1;
+        const showResolution = (row.status === 'campaign_complete' && !early) || mainFinished(chapter, player.done);
         const ending = row.status === 'active' || !showResolution ? null : chapter.ending;
         const recap = !withRecap || row.status !== 'active' ? null
             : row.chapter > 0 ? campaign.chapters[row.chapter - 1].ending
@@ -1737,8 +1764,9 @@ export class PlazaRoom extends DurableObject<Env> {
             // "Previously", for a student coming back to a story that is already under way
             recap, ...(recap && recapHelp ? { recapHelp } : {}),
             ...(recap && row.chapter > 0 && campaign.chapters[row.chapter - 1].endingImage ? { recapImage: campaign.chapters[row.chapter - 1].endingImage } : {}),
-            finale: row.status === 'campaign_complete' ? campaign.finale : null,
-            ...(row.status === 'campaign_complete' && campaign.help?.finale ? { finaleHelp: campaign.help.finale } : {})
+            finale: row.status === 'campaign_complete' && !early ? campaign.finale : null,
+            ...(row.status === 'campaign_complete' && !early && campaign.help?.finale ? { finaleHelp: campaign.help.finale } : {}),
+            ...(early ? { endedEarly: true } : {})
         };
     }
 
@@ -2201,7 +2229,7 @@ export class PlazaRoom extends DurableObject<Env> {
         this.sql.exec('UPDATE campaign_players SET done = ? WHERE game_id = ? AND student_key = ?',
             JSON.stringify([...player.done, objective.id]), seat.game, seat.studentKey);
         reply(true);
-        this.award(seat.studentKey, `answer:${seat.game}:${objective.id}`, objective.board ? XP.quest : XP.answer,
+        this.award(seat.studentKey, `answer:${seat.game}:${this.missionKey(seat.game, objective.id)}`, objective.board ? XP.quest : XP.answer,
             !objective.board ? 'Right answer in your journal' : objective.activity ? 'Partner quest completed' : 'Side quest completed', seat.game);
         // One answer finishes a group's quest for every member, with XP for each.
         if (group) {
@@ -2209,7 +2237,7 @@ export class PlazaRoom extends DurableObject<Env> {
                 const other = this.player(seat.game, member, row.campaign_id);
                 if (!other || other.done.includes(objective.id)) continue;
                 this.sql.exec('UPDATE campaign_players SET done = ? WHERE game_id = ? AND student_key = ?', JSON.stringify([...other.done, objective.id]), seat.game, member);
-                this.award(member, `answer:${seat.game}:${objective.id}`, XP.quest, 'Group side quest completed', seat.game);
+                this.award(member, `answer:${seat.game}:${this.missionKey(seat.game, objective.id)}`, XP.quest, 'Group side quest completed', seat.game);
             }
             this.questBoard.finishGroup(group.group_id);
         }
@@ -2219,7 +2247,7 @@ export class PlazaRoom extends DurableObject<Env> {
             const other = this.campaignPlayers(seat.game).find(p => p.student_key === member);
             if (!other || member === seat.studentKey || other.done.includes(objective.id)) continue;
             this.sql.exec('UPDATE campaign_players SET done = ? WHERE game_id = ? AND student_key = ?', JSON.stringify([...other.done, objective.id]), seat.game, member);
-            this.award(member, `answer:${seat.game}:${objective.id}`, XP.answer, 'Your team answered a question', seat.game);
+            this.award(member, `answer:${seat.game}:${this.missionKey(seat.game, objective.id)}`, XP.answer, 'Your team answered a question', seat.game);
         }
         const chapter = campaign.chapters[row.chapter];
         if (row.status === 'active' && chapterDone(chapter, this.campaignUnits(seat.game))) {
@@ -2274,14 +2302,20 @@ export class PlazaRoom extends DurableObject<Env> {
         if (game === null) return 'Open or create a game first.';
         const row = this.campaignRow(game);
         if (action.op === 'start') {
-            if (row) return 'This game already has a campaign.';
+            // One campaign at a time: a finished one is kept in the game's history when the next starts.
+            if (row && row.status !== 'campaign_complete') return 'End the campaign that is running first.';
             const published = this.missions.latest(action.campaign ?? '');
             if (!published) return 'Publish that campaign in Mission Studio first.';
             const { campaign, revision } = published;
             // A secret thief needs the whole class to hide among: such a mission is not played in teams.
             const teams = action.teams === true;
             if (teams && campaign.chapters.some(chapter => chapter.thieves)) return 'This mission has a secret thief, so it is played by the whole class.';
-            this.sql.exec("INSERT INTO campaigns (game_id, campaign_id, chapter, status, started, revision_id, live_epoch, teams) VALUES (?, ?, 0, 'active', ?, ?, ?, ?)", game, campaign.id, Date.now(), revision, crypto.randomUUID(), teams ? 1 : 0);
+            if (action.themeId !== undefined && !this.themes.has(action.themeId)) return 'Choose an available map.';
+            if (row) this.keepCampaign(game, row);
+            // The new story may be on another map: the game moves there first, so its students start in the right place.
+            if (action.themeId !== undefined && this.game(game)?.themeId !== action.themeId) this.switchMap(game, action.themeId);
+            const run = this.sql.exec<{ runs: number }>('SELECT COUNT(*) AS runs FROM campaign_history WHERE game_id = ?', game).toArray()[0]?.runs ?? 0;
+            this.sql.exec("INSERT INTO campaigns (game_id, campaign_id, chapter, status, started, revision_id, live_epoch, teams, run) VALUES (?, ?, 0, 'active', ?, ?, ?, ?, ?)", game, campaign.id, Date.now(), revision, crypto.randomUUID(), teams ? 1 : 0, run);
             if (teams) this.formTeams(game, [...new Set(this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey))]);
             for (const seat of this.seats()) if (seat.game === game) this.player(game, seat.studentKey, campaign.id);
             this.pickThieves(game, 0, campaign.chapters[0]);
@@ -2293,7 +2327,13 @@ export class PlazaRoom extends DurableObject<Env> {
             if (row.chapter + 1 < campaign.chapters.length) {
                 this.sql.exec("UPDATE campaigns SET chapter = chapter + 1, status = 'active', revealed = 0 WHERE game_id = ?", game);
                 this.pickThieves(game, row.chapter + 1, campaign.chapters[row.chapter + 1]);
-            } else this.sql.exec("UPDATE campaigns SET status = 'campaign_complete' WHERE game_id = ?", game);
+            } else this.sql.exec("UPDATE campaigns SET status = 'campaign_complete', ended = ? WHERE game_id = ?", Date.now(), game);
+        } else if (action.op === 'end') {
+            // The teacher ends the story at any chapter. Everything students did stays; before the last chapter the
+            // story stops without its ending, which would give the mystery away.
+            const campaign = this.gameCampaign(game);
+            if (row.status === 'campaign_complete') return 'The campaign is over.';
+            this.sql.exec("UPDATE campaigns SET status = 'campaign_complete', ended = ?, early = ? WHERE game_id = ?", Date.now(), campaign && row.chapter + 1 < campaign.chapters.length ? 1 : 0, game);
         } else if (action.op === 'team') {
             // The teacher moves a student to another team, or to a new one of their own.
             if (!row.teams) return 'This campaign is played by the whole class.';
@@ -2311,19 +2351,7 @@ export class PlazaRoom extends DurableObject<Env> {
             this.sql.exec('UPDATE campaigns SET revealed = revealed + 1 WHERE game_id = ?', game);
         } else if (action.op === 'reset') {
             if (action.confirm !== true) return 'Confirm to erase this game\'s campaign.';
-            this.sql.exec('DELETE FROM campaigns WHERE game_id = ?', game);
-            // The game's side quests stay, with who did them and what they wrote: they belong to the game, not the mission.
-            this.sql.exec('DELETE FROM campaign_players WHERE game_id = ?', game);
-            this.sql.exec('DELETE FROM campaign_reports WHERE game_id = ? AND objective NOT IN (SELECT quest_id FROM game_side_quests WHERE game_id = ?)', game, game);
-            this.sql.exec('DELETE FROM report_checks WHERE game_id = ? AND objective NOT IN (SELECT quest_id FROM game_side_quests WHERE game_id = ?)', game, game);
-            this.interviews.clear(game);
-            this.sql.exec('DELETE FROM campaign_thieves WHERE game_id = ?', game);
-            this.sql.exec('DELETE FROM campaign_teams WHERE game_id = ?', game);
-            this.sql.exec('DELETE FROM quest_assignments WHERE game_id = ? AND chapter <> ?', game, GAME_CHAPTER);
-            this.groups.clear(game, true);
-            this.sql.exec('DELETE FROM quest_releases WHERE game_id = ?', game);
-            this.sql.exec('DELETE FROM mission_live_quests WHERE game_id = ?', game);
-            this.sql.exec('DELETE FROM mission_live_previews WHERE game_id = ?', game);
+            this.clearCampaign(game);
             this.sendQuestToAll(game, true);
             return null;
         }
@@ -2363,6 +2391,93 @@ export class PlazaRoom extends DurableObject<Env> {
         return status;
     }
 
+    // What a campaign leaves in the game: removed when the teacher erases it, or when the next campaign starts once this
+    // one is kept in the history. The game's side quests stay, with who did them and what they wrote.
+    private clearCampaign(game: string): void {
+        this.sql.exec('DELETE FROM campaigns WHERE game_id = ?', game);
+        this.sql.exec('DELETE FROM campaign_players WHERE game_id = ?', game);
+        this.sql.exec('DELETE FROM campaign_reports WHERE game_id = ? AND objective NOT IN (SELECT quest_id FROM game_side_quests WHERE game_id = ?)', game, game);
+        this.sql.exec('DELETE FROM report_checks WHERE game_id = ? AND objective NOT IN (SELECT quest_id FROM game_side_quests WHERE game_id = ?)', game, game);
+        this.interviews.clear(game);
+        this.sql.exec('DELETE FROM campaign_thieves WHERE game_id = ?', game);
+        this.sql.exec('DELETE FROM campaign_teams WHERE game_id = ?', game);
+        this.sql.exec('DELETE FROM quest_assignments WHERE game_id = ? AND chapter <> ?', game, GAME_CHAPTER);
+        this.groups.clear(game, true);
+        this.sql.exec('DELETE FROM quest_releases WHERE game_id = ?', game);
+        this.sql.exec('DELETE FROM mission_live_quests WHERE game_id = ?', game);
+        this.sql.exec('DELETE FROM mission_live_previews WHERE game_id = ?', game);
+    }
+
+    // A finished campaign goes into the game's history before the next one starts: who played which role, how far they
+    // got, and what they wrote, as the teacher saw it. Students keep their XP.
+    private keepCampaign(game: string, row: CampaignRow): void {
+        const campaign = this.gameCampaign(game);
+        if (campaign) {
+            const names = this.rosterNames(game);
+            const players = this.campaignPlayers(game);
+            const question = (id: string) => campaign.chapters.flatMap(chapter => chapter.objectives).find(objective => objective.id === id)?.text ?? id;
+            const teamOf = (key: string) => { const team = row.teams ? this.teamOf(game, key) : null; return team === null ? {} : { team: teamName(team) }; };
+            const reports = this.sql.exec<{ student_key: string; objective: string; text: string; partner_key: string | null }>(
+                `SELECT r.student_key, r.objective, r.text, a.partner_key FROM campaign_reports r
+                LEFT JOIN quest_assignments a ON r.game_id = a.game_id AND r.student_key = a.student_key AND r.objective = a.objective
+                WHERE r.game_id = ? AND r.submitted = 1 AND r.objective NOT IN (SELECT quest_id FROM game_side_quests WHERE game_id = ?) ORDER BY r.ts LIMIT 500`, game, game).toArray();
+            const detail: Pick<EarlierCampaignDetail, 'players' | 'writing'> = {
+                players: players.map(player => ({ name: names.get(player.student_key) ?? 'Student', role: campaign.roles.find(role => role.id === player.role_id)?.name ?? player.role_id,
+                    answered: player.done.length, ...teamOf(player.student_key) })),
+                writing: reports.map(report => ({ name: names.get(report.student_key) ?? 'Student', question: question(report.objective), text: report.text,
+                    ...(report.partner_key ? { partner: names.get(report.partner_key) ?? 'Classmate' } : {}) })),
+            };
+            this.sql.exec(`INSERT INTO campaign_history (id, game_id, campaign_id, title, started, ended, chapter, chapters, early, teams, students, reports, detail)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, crypto.randomUUID(), game, campaign.id, campaign.title, row.started, row.ended ?? Date.now(),
+                Math.min(row.chapter, campaign.chapters.length - 1), campaign.chapters.length, row.early, row.teams, players.length, reports.length, JSON.stringify(detail));
+        }
+        this.clearCampaign(game);
+    }
+
+    private earlierCampaigns(game: string): EarlierCampaign[] {
+        return this.sql.exec<Omit<EarlierCampaign, 'early' | 'teams'> & { early: number; teams: number }>(
+            'SELECT id, title, started, ended, chapter, chapters, early, teams, students, reports FROM campaign_history WHERE game_id = ? ORDER BY ended DESC', game).toArray()
+            .map(row => ({ ...row, early: row.early === 1, teams: row.teams === 1 }));
+    }
+
+    // One earlier campaign of the open game, with its students and what they wrote.
+    earlierCampaign(token: string, id: string): EarlierCampaignDetail | { error: string; status: number } {
+        if (!this.teacherSignedIn(token)) return { error: 'Please sign in again.', status: 401 };
+        const game = this.activeGame();
+        const row = game === null ? undefined : this.sql.exec<Omit<EarlierCampaign, 'early' | 'teams'> & { early: number; teams: number; detail: string }>(
+            'SELECT id, title, started, ended, chapter, chapters, early, teams, students, reports, detail FROM campaign_history WHERE id = ? AND game_id = ?', id, game).toArray()[0];
+        if (!row) return { error: 'That campaign is not in this game.', status: 404 };
+        const { detail, ...summary } = row;
+        return { ...summary, early: summary.early === 1, teams: summary.teams === 1, ...JSON.parse(detail) };
+    }
+
+    // A free spot near a map's start, for a student the map has moved.
+    private startSpot(world: ReturnType<ThemeStore['world']>): { x: number; y: number } {
+        const tries = Array.from({ length: 12 }, () => ({ x: world.SPAWN.x + Math.round(Math.random() * 100 - 50), y: world.SPAWN.y + Math.round(Math.random() * 100 - 50) }));
+        return tries.find(point => !world.isBlocked(point.x, point.y)) ?? world.SPAWN;
+    }
+
+    // The game moves to another map, with the same PIN and everything saved in it: everyone here starts again at the new
+    // map's start, and every page draws it.
+    private switchMap(game: string, themeId: string): void {
+        this.sql.exec('UPDATE games SET theme_id = ? WHERE id = ?', themeId, game);
+        this.sql.exec('DELETE FROM positions WHERE game_id = ?', game);
+        const theme = this.themes.theme(themeId); const world = this.themes.world(themeId);
+        const moved: [WebSocket, Seat][] = [];
+        for (const ws of this.ctx.getWebSockets()) {
+            const seat = ws.deserializeAttachment() as Seat | null;
+            if (!seat || seat.left || seat.game !== game) continue;
+            const spot = this.startSpot(world);
+            seat.themeId = themeId; seat.zone = null; seat.x = spot.x; seat.y = spot.y; seat.movedAt = Date.now();
+            this.moves.delete(seat.id);
+            ws.serializeAttachment(seat);
+            moved.push([ws, seat]);
+        }
+        for (const [ws, seat] of moved) { try { ws.send(JSON.stringify({ t: 'snap', x: seat.x, y: seat.y })); } catch { /* closing */ } }
+        for (const [, seat] of moved) this.broadcast({ t: 'move', id: seat.id, x: seat.x, y: seat.y });
+        for (const [ws] of moved) { try { ws.send(JSON.stringify({ t: 'theme', theme })); } catch { /* closing */ } }
+    }
+
     private campaignStatus(game: string | null): CampaignStatus | null {
         const row = this.campaignRow(game);
         const campaign = row && this.gameCampaign(game);
@@ -2373,6 +2488,7 @@ export class PlazaRoom extends DurableObject<Env> {
         return {
             guideVersion: JSON.stringify([row.revision_id, row.live_epoch, row.live_version, row.chapter, [...names], players.map(player => [player.student_key, player.role_id]), thieves.map(key => [key, this.avatarOf(key)])]),
             id: campaign.id, title: campaign.title, status: row.status, chapter: row.chapter, chapters: campaign.chapters.length, zones: clueZones(campaign),
+            ...(row.status === 'campaign_complete' && row.early ? { endedEarly: true } : {}),
             ...((clashes => clashes.length ? { castClashes: clashes } : {})(castClashes(campaign.cast, [...names.values()]))),
             chapterTitle: campaign.chapters[Math.min(row.chapter, campaign.chapters.length - 1)].title,
             chapterTitles: campaign.chapters.map(chapter => chapter.title),
@@ -2402,7 +2518,7 @@ export class PlazaRoom extends DurableObject<Env> {
                         ?? [...(this.teamKeys(game, report.student_key) ?? [])].filter(key => key !== report.student_key);
                     const check = report.check_id ? this.reportChecks.get(report.check_id) : undefined;
                     return { studentKey: report.student_key, objective: report.objective, text: report.text, version: report.ts, ...(check ? { check: { status: check.status, feedback: check.feedback } } : {}),
-                        starred: this.starred(report.student_key, `report:${game}:${report.objective}`),
+                        starred: this.starred(report.student_key, `report:${game}:${this.missionKey(game, report.objective)}`),
                         ...(report.partner_key ? { partner: names.get(report.partner_key) ?? 'Classmate' } : others.length ? { partner: others.map(key => names.get(key) ?? 'Classmate').join(', ') } : {}) };
                 })
         };
@@ -2530,7 +2646,7 @@ export class PlazaRoom extends DurableObject<Env> {
         this.activityHistory.clear(game);
         this.incidents.forget(game);
         this.blockedWords.forget(game);
-        for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_teams', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'side_quest_groups', 'side_quest_members', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'game_side_quests', 'side_quest_done', 'game_side_quest_previews', 'warmups', 'warmup_players', 'speech_plays', 'student_tab_stats']) {
+        for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_history', 'campaign_players', 'campaign_teams', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'side_quest_groups', 'side_quest_members', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'game_side_quests', 'side_quest_done', 'game_side_quest_previews', 'warmups', 'warmup_players', 'speech_plays', 'student_tab_stats']) {
             this.sql.exec(`DELETE FROM ${table} WHERE game_id = ?`, game);
         }
         this.sql.exec('DELETE FROM games WHERE id = ?', game);
@@ -2853,6 +2969,13 @@ export class PlazaRoom extends DurableObject<Env> {
         return this.sql.exec<{ xp: number }>('SELECT xp FROM students WHERE student_key = ?', studentKey).toArray()[0]?.xp ?? 0;
     }
 
+    // A mission's question as XP remembers it. A game's later campaigns may reuse question IDs (the same mission again, or
+    // another version of it), and each campaign earns its own XP; the first campaign keeps the plain ID it always had.
+    private missionKey(game: string, objective: string): string {
+        const run = this.campaignRow(game)?.run ?? 0;
+        return run > 0 ? `${run}:${objective}` : objective;
+    }
+
     private starred(studentKey: string, source: string): boolean {
         return this.sql.exec('SELECT 1 FROM xp_awards WHERE student_key = ? AND source = ?', studentKey, source).toArray().length > 0;
     }
@@ -2880,7 +3003,9 @@ export class PlazaRoom extends DurableObject<Env> {
         if (action.report) {
             const { studentKey, objective } = action.report;
             if (!this.sql.exec('SELECT 1 FROM campaign_reports WHERE game_id = ? AND student_key = ? AND objective = ? AND submitted = 1', game, studentKey, objective).toArray().length) return 'That report was not found.';
-            return this.award(studentKey, `report:${game}:${objective}`, XP.teacher, 'Your teacher liked your report', game) ? null : 'That report already has a star.';
+            // A side quest belongs to the game; a mission's question to this run of the campaign.
+            const sideQuest = this.sql.exec('SELECT 1 FROM game_side_quests WHERE game_id = ? AND quest_id = ?', game, objective).toArray().length > 0;
+            return this.award(studentKey, `report:${game}:${sideQuest ? objective : this.missionKey(game, objective)}`, XP.teacher, 'Your teacher liked your report', game) ? null : 'That report already has a star.';
         }
         return 'Choose a message or a report.';
     }

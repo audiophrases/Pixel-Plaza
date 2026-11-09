@@ -101,6 +101,16 @@ The class can play on the teacher's laptop instead, over the school network. Stu
 4. Write the game's PIN on the board. Students open the online site, sign in with Google, are sent to the laptop, type the PIN, and (with random names) choose a name to keep.
 5. When most of the class is in: pick a warm-up (**Find someone who…**, **Who am I?** or **Find your pair**) and start it for the first few minutes, then **Start** the campaign (first time) or just let it resume; press **Start the next chapter** when the class is ready for the next one, so the thief is chosen from students who are there. Use **Reveal the next news** if the class is stuck, and **Vision** to widen or narrow how far students see.
 
+### One class, many campaigns
+
+A game keeps its PIN and link from campaign to campaign; you never need a new game for a new story.
+
+- **End campaign** (in the bar at the top, and in the **Campaign** tab) ends the story at any chapter. Students keep what they found, wrote and earned, and are free for side quests. Before the last chapter the story stops without its ending, so nothing is given away; on the last chapter, **Finish the story** shows the ending as before.
+- **Start another campaign.** Once a campaign has ended, the **Campaign** tab offers the missions again, with a **Map** choice. Starting on another map moves the whole game there: everyone in the plaza goes to the new map's start, with the same PIN, chat and XP. A mission whose map clues are not on the chosen map says which maps have them.
+- **Earlier campaigns.** The campaign that ended moves to *Earlier campaigns* in the **Campaign** tab: its dates, how far the class got, and **Show** for who played which role, how many questions they answered and what they wrote. Each campaign earns its own XP, even when a mission repeats questions from an earlier one.
+- **Erase campaign** is still there for a mistake: it removes the campaign without keeping it in *Earlier campaigns* (students keep their XP).
+- **Change map** in the **Map & spells** tab moves the game to another map at any time, with or without a campaign.
+
 ### Case teams
 
 A mission without a secret thief can be played in **case teams** of three or four, so students solve the story with a few classmates instead of searching the whole class for the right role. **Play in teams of 3–4** in the **Campaign** tab is on by default; missions with a secret thief (the Castanyada ones) say *Start (whole class)*, because the thief needs the whole class to hide among.

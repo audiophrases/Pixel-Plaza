@@ -92,7 +92,8 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
         const news = quest.clues.filter(c => c.from === 'news' && !seen.has(key('news', run, c.id)));
         if (news.length) add(key('news', run, news[0].id), { kind: 'news', eyebrow: 'FROM YOUR TEACHER', title: 'New information for the class', sections: news.map(c => ({ label: 'Teacher announcement', text: c.text, help: c.help, image: c.image })), next: 'You can read this again in your Journal clues.' }, news.slice(1).map(c => key('news', run, c.id)));
     }
-    if (quest.status === 'campaign_complete' && quest.finale) add(key('finale', run), { kind: 'ending', eyebrow: 'MISSION COMPLETE', title: quest.campaign.title, sections: [{ label: 'The ending', text: quest.finale, help: quest.finaleHelp }], next: 'Your Journal keeps the story and your discoveries.' });
+    if (quest.status === 'campaign_complete' && quest.endedEarly) add(key('ended', run), { kind: 'ending', eyebrow: 'STORY ENDED', title: quest.campaign.title, sections: [{ label: 'The story ends here', text: 'Your teacher ended this story. Your Journal keeps what you found, and you keep your XP.' }], next: 'You can do side quests until your teacher tells you what comes next.' });
+    else if (quest.status === 'campaign_complete' && quest.finale) add(key('finale', run), { kind: 'ending', eyebrow: 'MISSION COMPLETE', title: quest.campaign.title, sections: [{ label: 'The ending', text: quest.finale, help: quest.finaleHelp }], next: 'Your Journal keeps the story and your discoveries.' });
     else if (quest.chapter.ending) add(key('ending', run), { kind: 'ending', eyebrow: 'CHAPTER COMPLETE', title: quest.chapter.title, sections: [{ label: 'What happens next', text: quest.chapter.ending, help: quest.chapter.help?.ending, image: quest.chapter.endingImage }], next: 'You can keep helping classmates and doing optional quests until your teacher starts the next chapter.' });
     return result;
 }

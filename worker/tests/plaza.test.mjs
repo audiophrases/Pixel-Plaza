@@ -1787,6 +1787,94 @@ test('case teams: teams of three or four, one answer for the team, the team chat
     }
 });
 
+test('campaigns end at any chapter, are kept when the next one starts, and a game changes map with the same PIN', { timeout: 150000 }, async () => {
+    const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-campaign-runs-'));
+    const pinPlayUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    let plaza = await startPlaza(pinPlayUrl, persistTo);
+    const sockets = [];
+    try {
+        let { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, ...(body ? { body } : {}) });
+        PIN = (await teacher('game', { name: 'One class, many stories', randomNames: false })).body.pin;
+        const alex = await enter(base, 'signed-a', null); let sam = await enter(base, 'signed-b', null); sockets.push(alex, sam);
+        const quest = (socket, match, what) => socket.next(m => m.t === 'quest' && m.quest && match(m.quest), what).then(m => m.quest);
+
+        // The first story: Alex answers chapter 1 and writes a report.
+        assert.equal((await teacher('campaign', { op: 'end' })).status, 400, 'nothing to end yet');
+        assert.equal((await teacher('campaign', { op: 'start', campaign: 'castanyada' })).status, 200);
+        await quest(alex, q => q.campaign.id === 'castanyada', 'first story');
+        for (const [objective, text] of [['where', 'the park'], ['when', 'half past nine'], ['keys', 'two'], ['report-1', 'I think the driver has the chestnuts because he had the box.']]) {
+            alex.send({ t: 'answer', objective, text });
+            assert.equal((await alex.next(m => m.t === 'answered' && m.objective === objective, objective)).correct, true, objective);
+        }
+        const twice = await teacher('campaign', { op: 'start', campaign: 'castanyada-complete' });
+        assert.equal(twice.status, 400); assert.match(twice.body.error, /End the campaign/, 'one story at a time');
+
+        // Ended in chapter 1 of 3: nothing is erased, and the story stops without the ending the class has not reached.
+        const ended = (await teacher('campaign', { op: 'end' })).body;
+        assert.deepEqual([ended.campaign.status, ended.campaign.endedEarly, ended.campaign.chapter, ended.campaign.reports.length], ['campaign_complete', true, 0, 1]);
+        assert.deepEqual(ended.earlierCampaigns, []);
+        const samEnded = await quest(sam, q => q.status === 'campaign_complete', 'ended story');
+        assert.deepEqual([samEnded.endedEarly, samEnded.finale, samEnded.chapter.ending], [true, null, null]);
+        const alexEnded = await quest(alex, q => q.status === 'campaign_complete', 'ended story for Alex');
+        assert.equal(alexEnded.finale, null); assert.ok(alexEnded.chapter.ending, 'the chapter Alex finished keeps its ending');
+        sam.send({ t: 'answer', objective: 'where', text: 'park' });
+        await new Promise(resolve => setTimeout(resolve, 400));
+        assert.equal(sam.inbox.some(m => m.t === 'answered' && m.correct), false, 'an ended story takes no answers');
+        assert.equal((await teacher('status')).body.campaign.players.find(p => p.studentKey === 'stu_b').done.length, 0);
+        assert.equal((await teacher('campaign', { op: 'end' })).status, 400, 'ended once');
+
+        // The next story on another map: the same game and PIN, everyone moved to the new map, the first story kept.
+        assert.equal((await teacher('campaign', { op: 'start', campaign: 'castanyada-complete', themeId: 'no-such-map' })).status, 400);
+        assert.equal((await teacher('status')).body.campaign.id, 'castanyada', 'a refused start changes nothing');
+        const next = await teacher('campaign', { op: 'start', campaign: 'castanyada-complete', themeId: 'commons-garden' });
+        assert.equal(next.status, 200, JSON.stringify(next.body));
+        assert.deepEqual([next.body.game.themeId, next.body.pin, next.body.campaign.id, next.body.campaign.status, next.body.campaign.reports.length], ['commons-garden', PIN, 'castanyada-complete', 'active', 0]);
+        assert.equal((await alex.next(m => m.t === 'theme', 'the new map')).theme.id, 'commons-garden');
+        const snap = await alex.next(m => m.t === 'snap', 'moved to its start');
+        const garden = (await api(base, '/api/themes')).body.themes.find(theme => theme.id === 'commons-garden');
+        const start = makeWorld(garden).SPAWN;
+        assert.ok(Math.hypot(snap.x - start.x, snap.y - start.y) < 80, 'near the new map’s start');
+        const [earlier] = next.body.earlierCampaigns;
+        assert.deepEqual([next.body.earlierCampaigns.length, earlier.title, earlier.early, earlier.chapter, earlier.chapters, earlier.students, earlier.reports],
+            [1, castanyada.title, true, 0, 3, 2, 1]);
+        const detail = (await teacher(`campaign-history?id=${earlier.id}`)).body;
+        assert.deepEqual(detail.writing.map(r => [r.name, r.question, r.text]), [['Alex', castanyada.chapters[0].objectives.find(o => o.id === 'report-1').text, 'I think the driver has the chestnuts because he had the box.']]);
+        assert.deepEqual(detail.players.map(p => [p.name, p.answered]).sort(), [['Alex', 4], ['Sam', 0]]);
+        assert.equal((await api(base, `/api/teacher/campaign-history?id=${earlier.id}`)).status, 401, 'only for the teacher');
+        assert.equal((await teacher('campaign-history?id=nope')).status, 404);
+
+        // The new story starts afresh, and the same questions earn XP again.
+        const fresh = await quest(alex, q => q.campaign.id === 'castanyada-complete', 'new story');
+        assert.equal(fresh.objectives.find(o => o.id === 'where').done, false);
+        alex.inbox.splice(0);
+        alex.send({ t: 'answer', objective: 'where', text: 'the park' });
+        assert.equal((await alex.next(m => m.t === 'answered' && m.objective === 'where', 'answered again')).correct, true);
+        assert.ok((await alex.next(m => m.t === 'xp' && m.gained, 'XP again')).gained > 0, 'a new campaign earns its own XP');
+
+        // The map changes at any time too; a student who comes back gets the game's new map.
+        assert.equal((await teacher('game-map', { themeId: 'no-such-map' })).status, 400);
+        assert.equal((await teacher('game-map', { themeId: 'commons-autumn' })).body.game.themeId, 'commons-autumn');
+        await sam.next(m => m.t === 'theme' && m.theme.id === 'commons-autumn', 'Sam sees the new map');
+        sam.ws.close(); await sam.closed;
+        sam = await enter(base, 'signed-b', null); sockets.push(sam);
+        assert.equal(sam.welcome.themeId, 'commons-autumn');
+
+        // Through a restart the history stays; erasing a campaign keeps no copy of it.
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop();
+        plaza = await startPlaza(pinPlayUrl, persistTo); base = plaza.base;
+        const restarted = (await teacher('status')).body;
+        assert.deepEqual([restarted.earlierCampaigns.length, restarted.campaign.id, restarted.game.themeId], [1, 'castanyada-complete', 'commons-autumn']);
+        await teacher('campaign', { op: 'reset', confirm: true });
+        assert.deepEqual([(await teacher('status')).body.earlierCampaigns.length, (await teacher('status')).body.campaign], [1, null], 'an erased campaign is not kept');
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('Side quest library: teachers write, change, delete, restore and import quests, and an old library becomes records', { timeout: 120000 }, async () => {
     const { DatabaseSync } = await import('node:sqlite');
     const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-quest-editor-'));

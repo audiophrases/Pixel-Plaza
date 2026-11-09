@@ -73,6 +73,7 @@ export type QuestView = {
     campaign: { id: string; title: string };
     vocabulary?: string[]; // Public story names/terms accepted by the English chat check; never secret answers.
     cast?: CastMember[]; // The story's characters, for the Who's who and to mark their names in the story.
+    endedEarly?: boolean; // The teacher ended the story before its last chapter: no ending, no finale.
     status: 'active' | 'chapter_complete' | 'campaign_complete';
     chapter: { index: number; of: number; title: string; intro: string; ending: string | null; introImage?: EvidenceImage; endingImage?: EvidenceImage; help?: { intro?: TextHelp; ending?: TextHelp } };
     role: { id: string; name: string; card: string; help?: TextHelp };

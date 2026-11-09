@@ -149,6 +149,11 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
         <button type="button" className="journal-dismiss" onClick={() => setRecapSeen(true)}>OK</button>
       </section>}
 
+      {quest.endedEarly && <section className="journal-block journal-ending">
+        <h3>The story ends here</h3>
+        <p>Your teacher ended this story. Your Journal keeps what you found, and you keep your XP.</p>
+      </section>}
+
       {quest.myTeam && <section className="journal-block journal-crew">
         <h3>Your team: {quest.myTeam.name}</h3>
         <ul className="journal-crew-list">{quest.myTeam.members.map(member => <li key={member.name} className={member.online ? undefined : 'journal-crew-away'}>
