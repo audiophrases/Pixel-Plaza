@@ -94,7 +94,7 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
     }
     if (quest.status === 'campaign_complete' && quest.endedEarly) add(key('ended', run), { kind: 'ending', eyebrow: 'STORY ENDED', title: quest.campaign.title, sections: [{ label: 'The story ends here', text: 'Your teacher ended this story. Your Journal keeps what you found, and you keep your XP.' }], next: 'You can do side quests until your teacher tells you what comes next.' });
     else if (quest.status === 'campaign_complete' && quest.finale) add(key('finale', run), { kind: 'ending', eyebrow: 'MISSION COMPLETE', title: quest.campaign.title, sections: [{ label: 'The ending', text: quest.finale, help: quest.finaleHelp }], next: 'Your Journal keeps the story and your discoveries.' });
-    else if (quest.chapter.ending) add(key('ending', run), { kind: 'ending', eyebrow: 'CHAPTER COMPLETE', title: quest.chapter.title, sections: [{ label: 'What happens next', text: quest.chapter.ending, help: quest.chapter.help?.ending, image: quest.chapter.endingImage }], next: 'You can keep helping classmates and doing optional quests until your teacher starts the next chapter.' });
+    else if (quest.chapter.ending) add(key('ending', run), { kind: 'ending', eyebrow: 'CHAPTER COMPLETE', title: quest.chapter.title, sections: [{ label: 'What happens next', text: quest.chapter.ending, help: quest.chapter.help?.ending, image: quest.chapter.endingImage }], next: quest.autoNextAt ? 'You can keep helping classmates and doing optional quests. The next chapter starts by itself in a few minutes.' : 'You can keep helping classmates and doing optional quests until your teacher starts the next chapter.' });
     return result;
 }
 

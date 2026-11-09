@@ -11,6 +11,7 @@ import type { Theme } from '../../shared/theme';
 import ThemePicture from '../components/ThemePicture';
 import TeacherMissionGuide from '../components/TeacherMissionGuide';
 import type { InterviewView } from '../../shared/campaign';
+import { AUTO_NEWS_MINUTES, AUTO_NEXT_MINUTES } from '../../shared/campaign';
 import type { ReportCheck } from '../../shared/reportFeedback';
 import type { PlayStats } from '../../shared/activityHistory';
 import { playLabel } from '../../shared/activityHistory';
@@ -41,6 +42,7 @@ type CampaignInfo = {
   interviews?: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
   castClashes?: string[]; // story characters called like a student here
   endedEarly?: boolean; // ended before its last chapter
+  newsAt?: number; nextAt?: number; held?: boolean; // auto-advance: when news and the next chapter come by themselves, or paused
   teams?: { team: number; name: string; done: number; total: number; members: { studentKey: string; name: string; role: string; online: boolean }[] }[];
   board?: { id: string; text: string; teacherReleased: boolean; released: boolean; accepted: number; completed: number }[];
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
@@ -54,6 +56,7 @@ type LiveStudent = { studentKey: string; name: string; x: number; y: number; zon
 type Status = {
   warmupPlays?: Partial<Record<WarmupKind, PlayStats>>;
   campaign: CampaignInfo | null; campaigns: CampaignChoice[]; earlierCampaigns?: EarlierCampaign[];
+  auto?: { news: number; next: number } | null; // the open game's auto-advance, in minutes (0 is off)
   sideQuests?: SideQuestPanel | null; // the open game's side quests, with or without a campaign
   warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
   incidents?: Incident[];
@@ -466,7 +469,10 @@ export default function Teacher() {
           {campaign.reveals.next && <button className="btn btn-secondary btn-sm" title={campaign.reveals.next} onClick={() => void action('campaign', { op: 'reveal' })}>📰 Next news</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => { if (window.confirm(`${nextStep(campaign)}?`)) void action('campaign', { op: 'next' }); }}>
             {campaign.chapter + 1 < campaign.chapters ? '▶ Next chapter' : '🏁 Finish the story'}</button>
-          {campaign.chapter + 1 < campaign.chapters && <button className="btn btn-secondary btn-sm" onClick={endCampaign}>⏹ End campaign</button>}</span>}
+          {campaign.chapter + 1 < campaign.chapters && <button className="btn btn-secondary btn-sm" onClick={endCampaign}>⏹ End campaign</button>}
+          {campaign.nextAt && <span className="teacher-auto-chip" title="Auto-advance: the class is ready">{campaign.chapter + 1 < campaign.chapters ? `▶ Chapter ${campaign.chapter + 2}` : '🏁 The ending'} by itself in <Countdown at={campaign.nextAt} /></span>}
+          {campaign.newsAt && <span className="teacher-auto-chip" title="Auto-advance: news comes when the class goes a while without a new right answer">📰 News by itself in <Countdown at={campaign.newsAt} /></span>}
+          {(campaign.held || campaign.nextAt || campaign.newsAt) && <button className="btn btn-secondary btn-sm" onClick={() => void action('campaign', { op: 'hold', hold: !campaign.held })}>{campaign.held ? '▶ Resume auto' : '⏸ Pause auto'}</button>}</span>}
       </section>}
       {status.game && <LiveClass gameId={status.game.id} alerts={status.support?.alerts ?? []} incidents={status.incidents ?? []}
         repeats={status.blocked?.repeats ?? []} online={status.online.map(s => ({ ...s, zone: placeName(s.zone) }))}
@@ -559,6 +565,7 @@ export default function Teacher() {
           </div>
           <label className="teacher-toggle"><input type="checkbox" checked={inTeams} onChange={event => setInTeams(event.target.checked)} />
             Play in teams of 3–4: the game forms the teams, each member holds a different clue, the team has its own chat, and one answer counts for the whole team.</label>
+          {status.auto && <AutoAdvance auto={status.auto} onChange={change => void action('auto', change)} />}
           <ul className="teacher-campaign-choices">{status.campaigns.map(choice => <li key={choice.id}>
             <div>
               <strong>{choice.title}</strong>
@@ -603,6 +610,8 @@ export default function Teacher() {
             <button className="btn btn-primary" onClick={() => void action('campaign', { op: 'next' })}>{nextStep(campaign)}</button>
             {campaign.chapter + 1 < campaign.chapters && <button className="btn btn-secondary" onClick={endCampaign}>⏹ End campaign now</button>}
           </div>}
+          {campaign.status !== 'campaign_complete' && status.auto && <AutoAdvance auto={status.auto} campaign={campaign} onChange={change => void action('auto', change)}
+            onHold={() => void action('campaign', { op: 'hold', hold: !campaign.held })} />}
           {campaign.status !== 'campaign_complete' && campaign.reveals.next && <p>Next news: <em>{campaign.reveals.next}</em></p>}
           {campaign.players.length > 0 && <><h3>Students</h3><ul>
             {campaign.players.map(player => <li key={player.studentKey}>
@@ -763,6 +772,35 @@ function readTab(): TabId | null {
 // The campaign's next step: a chapter to start, or the end.
 function nextStep(campaign: CampaignInfo): string {
   return campaign.chapter + 1 < campaign.chapters ? `Start chapter ${campaign.chapter + 2}: ${campaign.chapterTitles?.[campaign.chapter + 1] ?? ''}` : 'Finish the story: students see its ending';
+}
+
+// Minutes and seconds until a time, ticking.
+function Countdown({ at }: { at: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
+  const left = Math.max(0, Math.round((at - now) / 1000));
+  return <>{Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')}</>;
+}
+
+// Auto-advance for the open game: the next news when the class has gone a while without a new right answer, and the
+// next chapter a little after the class is ready. The teacher can pause it to talk with the class.
+function AutoAdvance({ auto, campaign, onChange, onHold }: { auto: { news: number; next: number }; campaign?: CampaignInfo; onChange: (change: { news?: number; next?: number }) => void; onHold?: () => void }) {
+  return <div className="teacher-auto">
+    <strong>Auto-advance</strong>
+    <label>📰 Next news <select aria-label="News by itself" value={auto.news} onChange={event => onChange({ news: Number(event.target.value) })}>
+      {AUTO_NEWS_MINUTES.map(minutes => <option key={minutes} value={minutes}>{minutes ? `by itself after ${minutes} min without a new right answer` : 'only when I release it'}</option>)}
+    </select></label>
+    <label>▶ Next chapter <select aria-label="Next chapter by itself" value={auto.next} onChange={event => onChange({ next: Number(event.target.value) })}>
+      {AUTO_NEXT_MINUTES.map(minutes => <option key={minutes} value={minutes}>{minutes ? `by itself ${minutes} min after the class is ready` : 'only when I start it'}</option>)}
+    </select></label>
+    {campaign && onHold && (auto.news > 0 || auto.next > 0) && <p>
+      {campaign.held ? 'Paused: nothing moves on by itself until you resume, or start the next chapter.'
+        : campaign.nextAt ? <>The class is ready: {campaign.chapter + 1 < campaign.chapters ? `chapter ${campaign.chapter + 2}` : 'the ending'} starts by itself in <Countdown at={campaign.nextAt} />.</>
+        : campaign.newsAt ? <>Without a new right answer, the next news comes by itself in <Countdown at={campaign.newsAt} />.</>
+        : 'Nothing is waiting to move on.'}
+      {' '}<button className="btn btn-secondary btn-sm" onClick={onHold}>{campaign.held ? '▶ Resume' : '⏸ Pause'}</button></p>}
+    <small>The clocks run only while the class is open with students in the plaza. The last chapter ends with the story’s ending.</small>
+  </div>;
 }
 
 // The campaigns this game played before, newest first: each opens to who played which role and what they wrote.

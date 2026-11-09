@@ -111,6 +111,15 @@ A game keeps its PIN and link from campaign to campaign; you never need a new ga
 - **Erase campaign** is still there for a mistake: it removes the campaign without keeping it in *Earlier campaigns* (students keep their XP).
 - **Change map** in the **Map & spells** tab moves the game to another map at any time, with or without a campaign.
 
+### Auto-advance
+
+A story can move on by itself, so the class never waits for you. **Auto-advance** in the **Campaign** tab sets, for each game:
+
+- **📰 Next news:** the chapter's next prepared news comes by itself after 3, 5 (the default), 8 or 10 minutes without a new right answer, or only when you release it. Every right answer to a main question starts the wait again, so news arrives when the class is stuck, not while it is working it out.
+- **▶ Next chapter:** once the class is ready (the chapter's share of students or teams has finished), the next chapter starts by itself 1, 2 (the default) or 5 minutes later, or only when you start it. After the last chapter it shows the story's ending. Students are told the next chapter is coming.
+- The bar at the top counts down to the next news and the next chapter. **⏸ Pause auto** holds both, for example to talk with the class; **▶ Resume auto** starts the waits again from that moment, and starting the next chapter yourself resumes it too.
+- The clocks run only while the class is open with students in the plaza: they start again from zero when you open the class or the first student comes back, so nothing moves on in an empty plaza or between lessons. **Next news** and **Next chapter** still work by hand at any time.
+
 ### Case teams
 
 A mission without a secret thief can be played in **case teams** of three or four, so students solve the story with a few classmates instead of searching the whole class for the right role. **Play in teams of 3–4** in the **Campaign** tab is on by default; missions with a secret thief (the Castanyada ones) say *Start (whole class)*, because the thief needs the whole class to hide among.

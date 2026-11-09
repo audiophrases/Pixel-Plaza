@@ -42,6 +42,18 @@ function removeTemp(dir) {
     try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* left in temp */ }
 }
 
+// The room's own database among workerd's files. On a busy Windows machine workerd may hold a file a moment after it
+// exits, so a file that will not open is tried again for a few seconds; one that never opens is not the room's.
+async function openRoomDatabase(DatabaseSync, file) {
+    for (let attempt = 0; attempt < 15; attempt++) {
+        let db;
+        try { db = new DatabaseSync(file); db.prepare('SELECT 1 FROM sqlite_master LIMIT 1').get(); return db; }
+        catch { try { db?.close(); } catch { /* not open */ } }
+        await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    return null;
+}
+
 async function freePort() {
     const server = net.createServer();
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -74,7 +86,7 @@ async function startPlaza(pinPlayUrl, persistTo, vars = {}, { content = true, po
         '--var', `CREATE_PASSWORD_HASH:${await sha256Hex(PASSWORD)}`,
         '--var', `PINPLAY_API_URL:${pinPlayUrl}`,
         // No OpenAI key unless a test brings its own: the one in .dev.vars must not change the results.
-        ...Object.entries({ OPENAI_API_KEY: '', REPORT_CHECKS: '0', MOVEMENT_CHECK: '0', CONTENT_TOKEN, ...vars }).flatMap(([key, value]) => ['--var', `${key}:${value}`])], {
+        ...Object.entries({ OPENAI_API_KEY: '', REPORT_CHECKS: '0', MOVEMENT_CHECK: '0', AUTO_MINUTE_MS: '3600000', CONTENT_TOKEN, ...vars }).flatMap(([key, value]) => ['--var', `${key}:${value}`])], {
         cwd: root, env: { ...process.env, WRANGLER_SEND_METRICS: 'false' }, stdio: ['ignore', 'pipe', 'pipe']
     });
     let log = '';
@@ -879,7 +891,8 @@ test('Live missions: reviewed additions preserve progress, enforce conflicts and
         let expired = false;
         for (const file of files(persistTo).filter(file => file.endsWith('.sqlite'))) {
             assert.ok(path.resolve(file).startsWith(path.resolve(persistTo) + path.sep));
-            const db = new DatabaseSync(file);
+            const db = await openRoomDatabase(DatabaseSync, file);
+            if (!db) continue;
             try {
                 if (!db.prepare("SELECT name FROM sqlite_master WHERE name = 'mission_live_previews'").get()) continue;
                 expired = db.prepare('UPDATE mission_live_previews SET expires = 0 WHERE preview_id = ?').run(expiredPreview.id).changes === 1;
@@ -1512,7 +1525,8 @@ test('Side quests once added to a mission chapter move to the game, with who fin
         const files = directory => fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);
         let written = false;
         for (const file of files(persistTo).filter(file => file.endsWith('.sqlite'))) {
-            const db = new DatabaseSync(file);
+            const db = await openRoomDatabase(DatabaseSync, file);
+            if (!db) continue;
             try {
                 if (!db.prepare("SELECT name FROM sqlite_master WHERE name = 'mission_live_quests'").get()) continue;
                 const add = db.prepare('INSERT INTO mission_live_quests (game_id, objective_id, chapter_id, content, source_id, source_version, created) VALUES (?, ?, ?, ?, ?, 1, ?)');
@@ -1875,6 +1889,76 @@ test('campaigns end at any chapter, are kept when the next one starts, and a gam
     }
 });
 
+test('auto-advance: news when the class goes quiet, the next chapter once it is ready, paused by the teacher, and only with students here', { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-auto-'));
+    // A minute of auto-advance lasts 400 ms here.
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, { AUTO_MINUTE_MS: '400' });
+    const sockets = [];
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, ...(body ? { body } : {}) });
+        PIN = (await teacher('game', { name: 'On its own', randomNames: false })).body.pin;
+        assert.deepEqual((await teacher('status')).body.auto, { news: 5, next: 2 }, 'a game starts with auto-advance on');
+        assert.equal((await teacher('auto', { news: 4 })).status, 400, 'only the offered minutes');
+        assert.deepEqual((await teacher('auto', { news: 3, next: 1 })).body.auto, { news: 3, next: 1 });
+        const alex = await enter(base, 'signed-a', null), sam = await enter(base, 'signed-b', null); sockets.push(alex, sam);
+        const news = socket => socket.state.quest?.clues.filter(c => c.from === 'news').length ?? 0;
+
+        // Nobody answers: the first news comes by itself after "3 minutes".
+        const started = Date.now();
+        assert.equal((await teacher('campaign', { op: 'start', campaign: 'castanyada' })).status, 200);
+        const due = (await teacher('status')).body.campaign.newsAt;
+        assert.ok(due >= started + 1100 && due <= Date.now() + 1300, 'news is due three minutes after the chapter starts');
+        await alex.next(m => m.t === 'quest' && m.quest.clues.some(c => c.from === 'news'), 'news by itself');
+        assert.ok(Date.now() - started >= 1100, 'not before it was due');
+        assert.equal((await teacher('status')).body.campaign.reveals.shown, 1);
+
+        // A right answer is progress: the next news waits three minutes from it.
+        alex.send({ t: 'answer', objective: 'where', text: 'the park' });
+        assert.equal((await alex.next(m => m.t === 'answered' && m.objective === 'where', 'answer')).correct, true);
+        assert.ok((await teacher('status')).body.campaign.newsAt >= Date.now() + 800, 'the clock starts again from the right answer');
+
+        // Paused, nothing moves on; resumed, the clock starts again.
+        const held = (await teacher('campaign', { op: 'hold', hold: true })).body.campaign;
+        assert.deepEqual([held.held, held.newsAt, held.nextAt], [true, undefined, undefined]);
+        await pause(1800);
+        assert.equal((await teacher('status')).body.campaign.reveals.shown, 1, 'nothing while paused');
+        const resumed = (await teacher('campaign', { op: 'hold', hold: false })).body.campaign;
+        assert.equal(resumed.held, undefined); assert.ok(resumed.newsAt >= Date.now() + 800);
+
+        // Ready: the next chapter starts by itself "1 minute" later, and students are told it will.
+        for (const socket of [alex, sam]) for (const [objective, text] of [['where', 'park'], ['when', 'half past nine'], ['keys', 'two']]) {
+            if (socket.state.quest.objectives.find(o => o.id === objective)?.done) continue;
+            socket.send({ t: 'answer', objective, text });
+            assert.equal((await socket.next(m => m.t === 'answered' && m.objective === objective, objective)).correct, true);
+        }
+        const ready = await sam.next(m => m.t === 'quest' && m.quest.status === 'chapter_complete', 'ready');
+        assert.ok(ready.quest.autoNextAt > Date.now(), 'students know the next chapter comes by itself');
+        assert.ok((await teacher('status')).body.campaign.nextAt);
+        await alex.next(m => m.t === 'quest' && m.quest.chapter.index === 1, 'chapter 2 by itself');
+        const second = (await teacher('status')).body.campaign;
+        assert.deepEqual([second.chapter, second.status, second.reveals.shown], [1, 'active', 0]);
+
+        // With nobody in the plaza the clocks wait for the class; news comes only once students are back for a while.
+        alex.ws.close(); sam.ws.close(); await alex.closed; await sam.closed;
+        await pause(2500);
+        assert.equal((await teacher('status')).body.campaign.reveals.shown, 0, 'no news for an empty plaza');
+        const back = await enter(base, 'signed-a', null); sockets.push(back);
+        await back.next(m => m.t === 'quest' && m.quest.chapter.index === 1, 'back in chapter 2');
+        await back.next(m => m.t === 'quest' && m.quest.clues.some(c => c.from === 'news'), 'news after the class is back');
+
+        // Off: nothing is due.
+        const off = (await teacher('auto', { news: 0, next: 0 })).body;
+        assert.deepEqual([off.auto, off.campaign.newsAt, off.campaign.nextAt], [{ news: 0, next: 0 }, undefined, undefined]);
+        assert.equal(news(back) >= 1, true);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('Side quest library: teachers write, change, delete, restore and import quests, and an old library becomes records', { timeout: 120000 }, async () => {
     const { DatabaseSync } = await import('node:sqlite');
     const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-quest-editor-'));
@@ -1949,7 +2033,8 @@ test('Side quest library: teachers write, change, delete, restore and import que
         const pair = sideQuests.find(q => q.format === 'pair'); const mingle = sideQuests.find(q => q.format === 'mingle');
         let rewound = false;
         for (const file of files(persistTo).filter(file => file.endsWith('.sqlite'))) {
-            const db = new DatabaseSync(file);
+            const db = await openRoomDatabase(DatabaseSync, file);
+            if (!db) continue;
             try {
                 if (!db.prepare("SELECT name FROM sqlite_master WHERE name = 'side_quests'").get()) continue;
                 assert.equal(db.prepare('SELECT COUNT(*) AS n FROM side_quests WHERE deleted = 1').get().n, story.length - 1, 'bulk deletion persists to storage');
@@ -2199,7 +2284,8 @@ test('Mission Studio migration: legacy games retain roles, progress and thief as
         let migrated = false;
         for (const file of files(persistTo).filter(file => file.endsWith('.sqlite'))) {
             assert.ok(path.resolve(file).startsWith(path.resolve(persistTo) + path.sep));
-            const db = new DatabaseSync(file);
+            const db = await openRoomDatabase(DatabaseSync, file);
+            if (!db) continue;
             try {
                 if (!db.prepare("SELECT name FROM sqlite_master WHERE name = 'campaigns'").get()) continue;
                 // Reconstruct the actual pre-Studio table, rather than asking Node's SQLite
@@ -2217,8 +2303,9 @@ test('Mission Studio migration: legacy games retain roles, progress and thief as
         assert.ok(migrated, 'test found the isolated PlazaRoom database');
         plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo); base = plaza.base;
         const after = (await teacher('status')).body.campaign;
-        const { guideVersion: beforeGuide, ...beforeProgress } = before;
-        const { guideVersion: afterGuide, ...afterProgress } = after;
+        // Auto-advance due times are clock readings, not progress: the legacy table has no clocks.
+        const { guideVersion: beforeGuide, newsAt: _beforeNews, nextAt: _beforeNext, ...beforeProgress } = before;
+        const { guideVersion: afterGuide, newsAt: _afterNews, nextAt: _afterNext, ...afterProgress } = after;
         assert.deepEqual(afterProgress, beforeProgress, 'migration preserves campaign state exactly');
         assert.notEqual(afterGuide, beforeGuide, 'a rebuilt mission epoch refreshes the teacher guide');
         const seed = (await api(base, '/api/teacher/missions/get?id=castanyada', { session })).body.draft;
@@ -4267,7 +4354,8 @@ test('maps are data on the server: seeded once, sent with the welcome, and chang
         const files = directory => fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);
         let changed = false;
         for (const file of files(persistTo).filter(file => file.endsWith('.sqlite'))) {
-            const db = new DatabaseSync(file);
+            const db = await openRoomDatabase(DatabaseSync, file);
+            if (!db) continue;
             try {
                 if (!db.prepare("SELECT name FROM sqlite_master WHERE name = 'themes'").get()) continue;
                 const row = db.prepare("SELECT content FROM themes WHERE theme_id = 'commons-autumn'").get();

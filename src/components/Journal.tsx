@@ -212,7 +212,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
 
       {quest.chapter.ending && <section className="journal-block journal-ending">
         <h3>{quest.status === 'chapter_complete' ? 'The class is ready to advance' : 'Chapter complete'}</h3>
-        {quest.status === 'chapter_complete' && <p>You can keep working until your teacher starts the next chapter.</p>}
+        {quest.status === 'chapter_complete' && <p>{quest.autoNextAt ? 'The next chapter starts by itself in a few minutes. You can keep working until then.' : 'You can keep working until your teacher starts the next chapter.'}</p>}
         <p><StoryText text={quest.chapter.ending} /></p>
         <LanguageHelp help={quest.chapter.help?.ending} />
         <EvidencePicture image={quest.chapter.endingImage} text={quest.chapter.ending ?? ''} help={quest.chapter.help?.ending} />

@@ -14,7 +14,7 @@ import { BlockedWords } from './blockedWords.ts';
 import { blockedIn, repeated, taskWordSet, type BlockedStatus, type Term } from '../shared/blockedWords.ts';
 import { isGlitch } from '../shared/tidy.ts';
 import { PARTICIPATION, Participation, participationDecision } from './participation.ts';
-import { REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, nothingElseToDo, pickRole, prerequisiteIds, rewardClues, teamProgress, type BoardView, type QuestView } from '../shared/campaign.ts';
+import { AUTO_NEWS_MINUTES, AUTO_NEXT_MINUTES, REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, nothingElseToDo, pickRole, prerequisiteIds, rewardClues, teamProgress, type BoardView, type QuestView } from '../shared/campaign.ts';
 import { MissionRepository, readCopy, type MissionResult } from './missions.ts';
 import { SideQuestStore, readQuestCopy, type SideQuestResult } from './sideQuestStore.ts';
 import { QuestBoard, type BoardContext } from './questBoard.ts';
@@ -74,6 +74,7 @@ const REPEAT_SHARE = 0.2; // of the students here (three at least) writing the s
 const BLOCKED_NOTICE = 'Not sent: your teacher blocked that for this lesson.';
 const TEAM_MAX = 4; // students in a case team
 
+
 // Why an exchange with the online server stopped, as the laptop reports it.
 class SyncStopped extends Error {
     state: MissionSync['state']; status: number;
@@ -100,8 +101,9 @@ export type TeacherAction =
     | { kind: 'deleteGame'; game: string; confirm?: boolean } // erases a game and everything saved in it
     | { kind: 'vision'; radius: number }                // how far a student sees, in map pixels; 0 shows everyone
     | { kind: 'warmup'; op: 'start' | 'end'; type?: WarmupKind } // a get-to-know-you warm-up at the start of a lesson
-    | { kind: 'campaign'; op: 'start' | 'next' | 'reveal' | 'reset' | 'team' | 'end'; campaign?: string; confirm?: boolean; teams?: boolean; studentKey?: string; team?: number | 'new'; themeId?: string }
+    | { kind: 'campaign'; op: 'start' | 'next' | 'reveal' | 'reset' | 'team' | 'end' | 'hold'; campaign?: string; confirm?: boolean; teams?: boolean; studentKey?: string; team?: number | 'new'; themeId?: string; hold?: boolean }
     | { kind: 'gameMap'; themeId: string } // the open game moves to another map
+    | { kind: 'auto'; news?: number; next?: number } // the open game's auto-advance, in minutes (0 is off)
     | { kind: 'questRelease'; objective: string }
     | { kind: 'questPlace'; objective: string; studentKey: string }
     | { kind: 'reportAccept'; gameId: string; studentKey: string; objective: string; version: number }
@@ -121,7 +123,8 @@ export type GameSummary = { id: string; name: string; pin: string; lastOpened: n
 
 // Where this game's campaign stands, and what every student has done in it.
 type CampaignRow = { campaign_id: string; chapter: number; status: QuestView['status']; revealed: number; revision_id: string | null; live_version: number; live_epoch: string | null; teams: number;
-    started: number; ended: number | null; early: number; run: number };
+    started: number; ended: number | null; early: number; run: number;
+    progress_at: number | null; ready_at: number | null; held: number }; // the auto-advance clocks, and the teacher's pause
 // A campaign a game played before its current one, kept when the teacher started another: what the teacher can look back on.
 export type EarlierCampaign = { id: string; title: string; started: number; ended: number | null; chapter: number; chapters: number; early: boolean; teams: boolean; students: number; reports: number };
 export type EarlierCampaignDetail = EarlierCampaign & {
@@ -136,6 +139,8 @@ export type CampaignStatus = {
     players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
     castClashes?: string[]; // story characters called like a student in this game, whose names students might mix up
     endedEarly?: boolean; // the teacher ended the campaign before its last chapter
+    newsAt?: number; nextAt?: number; // when the next news and the next chapter come by themselves
+    held?: boolean; // the teacher paused auto-advance
     reports: { studentKey: string; objective: string; text: string; partner?: string; starred: boolean; version: number; check?: ReportCheck }[];
     interviews: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
     board?: ReturnType<QuestBoard['summary']>;
@@ -158,6 +163,7 @@ export type TeacherStatus = {
     warmup: { active: boolean; kind: WarmupKind; title?: string; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
     campaign: CampaignStatus | null; // the open game's campaign, once started
     earlierCampaigns: EarlierCampaign[]; // the open game's campaigns before this one, newest first
+    auto: { news: number; next: number } | null; // the open game's auto-advance, in minutes (0 is off)
     sideQuests: SideQuestStatus | null; // the open game's side quests, with or without a campaign
     campaigns: CampaignChoice[]; // those that can be started, in the order to offer them
     open: boolean;
@@ -299,13 +305,17 @@ export class PlazaRoom extends DurableObject<Env> {
         this.sql.exec('CREATE TABLE IF NOT EXISTS campaign_teams (game_id TEXT NOT NULL, student_key TEXT NOT NULL, team INTEGER NOT NULL, PRIMARY KEY (game_id, student_key))');
         // A campaign can end at any chapter (early: before its last), and a game plays one campaign after another: `run`
         // counts the campaigns before this one, and each one finished is kept in campaign_history.
-        for (const [column, type] of [['ended', 'INTEGER'], ['early', 'INTEGER NOT NULL DEFAULT 0'], ['run', 'INTEGER NOT NULL DEFAULT 0']]) {
+        for (const [column, type] of [['ended', 'INTEGER'], ['early', 'INTEGER NOT NULL DEFAULT 0'], ['run', 'INTEGER NOT NULL DEFAULT 0'],
+            ['progress_at', 'INTEGER'], ['ready_at', 'INTEGER'], ['held', 'INTEGER NOT NULL DEFAULT 0']]) {
             if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaigns')").toArray().some(row => row.name === column)) this.sql.exec(`ALTER TABLE campaigns ADD COLUMN ${column} ${type}`);
         }
         this.sql.exec(`CREATE TABLE IF NOT EXISTS campaign_history (id TEXT PRIMARY KEY, game_id TEXT NOT NULL, campaign_id TEXT NOT NULL, title TEXT NOT NULL,
             started INTEGER NOT NULL, ended INTEGER, chapter INTEGER NOT NULL, chapters INTEGER NOT NULL, early INTEGER NOT NULL DEFAULT 0, teams INTEGER NOT NULL DEFAULT 0,
             students INTEGER NOT NULL DEFAULT 0, reports INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL)`);
         this.sql.exec('CREATE INDEX IF NOT EXISTS campaign_history_game ON campaign_history (game_id, ended)');
+        for (const [column, minutes] of [['auto_news', 5], ['auto_next', 2]] as const) {
+            if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('games')").toArray().some(row => row.name === column)) this.sql.exec(`ALTER TABLE games ADD COLUMN ${column} INTEGER NOT NULL DEFAULT ${minutes}`);
+        }
         // Games from before limited vision show everyone.
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('games')").toArray().some(row => row.name === 'vision')) {
             this.sql.exec('ALTER TABLE games ADD COLUMN vision INTEGER NOT NULL DEFAULT 0');
@@ -372,6 +382,7 @@ export class PlazaRoom extends DurableObject<Env> {
             const row = game ? this.sql.exec<{ last_opened: number }>('SELECT last_opened FROM games WHERE id = ?', game).toArray()[0] : undefined;
             this.activityHistory.recover(game && row && this.isOpen() ? { game, session: this.helpSession(), opened: row.last_opened } : undefined);
         });
+        this.scheduleAuto();
     }
 
     // ---------- Called by the Worker ----------
@@ -716,6 +727,17 @@ export class PlazaRoom extends DurableObject<Env> {
         if (action.kind === 'campaign') {
             const failed = this.campaignAction(action);
             if (failed) return { error: failed, status: 400 };
+            this.scheduleAuto();
+        }
+        if (action.kind === 'auto') {
+            const game = this.activeGame();
+            if (game === null) return { error: 'Open a game first.', status: 400 };
+            if (action.news !== undefined && !AUTO_NEWS_MINUTES.includes(action.news)) return { error: 'Choose how long before news comes by itself.', status: 400 };
+            if (action.next !== undefined && !AUTO_NEXT_MINUTES.includes(action.next)) return { error: 'Choose how long before the next chapter starts by itself.', status: 400 };
+            if (action.news !== undefined) this.sql.exec('UPDATE games SET auto_news = ? WHERE id = ?', action.news, game);
+            if (action.next !== undefined) this.sql.exec('UPDATE games SET auto_next = ? WHERE id = ?', action.next, game);
+            this.scheduleAuto();
+            this.sendQuestToAll(game);
         }
         if (action.kind === 'questRelease') {
             const game = this.activeGame(); const row = this.campaignRow(game);
@@ -857,6 +879,7 @@ export class PlazaRoom extends DurableObject<Env> {
             warmup: this.warmupStatus(current?.id ?? null),
             campaign: this.campaignStatus(current?.id ?? null),
             earlierCampaigns: current ? this.earlierCampaigns(current.id) : [],
+            auto: current ? this.autoSettings(current.id) : null,
             sideQuests: this.sideQuestStatus(current?.id ?? null),
             campaigns: this.missions.published(),
             open: this.isOpen(),
@@ -1380,6 +1403,8 @@ export class PlazaRoom extends DurableObject<Env> {
         // Never chosen a voice: one of their own, not the same default as everyone else.
         if (!isEnglishVoice(seat.avatar.voice)) seat.avatar.voice = voiceFor(row.student_key);
         const others = this.seats();
+        // The first student back in an empty plaza starts the auto-advance clocks again, from now.
+        if (!others.some(other => other.game === game)) this.restartClocks(game);
         this.ctx.acceptWebSocket(server, [seat.studentKey]);
         server.serializeAttachment(seat);
         // Every classmate in this game, here or not, so naming one who is absent is still English.
@@ -1509,7 +1534,8 @@ export class PlazaRoom extends DurableObject<Env> {
 
     async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
         this.leave(ws, true);
-        try { ws.close(code, reason); } catch { /* reserved code, or already closed */ }
+        // A page that closed without a code (1005) is answered with a normal close, so its side finishes at once.
+        try { ws.close(code === 1005 || code === 1006 ? 1000 : code, reason); } catch { /* reserved code, or already closed */ }
     }
 
     async webSocketError(ws: WebSocket): Promise<void> {
@@ -1525,7 +1551,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
     private campaignRow(game: string | null): CampaignRow | null {
         return game === null ? null : this.sql.exec<CampaignRow>(
-            'SELECT campaign_id, chapter, status, revealed, revision_id, live_version, live_epoch, teams, started, ended, early, run FROM campaigns WHERE game_id = ?', game).toArray()[0] ?? null;
+            'SELECT campaign_id, chapter, status, revealed, revision_id, live_version, live_epoch, teams, started, ended, early, run, progress_at, ready_at, held FROM campaigns WHERE game_id = ?', game).toArray()[0] ?? null;
     }
 
     private campaignPlayers(game: string): { student_key: string; role_id: string; clues: string[]; done: string[]; last_wrong: number }[] {
@@ -1766,7 +1792,8 @@ export class PlazaRoom extends DurableObject<Env> {
             ...(recap && row.chapter > 0 && campaign.chapters[row.chapter - 1].endingImage ? { recapImage: campaign.chapters[row.chapter - 1].endingImage } : {}),
             finale: row.status === 'campaign_complete' && !early ? campaign.finale : null,
             ...(row.status === 'campaign_complete' && !early && campaign.help?.finale ? { finaleHelp: campaign.help.finale } : {}),
-            ...(early ? { endedEarly: true } : {})
+            ...(early ? { endedEarly: true } : {}),
+            ...((next => next !== null ? { autoNextAt: next } : {})(this.autoDue(game).next))
         };
     }
 
@@ -2147,9 +2174,10 @@ export class PlazaRoom extends DurableObject<Env> {
             }
             if (group) this.groups.setState(group.group_id, 'playing');
             if (!ctx.gameQuests.has(objective.id) && row?.status === 'chapter_complete' && chapter && !chapterDone(chapter, this.campaignUnits(seat.game))) {
-                this.sql.exec("UPDATE campaigns SET status = 'active' WHERE game_id = ?", seat.game);
+                this.sql.exec("UPDATE campaigns SET status = 'active', ready_at = NULL WHERE game_id = ?", seat.game);
             }
         });
+        this.scheduleAuto();
         this.sendQuestToAll(seat.game);
         for (const member of members) this.notify(member, 'info', group
             ? `${seat.name} undid the group report submission. Your writing is back in the Journal.`
@@ -2250,11 +2278,15 @@ export class PlazaRoom extends DurableObject<Env> {
             this.award(member, `answer:${seat.game}:${this.missionKey(seat.game, objective.id)}`, XP.answer, 'Your team answered a question', seat.game);
         }
         const chapter = campaign.chapters[row.chapter];
+        // A right answer to a main question is progress: the class is not stuck, so news waits.
+        if (!objective.optional && !objective.board) this.sql.exec('UPDATE campaigns SET progress_at = ? WHERE game_id = ?', Date.now(), seat.game);
         if (row.status === 'active' && chapterDone(chapter, this.campaignUnits(seat.game))) {
-            this.sql.exec("UPDATE campaigns SET status = 'chapter_complete' WHERE game_id = ?", seat.game);
+            this.sql.exec("UPDATE campaigns SET status = 'chapter_complete', ready_at = ? WHERE game_id = ?", Date.now(), seat.game);
+            this.scheduleAuto();
             this.sendQuestToAll(seat.game);
         } else if (team || chapter.objectives.some(o => o.board)) this.sendQuestToAll(seat.game);
         else for (const socket of this.ctx.getWebSockets(seat.studentKey)) this.sendQuest(socket, seat.game, seat.studentKey);
+        this.scheduleAuto();
     }
 
     // A student's answer to one of the game's side quests: checked as a mission's would be, and kept with the game. One
@@ -2315,19 +2347,19 @@ export class PlazaRoom extends DurableObject<Env> {
             // The new story may be on another map: the game moves there first, so its students start in the right place.
             if (action.themeId !== undefined && this.game(game)?.themeId !== action.themeId) this.switchMap(game, action.themeId);
             const run = this.sql.exec<{ runs: number }>('SELECT COUNT(*) AS runs FROM campaign_history WHERE game_id = ?', game).toArray()[0]?.runs ?? 0;
-            this.sql.exec("INSERT INTO campaigns (game_id, campaign_id, chapter, status, started, revision_id, live_epoch, teams, run) VALUES (?, ?, 0, 'active', ?, ?, ?, ?, ?)", game, campaign.id, Date.now(), revision, crypto.randomUUID(), teams ? 1 : 0, run);
+            this.sql.exec("INSERT INTO campaigns (game_id, campaign_id, chapter, status, started, revision_id, live_epoch, teams, run, progress_at) VALUES (?, ?, 0, 'active', ?, ?, ?, ?, ?, ?)", game, campaign.id, Date.now(), revision, crypto.randomUUID(), teams ? 1 : 0, run, Date.now());
             if (teams) this.formTeams(game, [...new Set(this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey))]);
             for (const seat of this.seats()) if (seat.game === game) this.player(game, seat.studentKey, campaign.id);
             this.pickThieves(game, 0, campaign.chapters[0]);
         } else if (!row) {
             return 'This game has no campaign.';
         } else if (action.op === 'next') {
-            const campaign = this.gameCampaign(game);
-            if (!campaign || row.status === 'campaign_complete') return 'The campaign is over.';
-            if (row.chapter + 1 < campaign.chapters.length) {
-                this.sql.exec("UPDATE campaigns SET chapter = chapter + 1, status = 'active', revealed = 0 WHERE game_id = ?", game);
-                this.pickThieves(game, row.chapter + 1, campaign.chapters[row.chapter + 1]);
-            } else this.sql.exec("UPDATE campaigns SET status = 'campaign_complete', ended = ? WHERE game_id = ?", Date.now(), game);
+            if (!this.nextChapter(game, row)) return 'The campaign is over.';
+        } else if (action.op === 'hold') {
+            // The teacher pauses auto-advance, to talk with the class; resuming starts the clocks again from now.
+            if (row.status === 'campaign_complete') return 'The campaign is over.';
+            const now = Date.now();
+            this.sql.exec('UPDATE campaigns SET held = ?, progress_at = ?, ready_at = CASE WHEN ready_at IS NULL THEN NULL ELSE ? END WHERE game_id = ?', action.hold === false ? 0 : 1, now, now, game);
         } else if (action.op === 'end') {
             // The teacher ends the story at any chapter. Everything students did stays; before the last chapter the
             // story stops without its ending, which would give the mystery away.
@@ -2348,7 +2380,7 @@ export class PlazaRoom extends DurableObject<Env> {
             const chapter = this.gameCampaign(game)?.chapters[row.chapter];
             if (!chapter || row.status === 'campaign_complete') return 'The chapter is not in progress.';
             if (row.revealed >= chapter.reveals.length) return 'There is no more news to reveal.';
-            this.sql.exec('UPDATE campaigns SET revealed = revealed + 1 WHERE game_id = ?', game);
+            this.sql.exec('UPDATE campaigns SET revealed = revealed + 1, progress_at = ? WHERE game_id = ?', Date.now(), game);
         } else if (action.op === 'reset') {
             if (action.confirm !== true) return 'Confirm to erase this game\'s campaign.';
             this.clearCampaign(game);
@@ -2389,6 +2421,78 @@ export class PlazaRoom extends DurableObject<Env> {
             else status.free.push({ studentKey: player.student_key, name: name(player.student_key) });
         }
         return status;
+    }
+
+    // The next chapter for everyone, or after the last one the story's ending. False when the campaign is over.
+    private nextChapter(game: string, row: CampaignRow): boolean {
+        const campaign = this.gameCampaign(game);
+        if (!campaign || row.status === 'campaign_complete') return false;
+        if (row.chapter + 1 < campaign.chapters.length) {
+            this.sql.exec("UPDATE campaigns SET chapter = chapter + 1, status = 'active', revealed = 0, progress_at = ?, ready_at = NULL, held = 0 WHERE game_id = ?", Date.now(), game);
+            this.pickThieves(game, row.chapter + 1, campaign.chapters[row.chapter + 1]);
+        } else this.sql.exec("UPDATE campaigns SET status = 'campaign_complete', ended = ?, ready_at = NULL WHERE game_id = ?", Date.now(), game);
+        return true;
+    }
+
+    // ---------- Auto-advance ----------
+    // A story can move on by itself: the next news when the class has gone a while without a new right answer, and
+    // the next chapter a little after the class is ready. Each game has its own minutes; the clocks only run while the
+    // class is open with students in it, and the teacher can pause them.
+
+    private autoSettings(game: string): { news: number; next: number } {
+        const row = this.sql.exec<{ auto_news: number; auto_next: number }>('SELECT auto_news, auto_next FROM games WHERE id = ?', game).toArray()[0];
+        return { news: row?.auto_news ?? 0, next: row?.auto_next ?? 0 };
+    }
+    private autoMinute(): number { return Number(this.env.AUTO_MINUTE_MS) || 60_000; }
+    // When the open game's story next moves on by itself, if it will.
+    private autoDue(game: string): { news: number | null; next: number | null } {
+        const row = this.campaignRow(game); const campaign = row && this.gameCampaign(game);
+        if (!row || !campaign || row.held) return { news: null, next: null };
+        const { news, next } = this.autoSettings(game); const minute = this.autoMinute();
+        const chapter = campaign.chapters[row.chapter];
+        return {
+            news: news > 0 && row.status === 'active' && chapter && row.revealed < chapter.reveals.length ? (row.progress_at ?? row.started) + news * minute : null,
+            next: next > 0 && row.status === 'chapter_complete' ? (row.ready_at ?? Date.now()) + next * minute : null,
+        };
+    }
+    // The clocks start again from now: the class has just opened, or its first student is back.
+    private restartClocks(game: string): void {
+        const now = Date.now();
+        this.sql.exec('UPDATE campaigns SET progress_at = ?, ready_at = CASE WHEN ready_at IS NULL THEN NULL ELSE ? END WHERE game_id = ?', now, now, game);
+        this.scheduleAuto();
+    }
+    // One alarm for the room, at the open game's next due time. Storage is touched only when that time changes: the
+    // room remembers what it set (unknown when it wakes, so the first call sets or clears it).
+    private alarmAt: number | null | undefined;
+    private scheduleAuto(): void {
+        const game = this.isOpen() ? this.activeGame() : null;
+        const due = game ? this.autoDue(game) : { news: null, next: null };
+        const soonest = Math.min(...[due.news, due.next].filter((time): time is number => time !== null));
+        const at = Number.isFinite(soonest) ? Math.max(soonest, Date.now() + 50) : null;
+        if (at === this.alarmAt || (at !== null && this.alarmAt !== undefined && this.alarmAt !== null && Math.abs(at - this.alarmAt) < 50)) return;
+        this.alarmAt = at;
+        if (at !== null) void this.ctx.storage.setAlarm(at);
+        else void this.ctx.storage.deleteAlarm();
+    }
+    async alarm(): Promise<void> {
+        this.alarmAt = null; // it has gone off
+        const game = this.isOpen() ? this.activeGame() : null;
+        const row = game ? this.campaignRow(game) : null;
+        if (game && row) {
+            const now = Date.now();
+            const due = this.autoDue(game);
+            if (!this.seats().some(seat => seat.game === game)) {
+                // Nobody in the plaza: the clocks wait for the class, and start again when the first student is back.
+                return;
+            } else if (due.next !== null && due.next <= now) {
+                this.nextChapter(game, row);
+                this.sendQuestToAll(game);
+            } else if (due.news !== null && due.news <= now) {
+                this.sql.exec('UPDATE campaigns SET revealed = revealed + 1, progress_at = ? WHERE game_id = ?', now, game);
+                this.sendQuestToAll(game);
+            }
+        }
+        this.scheduleAuto();
     }
 
     // What a campaign leaves in the game: removed when the teacher erases it, or when the next campaign starts once this
@@ -2489,6 +2593,8 @@ export class PlazaRoom extends DurableObject<Env> {
             guideVersion: JSON.stringify([row.revision_id, row.live_epoch, row.live_version, row.chapter, [...names], players.map(player => [player.student_key, player.role_id]), thieves.map(key => [key, this.avatarOf(key)])]),
             id: campaign.id, title: campaign.title, status: row.status, chapter: row.chapter, chapters: campaign.chapters.length, zones: clueZones(campaign),
             ...(row.status === 'campaign_complete' && row.early ? { endedEarly: true } : {}),
+            ...((due => ({ ...(due.news !== null ? { newsAt: due.news } : {}), ...(due.next !== null ? { nextAt: due.next } : {}) }))(this.autoDue(game))),
+            ...(row.held ? { held: true } : {}),
             ...((clashes => clashes.length ? { castClashes: clashes } : {})(castClashes(campaign.cast, [...names.values()]))),
             chapterTitle: campaign.chapters[Math.min(row.chapter, campaign.chapters.length - 1)].title,
             chapterTitles: campaign.chapters.map(chapter => chapter.title),
@@ -3469,6 +3575,7 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!open) {
             this.saveSetting('open', '0');
             this.closeRoom();
+            this.scheduleAuto();
             return;
         }
         const target = game ?? this.activeGame() ?? this.createGame('Class 1', false, 0);
@@ -3481,6 +3588,8 @@ export class PlazaRoom extends DurableObject<Env> {
             this.sql.exec('UPDATE games SET last_opened = ? WHERE id = ?', Date.now(), target);
             this.saveSetting('help_session', crypto.randomUUID());
         }
+        // Auto-advance counts from the moment the class opens, never from the last lesson.
+        if (reopening) this.restartClocks(target); else this.scheduleAuto();
     }
 
     private closeRoom(): void {

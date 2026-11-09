@@ -14,6 +14,10 @@
 import type { ReportCheck, ReportLevel } from './reportFeedback.ts';
 import type { EvidenceImage } from './evidence.ts';
 export const REPORT_MAX_LENGTH = 1000;
+// Auto-advance, in minutes (0 is off): the next news after this long without a new right answer, and the next chapter
+// this long after the class is ready. Games start with 5 and 2.
+export const AUTO_NEWS_MINUTES = [0, 3, 5, 8, 10];
+export const AUTO_NEXT_MINUTES = [0, 1, 2, 5];
 // Optional, author-written language support travels with the content. English stays the answer language.
 export type TextHelp = { ca?: string };
 
@@ -74,6 +78,7 @@ export type QuestView = {
     vocabulary?: string[]; // Public story names/terms accepted by the English chat check; never secret answers.
     cast?: CastMember[]; // The story's characters, for the Who's who and to mark their names in the story.
     endedEarly?: boolean; // The teacher ended the story before its last chapter: no ending, no finale.
+    autoNextAt?: number; // When the next chapter starts by itself, once the class is ready.
     status: 'active' | 'chapter_complete' | 'campaign_complete';
     chapter: { index: number; of: number; title: string; intro: string; ending: string | null; introImage?: EvidenceImage; endingImage?: EvidenceImage; help?: { intro?: TextHelp; ending?: TextHelp } };
     role: { id: string; name: string; card: string; help?: TextHelp };

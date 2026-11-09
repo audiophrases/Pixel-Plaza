@@ -25,6 +25,7 @@ export interface Env {
     OPENAI_PARTICIPATION?: string; // '0' disables small automatic conversation XP rewards
     MOVEMENT_CHECK?: string; // '0' turns off the check that moves do not go through walls or too fast (tests only)
     GROUP_START_MS?: string; // how long a side quest group waits before it may start with who is there (tests only)
+    AUTO_MINUTE_MS?: string; // how long a minute of auto-advance lasts (tests only)
     OPENAI_GRAMMAR_GATE?: string; // '0' skips the quick Decisions check that decides whether a hint is worth asking for
     // Set only on the teacher's laptop (npm run classroom): its address on the
     // school network, and the online Pixel Plaza where students sign in.
@@ -115,9 +116,12 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     if (path === '/api/teacher/warmup' && (body?.op === 'start' || body?.op === 'end')) {
         return { kind: 'warmup', op: body.op, ...(['facts', 'identity', 'pairs'].includes(body.type) ? { type: body.type } : {}) };
     }
-    if (path === '/api/teacher/campaign' && ['start', 'next', 'reveal', 'reset', 'team', 'end'].includes(body?.op)) {
+    if (path === '/api/teacher/auto' && (Number.isInteger(body?.news) || Number.isInteger(body?.next))) {
+        return { kind: 'auto', ...(Number.isInteger(body.news) ? { news: body.news } : {}), ...(Number.isInteger(body.next) ? { next: body.next } : {}) };
+    }
+    if (path === '/api/teacher/campaign' && ['start', 'next', 'reveal', 'reset', 'team', 'end', 'hold'].includes(body?.op)) {
         return { kind: 'campaign', op: body.op, ...(typeof body.campaign === 'string' ? { campaign: body.campaign } : {}), confirm: body.confirm === true, teams: body.teams === true,
-            ...(typeof body.themeId === 'string' ? { themeId: body.themeId } : {}),
+            ...(typeof body.themeId === 'string' ? { themeId: body.themeId } : {}), ...(typeof body.hold === 'boolean' ? { hold: body.hold } : {}),
             ...(typeof body.studentKey === 'string' ? { studentKey: body.studentKey } : {}), ...(body.team === 'new' || Number.isInteger(body.team) ? { team: body.team } : {}) };
     }
     if (path === '/api/teacher/game-map' && typeof body?.themeId === 'string') return { kind: 'gameMap', themeId: body.themeId };
