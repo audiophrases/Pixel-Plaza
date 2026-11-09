@@ -79,7 +79,7 @@ export default function StudentDrawer({ token, gameId, student, online, muted, s
   useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }); }, [open, shown.length]);
 
   const classmateName = (key: string) => who(key, data?.names[key] ?? key);
-  const label = (key: string) => key === 'nearby' ? '👥 Nearby' : key === 'everyone' ? '📢 Everyone' : key === 'teacher' ? '🧑‍🏫 You' : `🔒 ${classmateName(key.slice(2))}`;
+  const label = (key: string) => key === 'nearby' ? '👥 Nearby' : key === 'everyone' ? '📢 Everyone' : key === 'teacher' ? '🧑‍🏫 You' : key.startsWith('t:') ? `🤝 ${key.slice(2)}` : `🔒 ${classmateName(key.slice(2))}`;
   const speaker = (line: ConversationLine) => line.mine ? student.name : open === 'teacher' ? 'You' : open?.startsWith('p:') ? (data?.names[open.slice(2)] ?? 'Classmate') : 'Classmate';
 
   const send = async () => {

@@ -39,6 +39,7 @@ type CampaignInfo = {
   reveals: { shown: number; total: number; next: string | null };
   reports: { studentKey: string; objective: string; text: string; partner?: string; starred?: boolean; version: number; check?: ReportCheck }[];
   interviews?: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
+  teams?: { team: number; name: string; done: number; total: number; members: { studentKey: string; name: string; role: string; online: boolean }[] }[];
   board?: { id: string; text: string; teacherReleased: boolean; released: boolean; accepted: number; completed: number }[];
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
 };
@@ -106,6 +107,7 @@ export default function Teacher() {
   const notOnMap = (zones?: string[]) => plazaMap && zones ? zones.filter(zone => !plazaMap.zones.some(item => item.id === zone)) : [];
   const mapWarning = (zones?: string[]) => { const missing = notOnMap(zones); return missing.length > 0 && <p className="teacher-flag">⚠ Not on {plazaMap!.name}: {missing.join(', ')}. Students cannot find the map clues there; choose a map with these places for this game.</p>; };
   const [warmupKind, setWarmupKind] = useState<WarmupKind>('facts');
+  const [inTeams, setInTeams] = useState(true); // the next campaign is played in case teams, where the mission allows
   const [copyNote, setCopyNote] = useState(''); // shown when the browser would not copy
   const [copied, setCopied] = useState(''); // the PIN whose link was just copied
   const [vision, setVision] = useState(450); // how far students see in a new game, in map pixels
@@ -516,6 +518,8 @@ export default function Teacher() {
 
         {shown === 'campaign' && status.game && (!campaign ? <>
           <p>Start a story for <strong>{status.game.name}</strong>. Each student gets a role at random and keeps it for the whole campaign. Closing the game saves it, and reopening picks the story up again.</p>
+          <label className="teacher-toggle"><input type="checkbox" checked={inTeams} onChange={event => setInTeams(event.target.checked)} />
+            Play in teams of 3–4: the game forms the teams, each member holds a different clue, the team has its own chat, and one answer counts for the whole team.</label>
           <ul className="teacher-campaign-choices">{status.campaigns.map(choice => <li key={choice.id}>
             <div>
               <strong>{choice.title}</strong>
@@ -523,7 +527,8 @@ export default function Teacher() {
               <ol className="teacher-chapter-line">{chapterPreview(choice.chapters).map(([number, title]) => <li key={title}>{number > 0 && <span>{number}.</span>}{title}</li>)}</ol>
               {mapWarning(choice.zones)}
             </div>
-            <button className="btn btn-primary btn-sm" onClick={() => void action('campaign', { op: 'start', campaign: choice.id })}>Start</button>
+            <button className="btn btn-primary btn-sm" title={inTeams && !choice.teams ? 'This mission has a secret thief, so it is played by the whole class.' : undefined}
+              onClick={() => void action('campaign', { op: 'start', campaign: choice.id, teams: inTeams && choice.teams })}>{inTeams && choice.teams ? 'Start in teams' : inTeams ? 'Start (whole class)' : 'Start'}</button>
             <TeacherMissionGuide token={token} campaignId={choice.id} refreshKey={choice.revision} />
           </li>)}</ul>
           <p className="teacher-muted">Change these chapters or write your own campaign in <Link to="/mission-studio">Mission Studio</Link>.</p>
@@ -538,6 +543,16 @@ export default function Teacher() {
               {state === 'now' && <small>now</small>}
             </li>;
           })}</ol>
+          {!!campaign.teams?.length && <><h3>Teams</h3><ul className="teacher-teams">
+            {campaign.teams.map(team => <li key={team.team}>
+              <span><strong>{team.name}</strong> · {team.done} of {team.total} main questions{team.done === team.total && team.total > 0 ? ' · done: side quests until the next chapter' : ''}</span>
+              <ul>{team.members.map(member => <li key={member.studentKey}><span>{who(member.studentKey, member.name)} · {member.role}{member.online ? '' : ' · away'}</span>
+                <select aria-label={`Move ${member.name} to another team`} value="" onChange={event => { if (event.target.value) void action('campaign', { op: 'team', studentKey: member.studentKey, team: event.target.value === 'new' ? 'new' : Number(event.target.value) }); }}>
+                  <option value="">Move to…</option>
+                  {campaign.teams!.filter(other => other.team !== team.team).map(other => <option key={other.team} value={other.team}>{other.name}</option>)}
+                  <option value="new">A new team</option>
+                </select></li>)}</ul>
+            </li>)}</ul></>}
           <TeacherMissionGuide key={`${status.game.id}:${campaign.id}`} token={token} gameId={status.game.id}
             currentChapter={campaign.chapter} refreshKey={campaign.guideVersion} />
           {campaign.status !== 'campaign_complete' && <div className="teacher-newgame">

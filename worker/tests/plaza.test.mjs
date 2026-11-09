@@ -32,7 +32,9 @@ const students = { 'signed-a': { studentKey: 'stu_a', displayName: 'Alex', class
     'signed-c': { studentKey: 'stu_c', displayName: 'Chris', className: '4B' },
     'roger-1': { studentKey: 'stu_r1', displayName: 'Roger Lopez Marti', className: '4B' },
     'roger-2': { studentKey: 'stu_r2', displayName: 'Roger Costa', className: '4B' },
-    'roger-3': { studentKey: 'stu_r3', displayName: 'Roger Lluch', className: '4B' } };
+    'roger-3': { studentKey: 'stu_r3', displayName: 'Roger Lluch', className: '4B' },
+    // A class big enough for case teams.
+    ...Object.fromEntries(['Ana', 'Ben', 'Cai', 'Dev', 'Eva', 'Fin', 'Gus'].map((name, i) => [`team-${i + 1}`, { studentKey: `stu_t${i + 1}`, displayName: name, className: '4C' }])) };
 
 // Windows can hold workerd's files a moment after it exits; a leftover temp
 // folder must not hide the test's real result.
@@ -1634,6 +1636,152 @@ test('Season 2 imports as data and sends Catalan help only with each student’s
     }
 });
 
+test('case teams: teams of three or four, one answer for the team, the team chat, latecomers, moves and erasing', { timeout: 150000 }, async () => {
+    const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-teams-'));
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo);
+    const sockets = [];
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    try {
+        const { base } = plaza;
+        const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, ...(body ? { body } : {}) });
+        // A mystery without a secret thief: the first Castanyada chapter as a mission of its own, five roles, and a
+        // question that asks for the classmate with a role.
+        const campaign = { ...structuredClone(castanyada), id: 'team-case', title: 'Team case', chapters: [structuredClone(castanyada.chapters[0])] };
+        campaign.chapters[0].objectives.push({ id: 'who-drove', text: 'Who is the driver? Type their name.', accept: [], answerRole: 'driver', optional: true });
+        const imported = await teacher('missions/import', { envelope: missionEnvelope(campaign), publish: true });
+        assert.equal(imported.status, 200, JSON.stringify(imported.body));
+        PIN = (await teacher('game', { name: 'Case teams', randomNames: false })).body.pin;
+        const choices = (await teacher('status')).body.campaigns;
+        assert.equal(choices.find(c => c.id === 'castanyada').teams, false, 'a mission with a secret thief is played by the whole class');
+        assert.equal(choices.find(c => c.id === 'team-case').teams, true);
+        const byKey = new Map();
+        for (let i = 1; i <= 6; i++) { const socket = await enter(base, `team-${i}`, null); sockets.push(socket); byKey.set(`stu_t${i}`, socket); }
+        const refused = await teacher('campaign', { op: 'start', campaign: 'castanyada', teams: true });
+        assert.equal(refused.status, 400); assert.match(JSON.stringify(refused.body), /secret thief/);
+
+        // Six students make two teams of three, each member with a different role.
+        const started = await teacher('campaign', { op: 'start', campaign: 'team-case', teams: true });
+        assert.equal(started.status, 200, JSON.stringify(started.body));
+        const [blue, red] = started.body.campaign.teams;
+        assert.deepEqual(started.body.campaign.teams.map(team => [team.name, team.members.length, team.done, team.total]), [['Blue team', 3, 0, 3], ['Red team', 3, 0, 3]]);
+        for (const team of [blue, red]) assert.equal(new Set(team.members.map(member => member.role)).size, 3, `${team.name}: a different role each`);
+        const of = team => team.members.map(member => byKey.get(member.studentKey));
+        const [b1, b2, b3] = of(blue), [r1, r2, r3] = of(red);
+        await pause(500);
+        for (const [team, socket] of [...of(blue).map(s => [blue, s]), ...of(red).map(s => [red, s])]) {
+            const quest = socket.state.quest;
+            assert.equal(quest.myTeam.name, team.name);
+            assert.deepEqual(quest.myTeam.members.map(m => m.name).sort(), team.members.map(m => m.name).sort());
+            assert.equal(quest.myTeam.members.filter(m => m.me).length, 1);
+            // A role missing from the team comes as a town notice, as for a class without it.
+            const missing = campaign.roles.filter(role => !team.members.some(m => m.role === role.name)).map(role => `fallback-role-${role.id}`);
+            assert.deepEqual(quest.clues.filter(c => c.id.startsWith('fallback-role-')).map(c => c.id).sort(), missing.sort(), `${team.name}: notices for the two roles it lacks`);
+            assert.deepEqual(quest.team, { done: 0, total: 3 }, 'progress is the team’s own: its answers out of the main questions');
+        }
+
+        // The team's conversation reaches the team, and the teacher sees who it was for.
+        b1.send({ t: 'chat', cid: 'team', to: 'team', text: 'The box went to the park' });
+        const posted = await b1.next(m => m.t === 'result' && m.cid === 'team', 'team message posted');
+        for (const mate of [b2, b3]) assert.equal((await mate.next(m => m.t === 'chat' && m.id === posted.id, 'team message')).team, 'Blue team');
+        assert.deepEqual(await b1.next(m => m.t === 'chat' && m.id === posted.id, 'own team message').then(m => [m.team, m.heard, m.all]), ['Blue team', 2, undefined]);
+        b2.send({ t: 'typing', to: 'team' });
+        assert.equal((await b3.next(m => m.t === 'typing' && m.id === b2.me.id, 'team writing')).scope, 'team');
+        await pause(300);
+        assert.ok(of(red).every(s => !s.inbox.some(m => m.id === posted.id || (m.t === 'typing' && m.id === b2.me.id))), 'the other team never sees or hears it');
+        const entry = (await teacher('status')).body.entries.find(e => e.id === posted.id);
+        assert.deepEqual([entry.target, entry.everyone], ['Blue team', false]);
+        const threads = (await teacher(`conversations?studentKey=${blue.members[0].studentKey}`)).body.lines.map(line => line.thread);
+        assert.ok(threads.includes('t:Blue team'), 'the teacher’s drawer has the team’s conversation');
+
+        // One answer counts for the whole team, with XP and each member's reward clue; the other team still has it to do.
+        b1.send({ t: 'answer', objective: 'where', text: 'the park' });
+        assert.equal((await b1.next(m => m.t === 'answered' && m.objective === 'where', 'answer')).correct, true);
+        for (const mate of [b2, b3]) assert.match((await mate.next(m => m.t === 'xp' && m.gained, 'team XP')).reason, /team/i);
+        await pause(400);
+        for (const s of of(blue)) {
+            assert.equal(s.state.quest.objectives.find(o => o.id === 'where').done, true, 'done for every member');
+            assert.ok(s.state.quest.clues.some(c => c.id === 'reward-where'), 'each with their own role’s reward');
+        }
+        for (const s of of(red)) assert.equal(s.state.quest.objectives.find(o => o.id === 'where').done, false);
+        // What one member finds on the map, the team knows.
+        b2.send({ t: 'move', x: 1470, y: 1241 });
+        await b3.next(m => m.t === 'quest' && m.quest.clues.some(c => c.id === 'park-lock'), 'a teammate’s find');
+        await pause(300);
+        assert.ok(of(red).every(s => !s.state.quest.clues.some(c => c.id === 'park-lock')));
+
+        // "Who is the driver?" asks for a teammate: a driver in the other team is not the answer.
+        const roleIdOf = name => campaign.roles.find(role => role.name === name).id;
+        const driverIn = team => team.members.find(m => roleIdOf(m.role) === 'driver');
+        const asker = blue.members.find(m => roleIdOf(m.role) !== 'driver');
+        const askerSocket = byKey.get(asker.studentKey);
+        if (!driverIn(blue) && driverIn(red)) {
+            askerSocket.send({ t: 'answer', objective: 'who-drove', text: driverIn(red).name });
+            assert.equal((await askerSocket.next(m => m.t === 'answered' && m.objective === 'who-drove', 'other team’s driver')).correct, false);
+            await pause(3100); // the wait before trying again
+            askerSocket.send({ t: 'answer', objective: 'who-drove', text: 'Driver' });
+        } else askerSocket.send({ t: 'answer', objective: 'who-drove', text: driverIn(blue)?.name ?? 'Driver' });
+        assert.equal((await askerSocket.next(m => m.t === 'answered' && m.objective === 'who-drove', 'teammate driver or notice')).correct, true);
+
+        // A chapter is ready when its share of teams has finished: one team of two is not enough.
+        await pause(1100);
+        b3.send({ t: 'answer', objective: 'when', text: 'half past nine' });
+        assert.equal((await b3.next(m => m.t === 'answered' && m.objective === 'when')).correct, true);
+        b1.send({ t: 'answer', objective: 'keys', text: 'two' });
+        assert.equal((await b1.next(m => m.t === 'answered' && m.objective === 'keys')).correct, true);
+        await pause(400);
+        let status = (await teacher('status')).body.campaign;
+        assert.equal(status.status, 'active', 'half of the teams is under the chapter’s share');
+        assert.deepEqual(status.teams.map(t => t.done), [3, 0]);
+        assert.deepEqual(b2.state.quest.team, { done: 3, total: 3 });
+        for (const [objective, text] of [['where', 'pond'], ['when', '9 30'], ['keys', '2']]) {
+            r1.send({ t: 'answer', objective, text });
+            assert.equal((await r1.next(m => m.t === 'answered' && m.objective === objective)).correct, true);
+        }
+        await r3.next(m => m.t === 'quest' && m.quest.status === 'chapter_complete', 'chapter ready');
+        status = (await teacher('status')).body.campaign;
+        assert.deepEqual([status.status, status.teams.map(t => t.done)], ['chapter_complete', [3, 3]]);
+
+        // A latecomer joins a team with room and picks up what it has answered and found, without the XP.
+        const late = await enter(base, 'team-7', null); sockets.push(late); byKey.set('stu_t7', late);
+        await late.next(m => m.t === 'quest', 'late quest'); await pause(300);
+        const lateQuest = late.state.quest;
+        assert.equal(lateQuest.myTeam.name, 'Blue team'); assert.equal(lateQuest.myTeam.members.length, 4);
+        assert.equal(new Set(lateQuest.myTeam.members.map(m => m.role)).size, 4, 'with a role nobody in the team has');
+        assert.ok(['where', 'when', 'keys'].every(id => lateQuest.objectives.find(o => o.id === id).done), 'the team’s answers count for them');
+        assert.ok(lateQuest.clues.some(c => c.id === 'park-lock'), 'and its finds');
+        assert.equal(late.inbox.some(m => m.t === 'xp' && m.gained), false);
+        // Their reload brings back the team's conversation, not the other team's.
+        r2.send({ t: 'chat', cid: 'red', to: 'team', text: 'Red here' });
+        const redPosted = await r2.next(m => m.t === 'result' && m.cid === 'red');
+        late.ws.close(); await late.closed; await pause(200);
+        const back = await enter(base, 'team-7', null); sockets.push(back);
+        assert.equal((await back.next(m => m.t === 'chat' && m.id === posted.id, 'team history')).team, 'Blue team');
+        await pause(300);
+        assert.equal(back.inbox.some(m => m.id === redPosted.id), false);
+
+        // The teacher moves students: to another team, or to a new one.
+        const moved = (await teacher('campaign', { op: 'team', studentKey: 'stu_t7', team: red.team })).body.campaign;
+        assert.deepEqual(moved.teams.map(t => t.members.length), [3, 4]);
+        const split = (await teacher('campaign', { op: 'team', studentKey: blue.members[0].studentKey, team: 'new' })).body.campaign;
+        assert.deepEqual(split.teams.map(t => [t.name, t.members.length]), [['Blue team', 2], ['Red team', 4], ['Green team', 1]]);
+        assert.equal((await teacher('campaign', { op: 'team', studentKey: 'stu_t7', team: 9 })).status, 400, 'only to a team that exists');
+        await back.next(m => m.t === 'quest' && m.quest.myTeam?.name === 'Red team', 'moved to Red');
+
+        // Erasing the campaign erases the teams; the same mission for the whole class has none.
+        await teacher('campaign', { op: 'reset', confirm: true });
+        const again = (await teacher('campaign', { op: 'start', campaign: 'team-case' })).body.campaign;
+        assert.equal(again.teams, undefined);
+        await b1.next(m => m.t === 'quest' && m.quest && !m.quest.myTeam, 'whole class again');
+        await pause(1600);
+        b1.send({ t: 'chat', cid: 'noteam', to: 'team', text: 'Anyone?' });
+        assert.match((await b1.next(m => m.t === 'notice' && m.cid === 'noteam', 'no team')).text, /not in a team/);
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('Side quest library: teachers write, change, delete, restore and import quests, and an old library becomes records', { timeout: 120000 }, async () => {
     const { DatabaseSync } = await import('node:sqlite');
     const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-quest-editor-'));
@@ -2637,7 +2785,7 @@ test('a campaign: random fixed roles, private clues, discoveries, answers, chapt
         assert.deepEqual(opened.campaigns.map(item => item.id), ['castanyada', 'castanyada-side-quests', 'castanyada-complete', 'castanyada-investigations', 'plaza-free-play']);
         assert.deepEqual(opened.campaigns.find(item => item.id === 'castanyada-investigations'),
             { id: 'castanyada-investigations', title: 'Castanyada: Witness Investigations', revision: opened.campaigns.find(item => item.id === 'castanyada-investigations').revision, chapters: ['The Missing Chestnuts', 'Conflicting Stories', 'The Hotel Cellar', 'The Missing Festival Plan', 'The Haunted Celebration'],
-                zones: ['hotel', 'park'], mystery: true, partnerQuests: true, witnesses: true });
+                zones: ['hotel', 'park'], mystery: true, partnerQuests: true, witnesses: true, teams: false });
 
         // No story yet: nothing is sent.
         const early = await enter(base, 'signed-a', null);

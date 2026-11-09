@@ -41,6 +41,9 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
     const intro = key('chapter', run);
     const taskKey = (id: string) => key('task', run, id);
     const current = quest?.objectives.filter(o => !o.done) ?? [];
+    // In a campaign played in teams, the student works with their team, not the whole class.
+    const team = quest?.myTeam;
+    const mates = team?.members.filter(member => !member.me).map(member => `${member.name} (${member.role})`) ?? [];
     if (quest && quest.status !== 'campaign_complete' && !seen.has(intro)) {
         add(intro, { kind: 'chapter', eyebrow: `CHAPTER ${quest.chapter.index + 1} OF ${quest.chapter.of}`, title: quest.chapter.title,
             sections: [
@@ -49,11 +52,13 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
                 { label: `You are ${quest.role.name}`, text: quest.role.card, help: quest.role.help },
                 ...(quest.secret ? [{ label: quest.secret.title, text: quest.secret.text, help: quest.secret.help }] : []),
                 ...quest.clues.filter(c => c.from === 'job').map(c => ({ label: 'Your private clue', text: c.text, help: c.help })),
+                ...(team ? [{ label: `Your team: ${team.name}`, text: `${mates.length ? `You work with ${mates.join(', ')}. ` : ''}Each of you has a different clue. Share yours in the 🤝 Team chat and answer together: one answer counts for the whole team.` }] : []),
                 ...current.flatMap(taskInstructions),
-            ], next: 'Press OK, then use chat to talk to classmates. Your clues, tasks and answer boxes are in the Journal.' }, current.map(o => taskKey(o.id)));
+            ], next: team ? 'Press OK, then tell your team your clue in the 🤝 Team chat. Your clues, tasks and answer boxes are in the Journal.'
+                : 'Press OK, then use chat to talk to classmates. Your clues, tasks and answer boxes are in the Journal.' }, current.map(o => taskKey(o.id)));
     } else if (quest && quest.status !== 'campaign_complete') {
         const tasks = current.filter(o => !seen.has(taskKey(o.id)));
-        if (tasks.length) add(taskKey(tasks[0].id), { kind: 'task', eyebrow: 'NEW TASK', title: tasks.length === 1 ? 'Your next task is ready' : `${tasks.length} new tasks are ready`, sections: tasks.flatMap(taskInstructions), next: 'Read your clues and talk to classmates. Submit your answers in the Journal.' }, tasks.slice(1).map(o => taskKey(o.id)));
+        if (tasks.length) add(taskKey(tasks[0].id), { kind: 'task', eyebrow: 'NEW TASK', title: tasks.length === 1 ? 'Your next task is ready' : `${tasks.length} new tasks are ready`, sections: tasks.flatMap(taskInstructions), next: team ? 'Read your clues and talk to your team in the 🤝 Team chat. One answer in the Journal counts for the whole team.' : 'Read your clues and talk to classmates. Submit your answers in the Journal.' }, tasks.slice(1).map(o => taskKey(o.id)));
     }
     // The quest board belongs to the game: its announcements do not depend on a mission.
     if (board) {

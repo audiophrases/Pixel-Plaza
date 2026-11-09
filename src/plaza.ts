@@ -19,8 +19,8 @@ export type PlazaEvent =
   | { t: 'move'; id: string; x: number; y: number }
   | { t: 'emote'; id: string; emote: string }
   // all: for the whole plaza; heard: on the sender's own copy, how many classmates it reached
-  | { t: 'chat'; id?: string; sender: string; text: string; ts: number; whisper?: boolean; to?: string; all?: boolean; heard?: number; marks?: [number, number][]; voice?: string; history?: boolean }
-  | { t: 'typing'; id: string; scope: 'private' | 'nearby' | 'all' } // a classmate is writing a message that will reach you
+  | { t: 'chat'; id?: string; sender: string; text: string; ts: number; whisper?: boolean; to?: string; all?: boolean; team?: string; heard?: number; marks?: [number, number][]; voice?: string; history?: boolean }
+  | { t: 'typing'; id: string; scope: 'private' | 'nearby' | 'all' | 'team' } // a classmate is writing a message that will reach you
   | { t: 'retract'; id: string } // the teacher took a posted message down
   | { t: 'notice'; level: 'info' | 'warning'; text: string; cid?: string; id?: string } // cid: the attempt this answers; id: the chat message it is about
   | { t: 'result'; cid: string; id?: string }

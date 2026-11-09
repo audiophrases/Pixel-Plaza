@@ -107,3 +107,8 @@
 .journal-answer button:disabled { opacity: .55; cursor: default; }
 .journal-submitted-report { white-space: pre-wrap; overflow-wrap: anywhere; padding: .6rem .75rem; border-left: 3px solid #84a99c; background: rgba(255, 255, 255, .5); }
 .journal-undo-note { font-size: .8rem; opacity: .8; }
+/* A campaign played in teams: who is in the student's team, with their roles, and how a team works. */
+.journal-crew { border-left-color: #597ef7; background: #f0f5ff; }
+.journal-crew-list { margin: 0.3rem 0; padding-left: 1.1rem; }
+.journal-crew-away { color: #8c8c8c; }
+.journal-crew-steps { margin: 0.4rem 0 0; padding-left: 1.2rem; font-size: 0.9rem; }

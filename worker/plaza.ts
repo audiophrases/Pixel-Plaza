@@ -41,7 +41,7 @@ import type { Theme } from '../shared/theme.ts';
 import { XP, checkStyle, emotesFor, levelOf, readStyle, type Style } from '../shared/levels.ts';
 import { REPORT_LINES_PER_STUDENT, type ClassReportData, type ReportLine } from '../shared/classReport.ts';
 import { type Avatar, chatProblem, clampPosition, defaultAvatar, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
-import { HEARING_RANGE, TYPING_EVERY_MS } from '../shared/chat.ts';
+import { HEARING_RANGE, TYPING_EVERY_MS, isTeamName, teamName } from '../shared/chat.ts';
 import { identityRevealProblem } from '../shared/activityChat.ts';
 import { defaultWarmup, validateWarmup, warmupVocabulary, type SavedWarmup, type WarmupDefinition } from '../shared/warmupConfig.ts';
 import { VOICE_SAMPLE } from './speech.ts';
@@ -71,6 +71,7 @@ const PLAYS_SHOWN = 300;
 const REPEAT_WINDOW_MS = 5 * 60 * 1000; // what the whole plaza wrote lately, to find what everyone is repeating
 const REPEAT_SHARE = 0.2; // of the students here (three at least) writing the same thing to everyone
 const BLOCKED_NOTICE = 'Not sent: your teacher blocked that for this lesson.';
+const TEAM_MAX = 4; // students in a case team
 
 // Why an exchange with the online server stopped, as the laptop reports it.
 class SyncStopped extends Error {
@@ -98,7 +99,7 @@ export type TeacherAction =
     | { kind: 'deleteGame'; game: string; confirm?: boolean } // erases a game and everything saved in it
     | { kind: 'vision'; radius: number }                // how far a student sees, in map pixels; 0 shows everyone
     | { kind: 'warmup'; op: 'start' | 'end'; type?: WarmupKind } // a get-to-know-you warm-up at the start of a lesson
-    | { kind: 'campaign'; op: 'start' | 'next' | 'reveal' | 'reset'; campaign?: string; confirm?: boolean }
+    | { kind: 'campaign'; op: 'start' | 'next' | 'reveal' | 'reset' | 'team'; campaign?: string; confirm?: boolean; teams?: boolean; studentKey?: string; team?: number | 'new' }
     | { kind: 'questRelease'; objective: string }
     | { kind: 'questPlace'; objective: string; studentKey: string }
     | { kind: 'reportAccept'; gameId: string; studentKey: string; objective: string; version: number }
@@ -117,6 +118,7 @@ export type TeacherAction =
 export type GameSummary = { id: string; name: string; pin: string; lastOpened: number; open: boolean; randomNames: boolean; themeId: string };
 
 // Where this game's campaign stands, and what every student has done in it.
+type CampaignRow = { campaign_id: string; chapter: number; status: QuestView['status']; revealed: number; revision_id: string | null; live_version: number; live_epoch: string | null; teams: number };
 export type CampaignStatus = {
     guideVersion: string;
     id: string; title: string; status: QuestView['status']; chapter: number; chapters: number; chapterTitle: string; chapterTitles: string[];
@@ -126,6 +128,8 @@ export type CampaignStatus = {
     reports: { studentKey: string; objective: string; text: string; partner?: string; starred: boolean; version: number; check?: ReportCheck }[];
     interviews: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
     board?: ReturnType<QuestBoard['summary']>;
+    // In a campaign played in teams: each team, its members with their roles, and the chapter's main questions it has answered.
+    teams?: { team: number; name: string; done: number; total: number; members: { studentKey: string; name: string; role: string; online: boolean }[] }[];
 };
 // The open game's side quests, with or without a mission: students free to choose one (nothing else to do), those
 // doing one, how many are still on a warm-up or mission, and how many side quests the board has. `groups`: pairs and
@@ -246,7 +250,7 @@ export class PlazaRoom extends DurableObject<Env> {
                 PRIMARY KEY (game_id, student_key));`);
         // Older rooms predate nearby chat and whispers: their messages were for everyone.
         const chatColumns = this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('chat')").toArray().map(row => row.name);
-        for (const [column, type] of [['target_key', 'TEXT'], ['target_name', 'TEXT'], ['x', 'REAL'], ['y', 'REAL'], ['flag', 'TEXT'], ['note', 'TEXT'], ['game_id', 'TEXT'], ['marks', 'TEXT'], ['voice', 'TEXT']]) {
+        for (const [column, type] of [['target_key', 'TEXT'], ['target_name', 'TEXT'], ['x', 'REAL'], ['y', 'REAL'], ['flag', 'TEXT'], ['note', 'TEXT'], ['game_id', 'TEXT'], ['marks', 'TEXT'], ['voice', 'TEXT'], ['team', 'TEXT']]) {
             if (!chatColumns.includes(column)) this.sql.exec(`ALTER TABLE chat ADD COLUMN ${column} ${type}`);
         }
         // The whole name as PinPlay gives it, from which each game works out what to show.
@@ -276,6 +280,11 @@ export class PlazaRoom extends DurableObject<Env> {
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaigns')").toArray().some(row => row.name === 'revealed')) {
             this.sql.exec('ALTER TABLE campaigns ADD COLUMN revealed INTEGER NOT NULL DEFAULT 0');
         }
+        // A campaign may be played in case teams: who is in which team, a number, for the whole campaign.
+        if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaigns')").toArray().some(row => row.name === 'teams')) {
+            this.sql.exec('ALTER TABLE campaigns ADD COLUMN teams INTEGER NOT NULL DEFAULT 0');
+        }
+        this.sql.exec('CREATE TABLE IF NOT EXISTS campaign_teams (game_id TEXT NOT NULL, student_key TEXT NOT NULL, team INTEGER NOT NULL, PRIMARY KEY (game_id, student_key))');
         // Games from before limited vision show everyone.
         if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('games')").toArray().some(row => row.name === 'vision')) {
             this.sql.exec('ALTER TABLE games ADD COLUMN vision INTEGER NOT NULL DEFAULT 0');
@@ -833,7 +842,7 @@ export class PlazaRoom extends DurableObject<Env> {
                 .map(game => ({ ...game, randomNames: game.randomNames === 1, open: this.isOpen() && game.id === current?.id })),
             pin: this.classPin(),
             entries: this.sql.exec<Omit<TeacherStatus['entries'][number], 'starred' | 'everyone'> & { everyone: number }>(`SELECT id, student_key AS studentKey, sender, target_name AS target,
-                (target_key IS NULL AND x IS NULL) AS everyone, flag, note, text, ts AS timestamp, status FROM chat
+                (target_key IS NULL AND x IS NULL AND team IS NULL) AS everyone, flag, note, text, ts AS timestamp, status FROM chat
                 WHERE game_id IS ? ORDER BY ts DESC LIMIT ?`, current?.id ?? null, STATUS_HISTORY).toArray()
                 .map(entry => ({ ...entry, everyone: entry.everyone === 1, starred: this.starred(entry.studentKey, `teacher:${entry.id}`) })),
             moderation: !!this.env.OPENAI_API_KEY,
@@ -931,7 +940,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const names = this.rosterNames(game);
         const keyOf = new Map([...names].map(([key, name]) => [name, key]));
         // Whether a posted message went to everyone: it keeps no place on the map.
-        const toEveryone = new Set(this.sql.exec<{ id: string }>('SELECT id FROM chat WHERE game_id = ? AND student_key = ? AND target_key IS NULL AND x IS NULL', game, studentKey).toArray().map(row => row.id));
+        const toEveryone = new Set(this.sql.exec<{ id: string }>('SELECT id FROM chat WHERE game_id = ? AND student_key = ? AND target_key IS NULL AND x IS NULL AND team IS NULL', game, studentKey).toArray().map(row => row.id));
         const lines: ConversationLine[] = [];
         // What the student wrote, sent or not, and the teacher's private messages to them.
         for (const row of this.sql.exec<{ id: string; ts: number; source: string; status: string; text: string; target: string | null; reason: string | null; chat_id: string | null }>(
@@ -939,7 +948,7 @@ export class PlazaRoom extends DurableObject<Env> {
              AND source IN ('chat', 'interview', 'help', 'teacher') ORDER BY ts DESC, id DESC LIMIT 300`, game, studentKey).toArray()) {
             const teacher = row.source === 'teacher' || row.source === 'help' || row.target === 'Teacher';
             const everyone = row.target === 'Everyone' || (!row.target && !!row.chat_id && toEveryone.has(row.chat_id));
-            const thread = teacher ? 'teacher' : everyone ? 'everyone' : row.target ? `p:${keyOf.get(row.target) ?? row.target}` : 'nearby';
+            const thread = teacher ? 'teacher' : everyone ? 'everyone' : row.target && isTeamName(row.target) ? `t:${row.target}` : row.target ? `p:${keyOf.get(row.target) ?? row.target}` : 'nearby';
             lines.push({ id: row.id, at: row.ts, thread, mine: row.source !== 'teacher', text: row.text, status: row.status, reason: row.reason });
         }
         // What classmates wrote to them privately, posted or waiting.
@@ -1287,7 +1296,8 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     private beginAttempt(seat: AnswerSeat, text: string, source: AttemptSource, id?: string, to?: unknown, objective?: string): string {
-        const target = to === 'teacher' ? 'Teacher' : to === 'everyone' ? 'Everyone' : this.seats().find(s => s.game === seat.game && s.id === to)?.name;
+        const team = to === 'team' ? this.teamOf(seat.game, seat.studentKey) : null;
+        const target = to === 'teacher' ? 'Teacher' : to === 'everyone' ? 'Everyone' : team !== null ? teamName(team) : this.seats().find(s => s.game === seat.game && s.id === to)?.name;
         return this.assistance.begin({ game: seat.game, studentKey: seat.studentKey, name: seat.name,
             text, source, id: id && id.length <= 80 ? id : undefined, target, objective });
     }
@@ -1486,9 +1496,9 @@ export class PlazaRoom extends DurableObject<Env> {
     // story up where it stopped. Each student's role and finds are saved too, and only that
     // student's own are ever sent to them.
 
-    private campaignRow(game: string | null): { campaign_id: string; chapter: number; status: QuestView['status']; revealed: number; revision_id: string | null; live_version: number; live_epoch: string | null } | null {
-        return game === null ? null : this.sql.exec<{ campaign_id: string; chapter: number; status: QuestView['status']; revealed: number; revision_id: string | null; live_version: number; live_epoch: string | null }>(
-            'SELECT campaign_id, chapter, status, revealed, revision_id, live_version, live_epoch FROM campaigns WHERE game_id = ?', game).toArray()[0] ?? null;
+    private campaignRow(game: string | null): CampaignRow | null {
+        return game === null ? null : this.sql.exec<CampaignRow>(
+            'SELECT campaign_id, chapter, status, revealed, revision_id, live_version, live_epoch, teams FROM campaigns WHERE game_id = ?', game).toArray()[0] ?? null;
     }
 
     private campaignPlayers(game: string): { student_key: string; role_id: string; clues: string[]; done: string[]; last_wrong: number }[] {
@@ -1497,14 +1507,97 @@ export class PlazaRoom extends DurableObject<Env> {
             .map(row => ({ ...row, clues: JSON.parse(row.clues), done: JSON.parse(row.done) }));
     }
 
-    // The student's role, chosen at random the first time and the same ever after.
+    // ---------- Case teams ----------
+    // A campaign played in teams puts each student in a team of three or four for the whole campaign. A team holds every
+    // clue between its members, answers once for all of them, and talks in its own conversation.
+
+    private teamOf(game: string, studentKey: string): number | null {
+        return this.sql.exec<{ team: number }>('SELECT team FROM campaign_teams WHERE game_id = ? AND student_key = ?', game, studentKey).toArray()[0]?.team ?? null;
+    }
+    private teamMembers(game: string, team: number): string[] {
+        return this.sql.exec<{ student_key: string }>('SELECT student_key FROM campaign_teams WHERE game_id = ? AND team = ? ORDER BY rowid', game, team).toArray().map(row => row.student_key);
+    }
+    // Who plays together with this student: their team, or null when the campaign is played by the whole class.
+    private teamKeys(game: string, studentKey: string): Set<string> | null {
+        const team = this.teamOf(game, studentKey);
+        return team === null ? null : new Set(this.teamMembers(game, team));
+    }
+    // A team's conversation belongs to this run of the campaign: erased and started again, the teams talk afresh.
+    private teamChatKey(game: string, team: number): string { return `${this.campaignRow(game)?.live_epoch ?? ''}:${team}`; }
+    private teamFromChatKey(key: string): number { return Number(key.split(':').pop()); }
+    // Teams at random from the students here: a quarter of them, rounded up, so three or four in each.
+    private formTeams(game: string, students: string[]): void {
+        const order = [...students];
+        for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+        const count = Math.max(1, Math.ceil(order.length / TEAM_MAX));
+        order.forEach((key, i) => this.sql.exec('INSERT OR REPLACE INTO campaign_teams (game_id, student_key, team) VALUES (?, ?, ?)', game, key, i % count));
+    }
+    // A student who arrives later joins the team with the fewest players in the plaza that has room, or a new one.
+    private joinTeam(game: string, studentKey: string): number {
+        const here = new Set(this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey));
+        const teams = new Map<number, string[]>();
+        for (const row of this.sql.exec<{ student_key: string; team: number }>('SELECT student_key, team FROM campaign_teams WHERE game_id = ?', game).toArray()) teams.set(row.team, [...(teams.get(row.team) ?? []), row.student_key]);
+        const open = [...teams].filter(([, members]) => members.length < TEAM_MAX)
+            .sort((a, b) => a[1].filter(key => here.has(key)).length - b[1].filter(key => here.has(key)).length || a[1].length - b[1].length || a[0] - b[0])[0];
+        const team = open ? open[0] : teams.size ? Math.max(...teams.keys()) + 1 : 0;
+        this.sql.exec('INSERT OR REPLACE INTO campaign_teams (game_id, student_key, team) VALUES (?, ?, ?)', game, studentKey, team);
+        return team;
+    }
+    // A student who joins a team late, or is moved to another, picks up what the team has already answered and found,
+    // without the XP. Quest board quests stay each student's own.
+    private catchUpWithTeam(game: string, studentKey: string): void {
+        const mates = this.teamKeys(game, studentKey);
+        const players = this.campaignPlayers(game);
+        const me = players.find(player => player.student_key === studentKey);
+        if (!mates || !me) return;
+        const board = new Set(this.gameCampaign(game)?.chapters.flatMap(chapter => chapter.objectives).filter(objective => objective.board).map(objective => objective.id));
+        const others = players.filter(player => mates.has(player.student_key) && player.student_key !== studentKey);
+        const done = [...new Set([...me.done, ...others.flatMap(player => player.done).filter(id => !board.has(id))])];
+        const clues = [...new Set([...me.clues, ...others.flatMap(player => player.clues)])];
+        if (done.length > me.done.length || clues.length > me.clues.length)
+            this.sql.exec('UPDATE campaign_players SET done = ?, clues = ? WHERE game_id = ? AND student_key = ?', JSON.stringify(done), JSON.stringify(clues), game, studentKey);
+    }
+    // What counts towards a chapter: each student, or in teams each team once, with what its members did together.
+    private campaignUnits(game: string): { done: string[] }[] {
+        const players = this.campaignPlayers(game);
+        if (!this.campaignRow(game)?.teams) return players;
+        const teams = new Map<number, Set<string>>();
+        for (const player of players) {
+            const team = this.teamOf(game, player.student_key) ?? -1;
+            teams.set(team, new Set([...(teams.get(team) ?? []), ...player.done]));
+        }
+        return [...teams.values()].map(done => ({ done: [...done] }));
+    }
+    // The teams as the teacher sees them: members with their roles, and the main questions the team has answered.
+    private teamsStatus(game: string, campaign: Campaign, chapter: Campaign['chapters'][number]): NonNullable<CampaignStatus['teams']> {
+        const players = this.campaignPlayers(game); const names = this.rosterNames(game);
+        const here = new Set(this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey));
+        const main = chapter.objectives.filter(objective => !objective.optional).map(objective => objective.id);
+        const teams = new Map<number, typeof players>();
+        for (const player of players) { const team = this.teamOf(game, player.student_key); if (team !== null) teams.set(team, [...(teams.get(team) ?? []), player]); }
+        return [...teams].sort((a, b) => a[0] - b[0]).map(([team, members]) => {
+            const done = new Set(members.flatMap(member => member.done));
+            return { team, name: teamName(team), done: main.filter(id => done.has(id)).length, total: main.length,
+                members: members.map(member => ({ studentKey: member.student_key, name: names.get(member.student_key) ?? 'Student', online: here.has(member.student_key),
+                    role: campaign.roles.find(role => role.id === member.role_id)?.name ?? member.role_id })) };
+        });
+    }
+
+    // The student's role, chosen at random the first time and the same ever after. In teams, the team's members get
+    // different roles while the mission has enough, so a team holds every clue.
     private player(game: string, studentKey: string, campaignId: string) {
         const existing = this.campaignPlayers(game).find(row => row.student_key === studentKey);
         if (existing) return existing;
         const campaign = this.gameCampaign(game);
         if (!campaign || campaign.id !== campaignId) return null;
-        const role = pickRole(campaign.roles, this.campaignPlayers(game).map(row => row.role_id), Math.random());
+        const team = this.campaignRow(game)?.teams ? this.teamOf(game, studentKey) ?? this.joinTeam(game, studentKey) : null;
+        const taken = this.campaignPlayers(game).filter(row => team === null || this.teamOf(game, row.student_key) === team).map(row => row.role_id);
+        const role = pickRole(campaign.roles, taken, Math.random());
         this.sql.exec('INSERT INTO campaign_players (game_id, student_key, role_id) VALUES (?, ?, ?)', game, studentKey, role.id);
+        if (team !== null) {
+            this.catchUpWithTeam(game, studentKey);
+            return this.campaignPlayers(game).find(row => row.student_key === studentKey)!;
+        }
         return { student_key: studentKey, role_id: role.id, clues: [] as string[], done: [] as string[], last_wrong: 0 };
     }
 
@@ -1561,7 +1654,8 @@ export class PlazaRoom extends DurableObject<Env> {
 
     private meetingFallback(game: string, studentKey: string, roleId: string, campaign: { roles: { id: string; name: string }[] }): string | null {
         const online = new Set(this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey));
-        const peer = this.campaignPlayers(game).some(player => player.role_id === roleId && player.student_key !== studentKey && online.has(player.student_key));
+        const team = this.teamKeys(game, studentKey);
+        const peer = this.campaignPlayers(game).some(player => player.role_id === roleId && player.student_key !== studentKey && online.has(player.student_key) && (!team || team.has(player.student_key)));
         return peer ? null : campaign.roles.find(role => role.id === roleId)?.name ?? null;
     }
 
@@ -1584,7 +1678,9 @@ export class PlazaRoom extends DurableObject<Env> {
         const names = this.rosterNames(game);
         const found = campaign.chapters.flatMap(item => item.discoveries).filter(discovery => player.clues.includes(discovery.id));
         const online = new Set(this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey));
-        const present = this.campaignPlayers(game).filter(item => online.has(item.student_key));
+        // In teams, the roles that count are the team's: one missing from the team comes as a town notice.
+        const team = this.teamKeys(game, studentKey);
+        const present = this.campaignPlayers(game).filter(item => online.has(item.student_key) && (!team || team.has(item.student_key)));
         const fallback = absentRoleClues(campaign, chapter, role.id, player.done,
             present.filter(item => !chapter.thieves || !thieves.includes(item.student_key)).map(item => item.role_id),
             present.map(item => item.role_id));
@@ -1630,7 +1726,11 @@ export class PlazaRoom extends DurableObject<Env> {
                         ...(objective.conversation ? { conversation: this.conversation(game, studentKey, objective) } : {}) };
                 }),
             interviews: this.interviews.view(game, row.chapter, studentKey, names, new Map(chapter.objectives.map(o => [o.id, o.text]))),
-            team: teamProgress(chapter, this.campaignPlayers(game).map(item => ({ done: item.done, thief: thieves.includes(item.student_key) }))),
+            // The class's progress, or in teams the team's own.
+            team: team ? teamProgress(chapter, [{ done: player.done }])
+                : teamProgress(chapter, this.campaignPlayers(game).map(item => ({ done: item.done, thief: thieves.includes(item.student_key) }))),
+            ...(team ? { myTeam: { name: teamName(this.teamOf(game, studentKey)!), members: this.campaignPlayers(game).filter(item => team.has(item.student_key)).map(item => ({
+                name: names.get(item.student_key) ?? 'Student', role: campaign.roles.find(r => r.id === item.role_id)?.name ?? item.role_id, online: online.has(item.student_key), me: item.student_key === studentKey })) } } : {}),
             // "Previously", for a student coming back to a story that is already under way
             recap, ...(recap && recapHelp ? { recapHelp } : {}),
             ...(recap && row.chapter > 0 && campaign.chapters[row.chapter - 1].endingImage ? { recapImage: campaign.chapters[row.chapter - 1].endingImage } : {}),
@@ -1661,7 +1761,9 @@ export class PlazaRoom extends DurableObject<Env> {
             const own = mission.find(p => p.student_key === key);
             return { student_key: key, role_id: own?.role_id ?? '', done: [...(own?.done ?? []), ...this.gameSideQuests.done(game, key)] };
         };
-        const players = [...new Set([...names.keys(), ...mission.map(p => p.student_key)])].map(player);
+        // In teams, partners for the mission's own board quests come from the student's team.
+        const team = studentKey ? this.teamKeys(game, studentKey) : null;
+        const players = [...new Set([...names.keys(), ...mission.map(p => p.student_key)])].filter(key => !team || team.has(key)).map(player);
         const own = chapter?.objectives.filter(o => o.board) ?? [];
         const given = this.gameSideQuests.objectives(game, chapter?.id ?? null).filter(o => !own.some(item => item.id === o.id));
         const me = players.find(p => p.student_key === studentKey) ?? player(studentKey);
@@ -1752,7 +1854,9 @@ export class PlazaRoom extends DurableObject<Env> {
         const completed = this.interviews.completed(game, row.chapter, objective.id, student, assignment?.partner_key);
         const players = this.campaignPlayers(game);
         const role = players.find(p => p.student_key === student)?.role_id;
-        const seats = this.seats().filter(s => s.game === game && s.studentKey !== student
+        // In teams, the witnesses are teammates.
+        const team = this.teamKeys(game, student);
+        const seats = this.seats().filter(s => s.game === game && s.studentKey !== student && (!team || team.has(s.studentKey))
             && (!objective.activity || s.studentKey === assignment?.partner_key)
             && (!this.isRandom(game) || this.alias(game, s.studentKey).kept));
         // Put classmates with a different perspective first; do not reveal their clues.
@@ -1839,9 +1943,14 @@ export class PlazaRoom extends DurableObject<Env> {
         const player = this.player(seat.game, seat.studentKey, row.campaign_id);
         const fresh = campaign.chapters[row.chapter]?.discoveries.filter(item => item.zone === zone && !player?.clues.includes(item.id)) ?? [];
         if (!player || fresh.length === 0) return;
-        this.sql.exec('UPDATE campaign_players SET clues = ? WHERE game_id = ? AND student_key = ?',
-            JSON.stringify([...player.clues, ...fresh.map(item => item.id)]), seat.game, seat.studentKey);
-        for (const ws of this.ctx.getWebSockets(seat.studentKey)) this.sendQuest(ws, seat.game, seat.studentKey);
+        // In teams, what one member finds the whole team knows.
+        for (const member of this.teamKeys(seat.game, seat.studentKey) ?? [seat.studentKey]) {
+            const other = this.campaignPlayers(seat.game).find(p => p.student_key === member);
+            const found = fresh.filter(item => other && !other.clues.includes(item.id)).map(item => item.id);
+            if (!other || !found.length) continue;
+            this.sql.exec('UPDATE campaign_players SET clues = ? WHERE game_id = ? AND student_key = ?', JSON.stringify([...other.clues, ...found]), seat.game, member);
+            for (const ws of this.ctx.getWebSockets(member)) this.sendQuest(ws, seat.game, member);
+        }
     }
 
     private savedReport(game: string, objective: Objective, student: string) {
@@ -1978,7 +2087,8 @@ export class PlazaRoom extends DurableObject<Env> {
             this.sendQuest(ws, seat.game, seat.studentKey);
             return warn('This report has changed. Check the latest submission before undoing it.');
         }
-        const members = group?.members ?? [seat.studentKey];
+        // A team's report was the team's answer: reopening it reopens the question for the whole team.
+        const members = group?.members ?? (!objective.board ? [...(this.teamKeys(seat.game, seat.studentKey) ?? [seat.studentKey])] : [seat.studentKey]);
         const dependsOnReport = (candidate: Objective, seen = new Set<string>()): boolean => {
             if (seen.has(candidate.id)) return false;
             seen.add(candidate.id);
@@ -2005,7 +2115,7 @@ export class PlazaRoom extends DurableObject<Env> {
                 }
             }
             if (group) this.groups.setState(group.group_id, 'playing');
-            if (!ctx.gameQuests.has(objective.id) && row?.status === 'chapter_complete' && chapter && !chapterDone(chapter, this.campaignPlayers(seat.game))) {
+            if (!ctx.gameQuests.has(objective.id) && row?.status === 'chapter_complete' && chapter && !chapterDone(chapter, this.campaignUnits(seat.game))) {
                 this.sql.exec("UPDATE campaigns SET status = 'active' WHERE game_id = ?", seat.game);
             }
         });
@@ -2068,9 +2178,10 @@ export class PlazaRoom extends DurableObject<Env> {
             right = this.chapterThieves(seat.game, campaign, row.chapter).includes(seat.studentKey) ? false : answerMatches({ ...objective, accept: acceptedNames(culprits.filter(Boolean), [...names.values()]) }, typed);
             rejection = 'That name was not accepted. Check your clues and enter the name shown above the student\'s avatar.';
         } else if (objective.answerRole) {
-            // The name of a classmate who has that role, as the plaza shows it; never one's own.
+            // The name of a classmate who has that role, as the plaza shows it; never one's own. In teams, a teammate.
             const names = this.rosterNames(seat.game);
-            const holders = this.campaignPlayers(seat.game).filter(other => other.role_id === objective.answerRole && other.student_key !== seat.studentKey)
+            const mates = this.teamKeys(seat.game, seat.studentKey);
+            const holders = this.campaignPlayers(seat.game).filter(other => other.role_id === objective.answerRole && other.student_key !== seat.studentKey && (!mates || mates.has(other.student_key)))
                 .map(other => names.get(other.student_key) ?? '');
             const fallback = this.meetingFallback(seat.game, seat.studentKey, objective.answerRole, campaign);
             right = answerMatches({ ...objective, accept: [...acceptedNames(holders.filter(Boolean), [...names.values()]), ...(fallback ? [fallback] : [])] }, typed);
@@ -2099,11 +2210,19 @@ export class PlazaRoom extends DurableObject<Env> {
             }
             this.questBoard.finishGroup(group.group_id);
         }
+        // In teams, one answer counts for the whole team, with XP for each member.
+        const team = !objective.board ? this.teamKeys(seat.game, seat.studentKey) : null;
+        for (const member of team ?? []) {
+            const other = this.campaignPlayers(seat.game).find(p => p.student_key === member);
+            if (!other || member === seat.studentKey || other.done.includes(objective.id)) continue;
+            this.sql.exec('UPDATE campaign_players SET done = ? WHERE game_id = ? AND student_key = ?', JSON.stringify([...other.done, objective.id]), seat.game, member);
+            this.award(member, `answer:${seat.game}:${objective.id}`, XP.answer, 'Your team answered a question', seat.game);
+        }
         const chapter = campaign.chapters[row.chapter];
-        if (row.status === 'active' && chapterDone(chapter, this.campaignPlayers(seat.game))) {
+        if (row.status === 'active' && chapterDone(chapter, this.campaignUnits(seat.game))) {
             this.sql.exec("UPDATE campaigns SET status = 'chapter_complete' WHERE game_id = ?", seat.game);
             this.sendQuestToAll(seat.game);
-        } else if (chapter.objectives.some(o => o.board)) this.sendQuestToAll(seat.game);
+        } else if (team || chapter.objectives.some(o => o.board)) this.sendQuestToAll(seat.game);
         else for (const socket of this.ctx.getWebSockets(seat.studentKey)) this.sendQuest(socket, seat.game, seat.studentKey);
     }
 
@@ -2156,7 +2275,11 @@ export class PlazaRoom extends DurableObject<Env> {
             const published = this.missions.latest(action.campaign ?? '');
             if (!published) return 'Publish that campaign in Mission Studio first.';
             const { campaign, revision } = published;
-            this.sql.exec("INSERT INTO campaigns (game_id, campaign_id, chapter, status, started, revision_id, live_epoch) VALUES (?, ?, 0, 'active', ?, ?, ?)", game, campaign.id, Date.now(), revision, crypto.randomUUID());
+            // A secret thief needs the whole class to hide among: such a mission is not played in teams.
+            const teams = action.teams === true;
+            if (teams && campaign.chapters.some(chapter => chapter.thieves)) return 'This mission has a secret thief, so it is played by the whole class.';
+            this.sql.exec("INSERT INTO campaigns (game_id, campaign_id, chapter, status, started, revision_id, live_epoch, teams) VALUES (?, ?, 0, 'active', ?, ?, ?, ?)", game, campaign.id, Date.now(), revision, crypto.randomUUID(), teams ? 1 : 0);
+            if (teams) this.formTeams(game, [...new Set(this.seats().filter(seat => seat.game === game).map(seat => seat.studentKey))]);
             for (const seat of this.seats()) if (seat.game === game) this.player(game, seat.studentKey, campaign.id);
             this.pickThieves(game, 0, campaign.chapters[0]);
         } else if (!row) {
@@ -2168,6 +2291,15 @@ export class PlazaRoom extends DurableObject<Env> {
                 this.sql.exec("UPDATE campaigns SET chapter = chapter + 1, status = 'active', revealed = 0 WHERE game_id = ?", game);
                 this.pickThieves(game, row.chapter + 1, campaign.chapters[row.chapter + 1]);
             } else this.sql.exec("UPDATE campaigns SET status = 'campaign_complete' WHERE game_id = ?", game);
+        } else if (action.op === 'team') {
+            // The teacher moves a student to another team, or to a new one of their own.
+            if (!row.teams) return 'This campaign is played by the whole class.';
+            if (typeof action.studentKey !== 'string' || this.teamOf(game, action.studentKey) === null) return 'Choose a student in a team.';
+            const teams = new Set(this.sql.exec<{ team: number }>('SELECT DISTINCT team FROM campaign_teams WHERE game_id = ?', game).toArray().map(item => item.team));
+            const team = action.team === 'new' ? Math.max(-1, ...teams) + 1 : typeof action.team === 'number' && teams.has(action.team) ? action.team : null;
+            if (team === null) return 'Choose a team.';
+            this.sql.exec('UPDATE campaign_teams SET team = ? WHERE game_id = ? AND student_key = ?', team, game, action.studentKey);
+            this.catchUpWithTeam(game, action.studentKey);
         } else if (action.op === 'reveal') {
             // Prepared news goes to everyone, in the order the story gives it, when the class needs a nudge.
             const chapter = this.gameCampaign(game)?.chapters[row.chapter];
@@ -2183,6 +2315,7 @@ export class PlazaRoom extends DurableObject<Env> {
             this.sql.exec('DELETE FROM report_checks WHERE game_id = ? AND objective NOT IN (SELECT quest_id FROM game_side_quests WHERE game_id = ?)', game, game);
             this.interviews.clear(game);
             this.sql.exec('DELETE FROM campaign_thieves WHERE game_id = ?', game);
+            this.sql.exec('DELETE FROM campaign_teams WHERE game_id = ?', game);
             this.sql.exec('DELETE FROM quest_assignments WHERE game_id = ? AND chapter <> ?', game, GAME_CHAPTER);
             this.groups.clear(game, true);
             this.sql.exec('DELETE FROM quest_releases WHERE game_id = ?', game);
@@ -2249,6 +2382,7 @@ export class PlazaRoom extends DurableObject<Env> {
                 thief: thieves.includes(item.student_key)
             })),
             ...(campaign.chapters[row.chapter].objectives.some(o => o.board) ? { board: this.questBoard.summary(game, campaign.chapters[row.chapter]) } : {}),
+            ...(row.teams ? { teams: this.teamsStatus(game, campaign, campaign.chapters[Math.min(row.chapter, campaign.chapters.length - 1)]) } : {}),
             interviews: this.interviews.rows(game, row.chapter).map(i => ({
                 id: i.id, objective: i.objective, task: campaign.chapters[row.chapter].objectives.find(o => o.id === i.objective)?.text ?? i.objective,
                 incoming: false, studentKey: i.investigator, witnessKey: i.witness, questionId: i.question_id, answerId: i.answer_id, name: names.get(i.witness) ?? 'Classmate',
@@ -2259,8 +2393,9 @@ export class PlazaRoom extends DurableObject<Env> {
                 LEFT JOIN quest_assignments a ON r.game_id = a.game_id AND r.student_key = a.student_key AND r.objective = a.objective
                 WHERE r.game_id = ? AND r.submitted = 1 AND r.objective NOT IN (SELECT quest_id FROM game_side_quests WHERE game_id = ?) ORDER BY r.ts DESC LIMIT 100`, game, game).toArray()
                 .map(report => {
-                    // A group's report was written for every member: the teacher sees who else was in it.
-                    const others = this.questBoard.groupOf(game, report.objective, report.student_key)?.members.filter(key => key !== report.student_key) ?? [];
+                    // A group's report was written for every member, and in teams for the team: the teacher sees who else.
+                    const others = this.questBoard.groupOf(game, report.objective, report.student_key)?.members.filter(key => key !== report.student_key)
+                        ?? [...(this.teamKeys(game, report.student_key) ?? [])].filter(key => key !== report.student_key);
                     const check = report.check_id ? this.reportChecks.get(report.check_id) : undefined;
                     return { studentKey: report.student_key, objective: report.objective, text: report.text, version: report.ts, ...(check ? { check: { status: check.status, feedback: check.feedback } } : {}),
                         starred: this.starred(report.student_key, `report:${game}:${report.objective}`),
@@ -2391,7 +2526,7 @@ export class PlazaRoom extends DurableObject<Env> {
         this.activityHistory.clear(game);
         this.incidents.forget(game);
         this.blockedWords.forget(game);
-        for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'side_quest_groups', 'side_quest_members', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'game_side_quests', 'side_quest_done', 'game_side_quest_previews', 'warmups', 'warmup_players', 'speech_plays', 'student_tab_stats']) {
+        for (const table of ['positions', 'chat', 'chat_audience', 'aliases', 'game_students', 'campaigns', 'campaign_players', 'campaign_teams', 'campaign_reports', 'campaign_thieves', 'quest_assignments', 'side_quest_groups', 'side_quest_members', 'quest_releases', 'interviews', 'mission_live_quests', 'mission_live_previews', 'game_side_quests', 'side_quest_done', 'game_side_quest_previews', 'warmups', 'warmup_players', 'speech_plays', 'student_tab_stats']) {
             this.sql.exec(`DELETE FROM ${table} WHERE game_id = ?`, game);
         }
         this.sql.exec('DELETE FROM games WHERE id = ?', game);
@@ -2913,7 +3048,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const before = this.blockedWords.before(game, lesson);
         if (!this.isOpen() || this.activeGame() !== game) return { words, before, repeats: [] };
         const said = this.sql.exec<{ student_key: string; text: string }>(`SELECT student_key, text FROM chat
-            WHERE game_id = ? AND ts >= ? AND target_key IS NULL AND x IS NULL ORDER BY ts DESC LIMIT 300`,
+            WHERE game_id = ? AND ts >= ? AND target_key IS NULL AND x IS NULL AND team IS NULL ORDER BY ts DESC LIMIT 300`,
             game, Math.max(this.lessonStart(game), Date.now() - REPEAT_WINDOW_MS)).toArray()
             .filter(row => !blockedIn(row.text, terms, accepted)).map(row => ({ studentKey: row.student_key, text: row.text }));
         const least = Math.max(3, Math.ceil(this.seats().filter(seat => seat.game === game).length * REPEAT_SHARE));
@@ -2979,11 +3114,13 @@ export class PlazaRoom extends DurableObject<Env> {
         ws.serializeAttachment(seat);
         if (typeof value !== 'string') return reply('warning', 'Enter a text message.');
 
-        // `to` is the id of the classmate being whispered to, or 'everyone' for the whole plaza; without it,
-        // the message is for whoever is nearby.
+        // `to` is the id of the classmate being whispered to, 'everyone' for the whole plaza, or 'team' for the student's
+        // case team; without it, the message is for whoever is nearby.
         const everyone = to === 'everyone';
+        const team = to === 'team' ? this.teamOf(seat.game, seat.studentKey) : null;
+        if (to === 'team' && team === null) { refused('You are not in a team.'); return reply('warning', 'You are not in a team.'); }
         let target: Seat | undefined;
-        if (to !== undefined && to !== null && !everyone) {
+        if (to !== undefined && to !== null && !everyone && to !== 'team') {
             target = this.seats().find(other => other.game === seat.game && other.id === to);
             if (!target || target.studentKey === seat.studentKey) { refused('That student is not in the Plaza right now.'); return reply('warning', 'That student is not in the Plaza right now.'); }
         }
@@ -3019,14 +3156,15 @@ export class PlazaRoom extends DurableObject<Env> {
         // A message for everyone keeps no place: where the sender stood decides nothing.
         const currentNames = this.rosterNames(seat.game); // Names may change while moderation is in flight.
         const entry = { id: crypto.randomUUID(), game_id: seat.game, student_key: seat.studentKey, sender: currentNames.get(seat.studentKey) ?? seat.name, text: value.trim().slice(0, 200),
-            target_key: target?.studentKey ?? null, x: everyone ? null : seat.x, y: everyone ? null : seat.y, marks: null as string | null, voice: normalizeVoice(seat.avatar.voice) };
+            target_key: target?.studentKey ?? null, x: everyone || team !== null ? null : seat.x, y: everyone || team !== null ? null : seat.y, marks: null as string | null, voice: normalizeVoice(seat.avatar.voice),
+            team: team === null ? null : this.teamChatKey(seat.game, team) };
         // Sent as written although a better version was offered: mark the words that differ, for everyone who reads it.
         const slips = better ? wordDiff(entry.text, better).original : [];
         if (slips.length) entry.marks = JSON.stringify(slips);
-        this.sql.exec(`INSERT INTO chat (id, student_key, sender, text, ts, status, target_key, target_name, x, y, flag, note, game_id, marks, voice)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        this.sql.exec(`INSERT INTO chat (id, student_key, sender, text, ts, status, target_key, target_name, x, y, flag, note, game_id, marks, voice, team)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             entry.id, entry.student_key, entry.sender, entry.text, now, problem ? 'blocked' : posts ? 'approved' : 'pending',
-            entry.target_key, target ? currentNames.get(target.studentKey) ?? target.name : null, entry.x, entry.y, flag, note, seat.game, entry.marks, entry.voice);
+            entry.target_key, target ? currentNames.get(target.studentKey) ?? target.name : team !== null ? teamName(team) : null, entry.x, entry.y, flag, note, seat.game, entry.marks, entry.voice, entry.team);
         if (audit) this.attemptStatus(audit, problem ? 'blocked' : posts ? 'approved' : 'pending', blockedReason || (problem ?? note ?? flag ?? undefined), entry.id);
         if (term) this.blockedWords.tried(seat.game, this.helpSession(), term.key, seat.studentKey);
         if (harm) this.flagHarm(seat, harm, String(value), audit);
@@ -3069,12 +3207,14 @@ export class PlazaRoom extends DurableObject<Env> {
     // A whisper goes to its two students, a message for everyone to the whole plaza,
     // and nearby chat to whoever stands within earshot of where the sender stood;
     // the sender always sees their own. False when a whisper had nobody to reach.
-    private deliver(entry: { id: string; student_key: string; sender: string; text: string; target_key: string | null; x: number | null; y: number | null; marks?: string | null; game_id?: string | null; voice?: string | null }): boolean {
+    private deliver(entry: { id: string; student_key: string; sender: string; text: string; target_key: string | null; x: number | null; y: number | null; marks?: string | null; game_id?: string | null; voice?: string | null; team?: string | null }): boolean {
         const game = entry.game_id ?? this.activeGame();
         const recipients = new Set([entry.student_key]);
+        const team = entry.team && game ? new Set(this.teamMembers(game, this.teamFromChatKey(entry.team))) : null;
         for (const seat of this.seats()) {
             if (seat.game !== game) continue;
             const heard = entry.target_key !== null ? seat.studentKey === entry.target_key
+                : team ? team.has(seat.studentKey)
                 : entry.x === null || entry.y === null || Math.hypot(seat.x - entry.x, seat.y - entry.y) <= HEARING_RANGE;
             if (heard) recipients.add(seat.studentKey);
         }
@@ -3082,6 +3222,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const body = { t: 'chat', id: entry.id, sender: names.get(entry.student_key) ?? entry.sender, text: entry.text, voice: normalizeVoice(entry.voice), ts: Date.now(),
             ...(entry.marks ? { marks: JSON.parse(entry.marks) } : {}),
             ...(entry.target_key !== null ? { whisper: true, to: names.get(entry.target_key) ?? 'a classmate' }
+                : entry.team ? { team: teamName(this.teamFromChatKey(entry.team)) }
                 : entry.x === null || entry.y === null ? { all: true } : {}) };
         const message = JSON.stringify(body);
         // The sender's copy says how many classmates it reached: none means nobody was near enough to hear.
@@ -3116,12 +3257,14 @@ export class PlazaRoom extends DurableObject<Env> {
         if (this.isRandom(seat.game) && !this.alias(seat.game, seat.studentKey).kept) return;
         seat.lastTyping = now;
         ws.serializeAttachment(seat);
-        const scope = to === 'everyone' ? 'all' : typeof to === 'string' ? 'private' : 'nearby';
+        const scope = to === 'everyone' ? 'all' : to === 'team' ? 'team' : typeof to === 'string' ? 'private' : 'nearby';
+        const team = scope === 'team' ? this.teamKeys(seat.game, seat.studentKey) : null;
+        if (scope === 'team' && !team) return;
         const message = JSON.stringify({ t: 'typing', id: seat.id, scope });
         for (const socket of this.ctx.getWebSockets()) {
             const other = socket.deserializeAttachment() as Seat | null;
             if (!other || other.left || other.game !== seat.game || other.studentKey === seat.studentKey) continue;
-            const reached = scope === 'private' ? other.id === to : scope === 'all' || Math.hypot(other.x - seat.x, other.y - seat.y) <= HEARING_RANGE;
+            const reached = scope === 'private' ? other.id === to : scope === 'team' ? team!.has(other.studentKey) : scope === 'all' || Math.hypot(other.x - seat.x, other.y - seat.y) <= HEARING_RANGE;
             if (reached) try { socket.send(message); } catch { /* closing */ }
         }
     }
@@ -3133,15 +3276,18 @@ export class PlazaRoom extends DurableObject<Env> {
         const me = seat.studentKey;
         const from = this.sql.exec<{ last_opened: number }>('SELECT last_opened FROM games WHERE id = ?', seat.game).toArray()[0]?.last_opened ?? 0;
         const names = this.rosterNames(seat.game);
+        // The student's team's conversation, in a campaign played in teams.
+        const team = this.teamOf(seat.game, me);
+        const teamKey = team === null ? '' : this.teamChatKey(seat.game, team);
         const rows = this.sql.exec<{ id: string; student_key: string; sender: string; text: string; ts: number; target_key: string | null; x: number | null;
-            marks: string | null; voice: string | null; heard: number; received: number }>(
-            `SELECT c.id, c.student_key, c.sender, c.text, c.ts, c.target_key, c.x, c.marks, c.voice,
+            marks: string | null; voice: string | null; heard: number; received: number; team: string | null }>(
+            `SELECT c.id, c.student_key, c.sender, c.text, c.ts, c.target_key, c.x, c.marks, c.voice, c.team,
                 (SELECT COUNT(*) FROM chat_audience a WHERE a.chat_id = c.id AND a.student_key != c.student_key) AS heard,
                 EXISTS (SELECT 1 FROM chat_audience a WHERE a.chat_id = c.id AND a.student_key = ?) AS received
              FROM chat c WHERE c.game_id = ? AND c.status = 'approved' AND c.ts >= ?
-                AND (c.student_key = ? OR c.target_key = ? OR (c.target_key IS NULL AND c.x IS NULL)
+                AND (c.student_key = ? OR c.target_key = ? OR (c.target_key IS NULL AND c.x IS NULL AND c.team IS NULL) OR c.team = ?
                     OR EXISTS (SELECT 1 FROM chat_audience a WHERE a.chat_id = c.id AND a.student_key = ?))
-             ORDER BY c.ts DESC LIMIT ?`, me, seat.game, from, me, me, me, CHAT_HISTORY).toArray().reverse();
+             ORDER BY c.ts DESC LIMIT ?`, me, seat.game, from, me, me, teamKey, me, CHAT_HISTORY).toArray().reverse();
         // Their own private messages to the teacher, which the teacher's replies (sent with the help state) answer.
         const toTeacher = this.sql.exec<{ id: string; text: string; ts: number }>(`SELECT id, TRIM(COALESCE(final_text, text)) AS text, ts FROM assistance_attempts
             WHERE game_id = ? AND student_key = ? AND source = 'chat' AND target = 'Teacher' AND status = 'teacher-inbox'
@@ -3153,7 +3299,8 @@ export class PlazaRoom extends DurableObject<Env> {
                 ws.send(JSON.stringify({ t: 'chat', id: row.id, sender: names.get(row.student_key) ?? row.sender, text: row.text, voice: normalizeVoice(row.voice), ts: row.ts,
                     ...(row.target_key === me && !row.received ? {} : { history: true }),
                     ...(row.marks ? { marks: JSON.parse(row.marks) } : {}),
-                    ...(row.target_key !== null ? { whisper: true, to: names.get(row.target_key) ?? 'a classmate' } : row.x === null ? { all: true } : {}),
+                    ...(row.target_key !== null ? { whisper: true, to: names.get(row.target_key) ?? 'a classmate' }
+                        : row.team ? { team: teamName(this.teamFromChatKey(row.team)) } : row.x === null ? { all: true } : {}),
                     ...(row.student_key === me ? { heard: row.heard } : {}) }));
             }
             for (const row of toTeacher) {

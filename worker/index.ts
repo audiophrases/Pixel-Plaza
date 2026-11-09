@@ -115,8 +115,9 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     if (path === '/api/teacher/warmup' && (body?.op === 'start' || body?.op === 'end')) {
         return { kind: 'warmup', op: body.op, ...(['facts', 'identity', 'pairs'].includes(body.type) ? { type: body.type } : {}) };
     }
-    if (path === '/api/teacher/campaign' && ['start', 'next', 'reveal', 'reset'].includes(body?.op)) {
-        return { kind: 'campaign', op: body.op, ...(typeof body.campaign === 'string' ? { campaign: body.campaign } : {}), confirm: body.confirm === true };
+    if (path === '/api/teacher/campaign' && ['start', 'next', 'reveal', 'reset', 'team'].includes(body?.op)) {
+        return { kind: 'campaign', op: body.op, ...(typeof body.campaign === 'string' ? { campaign: body.campaign } : {}), confirm: body.confirm === true, teams: body.teams === true,
+            ...(typeof body.studentKey === 'string' ? { studentKey: body.studentKey } : {}), ...(body.team === 'new' || Number.isInteger(body.team) ? { team: body.team } : {}) };
     }
     if (path === '/api/teacher/quest-release' && typeof body?.objective === 'string') return { kind: 'questRelease', objective: body.objective };
     if (path === '/api/teacher/quest-place' && typeof body?.objective === 'string' && typeof body?.studentKey === 'string') return { kind: 'questPlace', objective: body.objective, studentKey: body.studentKey };

@@ -68,7 +68,7 @@ To change a student's appearance or displayed name, open their face or name, the
 
 ## How students chat
 
-The chat box lists conversations down its left side, as faces: **Nearby** (everyone within 350 map pixels; the chat starts here), **Everyone** (the whole plaza), a private chat with each classmate, the newest on top, and the **Teacher** (private, any language). The top of the open conversation shows who reads it: in Nearby, the faces of the classmates close enough, or *Nobody near you*.
+The chat box lists conversations down its left side, as faces: **Nearby** (everyone within 350 map pixels; the chat starts here), **Everyone** (the whole plaza), a private chat with each classmate, the newest on top, and the **Teacher** (private, any language). In a campaign played in teams, **🤝 Team** comes first: only the student's case team reads it (and the teacher, in the Chat log), and the chat opens on it when the campaign starts. The top of the open conversation shows who reads it: in Nearby, the faces of the classmates close enough, or *Nobody near you*.
 
 - Messages are bubbles, the student's own on the right with what became of it: 🕓 waiting for the teacher, ✓ reached nobody (nobody was near enough), ✓✓ delivered (in a group chat, with how many got it), ✕ not posted.
 - A private message (or the teacher's) chimes, and opens its conversation by itself when the student is not writing anything and the chat they have open has been quiet for 20 seconds. Otherwise its card waits above the chat: one card for each classmate waiting for a reply, the longest waiting first, with their newest line and how long they have waited. Tapping a card opens that conversation ready to type; the card goes once the student replies, or with **×** (later) until that classmate writes again. Up to three cards show, then *+N more waiting*; on a phone each is one line. Each face counts its new messages.
@@ -76,7 +76,7 @@ The chat box lists conversations down its left side, as faces: **Nearby** (every
 - Three dots show who is writing a message that will reach you, in the chat and over their head on the map. What someone says shows over their head for a few seconds (🔒 a whisper, 📢 for everyone), and only to those who received it.
 - Clicking a classmate on the map, or a name in a group chat, opens a private chat with them; **＋** lists everyone, nearest first.
 - A reloaded page or a dropped connection gets this lesson's chat back.
-- Messages for everyone are read aloud only while the Everyone conversation is open; nearby and private ones always are.
+- Messages for everyone are read aloud only while the Everyone conversation is open; nearby, team and private ones always are.
 
 A dropped connection (a closed lid, Wi-Fi roaming) reconnects by itself. Opening the plaza in a second tab moves the student's avatar there and tells the first tab why.
 
@@ -100,6 +100,17 @@ The class can play on the teacher's laptop instead, over the school network. Stu
 3. **Games:** pick an existing game from the list and press Open, or make a **New game** (name it, choose Random names and how far students see). A game keeps its own PIN, chat, avatars' positions and story, and you can close and reopen it in any later lesson. One game is open at a time.
 4. Write the game's PIN on the board. Students open the online site, sign in with Google, are sent to the laptop, type the PIN, and (with random names) choose a name to keep.
 5. When most of the class is in: pick a warm-up (**Find someone who…**, **Who am I?** or **Find your pair**) and start it for the first few minutes, then **Start** the campaign (first time) or just let it resume; press **Start the next chapter** when the class is ready for the next one, so the thief is chosen from students who are there. Use **Reveal the next news** if the class is stuck, and **Vision** to widen or narrow how far students see.
+
+### Case teams
+
+A mission without a secret thief can be played in **case teams** of three or four, so students solve the story with a few classmates instead of searching the whole class for the right role. **Play in teams of 3–4** in the **Campaign** tab is on by default; missions with a secret thief (the Castanyada ones) say *Start (whole class)*, because the thief needs the whole class to hide among.
+
+- **Forming the teams.** The game shuffles the students present into teams, a quarter of the class rounded up (a class of 6 becomes two teams of 3), named by colour: Blue team, Red team… A student who arrives later joins the team with the fewest players in the plaza that has room, or starts a new one, and picks up what the team has already answered and found.
+- **One clue each.** Each member gets a different role while the mission has enough, so the team holds the whole puzzle. A role the team lacks comes to it as a town notice.
+- **One answer for the team.** A right answer or report completes the question for every member, with XP for each and each member's own reward clue. A map clue one member finds goes to the whole team. Witness exchanges and "type the name of the classmate with this role" use teammates only.
+- **The Journal** shows *Your team*: its members, their roles, who is away, and three steps: read your clue, tell your team in the 🤝 Team chat, answer together. The progress bar is the team's.
+- **Pace.** A chapter is ready when its share of *teams* has finished. A finished team has nothing left to do, so its members are asked to choose a side quest until you start the next chapter for everyone.
+- **In Teacher controls**, the **Campaign** tab lists each team with its members, their roles and the main questions it has answered. **Move to…** puts a student in another team or a new one; they keep their role. The Chat log shows team messages as *→ Blue team*, and a student's drawer has a 🤝 tab for their team. **Erase campaign** erases the teams too.
 6. **Close class** saves everything and sends students out. Students who were absent join the game with its PIN the next time you open it.
 
 `PLAZA_LAN_URL` overrides the detected address, for example when the laptop has more than one network. `PORT` changes the port. Progress on the laptop is kept in `.wrangler/classroom`, separate from the online plaza: avatars chosen online are not carried over, and students choose them again the first time.

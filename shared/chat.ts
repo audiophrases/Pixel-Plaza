@@ -14,15 +14,21 @@ export const TYPING_SHOWN_MS = 4500;
 export const NEAR = 'near';
 export const ALL = 'all';
 export const TEACHER = 'teacher';
+export const TEAM = 'team'; // the student's case team, in a campaign played in teams
+// Case teams are named by colour, in this order; a class with more teams than colours numbers the later ones.
+const TEAM_COLOURS = ['Blue', 'Red', 'Green', 'Yellow', 'Purple', 'Orange', 'Pink', 'Teal', 'Brown', 'Grey'];
+export const teamName = (team: number) => `${TEAM_COLOURS[team % TEAM_COLOURS.length]}${team >= TEAM_COLOURS.length ? ` ${Math.floor(team / TEAM_COLOURS.length) + 1}` : ''} team`;
+export const isTeamName = (name: string) => new RegExp(`^(${TEAM_COLOURS.join('|')})( [0-9]+)? team$`).test(name);
 export const privateChat = (name: string): string => `p:${name}`;
 export const partnerOf = (key: string): string | null => (key.startsWith('p:') ? key.slice(2) : null);
 
 // What a message's conversation is decided from. `conv` pins a notice to the conversation it answers.
-export type ChatLine = { sender: string; to?: string; whisper?: boolean; all?: boolean; teacher?: boolean; conv?: string };
+export type ChatLine = { sender: string; to?: string; whisper?: boolean; all?: boolean; teacher?: boolean; conv?: string; team?: string };
 
 export function conversationOf(line: ChatLine, me: string): string {
     if (line.conv) return line.conv;
     if (line.teacher || (line.whisper && line.to === 'Teacher')) return TEACHER;
+    if (line.team) return TEAM;
     if (line.whisper) return privateChat(line.sender === me ? line.to ?? '' : line.sender);
     // Arrivals and departures concern the whole plaza.
     return line.all || line.sender === 'System' ? ALL : NEAR;

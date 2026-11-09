@@ -12,7 +12,7 @@ import { DEFAULT_STYLE, REWARDS, emotesFor, levelOf, type Style } from '../../sh
 import { correctedSentence, readCorrection, wordDiff } from '../../shared/diff';
 import Correction from '../components/Correction';
 import { firstName } from '../../shared/names';
-import { ALL, NEAR, TEACHER, TYPING_EVERY_MS, TYPING_SHOWN_MS, conversationOf, inEarshot, opensItself, partnerOf, privateChat, renamedTogether } from '../../shared/chat';
+import { ALL, NEAR, TEACHER, TEAM, TYPING_EVERY_MS, TYPING_SHOWN_MS, conversationOf, inEarshot, opensItself, partnerOf, privateChat, renamedTogether } from '../../shared/chat';
 import PhaserGame from '../components/PhaserGame';
 import type { AnswerFeedback, BoardView, QuestView } from '../../shared/campaign';
 import type { StudentSupport } from '../../shared/support';
@@ -50,9 +50,10 @@ interface ChatMessage {
   waiting?: boolean; // the student's own message, still with the teacher
   declined?: boolean; // the student's own message, which the teacher did not post
   read?: boolean; // seen before the page was reloaded: never counted as new
+  team?: string; // for the student's case team
 }
 
-type Typing = { scope: 'private' | 'nearby' | 'all'; until: number };
+type Typing = { scope: 'private' | 'nearby' | 'all' | 'team'; until: number };
 
 // Text with some character ranges wrapped, so a changed or mistaken word can have its own shade.
 function Marked({ text, marks, className }: { text: string; marks?: readonly (readonly [number, number])[]; className: string }) {
@@ -71,7 +72,7 @@ function Marked({ text, marks, className }: { text: string; marks?: readonly (re
 // What became of the student's own message, in the marks messaging apps use: a clock while it waits
 // for the teacher, one tick when nobody got it, two when someone did, a cross when it was not posted.
 function Ticks({ message, conversation }: { message: ChatMessage; conversation: string }) {
-  const group = conversation === NEAR || conversation === ALL;
+  const group = conversation === NEAR || conversation === ALL || conversation === TEAM;
   if (message.declined) return <span className="chat-ticks chat-ticks-no" title="Your teacher did not post this">✕</span>;
   if (message.waiting) return <span className="chat-ticks" title="Waiting for your teacher">🕓</span>;
   if (!message.heard) {
@@ -145,7 +146,7 @@ export default function Game() {
   // Who the open conversation is with, and where its messages go.
   const partnerName = partnerOf(active);
   const partner = partnerName ? classmates.find(classmate => classmate.name === partnerName) ?? null : null;
-  const whisperTo = active === TEACHER ? 'teacher' : active === ALL ? 'everyone' : partnerName ? partner?.id ?? '' : '';
+  const whisperTo = active === TEACHER ? 'teacher' : active === ALL ? 'everyone' : active === TEAM ? 'team' : partnerName ? partner?.id ?? '' : '';
   const activeRef = useRef(NEAR);
   useEffect(() => { activeRef.current = active; }, [active]);
   // Something is being written or checked: nothing may switch the conversation under it.
@@ -260,13 +261,22 @@ export default function Game() {
     const name = item.scope === 'private' ? classmates.find(classmate => classmate.id === id)?.name : undefined;
     if (name && !privates.has(privateChat(name))) privates.set(privateChat(name), Number.MAX_SAFE_INTEGER);
   }
-  const pinned = [NEAR, ALL, TEACHER];
+  // In a campaign played in teams, the team's conversation comes first: it is where the case is solved.
+  const myTeam = quest?.myTeam ?? null;
+  const pinned = myTeam ? [TEAM, NEAR, ALL, TEACHER] : [NEAR, ALL, TEACHER];
+  // The chat opens on the team when the team campaign starts, and leaves it when the team is gone.
+  const [teamShown, setTeamShown] = useState<string | null>(null);
+  if ((myTeam?.name ?? null) !== teamShown) {
+    setTeamShown(myTeam?.name ?? null);
+    if (myTeam && !teamShown) setActive(TEAM);
+    else if (!myTeam && active === TEAM) setActive(NEAR);
+  }
   const chats = [...privates].sort((a, b) => b[1] - a[1]).map(([key]) => key);
   // Who is writing in a conversation right now.
   const writers = (key: string): string[] => Object.keys(typing).flatMap(id => {
     const name = classmates.find(classmate => classmate.id === id)?.name;
     const scope = typing[id].scope;
-    return name && (key === NEAR ? scope === 'nearby' : key === ALL ? scope === 'all' : scope === 'private' && key === privateChat(name)) ? [name] : [];
+    return name && (key === NEAR ? scope === 'nearby' : key === ALL ? scope === 'all' : key === TEAM ? scope === 'team' : scope === 'private' && key === privateChat(name)) ? [name] : [];
   });
 
   // "Is writing" runs out a little after the last report.
@@ -551,7 +561,7 @@ export default function Game() {
       if (event.t === 'chat') {
         if (!event.history && typeof event.ts === 'number') clock.current = event.ts - Date.now();
         const mine = event.sender === me();
-        const line = say({ id: event.id, sender: event.sender, text: event.text, timestamp: event.ts, at: event.ts, whisper: event.whisper, to: event.to, all: event.all,
+        const line = say({ id: event.id, sender: event.sender, text: event.text, timestamp: event.ts, at: event.ts, whisper: event.whisper, to: event.to, all: event.all, team: event.team,
           heard: event.heard, marks: event.marks, voice: event.voice, read: event.history });
         // Read aloud as it arrives, except the whole plaza's chatter while another conversation is open.
         if (event.id) audio.receive(event.id, !!event.history || (!!event.all && !mine && activeRef.current !== ALL));
@@ -750,11 +760,11 @@ export default function Game() {
 
   const openTeacherChat = () => talk(TEACHER);
 
-  const group = active === NEAR || active === ALL;
+  const group = active === NEAR || active === ALL || active === TEAM;
   const shown = [...(byConv.get(active) ?? []), ...(byConv.get('*') ?? [])].sort((a, b) => a.at - b.at);
   const writing = writers(active);
-  const nameOf = (key: string) => key === NEAR ? 'Nearby' : key === ALL ? 'Everyone' : key === TEACHER ? 'Teacher' : partnerOf(key) ?? '';
-  const iconOf = (key: string) => key === NEAR ? '👥' : key === ALL ? '📢' : key === TEACHER ? '🧑‍🏫' : undefined;
+  const nameOf = (key: string) => key === NEAR ? 'Nearby' : key === ALL ? 'Everyone' : key === TEACHER ? 'Teacher' : key === TEAM ? myTeam?.name ?? 'Team' : partnerOf(key) ?? '';
+  const iconOf = (key: string) => key === NEAR ? '👥' : key === ALL ? '📢' : key === TEACHER ? '🧑‍🏫' : key === TEAM ? '🤝' : undefined;
   const playerOf = (key: string) => classmates.find(classmate => classmate.name === partnerOf(key)) ?? null;
   const conversationButton = (key: string) => {
     const count = key === active ? 0 : newIn(key).length;
@@ -762,7 +772,7 @@ export default function Game() {
     return <button key={key} type="button" role="tab" aria-selected={key === active}
       className={`chat-conv${pinned.includes(key) ? ` chat-conv-${key}` : ''}${key === active ? ' active' : ''}${count ? ' chat-conv-new' : ''}${away ? ' chat-conv-away' : ''}`}
       aria-label={count ? `${nameOf(key)}, ${count} new` : nameOf(key)}
-      title={key === NEAR ? 'Everyone close to you' : key === ALL ? 'Everyone in the Plaza' : key === TEACHER ? 'Only your teacher' : `Only ${nameOf(key)} (and your teacher)`}
+      title={key === NEAR ? 'Everyone close to you' : key === ALL ? 'Everyone in the Plaza' : key === TEACHER ? 'Only your teacher' : key === TEAM ? 'Only your team (and your teacher)' : `Only ${nameOf(key)} (and your teacher)`}
       onClick={() => choose(key)}>
       <Face player={playerOf(key)} name={nameOf(key)} icon={iconOf(key)} />
       {count > 0 && <span className="chat-conv-count">{count > 9 ? '9+' : count}</span>}
@@ -935,6 +945,11 @@ export default function Game() {
                 </> : active === ALL ? <>
                   <strong>📢 Everyone</strong>
                   <span className="chat-head-note">{classmates.length ? `${classmates.length} ${classmates.length === 1 ? 'classmate' : 'classmates'}` : 'Nobody else is here yet'}</span>
+                </> : active === TEAM && myTeam ? <>
+                  <strong>🤝 {myTeam.name}</strong>
+                  <span className="chat-head-people" title={myTeam.members.map(member => member.name).join(', ')}>
+                    {myTeam.members.filter(member => !member.me).map(member => <Face key={member.name} player={classmates.find(classmate => classmate.name === member.name)} name={member.name} />)}
+                  </span>
                 </> : active === TEACHER ? <>
                   <strong>🧑‍🏫 Teacher</strong><span className="chat-head-note">private · any language</span>
                 </> : <>
@@ -1028,7 +1043,7 @@ export default function Game() {
                   type="text"
                   ref={chatField}
                   className={`chat-input${spelling.length ? ' chat-input-blocked' : ''}`}
-                  placeholder={active === TEACHER ? 'Ask your teacher in any language…' : active === ALL ? 'Message everyone…'
+                  placeholder={active === TEACHER ? 'Ask your teacher in any language…' : active === ALL ? 'Message everyone…' : active === TEAM ? 'Message your team…'
                     : active === NEAR ? (earshot.length ? 'Talk to people near you…' : 'Nobody near you…')
                     : partner ? `Message ${partner.name}…` : `${partnerName} is not in the Plaza now`}
                   maxLength={200}

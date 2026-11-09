@@ -100,6 +100,13 @@ kbd { border: 1px solid #aaa; border-radius: 4px; padding: 0 .35rem; background:
 .teacher-chapter-line li span { margin-right: .25em; color: #8a93a3; }
 .teacher-chapter-line li:not(:last-child)::after { content: ' →'; color: #b0b7c3; }
 
+/* A campaign played in teams: each team in a card, its members with a Move to… menu. */
+.teacher-panel .teacher-teams { gap: .5rem; margin: .5rem 0 .75rem; }
+.teacher-teams > li { display: grid; gap: .35rem; padding: .6rem .8rem; border: 1px solid var(--line); border-radius: 10px; }
+.teacher-teams > li > ul { gap: .25rem; }
+.teacher-teams > li > ul > li { font-size: .9rem; }
+.teacher-teams select { font-size: .8rem; padding: .15rem .3rem; }
+
 /* A running campaign: its chapters as numbered steps, done, now and next. */
 .teacher-panel .teacher-chapter-steps { display: flex; flex-wrap: wrap; gap: .4rem; margin: .75rem 0; padding: 0; list-style: none; }
 .teacher-chapter-steps li { display: inline-flex; align-items: center; gap: .4rem; padding: .3rem .6rem .3rem .3rem; border: 1px solid var(--line); border-radius: .6rem; font-size: .9rem; color: #5f6b7a; }

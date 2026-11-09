@@ -90,7 +90,9 @@ export class MissionRepository {
                 const objectives = campaign.chapters.flatMap(chapter => chapter.objectives);
                 return [{ id: campaign.id, title: campaign.title, revision, chapters: campaign.chapters.map(chapter => chapter.title), zones: clueZones(campaign),
                     mystery: objectives.some(objective => objective.answerThief), partnerQuests: objectives.some(objective => objective.board),
-                    witnesses: objectives.some(objective => objective.conversation) }];
+                    witnesses: objectives.some(objective => objective.conversation),
+                    // A secret thief needs the whole class to hide among: such a mission is not played in teams.
+                    teams: !campaign.chapters.some(chapter => chapter.thieves) }];
             });
     }
     latest(id: string): { campaign: Campaign; revision: string } | null {

@@ -79,7 +79,9 @@ export type QuestView = {
     thieves: string[] | null; // who it was, once the chapter is over
     objectives: { id: string; text: string; done: boolean; optional: boolean; kind: 'text' | 'name' | 'report'; help?: TextHelp; conversation?: ConversationView; report?: ReportSubmission }[];
     interviews?: InterviewView[];
-    team: { done: number; total: number }; // how far the whole class is through this chapter's main questions
+    team: { done: number; total: number }; // how far the whole class is through this chapter's main questions, or in teams the student's team
+    // In a campaign played in teams: the student's team, its members with their roles (`me` is this student).
+    myTeam?: { name: string; members: { name: string; role: string; online: boolean; me: boolean }[] };
     recap: string | null; // sent when the student comes back to a story already under way
     finale: string | null;
     recapHelp?: TextHelp;

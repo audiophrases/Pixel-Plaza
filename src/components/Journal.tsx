@@ -147,8 +147,16 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
         <button type="button" className="journal-dismiss" onClick={() => setRecapSeen(true)}>OK</button>
       </section>}
 
+      {quest.myTeam && <section className="journal-block journal-crew">
+        <h3>Your team: {quest.myTeam.name}</h3>
+        <ul className="journal-crew-list">{quest.myTeam.members.map(member => <li key={member.name} className={member.online ? undefined : 'journal-crew-away'}>
+          <strong>{member.me ? `${member.name} (you)` : member.name}</strong> · {member.role}{!member.online && ' · not in the plaza'}
+        </li>)}</ul>
+        <ol className="journal-crew-steps"><li>Read your clue below.</li><li>Tell your team in the <b>🤝 team chat</b>.</li><li>Answer together: one answer counts for the whole team.</li></ol>
+      </section>}
+
       {quest.team.total > 0 && <section className="journal-block journal-team">
-        <h3>Class progress</h3>
+        <h3>{quest.myTeam ? 'Your team’s progress' : 'Class progress'}</h3>
         <div className="journal-meter" role="progressbar" aria-valuemin={0} aria-valuemax={quest.team.total} aria-valuenow={quest.team.done}>
           <span style={{ width: `${Math.round(100 * quest.team.done / quest.team.total)}%` }} />
         </div>

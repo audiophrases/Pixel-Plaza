@@ -1,5 +1,6 @@
 import type { AttemptSource } from './support.ts';
 import { tidy } from './tidy.ts';
+import { isTeamName } from './chat.ts';
 
 // A prompt the teacher copies into an AI chat (ChatGPT, Claude, Gemini...) to get a report on a lesson: who is
 // doing well, who needs help and who is not doing much, with quoted evidence. The server gathers the log;
@@ -53,7 +54,7 @@ export function buildReportPrompt(data: ClassReportData, options: ReportOptions)
 
     const activity = (line: ReportLine) => {
         if (line.source === 'chat') return !line.target ? 'chat to classmates nearby' : line.target === 'Teacher' ? 'private message to the teacher'
-            : line.target === 'Everyone' ? 'chat to the whole class' : `whisper to ${hide(line.target)}`;
+            : line.target === 'Everyone' ? 'chat to the whole class' : isTeamName(line.target) ? `chat to their case team (${line.target})` : `whisper to ${hide(line.target)}`;
         if (line.source === 'answer') return `journal answer${line.question ? ` to ${quote(line.question)}` : ''}`;
         if (line.source === 'interview') return `witness exchange${line.target ? ` with ${hide(line.target)}` : ''}`;
         if (line.source === 'warmup') return 'warm-up answer';
