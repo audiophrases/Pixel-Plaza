@@ -1,0 +1,128 @@
+{
+  "format": "pixel-plaza-side-quest-content-pack",
+  "version": 1,
+  "title": "Talk Together — 200 Side Quests",
+  "total": 200,
+  "formats": {
+    "pair": 100,
+    "group": 100
+  },
+  "levels": {
+    "A1": 60,
+    "A2": 104,
+    "B1": 36
+  },
+  "minutes": [
+    3,
+    6
+  ],
+  "imports": {
+    "all": "side-quests-talk-200.json",
+    "pairs": "pairs-100.json",
+    "groups": "groups-100.json"
+  },
+  "guide": "README.md",
+  "preview": "teacher-preview.html",
+  "categories": [
+    {
+      "format": "pair",
+      "category": "Two people, one choice",
+      "count": 10
+    },
+    {
+      "format": "pair",
+      "category": "Listen and check",
+      "count": 10
+    },
+    {
+      "format": "pair",
+      "category": "Describe, ask, guess",
+      "count": 10
+    },
+    {
+      "format": "pair",
+      "category": "Everyday mini-dialogues",
+      "count": 10
+    },
+    {
+      "format": "pair",
+      "category": "Fix a misunderstanding",
+      "count": 10
+    },
+    {
+      "format": "pair",
+      "category": "Two-person story turns",
+      "count": 10
+    },
+    {
+      "format": "pair",
+      "category": "Make a small plan",
+      "count": 10
+    },
+    {
+      "format": "pair",
+      "category": "Invent it together",
+      "count": 10
+    },
+    {
+      "format": "pair",
+      "category": "Compare and find common ground",
+      "count": 10
+    },
+    {
+      "format": "pair",
+      "category": "Help and encourage",
+      "count": 10
+    },
+    {
+      "format": "group",
+      "category": "Decide with a limit",
+      "count": 10
+    },
+    {
+      "format": "group",
+      "category": "Story circles",
+      "count": 10
+    },
+    {
+      "format": "group",
+      "category": "Group invention studio",
+      "count": 10
+    },
+    {
+      "format": "group",
+      "category": "Small problems, shared fixes",
+      "count": 10
+    },
+    {
+      "format": "group",
+      "category": "Three voices, one scene",
+      "count": 10
+    },
+    {
+      "format": "group",
+      "category": "Three views to compare",
+      "count": 10
+    },
+    {
+      "format": "group",
+      "category": "Teach something clearly",
+      "count": 10
+    },
+    {
+      "format": "group",
+      "category": "Talk through word games",
+      "count": 10
+    },
+    {
+      "format": "group",
+      "category": "Ask for a better reason",
+      "count": 10
+    },
+    {
+      "format": "group",
+      "category": "Make room for every voice",
+      "count": 10
+    }
+  ]
+}
