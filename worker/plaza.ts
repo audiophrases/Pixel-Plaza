@@ -14,7 +14,7 @@ import { BlockedWords } from './blockedWords.ts';
 import { blockedIn, repeated, taskWordSet, type BlockedStatus, type Term } from '../shared/blockedWords.ts';
 import { isGlitch } from '../shared/tidy.ts';
 import { PARTICIPATION, Participation, participationDecision } from './participation.ts';
-import { AUTO_NEWS_MINUTES, AUTO_NEXT_MINUTES, REPORT_MAX_LENGTH, absentRoleClues, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, nothingElseToDo, pickRole, prerequisiteIds, rewardClues, teamProgress, type BoardView, type QuestView } from '../shared/campaign.ts';
+import { AUTO_NEWS_MINUTES, AUTO_NEXT_MINUTES, REPORT_MAX_LENGTH, absentRoleClues, stuckDue, acceptedNames, answerMatches, chapterDone, isUnlocked, mainFinished, nothingElseToDo, pickRole, prerequisiteIds, rewardClues, teamProgress, type BoardView, type QuestView } from '../shared/campaign.ts';
 import { MissionRepository, readCopy, type MissionResult } from './missions.ts';
 import { SideQuestStore, readQuestCopy, type SideQuestResult } from './sideQuestStore.ts';
 import { QuestBoard, type BoardContext } from './questBoard.ts';
@@ -88,7 +88,7 @@ const CLOSE_CLASS_CLOSED = 4002; // the teacher closed the game
 
 // Per-socket state. It lives in the socket's attachment, so it survives the
 // room hibernating between messages.
-type Seat = { id: string; game: string; themeId?: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; style?: Style; x: number; y: number; lastChat: number; lastCheck?: number; lastTyping?: number; lastReroll?: number; movedAt?: number; left?: boolean; frozenUntil?: number; downUntil?: number; inTab?: boolean; tabSwitches?: number; tabAwayAt?: number | null };
+type Seat = { id: string; game: string; since?: number; themeId?: string; zone?: string | null; studentKey: string; name: string; avatar: Avatar; style?: Style; x: number; y: number; lastChat: number; lastCheck?: number; lastTyping?: number; lastReroll?: number; movedAt?: number; left?: boolean; frozenUntil?: number; downUntil?: number; inTab?: boolean; tabSwitches?: number; tabAwayAt?: number | null };
 type AnswerSeat = Pick<Seat, 'game' | 'studentKey' | 'name'>;
 
 export type TeacherAction =
@@ -309,6 +309,8 @@ export class PlazaRoom extends DurableObject<Env> {
             ['progress_at', 'INTEGER'], ['ready_at', 'INTEGER'], ['held', 'INTEGER NOT NULL DEFAULT 0']]) {
             if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaigns')").toArray().some(row => row.name === column)) this.sql.exec(`ALTER TABLE campaigns ADD COLUMN ${column} ${type}`);
         }
+        // When each student last answered a main question right: whether their team, or they, are stuck.
+        if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('campaign_players')").toArray().some(row => row.name === 'right_at')) this.sql.exec('ALTER TABLE campaign_players ADD COLUMN right_at INTEGER');
         this.sql.exec(`CREATE TABLE IF NOT EXISTS campaign_history (id TEXT PRIMARY KEY, game_id TEXT NOT NULL, campaign_id TEXT NOT NULL, title TEXT NOT NULL,
             started INTEGER NOT NULL, ended INTEGER, chapter INTEGER NOT NULL, chapters INTEGER NOT NULL, early INTEGER NOT NULL DEFAULT 0, teams INTEGER NOT NULL DEFAULT 0,
             students INTEGER NOT NULL DEFAULT 0, reports INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL)`);
@@ -1398,15 +1400,16 @@ export class PlazaRoom extends DurableObject<Env> {
             style: readStyle(saved.style, levelOf(saved.xp).level),
             x: spot.x, y: spot.y,
             lastChat: 0, movedAt: Date.now(),
-            inTab: true, tabSwitches: tabStat?.tab_switches ?? 0, tabAwayAt: null
+            inTab: true, tabSwitches: tabStat?.tab_switches ?? 0, tabAwayAt: null, since: Date.now()
         };
         // Never chosen a voice: one of their own, not the same default as everyone else.
         if (!isEnglishVoice(seat.avatar.voice)) seat.avatar.voice = voiceFor(row.student_key);
         const others = this.seats();
-        // The first student back in an empty plaza starts the auto-advance clocks again, from now.
-        if (!others.some(other => other.game === game)) this.restartClocks(game);
+        const firstBack = !others.some(other => other.game === game);
         this.ctx.acceptWebSocket(server, [seat.studentKey]);
         server.serializeAttachment(seat);
+        // Who is here decides when news is due. The first student back in an empty plaza starts the clocks again, from now.
+        if (firstBack) this.restartClocks(game); else this.scheduleAuto();
         // Every classmate in this game, here or not, so naming one who is absent is still English.
         // The map itself comes with the welcome: the page has none of its own.
         server.send(JSON.stringify({ t: 'welcome', id: seat.id, gameId: seat.game, themeId, theme: this.themes.theme(themeId), players: [...others, seat].map(publicSeat),
@@ -2278,8 +2281,8 @@ export class PlazaRoom extends DurableObject<Env> {
             this.award(member, `answer:${seat.game}:${this.missionKey(seat.game, objective.id)}`, XP.answer, 'Your team answered a question', seat.game);
         }
         const chapter = campaign.chapters[row.chapter];
-        // A right answer to a main question is progress: the class is not stuck, so news waits.
-        if (!objective.optional && !objective.board) this.sql.exec('UPDATE campaigns SET progress_at = ? WHERE game_id = ?', Date.now(), seat.game);
+        // A right answer to a main question is progress for this student, and in teams for their team.
+        if (!objective.optional && !objective.board) this.sql.exec('UPDATE campaign_players SET right_at = ? WHERE game_id = ? AND student_key = ?', Date.now(), seat.game, seat.studentKey);
         if (row.status === 'active' && chapterDone(chapter, this.campaignUnits(seat.game))) {
             this.sql.exec("UPDATE campaigns SET status = 'chapter_complete', ready_at = ? WHERE game_id = ?", Date.now(), seat.game);
             this.scheduleAuto();
@@ -2451,10 +2454,36 @@ export class PlazaRoom extends DurableObject<Env> {
         const { news, next } = this.autoSettings(game); const minute = this.autoMinute();
         const chapter = campaign.chapters[row.chapter];
         return {
-            news: news > 0 && row.status === 'active' && chapter && row.revealed < chapter.reveals.length ? (row.progress_at ?? row.started) + news * minute : null,
+            news: news > 0 && row.status === 'active' && chapter && row.revealed < chapter.reveals.length ? this.newsDue(game, row, campaign, news * minute) : null,
             next: next > 0 && row.status === 'chapter_complete' ? (row.ready_at ?? Date.now()) + next * minute : null,
         };
     }
+    // News is due once at least half of those still working on the chapter have gone the wait without a right answer:
+    // teams in a team campaign, students otherwise; only those in the plaza. A secret thief has finished when they have
+    // answered what a thief is asked. Each one's clock starts from the latest of: the class's last news or chapter start
+    // (or the class opening), its last right answer, and when it came into the plaza.
+    private newsDue(game: string, row: CampaignRow, campaign: Campaign, wait: number): number | null {
+        const chapter = campaign.chapters[row.chapter];
+        const baseline = row.progress_at ?? row.started;
+        const arrived = new Map(this.seats().filter(seat => seat.game === game).map(seat => [seat.studentKey, seat.since ?? baseline]));
+        const rightAt = new Map(this.sql.exec<{ student_key: string; right_at: number | null }>('SELECT student_key, right_at FROM campaign_players WHERE game_id = ?', game)
+            .toArray().map(item => [item.student_key, item.right_at ?? 0]));
+        const thieves = new Set(chapter.thieves ? this.chapterThieves(game, campaign, row.chapter) : []);
+        const units = new Map<string, { right: number; arrived: number; done: Set<string>; thief: boolean }>();
+        for (const player of this.campaignPlayers(game)) {
+            const team = row.teams ? this.teamOf(game, player.student_key) : null;
+            const key = team === null ? `student:${player.student_key}` : `team:${team}`;
+            const unit = units.get(key) ?? { right: 0, arrived: Infinity, done: new Set<string>(), thief: thieves.has(player.student_key) };
+            unit.right = Math.max(unit.right, rightAt.get(player.student_key) ?? 0);
+            if (arrived.has(player.student_key)) unit.arrived = Math.min(unit.arrived, arrived.get(player.student_key)!);
+            for (const id of player.done) unit.done.add(id);
+            units.set(key, unit);
+        }
+        const asked = (unit: { thief: boolean }) => chapter.objectives.filter(objective => !objective.optional && !(unit.thief && (objective.answerThief || objective.thiefKnows)));
+        const working = [...units.values()].filter(unit => Number.isFinite(unit.arrived) && !asked(unit).every(objective => unit.done.has(objective.id)));
+        return stuckDue(working.map(unit => Math.max(baseline, unit.right, unit.arrived)), wait);
+    }
+
     // The clocks start again from now: the class has just opened, or its first student is back.
     private restartClocks(game: string): void {
         const now = Date.now();
@@ -3140,6 +3169,7 @@ export class PlazaRoom extends DurableObject<Env> {
         this.broadcast({ t: 'leave', id: seat.id }, ws);
         if (announce) this.systemChat(`${seat.name} left the Plaza.`, ws);
         this.refreshBoard(seat.game);
+        this.scheduleAuto(); // who is here decides when news is due
     }
 
     // A hint before sending. Only a positive safety clearance may reach the

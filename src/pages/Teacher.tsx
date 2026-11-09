@@ -471,7 +471,7 @@ export default function Teacher() {
             {campaign.chapter + 1 < campaign.chapters ? '▶ Next chapter' : '🏁 Finish the story'}</button>
           {campaign.chapter + 1 < campaign.chapters && <button className="btn btn-secondary btn-sm" onClick={endCampaign}>⏹ End campaign</button>}
           {campaign.nextAt && <span className="teacher-auto-chip" title="Auto-advance: the class is ready">{campaign.chapter + 1 < campaign.chapters ? `▶ Chapter ${campaign.chapter + 2}` : '🏁 The ending'} by itself in <Countdown at={campaign.nextAt} /></span>}
-          {campaign.newsAt && <span className="teacher-auto-chip" title="Auto-advance: news comes when the class goes a while without a new right answer">📰 News by itself in <Countdown at={campaign.newsAt} /></span>}
+          {campaign.newsAt && <span className="teacher-auto-chip" title="Auto-advance: news comes when half the class (or half the teams) has gone a while without a right answer">📰 News by itself in <Countdown at={campaign.newsAt} /></span>}
           {(campaign.held || campaign.nextAt || campaign.newsAt) && <button className="btn btn-secondary btn-sm" onClick={() => void action('campaign', { op: 'hold', hold: !campaign.held })}>{campaign.held ? '▶ Resume auto' : '⏸ Pause auto'}</button>}</span>}
       </section>}
       {status.game && <LiveClass gameId={status.game.id} alerts={status.support?.alerts ?? []} incidents={status.incidents ?? []}
@@ -788,7 +788,7 @@ function AutoAdvance({ auto, campaign, onChange, onHold }: { auto: { news: numbe
   return <div className="teacher-auto">
     <strong>Auto-advance</strong>
     <label>📰 Next news <select aria-label="News by itself" value={auto.news} onChange={event => onChange({ news: Number(event.target.value) })}>
-      {AUTO_NEWS_MINUTES.map(minutes => <option key={minutes} value={minutes}>{minutes ? `by itself after ${minutes} min without a new right answer` : 'only when I release it'}</option>)}
+      {AUTO_NEWS_MINUTES.map(minutes => <option key={minutes} value={minutes}>{minutes ? `by itself when half the class is stuck for ${minutes} min` : 'only when I release it'}</option>)}
     </select></label>
     <label>▶ Next chapter <select aria-label="Next chapter by itself" value={auto.next} onChange={event => onChange({ next: Number(event.target.value) })}>
       {AUTO_NEXT_MINUTES.map(minutes => <option key={minutes} value={minutes}>{minutes ? `by itself ${minutes} min after the class is ready` : 'only when I start it'}</option>)}
@@ -796,10 +796,10 @@ function AutoAdvance({ auto, campaign, onChange, onHold }: { auto: { news: numbe
     {campaign && onHold && (auto.news > 0 || auto.next > 0) && <p>
       {campaign.held ? 'Paused: nothing moves on by itself until you resume, or start the next chapter.'
         : campaign.nextAt ? <>The class is ready: {campaign.chapter + 1 < campaign.chapters ? `chapter ${campaign.chapter + 2}` : 'the ending'} starts by itself in <Countdown at={campaign.nextAt} />.</>
-        : campaign.newsAt ? <>Without a new right answer, the next news comes by itself in <Countdown at={campaign.newsAt} />.</>
+        : campaign.newsAt ? <>If half the class stays stuck, the next news comes by itself in <Countdown at={campaign.newsAt} />.</>
         : 'Nothing is waiting to move on.'}
       {' '}<button className="btn btn-secondary btn-sm" onClick={onHold}>{campaign.held ? '▶ Resume' : '⏸ Pause'}</button></p>}
-    <small>The clocks run only while the class is open with students in the plaza. The last chapter ends with the story’s ending.</small>
+    <small>Stuck means no right answer to a main question for that long, counting those still working on the chapter: half the teams, in a team campaign. The clocks run only while the class is open with students in the plaza. The last chapter ends with the story’s ending.</small>
   </div>;
 }
 

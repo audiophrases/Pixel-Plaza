@@ -18,6 +18,14 @@ export const REPORT_MAX_LENGTH = 1000;
 // this long after the class is ready. Games start with 5 and 2.
 export const AUTO_NEWS_MINUTES = [0, 3, 5, 8, 10];
 export const AUTO_NEXT_MINUTES = [0, 1, 2, 5];
+// When news comes by itself: once at least half of those still working on the chapter (teams, or students in a
+// whole-class game) have gone `wait` without progress. `clocks` are when each last made progress; null when nobody is
+// working. One fast team answering never keeps the news from the rest of the class.
+export function stuckDue(clocks: readonly number[], wait: number): number | null {
+    if (!clocks.length) return null;
+    const stuckAt = clocks.map(clock => clock + wait).sort((a, b) => a - b);
+    return stuckAt[Math.ceil(stuckAt.length / 2) - 1];
+}
 // Optional, author-written language support travels with the content. English stays the answer language.
 export type TextHelp = { ca?: string };
 

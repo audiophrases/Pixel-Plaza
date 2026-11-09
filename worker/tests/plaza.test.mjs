@@ -1714,8 +1714,10 @@ test('case teams: teams of three or four, one answer for the team, the team chat
         assert.ok(threads.includes('t:Blue team'), 'the teacher’s drawer has the team’s conversation');
 
         // One answer counts for the whole team, with XP and each member's reward clue; the other team still has it to do.
+        const newsBefore = (await teacher('status')).body.campaign.newsAt;
         b1.send({ t: 'answer', objective: 'where', text: 'the park' });
         assert.equal((await b1.next(m => m.t === 'answered' && m.objective === 'where', 'answer')).correct, true);
+        assert.equal((await teacher('status')).body.campaign.newsAt, newsBefore, 'one team answering does not hold back the news from the other, still stuck');
         for (const mate of [b2, b3]) assert.match((await mate.next(m => m.t === 'xp' && m.gained, 'team XP')).reason, /team/i);
         await pause(400);
         for (const s of of(blue)) {
@@ -1889,12 +1891,14 @@ test('campaigns end at any chapter, are kept when the next one starts, and a gam
     }
 });
 
-test('auto-advance: news when the class goes quiet, the next chapter once it is ready, paused by the teacher, and only with students here', { timeout: 120000 }, async () => {
+test('auto-advance: news when half the class is stuck, the next chapter once it is ready, paused by the teacher, and only with students here', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay(); const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-auto-'));
-    // A minute of auto-advance lasts 400 ms here.
-    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, { AUTO_MINUTE_MS: '400' });
+    // A minute of auto-advance lasts a second here.
+    const plaza = await startPlaza(`http://127.0.0.1:${pinPlay.address().port}`, persistTo, { AUTO_MINUTE_MS: '1000' });
     const sockets = [];
     const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    // Waits on what a page knows, for longer than a single message wait: the alarm runs late on a busy machine.
+    const until = async (check, what, ms = 9000) => { for (const end = Date.now() + ms; Date.now() < end; await pause(150)) if (await check()) return; throw new Error(`Timed out waiting for ${what}`); };
     try {
         const { base } = plaza;
         const { body: { token: session } } = await api(base, '/api/teacher/login', { body: { password: PASSWORD } });
@@ -1903,22 +1907,27 @@ test('auto-advance: news when the class goes quiet, the next chapter once it is 
         assert.deepEqual((await teacher('status')).body.auto, { news: 5, next: 2 }, 'a game starts with auto-advance on');
         assert.equal((await teacher('auto', { news: 4 })).status, 400, 'only the offered minutes');
         assert.deepEqual((await teacher('auto', { news: 3, next: 1 })).body.auto, { news: 3, next: 1 });
-        const alex = await enter(base, 'signed-a', null), sam = await enter(base, 'signed-b', null); sockets.push(alex, sam);
+        const alex = await enter(base, 'signed-a', null), sam = await enter(base, 'signed-b', null), chris = await enter(base, 'signed-c', null); sockets.push(alex, sam, chris);
         const news = socket => socket.state.quest?.clues.filter(c => c.from === 'news').length ?? 0;
 
         // Nobody answers: the first news comes by itself after "3 minutes".
         const started = Date.now();
         assert.equal((await teacher('campaign', { op: 'start', campaign: 'castanyada' })).status, 200);
         const due = (await teacher('status')).body.campaign.newsAt;
-        assert.ok(due >= started + 1100 && due <= Date.now() + 1300, 'news is due three minutes after the chapter starts');
-        await alex.next(m => m.t === 'quest' && m.quest.clues.some(c => c.from === 'news'), 'news by itself');
-        assert.ok(Date.now() - started >= 1100, 'not before it was due');
+        assert.ok(due >= started + 2900 && due <= Date.now() + 3100, 'news is due three minutes after the chapter starts');
+        await until(() => news(alex) > 0, 'news by itself');
+        assert.ok(Date.now() - started >= 2900, 'not before it was due');
         assert.equal((await teacher('status')).body.campaign.reveals.shown, 1);
 
-        // A right answer is progress: the next news waits three minutes from it.
+        // One student's right answer does not hold back the news while most of the class is stuck; once two of the
+        // three are working it out, the news waits for them.
+        const stuck = (await teacher('status')).body.campaign.newsAt;
         alex.send({ t: 'answer', objective: 'where', text: 'the park' });
         assert.equal((await alex.next(m => m.t === 'answered' && m.objective === 'where', 'answer')).correct, true);
-        assert.ok((await teacher('status')).body.campaign.newsAt >= Date.now() + 800, 'the clock starts again from the right answer');
+        assert.equal((await teacher('status')).body.campaign.newsAt, stuck, 'Sam and Chris are still stuck: the news is still due');
+        sam.send({ t: 'answer', objective: 'where', text: 'pond' });
+        assert.equal((await sam.next(m => m.t === 'answered' && m.objective === 'where', 'answer')).correct, true);
+        assert.ok((await teacher('status')).body.campaign.newsAt > stuck + 100, 'only Chris is stuck now: the news waits');
 
         // Paused, nothing moves on; resumed, the clock starts again.
         const held = (await teacher('campaign', { op: 'hold', hold: true })).body.campaign;
@@ -1926,7 +1935,7 @@ test('auto-advance: news when the class goes quiet, the next chapter once it is 
         await pause(1800);
         assert.equal((await teacher('status')).body.campaign.reveals.shown, 1, 'nothing while paused');
         const resumed = (await teacher('campaign', { op: 'hold', hold: false })).body.campaign;
-        assert.equal(resumed.held, undefined); assert.ok(resumed.newsAt >= Date.now() + 800);
+        assert.equal(resumed.held, undefined); assert.ok(resumed.newsAt >= Date.now() + 2500);
 
         // Ready: the next chapter starts by itself "1 minute" later, and students are told it will.
         for (const socket of [alex, sam]) for (const [objective, text] of [['where', 'park'], ['when', 'half past nine'], ['keys', 'two']]) {
@@ -1942,12 +1951,13 @@ test('auto-advance: news when the class goes quiet, the next chapter once it is 
         assert.deepEqual([second.chapter, second.status, second.reveals.shown], [1, 'active', 0]);
 
         // With nobody in the plaza the clocks wait for the class; news comes only once students are back for a while.
-        alex.ws.close(); sam.ws.close(); await alex.closed; await sam.closed;
+        for (const socket of [alex, sam, chris]) socket.ws.close();
+        await alex.closed; await sam.closed; await chris.closed;
         await pause(2500);
         assert.equal((await teacher('status')).body.campaign.reveals.shown, 0, 'no news for an empty plaza');
         const back = await enter(base, 'signed-a', null); sockets.push(back);
         await back.next(m => m.t === 'quest' && m.quest.chapter.index === 1, 'back in chapter 2');
-        await back.next(m => m.t === 'quest' && m.quest.clues.some(c => c.from === 'news'), 'news after the class is back');
+        await until(() => news(back) > 0, 'news after the class is back');
 
         // Off: nothing is due.
         const off = (await teacher('auto', { news: 0, next: 0 })).body;
