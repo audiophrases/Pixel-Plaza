@@ -1,0 +1,2 @@
+/* A story character's name: its own colour and a 📖, so it never looks like a classmate's. */
+.cast-name { display: inline; padding: 0 .25em; border-radius: .3em; background: #f6ecfb; color: #6b2f8f; font-weight: 600; white-space: nowrap; }

@@ -522,6 +522,40 @@
       "Irina Sokolova",
       "Coma-ruga",
       "CCTV"
+    ],
+    "cast": [
+      {
+        "name": "Karina Gonzalvez",
+        "about": "A student. She is missing after the storm."
+      },
+      {
+        "name": "Youssef El Amrani",
+        "about": "A student, Karina’s best friend."
+      },
+      {
+        "name": "Laia Garcia",
+        "about": "A student who saved the 8:15 messages on her phone."
+      },
+      {
+        "name": "Chidi Okafor",
+        "about": "A student who was near the sports hall that morning."
+      },
+      {
+        "name": "Ms Awa Diop",
+        "about": "The PE teacher."
+      },
+      {
+        "name": "Ms Andreea Ionescu",
+        "about": "A teacher, Ms Diop’s colleague."
+      },
+      {
+        "name": "Ms Irina Sokolova",
+        "about": "The maths teacher."
+      },
+      {
+        "name": "Mr El Idrissi",
+        "about": "The deputy head of the school."
+      }
     ]
   }
 }

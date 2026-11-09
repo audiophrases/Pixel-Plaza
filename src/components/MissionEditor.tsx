@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { boardWait, isUnlocked, mainFinished, prerequisiteIds, type Campaign, type Chapter, type Objective } from '../../shared/campaign';
 import type { Theme } from '../../shared/theme';
+import { CAST_ABOUT_MAX, CAST_MAX, CAST_NAME_MAX } from '../../shared/cast';
 import MissionStepEditor, { RoleClues } from './MissionStepEditor';
 import MissionField from './MissionField';
 import MissionLanguageHelp from './MissionLanguageHelp';
@@ -53,8 +54,17 @@ export default function MissionEditor({ campaign, chapterIndex, setChapterIndex,
             <MissionField label="Mission title" value={campaign.title} placeholder="For example: The missing festival lights" maxLength={120} onChange={title => commit({ ...campaign, title })} />
             <MissionField label="Story names and words allowed in English chat (one per line)" value={campaign.vocabulary?.join('\n') ?? ''} multiline maxLength={12100}
                 onChange={text => commit({ ...campaign, vocabulary: text.split('\n') })} />
-            <p className="mission-muted">Public character and place names only. Students receive this list when the story starts; keep secret answers out of it.</p>
+            <p className="mission-muted">Public place names and words only (story characters below are allowed already). Students receive this list when the story starts; keep secret answers out of it.</p>
             <MissionField label="How does the mission end?" value={campaign.finale} multiline onChange={finale => commit({ ...campaign, finale })} /><p className="mission-muted">Students see this message after the whole adventure ends.</p>
+        </section>
+        <section className="mission-card mission-cast"><div className="mission-toolbar"><div><h2>Story characters</h2><p className="mission-muted">The people in the story, not students. Students see them in a 📖 Who’s who, and the story marks their names 📖 so nobody takes a character for a classmate. Write the full name, with Ms or Mr if the story uses it: “Laia Garcia” also marks “Laia” and “Garcia”.</p></div>
+            <button type="button" className="mission-button" disabled={(campaign.cast?.length ?? 0) >= CAST_MAX} onClick={() => commit({ ...campaign, cast: [...(campaign.cast ?? []), { name: '', about: '' }] })}>+ Add character</button></div>
+            {!campaign.cast?.length && <p className="mission-muted">No characters yet.</p>}
+            {campaign.cast?.map((member, i) => <div className="mission-cast-row" key={i}>
+                <MissionField label="Name" value={member.name} placeholder="For example: Laia Garcia" maxLength={CAST_NAME_MAX} onChange={name => commit({ ...campaign, cast: campaign.cast!.map((m, j) => i === j ? { ...m, name } : m) })} />
+                <MissionField label="Who they are, in one line" value={member.about} placeholder="For example: a student who saved a screenshot" maxLength={CAST_ABOUT_MAX} onChange={about => commit({ ...campaign, cast: campaign.cast!.map((m, j) => i === j ? { ...m, about } : m) })} />
+                <button type="button" className="mission-button danger" onClick={() => remove({ ...campaign, cast: campaign.cast!.filter((_, j) => j !== i) }, `${member.name.trim() || 'Character'} removed.`)}>Remove</button>
+            </div>)}
         </section>
         <section className="mission-card"><div className="mission-toolbar"><div><h2>Student roles</h2><p className="mission-muted">The game gives each student a role. Different clues encourage conversation.</p></div><button type="button" className="mission-button" disabled={campaign.roles.length >= 20} onClick={() => { const id = freshId('role'); setNewRoleId(id); commit({ ...campaign, roles: [...campaign.roles, { id, name: 'New role', card: '', clue: '' }] }); }}>+ Add role</button></div>
             <div className="mission-role-grid">{campaign.roles.map((role, i) => <details className={`mission-role mission-details role-tone-${i % 6}`} key={role.id} open={campaign.roles.length === 1 || role.id === newRoleId ? true : undefined}><summary><span className="mission-role-card-heading"><RoleBadge role={role} index={i} /><span><strong>{role.name || `Role ${i + 1}`}</strong><small>{!role.card.trim() || !role.clue.trim() ? 'Add a role card & starting clue' : 'Role card & clue ready'}</small></span><span className="mission-role-expand" aria-hidden="true">＋</span></span><span className="mission-role-excerpt"><span>WHO THEY ARE</span>{role.card || 'Describe this character’s part in the story.'}<span>WHAT THEY KNOW</span>{role.clue || 'Give this role something only they know.'}</span><span className="mission-role-edit-label">Edit role & clues</span></summary>

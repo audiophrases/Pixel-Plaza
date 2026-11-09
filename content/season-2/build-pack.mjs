@@ -154,6 +154,17 @@ const chapters = [
 const campaign = {
     id: 'protocol-815', title: 'Protocol 8:15 — The Missing Student', roles, chapters,
     vocabulary: ['Karina Gonzalvez', 'Youssef El Amrani', 'Awa Diop', 'Andreea Ionescu', 'El Idrissi', 'Laia Garcia', 'Chidi Okafor', 'Irina Sokolova', 'Coma-ruga', 'CCTV'],
+    // The story's people, as students may know them from the start: shown as a Who's who and marked 📖 in the story.
+    cast: [
+        { name: 'Karina Gonzalvez', about: 'A student. She is missing after the storm.' },
+        { name: 'Youssef El Amrani', about: 'A student, Karina’s best friend.' },
+        { name: 'Laia Garcia', about: 'A student who saved the 8:15 messages on her phone.' },
+        { name: 'Chidi Okafor', about: 'A student who was near the sports hall that morning.' },
+        { name: 'Ms Awa Diop', about: 'The PE teacher.' },
+        { name: 'Ms Andreea Ionescu', about: 'A teacher, Ms Diop’s colleague.' },
+        { name: 'Ms Irina Sokolova', about: 'The maths teacher.' },
+        { name: 'Mr El Idrissi', about: 'The deputy head of the school.' },
+    ],
     finale: 'Karina is safe. El Idrissi’s ignored warning and cover-up are exposed. Youssef apologises. Ms Diop and Ms Ionescu speak openly. Trust takes longer to repair. When telling the truth costs you something, will you still do it?',
     help: { finale: help('La Karina està bé. Queden al descobert l’avís ignorat i l’encobriment d’El Idrissi. En Youssef demana perdó. Les senyores Diop i Ionescu parlen obertament. Recuperar la confiança costa més. Si dir la veritat et fa perdre alguna cosa, la diràs igualment?') },
 };

@@ -12,6 +12,11 @@ export function importMission(current: Campaign, text: string, mode: 'replace' |
     }
     const candidate = structuredClone(current);
     if (incoming.campaign.vocabulary?.length) candidate.vocabulary = [...new Set([...(candidate.vocabulary ?? []), ...incoming.campaign.vocabulary])];
+    // New story characters join the cast; one already there keeps what the teacher wrote about them.
+    for (const member of incoming.campaign.cast ?? []) {
+        const cast = candidate.cast ?? [];
+        if (!cast.some(existing => existing.name.trim().toLowerCase() === member.name.trim().toLowerCase())) candidate.cast = [...cast, member];
+    }
     const changes: string[] = [];
     const target = mode === 'extend' ? candidate.chapters.find(c => c.id === chapterId) : undefined;
     if (mode === 'extend' && (!target || incoming.campaign.chapters.length !== 1)) return { campaign: null, errors: [{ path: 'chapters', message: 'To extend the selected chapter, import exactly one chapter containing the new quests, discoveries and news.' }], warnings: [], changes };

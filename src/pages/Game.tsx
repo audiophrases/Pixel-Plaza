@@ -15,6 +15,7 @@ import { firstName } from '../../shared/names';
 import { ALL, NEAR, TEACHER, TEAM, TYPING_EVERY_MS, TYPING_SHOWN_MS, conversationOf, inEarshot, opensItself, partnerOf, privateChat, renamedTogether } from '../../shared/chat';
 import PhaserGame from '../components/PhaserGame';
 import type { AnswerFeedback, BoardView, QuestView } from '../../shared/campaign';
+import { castWords } from '../../shared/cast';
 import type { StudentSupport } from '../../shared/support';
 import { PlazaConnection } from '../plaza';
 import { messageId } from '../utils/messageId';
@@ -705,7 +706,7 @@ export default function Game() {
       // Every word must be English. Names of people in the Plaza are fine.
       // If the dictionary cannot load, chat carries on rather than stopping.
       // Names of classmates and of the famous people in the "Who am I?" warm-up are fine.
-      const names = [session.student.displayName, ...[...plaza.players.values()].map(player => player.name), ...plaza.classNames, ...IDENTITY_NAMES, ...warmupVocabulary.current, ...(quest?.vocabulary ?? [])];
+      const names = [session.student.displayName, ...[...plaza.players.values()].map(player => player.name), ...plaza.classNames, ...IDENTITY_NAMES, ...warmupVocabulary.current, ...(quest?.vocabulary ?? []), ...castWords(quest?.cast)];
       let check: Checker | null = null;
       try {
         check = await loadChecker();
@@ -966,7 +967,8 @@ export default function Game() {
               </div> : <div className="chat-messages" onClick={chatSpot.size === 'compact' ? () => resizeChat(1) : undefined}
                 title={chatSpot.size === 'compact' ? 'Show more of the chat' : undefined}>
                 {shown.length === 0 && <p className="chat-empty">{active === NEAR ? (earshot.length ? '👋 Say hello!' : '🚶 Walk up to a classmate to talk.')
-                  : active === ALL ? '📢 Say something to everyone!' : active === TEACHER ? 'Ask your teacher for help, in any language.' : `👋 Say hi to ${partnerName}!`}</p>}
+                  : active === ALL ? '📢 Say something to everyone!' : active === TEACHER ? 'Ask your teacher for help, in any language.'
+                  : active === TEAM ? '🤝 Tell your team what your clue says.' : `👋 Say hi to ${partnerName}!`}</p>}
                 {shown.map((msg, i) => {
                   if (msg.sender.startsWith('System')) {
                     // Notices from the game are just the sentence, small, between the messages

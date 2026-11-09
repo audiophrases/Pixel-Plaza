@@ -1588,6 +1588,7 @@ test('Season 2 imports as data and sends Catalan help only with each student’s
         assert.notEqual(own.role.id, other.role.id);
         assert.equal(own.chapter.help.intro.ca, campaign.chapters[0].help.intro.ca);
         assert.deepEqual(own.vocabulary, campaign.vocabulary, 'public story vocabulary comes from the imported campaign');
+        assert.equal(campaign.cast.length, 8); assert.deepEqual(own.cast, campaign.cast, 'students get the story’s Who’s who');
         for (const image of [campaign.chapters[0].endingImage, campaign.chapters[0].discoveries[0].image, campaign.chapters[2].discoveries[1].image]) {
             assert.ok(!JSON.stringify(own).includes(image.src), 'locked pictures are not sent to the browser');
         }
@@ -1649,6 +1650,8 @@ test('case teams: teams of three or four, one answer for the team, the team chat
         // question that asks for the classmate with a role.
         const campaign = { ...structuredClone(castanyada), id: 'team-case', title: 'Team case', chapters: [structuredClone(castanyada.chapters[0])] };
         campaign.chapters[0].objectives.push({ id: 'who-drove', text: 'Who is the driver? Type their name.', accept: [], answerRole: 'driver', optional: true });
+        // Story characters, one called like a student in this class.
+        campaign.cast = [{ name: 'Ana Pons', about: 'The café owner.' }, { name: 'Mr Vidal', about: 'The shop’s delivery manager.' }];
         const imported = await teacher('missions/import', { envelope: missionEnvelope(campaign), publish: true });
         assert.equal(imported.status, 200, JSON.stringify(imported.body));
         PIN = (await teacher('game', { name: 'Case teams', randomNames: false })).body.pin;
@@ -1664,6 +1667,7 @@ test('case teams: teams of three or four, one answer for the team, the team chat
         const started = await teacher('campaign', { op: 'start', campaign: 'team-case', teams: true });
         assert.equal(started.status, 200, JSON.stringify(started.body));
         const [blue, red] = started.body.campaign.teams;
+        assert.deepEqual(started.body.campaign.castClashes, ['Ana Pons'], 'the teacher hears that a story character shares a student’s name');
         assert.deepEqual(started.body.campaign.teams.map(team => [team.name, team.members.length, team.done, team.total]), [['Blue team', 3, 0, 3], ['Red team', 3, 0, 3]]);
         for (const team of [blue, red]) assert.equal(new Set(team.members.map(member => member.role)).size, 3, `${team.name}: a different role each`);
         const of = team => team.members.map(member => byKey.get(member.studentKey));
@@ -1674,6 +1678,7 @@ test('case teams: teams of three or four, one answer for the team, the team chat
             assert.equal(quest.myTeam.name, team.name);
             assert.deepEqual(quest.myTeam.members.map(m => m.name).sort(), team.members.map(m => m.name).sort());
             assert.equal(quest.myTeam.members.filter(m => m.me).length, 1);
+            assert.deepEqual(quest.cast, campaign.cast);
             // A role missing from the team comes as a town notice, as for a class without it.
             const missing = campaign.roles.filter(role => !team.members.some(m => m.role === role.name)).map(role => `fallback-role-${role.id}`);
             assert.deepEqual(quest.clues.filter(c => c.id.startsWith('fallback-role-')).map(c => c.id).sort(), missing.sort(), `${team.name}: notices for the two roles it lacks`);

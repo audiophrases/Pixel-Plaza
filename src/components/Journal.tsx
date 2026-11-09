@@ -6,6 +6,8 @@ import './Journal.css';
 import { Investigation, WitnessInbox, type InvestigationTurn } from './Investigation';
 import LanguageHelp from './LanguageHelp';
 import EvidencePicture from './EvidencePicture';
+import StoryText from './StoryText';
+import { CastContext } from './castContext';
 
 type Props = {
   quest: QuestView | null; // the mission, if one is running
@@ -43,7 +45,7 @@ function Question({ objective, feedback, onAnswer, onUndoReport, shared = false,
   const feedbackId = `answer-feedback-${objective.id}`;
   return <section className={`journal-block journal-question${objective.optional ? ' journal-bonus' : ''}`}>
     <h3>{heading ?? (objective.optional ? 'Bonus question' : 'Question')}</h3>
-    <p className="journal-ask">{objective.text}</p>
+    <p className="journal-ask"><StoryText text={objective.text} /></p>
     <LanguageHelp help={objective.help} answer />
     {objective.done ? <>
       <p className="journal-right">{report ? check ? 'Quest complete.' : 'Sent to your teacher.' : 'Correct.'}</p>
@@ -125,7 +127,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
     return () => window.clearTimeout(timer);
   }, [nextStart]);
 
-  return <aside className="journal glass-panel">
+  return <CastContext.Provider value={quest?.cast ?? []}><aside className="journal glass-panel">
     <button type="button" className="journal-toggle" onClick={() => { setOpen(value => !value); setFresh(false); }}>
       <span>{quest?.chapter.title ?? 'Side quests'}{fresh && <b className="journal-new">NEW</b>}</span>
       <span>{open ? '▲' : '▼'}</span>
@@ -135,13 +137,13 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
       {quest.secret && <section className="journal-block journal-secret">
         <h3>Secret</h3>
         <p className="journal-role">{quest.secret.title}</p>
-        <p>{quest.secret.text}</p>
+        <p><StoryText text={quest.secret.text} /></p>
         <LanguageHelp help={quest.secret.help} />
       </section>}
 
       {quest.recap && !recapSeen && <section className="journal-block journal-recap">
         <h3>Previously</h3>
-        <p>{quest.recap}</p>
+        <p><StoryText text={quest.recap} /></p>
         <LanguageHelp help={quest.recapHelp} />
         <EvidencePicture image={quest.recapImage} text={quest.recap ?? ''} help={quest.recapHelp} />
         <button type="button" className="journal-dismiss" onClick={() => setRecapSeen(true)}>OK</button>
@@ -165,15 +167,21 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
 
       {quest.status !== 'campaign_complete' && <section className="journal-block journal-task">
         <h3>Task</h3>
-        <p>{quest.chapter.intro}</p>
+        <p><StoryText text={quest.chapter.intro} /></p>
         <LanguageHelp help={quest.chapter.help?.intro} />
         <EvidencePicture image={quest.chapter.introImage} text={quest.chapter.intro} help={quest.chapter.help?.intro} />
       </section>}
 
+      {!!quest.cast?.length && <details className="journal-block journal-cast" open>
+        <summary><h3>📖 Who’s who in the story</h3></summary>
+        <p className="journal-cast-note">These are characters in the story, not your classmates.</p>
+        <ul>{quest.cast.map(member => <li key={member.name}><span className="cast-name">📖 {member.name}</span> {member.about}</li>)}</ul>
+      </details>}
+
       <section className="journal-block">
         <h3>You are</h3>
         <p className="journal-role">{quest.role.name}</p>
-        <p>{quest.role.card}</p>
+        <p><StoryText text={quest.role.card} /></p>
         <LanguageHelp help={quest.role.help} />
       </section>
 
@@ -182,7 +190,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
         <ul className="journal-clues">
           {quest.clues.map(clue => <li key={clue.id}>
             <span className="journal-source">{SOURCE[clue.from] ?? `Found: ${clue.from}`}</span>
-            {clue.text}
+            <StoryText text={clue.text} />
             <LanguageHelp help={clue.help} />
             <EvidencePicture image={clue.image} text={clue.text} help={clue.help} />
           </li>)}
@@ -200,7 +208,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
       {quest.chapter.ending && <section className="journal-block journal-ending">
         <h3>{quest.status === 'chapter_complete' ? 'The class is ready to advance' : 'Chapter complete'}</h3>
         {quest.status === 'chapter_complete' && <p>You can keep working until your teacher starts the next chapter.</p>}
-        <p>{quest.chapter.ending}</p>
+        <p><StoryText text={quest.chapter.ending} /></p>
         <LanguageHelp help={quest.chapter.help?.ending} />
         <EvidencePicture image={quest.chapter.endingImage} text={quest.chapter.ending ?? ''} help={quest.chapter.help?.ending} />
       </section>}
@@ -228,7 +236,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
             {item.reason && <p>{item.reason}</p>}<button className="journal-choice" disabled={item.state !== 'available'} onClick={() => onAccept?.(item.id)}>{item.joining?.length ? `Join ${item.joining.join(', ')}` : 'Accept quest'}</button></>}
         </article>)}
       </section>}
-      {quest?.finale && <section className="journal-block journal-ending"><p>{quest.finale}</p><LanguageHelp help={quest.finaleHelp} /></section>}
+      {quest?.finale && <section className="journal-block journal-ending"><p><StoryText text={quest.finale} /></p><LanguageHelp help={quest.finaleHelp} /></section>}
     </div>}
-  </aside>;
+  </aside></CastContext.Provider>;
 }

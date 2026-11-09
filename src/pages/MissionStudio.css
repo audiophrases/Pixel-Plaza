@@ -217,6 +217,11 @@
 .mission-world-clues p { border-top: 1px solid #d7e1d6; padding-top: .6rem; margin-top: .6rem; font-size: .8rem; line-height: 1.6; overflow-wrap: anywhere; }
 .mission-map-empty { font-size: .85rem; color: #5d6b62; padding: 1rem; border: 1px dashed #becfbe; border-radius: 10px; }
 .mission-role-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1rem; margin-top: 1.2rem; align-items: start; }
+/* Story characters: name, one line about them, and Remove, in a row. */
+.mission-cast-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,2fr) auto; gap: 0 .75rem; align-items: end; }
+.mission-studio-page .mission-cast-row .mission-field { margin: .6rem 0; }
+.mission-cast-row > .mission-button { margin-bottom: .6rem; }
+@media (max-width: 720px) { .mission-cast-row { grid-template-columns: 1fr; } }
 .mission-role-grid .mission-role { padding: 1rem; border: 1px solid var(--role-line); border-top: 4px solid var(--role-ink); border-radius: 12px; background: #fff; min-width: 0; }
 .mission-role-grid summary { list-style: none; }
 .mission-role-grid summary::-webkit-details-marker { display: none; }

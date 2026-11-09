@@ -49,6 +49,8 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
             sections: [
                 ...(quest.recap ? [{ label: 'Previously', text: quest.recap, help: quest.recapHelp, image: quest.recapImage }] : []),
                 { label: 'The story', text: quest.chapter.intro, help: quest.chapter.help?.intro, image: quest.chapter.introImage },
+                // The story's characters, marked 📖, are never classmates.
+                ...(quest.cast?.length ? [{ label: '📖 Story characters', text: `${quest.cast.map(member => member.name).join(', ')}. They are people in the story, not your classmates. Who’s who in your Journal says who they are.` }] : []),
                 { label: `You are ${quest.role.name}`, text: quest.role.card, help: quest.role.help },
                 ...(quest.secret ? [{ label: quest.secret.title, text: quest.secret.text, help: quest.secret.help }] : []),
                 ...quest.clues.filter(c => c.from === 'job').map(c => ({ label: 'Your private clue', text: c.text, help: c.help })),

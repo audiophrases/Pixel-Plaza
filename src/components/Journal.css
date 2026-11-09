@@ -112,3 +112,9 @@
 .journal-crew-list { margin: 0.3rem 0; padding-left: 1.1rem; }
 .journal-crew-away { color: #8c8c8c; }
 .journal-crew-steps { margin: 0.4rem 0 0; padding-left: 1.2rem; font-size: 0.9rem; }
+/* Who's who: the story's characters, folded away once read. */
+.journal-cast { border-left-color: #9b59c4; background: #fbf6fe; }
+.journal-cast summary { cursor: pointer; list-style-position: inside; }
+.journal-cast summary h3 { display: inline; }
+.journal-cast-note { font-size: 0.85rem; color: #5c4a68; }
+.journal-cast ul { margin: 0.3rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.3rem; font-size: 0.9rem; }

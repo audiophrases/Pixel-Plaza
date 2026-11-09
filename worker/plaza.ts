@@ -42,6 +42,7 @@ import { XP, checkStyle, emotesFor, levelOf, readStyle, type Style } from '../sh
 import { REPORT_LINES_PER_STUDENT, type ClassReportData, type ReportLine } from '../shared/classReport.ts';
 import { type Avatar, chatProblem, clampPosition, defaultAvatar, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 import { HEARING_RANGE, TYPING_EVERY_MS, isTeamName, teamName } from '../shared/chat.ts';
+import { castClashes, castWords } from '../shared/cast.ts';
 import { identityRevealProblem } from '../shared/activityChat.ts';
 import { defaultWarmup, validateWarmup, warmupVocabulary, type SavedWarmup, type WarmupDefinition } from '../shared/warmupConfig.ts';
 import { VOICE_SAMPLE } from './speech.ts';
@@ -125,6 +126,7 @@ export type CampaignStatus = {
     zones: string[]; // where the map clues are, to tell the teacher when the game's map lacks one
     reveals: { shown: number; total: number; next: string | null }; // prepared news the teacher can release
     players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
+    castClashes?: string[]; // story characters called like a student in this game, whose names students might mix up
     reports: { studentKey: string; objective: string; text: string; partner?: string; starred: boolean; version: number; check?: ReportCheck }[];
     interviews: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
     board?: ReturnType<QuestBoard['summary']>;
@@ -1696,6 +1698,7 @@ export class PlazaRoom extends DurableObject<Env> {
             runId: `${game}:${row.live_epoch ?? row.revision_id ?? campaign.id}`,
             campaign: { id: campaign.id, title: campaign.title },
             ...(campaign.vocabulary?.length ? { vocabulary: campaign.vocabulary } : {}),
+            ...(campaign.cast?.length ? { cast: campaign.cast } : {}),
             status: row.status,
             chapter: { index: row.chapter, of: campaign.chapters.length, title: chapter.title, intro: chapter.intro,
                 ending, ...(chapter.introImage ? { introImage: chapter.introImage } : {}), ...(ending && chapter.endingImage ? { endingImage: chapter.endingImage } : {}), ...(chapter.help ? { help: { intro: chapter.help.intro, ...(ending ? { ending: chapter.help.ending } : {}) } } : {}) },
@@ -2370,6 +2373,7 @@ export class PlazaRoom extends DurableObject<Env> {
         return {
             guideVersion: JSON.stringify([row.revision_id, row.live_epoch, row.live_version, row.chapter, [...names], players.map(player => [player.student_key, player.role_id]), thieves.map(key => [key, this.avatarOf(key)])]),
             id: campaign.id, title: campaign.title, status: row.status, chapter: row.chapter, chapters: campaign.chapters.length, zones: clueZones(campaign),
+            ...((clashes => clashes.length ? { castClashes: clashes } : {})(castClashes(campaign.cast, [...names.values()]))),
             chapterTitle: campaign.chapters[Math.min(row.chapter, campaign.chapters.length - 1)].title,
             chapterTitles: campaign.chapters.map(chapter => chapter.title),
             reveals: (() => {
@@ -2982,7 +2986,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // Names and other words the English check takes besides the dictionary's.
     private englishNames(game: string): string[] {
-        return [...this.rosterNames(game).values(), ...IDENTITY_NAMES, ...warmupVocabulary(this.warmupDefinition(game)), ...warmupVocabulary(this.savedWarmup('identity').definition), ...(this.gameCampaign(game)?.vocabulary ?? [])];
+        return [...this.rosterNames(game).values(), ...IDENTITY_NAMES, ...warmupVocabulary(this.warmupDefinition(game)), ...warmupVocabulary(this.savedWarmup('identity').definition), ...(this.gameCampaign(game)?.vocabulary ?? []), ...castWords(this.gameCampaign(game)?.cast)];
     }
 
     // On the teacher's laptop, whether the English check takes a word. A blocked word is then also found inside

@@ -61,7 +61,9 @@ export type Chapter = {
     thieves?: { card: string; story: string; label?: string; carry?: boolean; help?: { card?: TextHelp; story?: TextHelp } };
 };
 export type Role = { id: string; name: string; card: string; clue: string; help?: { card?: TextHelp; clue?: TextHelp } };
-export type Campaign = { id: string; title: string; roles: Role[]; chapters: Chapter[]; finale: string; help?: { finale?: TextHelp }; vocabulary?: string[] };
+// A person in the story, not a student: a name and one line about them.
+export type CastMember = { name: string; about: string };
+export type Campaign = { id: string; title: string; roles: Role[]; chapters: Chapter[]; finale: string; help?: { finale?: TextHelp }; vocabulary?: string[]; cast?: CastMember[] };
 export type AnswerFeedback = { objective: string; correct: boolean; wait: boolean; message?: string };
 export type ReportSubmission = { text: string; version: number; submitted: boolean; check?: ReportCheck };
 
@@ -70,6 +72,7 @@ export type QuestView = {
     runId?: string; // Stable across reconnects; new when the teacher restarts this campaign.
     campaign: { id: string; title: string };
     vocabulary?: string[]; // Public story names/terms accepted by the English chat check; never secret answers.
+    cast?: CastMember[]; // The story's characters, for the Who's who and to mark their names in the story.
     status: 'active' | 'chapter_complete' | 'campaign_complete';
     chapter: { index: number; of: number; title: string; intro: string; ending: string | null; introImage?: EvidenceImage; endingImage?: EvidenceImage; help?: { intro?: TextHelp; ending?: TextHelp } };
     role: { id: string; name: string; card: string; help?: TextHelp };

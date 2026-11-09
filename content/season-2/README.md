@@ -49,9 +49,11 @@ In Mission Studio, **Catalan help** under mission setup edits role cards, starti
 
 The mission’s editable `vocabulary` lists its public character and place names. Both English chat checks accept those words during this campaign. The list is content, not a built-in name exception, and contains no secret answers.
 
+Its editable `cast` lists the eight story characters, each with one public line (Karina, Youssef, Laia, Chidi, Ms Diop, Ms Ionescu, Ms Sokolova and Mr El Idrissi). Students see them as a 📖 *Who’s who* in the Journal, and the story marks their names 📖 wherever it mentions them, so a character is never mistaken for a classmate. If the mission is already imported, import this pack again or add the characters under *Story characters* in Mission Studio.
+
 ## Running the lessons
 
-Use at least two students: the main report in each chapter requires one in-game witness exchange. Four or more lets the four investigator roles distribute naturally. Missing-role evidence uses the app’s existing fallback notices. Players are investigators; the named story characters are witnesses in the fictional documents, not roles assigned to real classmates.
+Use at least two students: the main report in each chapter requires one in-game witness exchange. Four or more lets the four investigator roles distribute naturally. Started in case teams (on by default), each team of three or four holds the investigator roles between its members, talks in its own Team chat and answers once for the whole team. Missing-role evidence uses the app’s existing fallback notices. Players are investigators; the named story characters are witnesses in the fictional documents, not roles assigned to real classmates.
 
 Keep the unsafe passage blocked. Evidence is collected from the open ground outside buildings. Students investigate information; staff handle the emergency. A teacher may adapt names, setting, stakes and translations like any other mission.
 

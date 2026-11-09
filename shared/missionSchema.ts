@@ -1,6 +1,7 @@
 import { isUnlocked, prerequisiteIds, type Campaign, type Chapter, type Objective, type Role, type TextHelp } from './campaign.ts';
 
 import { evidenceSource, EVIDENCE_MAX_CHARS, type EvidenceImage } from './evidence.ts';
+import { CAST_ABOUT_MAX, CAST_MAX, CAST_NAME_MAX } from './cast.ts';
 export const MISSION_MAX_BYTES = 512_000;
 export type MissionEnvelope = { format: 'pixel-plaza-campaign'; schemaVersion: 1 | 2; campaign: Campaign };
 export type MissionIssue = { path: string; message: string };
@@ -77,7 +78,7 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
     const envelope = obj(input, 'file', ['format', 'schemaVersion', 'campaign']);
     if (envelope.format !== 'pixel-plaza-campaign') fail('format', 'Expected pixel-plaza-campaign.');
     if (envelope.schemaVersion !== 1 && envelope.schemaVersion !== 2) fail('schemaVersion', 'Only schema versions 1 and 2 are supported.');
-    const raw = obj(envelope.campaign, 'campaign', ['id', 'title', 'roles', 'chapters', 'finale', 'help', 'vocabulary']);
+    const raw = obj(envelope.campaign, 'campaign', ['id', 'title', 'roles', 'chapters', 'finale', 'help', 'vocabulary', 'cast']);
     const roles: Role[] = list(raw.roles, 'roles', 20).map((value, i) => {
         const path = `roles[${i}]`;
         const r = obj(value, path, ['id', 'name', 'card', 'clue', 'help']);
@@ -163,6 +164,17 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
     const campaign: Campaign = { id: id(raw.id, 'campaign.id'), title: str(raw.title, 'campaign.title', 120), finale: str(raw.finale, 'campaign.finale'), roles, chapters };
     if (raw.help !== undefined) campaign.help = fieldHelp(raw.help, 'campaign.help', ['finale']);
     if (raw.vocabulary !== undefined) campaign.vocabulary = [...new Set(list(raw.vocabulary, 'campaign.vocabulary', 100).map((value, i) => str(value, `campaign.vocabulary[${i}]`, 120, false).trim()).filter(Boolean))];
+    // Story characters: a name on one line and one line about them, each name different.
+    if (raw.cast !== undefined) {
+        campaign.cast = list(raw.cast, 'campaign.cast', CAST_MAX).map((value, i) => {
+            const path = `campaign.cast[${i}]`; const member = obj(value, path, ['name', 'about']);
+            const name = str(member.name, `${path}.name`, CAST_NAME_MAX), about = str(member.about, `${path}.about`, CAST_ABOUT_MAX);
+            if (/[\r\n]/.test(name + about)) fail(path, 'Use one line for the name and one for who they are.');
+            return { name, about };
+        });
+        const names = campaign.cast.map(member => member.name.trim().toLowerCase()).filter(Boolean);
+        if (new Set(names).size !== names.length) fail('campaign.cast', 'Give each story character a different name.');
+    }
     const unique = (ids: string[], path: string) => { if (new Set(ids).size !== ids.length) fail(path, 'IDs must be unique.'); };
     unique(roles.map(r => r.id), 'roles'); unique(chapters.map(c => c.id), 'chapters');
     // Progress arrays and report rows are campaign-wide, not scoped to a chapter.

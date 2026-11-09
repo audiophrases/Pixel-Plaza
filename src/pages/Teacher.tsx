@@ -39,6 +39,7 @@ type CampaignInfo = {
   reveals: { shown: number; total: number; next: string | null };
   reports: { studentKey: string; objective: string; text: string; partner?: string; starred?: boolean; version: number; check?: ReportCheck }[];
   interviews?: (InterviewView & { studentKey: string; witnessKey: string; questionId: string; answerId: string | null })[];
+  castClashes?: string[]; // story characters called like a student here
   teams?: { team: number; name: string; done: number; total: number; members: { studentKey: string; name: string; role: string; online: boolean }[] }[];
   board?: { id: string; text: string; teacherReleased: boolean; released: boolean; accepted: number; completed: number }[];
   players: { studentKey: string; name: string; role: string; clues: number; done: string[]; thief: boolean }[];
@@ -535,6 +536,7 @@ export default function Teacher() {
         </> : <>
           <p><strong>{campaign.title}</strong> · {{ active: 'in progress', chapter_complete: 'ready for the next chapter: students can keep working', campaign_complete: 'finished' }[campaign.status]}</p>
           {mapWarning(campaign.zones)}
+          {!!campaign.castClashes?.length && <p className="teacher-muted">📖 {campaign.castClashes.join(', ')} {campaign.castClashes.length === 1 ? 'is a story character who shares a name' : 'are story characters who share names'} with students here. Students see characters marked 📖 in the Journal and the instructions; it may help to point that out.</p>}
           <ol className="teacher-chapter-steps">{(campaign.chapterTitles ?? []).map((title, index) => {
             const state = campaign.status === 'campaign_complete' || index < campaign.chapter ? 'done' : index === campaign.chapter ? 'now' : 'next';
             return <li key={index} className={`teacher-step-${state}`} aria-current={state === 'now' ? 'step' : undefined}>
