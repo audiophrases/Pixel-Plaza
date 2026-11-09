@@ -194,7 +194,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
         <h3>What you know</h3>
         <ul className="journal-clues">
           {quest.clues.map(clue => <li key={clue.id}>
-            <span className="journal-source">{SOURCE[clue.from] ?? `Found: ${clue.from}`}</span>
+            <span className="journal-source">{clue.from === 'job' && clue.image ? 'Your picture · only you have it' : SOURCE[clue.from] ?? `Found: ${clue.from}`}</span>
             <StoryText text={clue.text} />
             <LanguageHelp help={clue.help} />
             <EvidencePicture image={clue.image} text={clue.text} help={clue.help} />
