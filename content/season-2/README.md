@@ -19,9 +19,9 @@ The app does not import this directory, seed this mission, register this map or 
 Use an app version with **Import mission**, evidence pictures and expandable Catalan help.
 
 1. Open **Map Studio** (`/studio`) and sign in. Use **Open a theme file** to open `theme.json`, then **Import AI background** to open `art/campus.png`. Check the paths and walking preview. Save the map draft and **Publish to games**. The studio uploads the picture with the map into server storage.
-2. Open **Mission Studio** (`/mission-studio`) and click **Import mission**. Choose `protocol-815-season-2.zip` or `campaign.json`. The preview shows three chapters, twelve tasks, four roles, seven pictures and whether the map is ready. Click **Import & publish**. No empty mission or extraction is needed. Use **Save as draft** if you want to edit before publishing. Importing again creates a separate copy.
+2. Open **Mission Studio** (`/mission-studio`) and click **Import mission**. Choose `protocol-815-season-2.zip` or `campaign.json`. The preview shows three chapters, nine tasks, four roles, fifteen pictures and whether the map is ready. Click **Import & publish**. No empty mission or extraction is needed. Use **Save as draft** if you want to edit before publishing. Importing again creates a separate copy.
 3. Create a new game on **Protocol 8:15 · Storm campus**. Start **Protocol 8:15 — The Missing Student** from Teacher controls.
-4. Advance chapters manually after the class discussion. Use teacher news if students need a clue. Check written reports and accept uncertain or unavailable automatic checks in Teacher controls.
+4. Play in case teams (on by default). Auto-advance releases each chapter’s tips when half the class is stuck and starts the next chapter once the class is ready; you can pause it or advance by hand. Check the shared writing and accept uncertain automatic checks in Teacher controls.
 
 For a standalone lesson, import one file from `chapters/` into its own new mission. For adaptation, the normal append/extend tools keep help with copied chapters and tasks. Appending leaves the destination campaign’s finale unchanged; review that field after combining chapter modules.
 
@@ -29,15 +29,13 @@ Do not run the old map-registry installer for this pack: that installs map files
 
 ## Evidence pictures
 
-The campaign and individual chapter files include seven evidence pictures: conflicting messages, CCTV, a safety warning, an office receipt, Karina’s message, an email and the timeline. They are embedded in the JSON; no separate picture upload or asset registration is needed. The campus theme is unchanged by this addition.
+The season is told in pictures. Each chapter gives every role one private picture (twelve in all), and the chapters open and close with story pictures: the storm, the security camera and Karina’s message. Fifteen distinct pictures are embedded in the JSON as small WebP images; no separate upload or asset registration is needed.
 
-In Mission Studio, select a chapter and open **Evidence pictures** to replace or remove a picture, or edit its screen-reader description. Attachments are supported on chapter openings/endings, map clues and teacher news. Choose PNG, JPEG or WebP; the editor reduces large uploads. The mission remains subject to its 512 KB limit, so use focused evidence images instead of full-page scans.
+A private clue picture is seen only by students with that role (or, in a team missing that role, by the team as a town notice). In Mission Studio, select a chapter and open **Evidence pictures** to replace or remove any picture, including each role’s **Private clue** picture, or edit its screen-reader description. Choose PNG, JPEG or WebP; the editor reduces large uploads. The mission stays under its 512 KB limit.
 
-Students use **Enlarge evidence** in the Journal or instruction pop-ups. The enlarged view includes the matching English text and expandable Catalan help. Escape or **Close picture** returns to the card without clearing an answer. Pictures follow the same discovery, news-release and ending rules as their text.
+Students use **Enlarge evidence** in the Journal or instruction pop-ups. The enlarged view includes the matching English text and expandable Catalan help.
 
-Editable document sources and the preserved generated CCTV original are in `art/evidence/`. Run `node content/season-2/build-evidence.mjs` before `build-pack.mjs` when changing the art sources. The exact CCTV prompt is in `art/evidence/prompt.md`.
-
-This update needs the app version with evidence-picture support. Re-import the updated campaign into a draft, review and publish; existing games retain their pinned revision. You do not need to re-import the theme.
+Editable document sources and the preserved generated CCTV original are in `art/evidence/`. Run `node content/season-2/build-evidence.mjs` before `build-pack.mjs` when changing the art sources. The exact CCTV prompt is in `art/evidence/prompt.md`; the storm picture’s is in `art/evidence/opening-story-prompt.md`.
 
 ## Where Catalan appears
 
@@ -53,13 +51,19 @@ Its editable `cast` lists the eight story characters, each with one public line 
 
 ## Running the lessons
 
-The student copy uses short story summaries, directions to each clue and sentence starters for chat and reports, with matching Catalan help. Start with: “Karina is missing. You are detectives. Share clues to find out what happened.” The teacher guide includes a brief walkthrough. Reports still need **Choose a witness** in the Journal; ordinary chat alone does not complete that step.
+Chatting is how the case is solved. Every student holds one private picture, and every question needs two pictures held by two different roles; the question names them (“Ask the Message checker and the Document checker”). Nobody can answer from their own picture alone, so the team tells each other what their pictures show, in the 🤝 Team chat or out loud, in English.
 
-To use this revised wording, import the rebuilt ZIP or campaign JSON in Mission Studio, review and publish it, then start a new game with that mission. Importing creates a separate copy; existing published missions and running games are not changed by rebuilding these files.
+The same three steps every chapter, in the opening of each chapter and on the role cards:
 
-Use at least two students: the main report in each chapter requires one in-game witness exchange. Four or more lets the four investigator roles distribute naturally. Started in case teams (on by default), each team of three or four holds the investigator roles between its members, talks in its own Team chat and answers once for the whole team. Missing-role evidence uses the app’s existing fallback notices. Players are investigators; the named story characters are witnesses in the fictional documents, not roles assigned to real classmates.
+1. Look at your picture.
+2. Tell your team what it shows. Ask: “What is your picture?”
+3. Answer together in the Journal.
 
-Keep the unsafe passage blocked. Evidence is collected from the open ground outside buildings. Students investigate information; staff handle the emergency. A teacher may adapt names, setting, stakes and translations like any other mission.
+Each chapter: two short questions, opening one at a time, then one short piece of writing done together. There is no witness exchange: the team chat replaces it. Each chapter also has two prepared tips, which name the two roles to compare. The map’s places have small extra clues when students walk by; no answer needs them.
+
+Use at least two students; four or more lets every role be played. Started in case teams (on by default), each team of three or four holds the roles between its members, talks in its own Team chat and answers once for the whole team. A missing role’s picture reaches the team as a town notice. The named story characters are people in the pictures, not roles assigned to real classmates.
+
+To use this version, import the rebuilt ZIP or `campaign.json` in Mission Studio and publish it; importing creates a separate copy, and games already running keep the version they started with. The teacher guide has the answers, the pictures each question needs and the timeline.
 
 ## Rebuild and validate
 

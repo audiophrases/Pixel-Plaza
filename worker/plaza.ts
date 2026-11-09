@@ -1762,6 +1762,8 @@ export class PlazaRoom extends DurableObject<Env> {
             clues: [
                 { id: `role-${role.id}`, from: 'job',
                     ...(roleHelp?.ca ? { help: { ca: fillThiefClue(roleHelp.ca, looks) } } : {}),
+                    // The role's picture for this chapter, never the thief's: only this student sees it.
+                    ...(!(isThief && chapter.thieves) && chapter.roleClueImages?.[role.id] ? { image: chapter.roleClueImages[role.id] } : {}),
                     text: isThief && chapter.thieves ? `${chapter.thieves.label ?? 'Your story'}: ${chapter.thieves.story}` : fillThiefClue(chapter.roleClues?.[role.id] ?? role.clue, looks) },
                 ...found.map(item => ({ id: item.id, text: item.text, from: item.zone, ...(item.help ? { help: item.help } : {}), ...(item.image ? { image: item.image } : {}) })),
                 ...rewardClues(chapter, role.id, player.done).map(item => ({ ...item, from: 'reward' })),

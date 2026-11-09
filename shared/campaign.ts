@@ -60,6 +60,7 @@ export type Chapter = {
     endingImage?: EvidenceImage;
     help?: { intro?: TextHelp; recap?: TextHelp; ending?: TextHelp };
     roleClueHelp?: Record<string, TextHelp>;
+    roleClueImages?: Record<string, EvidenceImage>; // a picture with each role's private clue in this chapter, seen only by that role
     objectives: Objective[];
     share: number;       // the fraction of the class that must finish every main question (0 to 1)
     discoveries: Discovery[];
@@ -193,7 +194,8 @@ export function absentRoleClues(campaign: Campaign, chapter: Chapter, roleId: st
     return campaign.roles.flatMap(role => [
         ...(!startingRoles.includes(role.id) && role.id !== roleId
             ? [{ id: `fallback-role-${role.id}`, text: chapter.roleClues?.[role.id] ?? role.clue, from: 'town notice',
-                ...((chapter.roleClues?.[role.id] !== undefined ? chapter.roleClueHelp?.[role.id] : role.help?.clue) ? { help: chapter.roleClues?.[role.id] !== undefined ? chapter.roleClueHelp?.[role.id] : role.help?.clue } : {}) }] : []),
+                ...((chapter.roleClues?.[role.id] !== undefined ? chapter.roleClueHelp?.[role.id] : role.help?.clue) ? { help: chapter.roleClues?.[role.id] !== undefined ? chapter.roleClueHelp?.[role.id] : role.help?.clue } : {}),
+                ...(chapter.roleClueImages?.[role.id] ? { image: chapter.roleClueImages[role.id] } : {}) }] : []),
         ...(!rewardRoles.includes(role.id) && role.id !== roleId
             ? rewardClues(chapter, role.id, done).map(clue => ({ ...clue, id: `fallback-${role.id}-${clue.id}`, from: 'town notice' })) : []),
     ]);

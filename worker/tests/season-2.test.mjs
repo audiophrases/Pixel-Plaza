@@ -17,8 +17,8 @@ const theme = parseTheme(read('theme.json'));
 const words = text => text.trim().split(/\s+/).length;
 
 test('evidence pictures are portable, bounded raster data with required descriptions', () => {
-    const images = campaign.chapters.flatMap(c => [c.introImage, c.endingImage, ...c.discoveries.map(d => d.image), ...c.reveals.map(r => r.image)]).filter(Boolean);
-    assert.equal(new Set(images.map(image => image.src)).size, 7);
+    const images = campaign.chapters.flatMap(c => [c.introImage, c.endingImage, ...c.discoveries.map(d => d.image), ...c.reveals.map(r => r.image), ...Object.values(c.roleClueImages ?? {})]).filter(Boolean);
+    assert.equal(new Set(images.map(image => image.src)).size, 15, 'twelve private pictures and three story pictures');
     assert.ok(images.every(image => evidenceSource(image.src) && image.alt.trim()));
     for (const bad of ['https://example.com/picture.png', 'javascript:alert(1)', 'data:image/svg+xml;base64,PHN2Zz4=', 'data:image/png;base64,YWJjZA==', 'data:image/png;base64,' + 'a'.repeat(100000)]) {
         const copy = structuredClone(campaign); copy.chapters[0].endingImage.src = bad;
@@ -56,6 +56,21 @@ test('Season 2 is a valid modular three-chapter pack with concise bilingual stud
     assert.equal(bytes.readUInt32BE(16), bytes.readUInt32BE(20), 'the background is square');
 });
 
+test('every question needs two pictures, held by two different roles, and the team chat replaces the witness step', () => {
+    const roleNamed = text => campaign.roles.filter(role => text.includes(role.name));
+    for (const chapter of campaign.chapters) {
+        assert.deepEqual(Object.keys(chapter.roleClueImages).sort(), campaign.roles.map(role => role.id).sort(), `${chapter.title}: one picture for every role`);
+        for (const role of campaign.roles) assert.ok(chapter.roleClues[role.id].startsWith('Your picture:') && chapter.roleClueImages[role.id].alt.trim(), `${chapter.title}: ${role.name}'s clue describes the picture`);
+        const questions = chapter.objectives.filter(o => o.kind !== 'report');
+        assert.equal(questions.length, 2);
+        for (const question of questions) assert.equal(roleNamed(question.text).length, 2, `${question.id} names the two roles to ask`);
+        assert.ok(chapter.objectives.every(o => !o.conversation && !o.optional), `${chapter.title}: no witness step and no bonus`);
+        // The prepared tips name the same two roles as the questions, in order.
+        chapter.reveals.forEach((tip, i) => assert.deepEqual(roleNamed(tip.text).map(r => r.id).sort(), roleNamed(questions[i].text).map(r => r.id).sort(), tip.id));
+        assert.ok(/Look at your picture\. Tell your team what it shows\. Answer together\./.test(chapter.intro), `${chapter.title}: the three steps`);
+    }
+});
+
 test('chapter copies retain translations when append remaps duplicate IDs', () => {
     const appended = importMission(campaign, JSON.stringify(read('chapters/02.json')), 'append');
     assert.deepEqual(appended.errors, []);
@@ -65,6 +80,7 @@ test('chapter copies retain translations when append remaps duplicate IDs', () =
     assert.deepEqual(copy.endingImage, original.endingImage);
     assert.deepEqual(copy.discoveries.map(d => d.image), original.discoveries.map(d => d.image));
     assert.deepEqual(copy.roleClueHelp, original.roleClueHelp);
+    assert.deepEqual(copy.roleClueImages, original.roleClueImages);
     assert.deepEqual(copy.objectives.map(o => o.help), original.objectives.map(o => o.help));
     assert.equal(copy.objectives[1].after, copy.objectives[0].id);
 });
@@ -76,6 +92,8 @@ test('language help is bounded, text only, and cannot reference nonexistent rewa
         c => { c.chapters[0].help.answer = { ca: 'hidden' }; },
         c => { c.chapters[0].roleClueHelp = { unknown: { ca: 'hidden' } }; },
         c => { c.chapters[0].objectives[0].rewardHelp = { 'media-analyst': { ca: 'unearned' } }; },
+        c => { c.chapters[0].roleClueImages = { unknown: c.chapters[0].roleClueImages['media-analyst'] }; },
+        c => { c.chapters[0].roleClueImages['media-analyst'] = { src: 'https://example.com/clue.png', alt: 'A clue' }; },
     ]) {
         const changed = structuredClone(campaign); mutate(changed);
         assert.equal(validateMission(missionEnvelope(changed)).campaign, null);

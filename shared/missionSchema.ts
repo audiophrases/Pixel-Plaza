@@ -87,7 +87,7 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
     });
     const chapters: Chapter[] = list(raw.chapters, 'chapters', 20).map((value, i) => {
         const path = `chapters[${i}]`;
-        const c = obj(value, path, ['id', 'title', 'intro', 'recap', 'ending', 'share', 'objectives', 'discoveries', 'reveals', 'roleClues', 'thieves', 'help', 'roleClueHelp', 'introImage', 'endingImage']);
+        const c = obj(value, path, ['id', 'title', 'intro', 'recap', 'ending', 'share', 'objectives', 'discoveries', 'reveals', 'roleClues', 'thieves', 'help', 'roleClueHelp', 'roleClueImages', 'introImage', 'endingImage']);
         const objectives: Objective[] = list(c.objectives, `${path}.objectives`, 100).map((value, j) => {
             const p = `${path}.objectives[${j}]`;
             const o = obj(value, p, ['id', 'text', 'accept', 'answerThief', 'thiefKnows', 'answerRole', 'kind', 'after', 'optional', 'rewards', 'requires', 'board', 'activity', 'conversation', 'successCriteria', 'level', 'help', 'rewardHelp']);
@@ -152,6 +152,11 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
         if (c.endingImage !== undefined) chapter.endingImage = image(c.endingImage, `${path}.endingImage`);
         if (c.help !== undefined) chapter.help = fieldHelp(c.help, `${path}.help`, ['intro', 'recap', 'ending']);
         if (c.roleClueHelp !== undefined) chapter.roleClueHelp = roleHelp(c.roleClueHelp, `${path}.roleClueHelp`);
+        // A picture with a role's private clue: seen only by students with that role.
+        if (c.roleClueImages !== undefined) {
+            if (!record(c.roleClueImages)) fail(`${path}.roleClueImages`, 'Expected role IDs mapped to pictures.');
+            else chapter.roleClueImages = Object.fromEntries(Object.entries(c.roleClueImages).slice(0, 20).map(([key, picture]) => [id(key, `${path}.roleClueImages.${key}`), image(picture, `${path}.roleClueImages.${key}`)]));
+        }
         if (c.thieves !== undefined) {
             const t = obj(c.thieves, `${path}.thieves`, ['card', 'story', 'label', 'carry', 'help']);
             chapter.thieves = { card: str(t.card, `${path}.thieves.card`), story: str(t.story, `${path}.thieves.story`) };
@@ -224,6 +229,7 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
         }
         for (const role of Object.keys(c.roleClues ?? {})) if (!roleIds.has(role)) content(`${path}.roleClues.${role}`, 'Role does not exist.');
         for (const role of Object.keys(c.roleClueHelp ?? {})) if (!c.roleClues?.[role]) content(`${path}.roleClueHelp.${role}`, 'Language help needs a matching English chapter clue.');
+        for (const role of Object.keys(c.roleClueImages ?? {})) if (!roleIds.has(role)) content(`${path}.roleClueImages.${role}`, 'Role does not exist.');
         if (zones) c.discoveries.forEach((d, j) => { if (!zones.has(d.zone)) content(`${path}.discoveries[${j}].zone`, 'Choose a place that is on one of the maps.'); });
         if (c.thieves?.carry && (i === 0 || !chapters[i - 1].thieves)) content(`${path}.thieves.carry`, 'Carry requires a preceding thief chapter.');
     });

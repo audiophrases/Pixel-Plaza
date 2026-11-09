@@ -21,7 +21,7 @@ export default function MissionFileImport({ preview, maps, mapsReady, mapsFailed
     const missing = needed.filter(zone => !zones.has(zone));
     const matching = maps.filter(map => needed.every(zone => map.zones.some(place => place.id === zone)));
     const objectives = campaign.chapters.flatMap(chapter => chapter.objectives);
-    const pictures = new Set(campaign.chapters.flatMap(chapter => [chapter.introImage, chapter.endingImage, ...chapter.discoveries.map(clue => clue.image), ...chapter.reveals.map(news => news.image)]).filter(Boolean).map(image => image!.src)).size;
+    const pictures = new Set(campaign.chapters.flatMap(chapter => [chapter.introImage, chapter.endingImage, ...chapter.discoveries.map(clue => clue.image), ...chapter.reveals.map(news => news.image), ...Object.values(chapter.roleClueImages ?? {})]).filter(Boolean).map(image => image!.src)).size;
     return <section className="mission-card mission-file-preview" aria-labelledby="mission-import-heading">
         <p className="mission-eyebrow">READY TO IMPORT</p><h2 id="mission-import-heading" ref={heading} tabIndex={-1}>Import {preview.campaign.title || 'mission'}</h2>
         <p className="mission-muted mission-import-source">{preview.source}</p>

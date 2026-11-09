@@ -13,6 +13,8 @@ export function evidenceFields(campaign: Campaign, index: number) {
         { label: 'Chapter ending', text: c.ending, image: c.endingImage, path: ['chapters', index, 'endingImage'] },
         ...c.discoveries.map((d, i) => ({ label: `Map clue ${i + 1} · ${d.zone}`, text: d.text, image: d.image, path: ['chapters', index, 'discoveries', i, 'image'] })),
         ...c.reveals.map((r, i) => ({ label: `Teacher news ${i + 1}`, text: r.text, image: r.image, path: ['chapters', index, 'reveals', i, 'image'] })),
+        // Each role's private clue can come with a picture only that role sees: the picture a student describes to the team.
+        ...campaign.roles.map(role => ({ label: `Private clue · ${role.name || role.id}`, text: c.roleClues?.[role.id] ?? role.clue, image: c.roleClueImages?.[role.id], path: ['chapters', index, 'roleClueImages', role.id] })),
     ];
 }
 
@@ -43,13 +45,13 @@ export default function MissionEvidence({ campaign, chapterIndex, onChange }: { 
     const update = (path: (string | number)[], image?: EvidenceImage) => {
         const copy = structuredClone(latest.current);
         let target = copy as unknown as Record<string, unknown>;
-        for (const key of path.slice(0, -1)) target = target[key] as Record<string, unknown>;
+        for (const key of path.slice(0, -1)) target = (target[key] ??= {}) as Record<string, unknown>;
         if (image) target[path.at(-1)!] = image; else delete target[path.at(-1)!];
         if (new TextEncoder().encode(JSON.stringify(missionEnvelope(copy), null, 2)).length > MISSION_MAX_BYTES) throw new Error('This mission is full (512 KB). Remove a picture or import chapters as separate missions.');
         onChange(copy);
     };
     return <section className="mission-card"><details className="mission-details" data-editor-section="evidence-pictures"><summary>Evidence pictures</summary>
-        <p className="mission-muted">Add a picture beside a story, map clue or teacher announcement. Students can enlarge it when that text becomes available. Keep the essential evidence in the English text and Catalan help too.</p>
+        <p className="mission-muted">Add a picture beside a story, map clue, teacher announcement or a role’s private clue. Students can enlarge it when that text becomes available. Keep the essential evidence in the English text and Catalan help too.</p>
         <p className="mission-muted">Pictures are stored inside the mission and included in exports and sync. Large pictures are reduced automatically. Review small text in the preview before publishing.</p>
         {error && <p role="alert">{error}</p>}
         {evidenceFields(campaign, chapterIndex).map(field => <details className="mission-details" key={field.path.join('.')} data-evidence-path={field.path.join('.')}><summary>{field.label}{field.image ? ' · picture added' : ''}</summary>

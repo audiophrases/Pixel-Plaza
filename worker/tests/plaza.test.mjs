@@ -1567,8 +1567,9 @@ test('Season 2 imports as data and sends Catalan help only with each student’s
         const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
         const pack = JSON.parse(fs.readFileSync(path.join(root, 'content/season-2/campaign.json'), 'utf8'));
         const campaign = pack.campaign;
-        // Exercise news attachments too, without adding an extra repeated clue to the authored pack.
-        campaign.chapters[0].reveals[0].image = campaign.chapters[0].discoveries[0].image;
+        // Exercise news and map clue pictures too, reusing a picture the pack already has.
+        campaign.chapters[0].reveals[0].image = campaign.chapters[0].roleClueImages['records-researcher'];
+        campaign.chapters[0].discoveries[0].image = campaign.chapters[0].roleClueImages['records-researcher'];
         assert.equal((await teacher('missions/list')).body.library.length, 0, 'the season is not seeded or built in');
         assert.equal((await api(base, '/api/teacher/missions/import', { body: { envelope: pack, publish: true } })).status, 401);
         const premature = await teacher('missions/import', { envelope: pack, publish: true });
@@ -1603,32 +1604,40 @@ test('Season 2 imports as data and sends Catalan help only with each student’s
         assert.equal(own.chapter.help.intro.ca, campaign.chapters[0].help.intro.ca);
         assert.deepEqual(own.vocabulary, campaign.vocabulary, 'public story vocabulary comes from the imported campaign');
         assert.equal(campaign.cast.length, 8); assert.deepEqual(own.cast, campaign.cast, 'students get the story’s Who’s who');
-        for (const image of [campaign.chapters[0].endingImage, campaign.chapters[0].discoveries[0].image, campaign.chapters[2].discoveries[1].image]) {
+        for (const image of [campaign.chapters[0].endingImage, campaign.chapters[1].roleClueImages[own.role.id], campaign.chapters[2].roleClueImages['site-observer']]) {
             assert.ok(!JSON.stringify(own).includes(image.src), 'locked pictures are not sent to the browser');
         }
         const role = campaign.roles.find(r => r.id === own.role.id), otherRole = campaign.roles.find(r => r.id === other.role.id);
         assert.deepEqual(own.role.help, role.help.card);
         assert.deepEqual(own.clues.find(c => c.from === 'job').help, role.help.clue);
+        // Each student's private picture is theirs; a classmate's stays with them. A role nobody plays comes as a town notice.
+        assert.deepEqual(own.clues.find(c => c.from === 'job').image, campaign.chapters[0].roleClueImages[own.role.id]);
+        assert.ok(!JSON.stringify(own).includes(campaign.chapters[0].roleClueImages[other.role.id].src), 'a present classmate’s picture stays private');
+        const absent = campaign.roles.filter(r => r.id !== own.role.id && r.id !== other.role.id);
+        for (const missing of absent) assert.deepEqual(own.clues.find(c => c.id === `fallback-role-${missing.id}`).image, campaign.chapters[0].roleClueImages[missing.id]);
         assert.ok(!JSON.stringify(own).includes(otherRole.help.clue.ca), 'another present role’s private translation stays private');
         for (const hidden of [campaign.chapters[0].help.ending.ca, campaign.chapters[1].help.intro.ca, campaign.help.finale.ca,
             campaign.chapters[0].objectives[1].help.ca, campaign.chapters[0].reveals[0].help.ca, campaign.chapters[0].discoveries[0].help.ca]) {
             assert.ok(!JSON.stringify(own).includes(hidden), `not sent early: ${hidden}`);
         }
         assert.deepEqual(own.objectives.map(o => o.help), [campaign.chapters[0].objectives[0].help]);
-        a.send({ t: 'answer', objective: 'p815-c1-messages', text: 'sports hall' });
-        assert.equal((await a.next(m => m.t === 'answered' && m.objective === 'p815-c1-messages')).correct, true);
-        const unlocked = await a.next(m => m.t === 'quest' && m.quest?.objectives.some(o => o.id === 'p815-c1-passage'));
-        assert.deepEqual(unlocked.quest.objectives.find(o => o.id === 'p815-c1-passage').help, campaign.chapters[0].objectives[1].help);
+        a.send({ t: 'answer', objective: 'p815-c1-wrong', text: 'Go to the sports hall' });
+        assert.equal((await a.next(m => m.t === 'answered' && m.objective === 'p815-c1-wrong')).correct, true);
+        const unlocked = await a.next(m => m.t === 'quest' && m.quest?.objectives.some(o => o.id === 'p815-c1-where'));
+        assert.deepEqual(unlocked.quest.objectives.find(o => o.id === 'p815-c1-where').help, campaign.chapters[0].objectives[1].help);
         await teacher('campaign', { op: 'reveal' });
         const news = await a.next(m => m.t === 'quest' && m.quest?.clues.some(c => c.from === 'news'));
         assert.deepEqual(news.quest.clues.find(c => c.from === 'news').help, campaign.chapters[0].reveals[0].help);
         assert.deepEqual(news.quest.clues.find(c => c.from === 'news').image, campaign.chapters[0].reveals[0].image);
-        a.send({ t: 'move', x: 400, y: 760 });
-        const discovered = await a.next(m => m.t === 'quest' && m.quest?.clues.some(c => c.id === 'p815-c1-office'));
-        assert.deepEqual(discovered.quest.clues.find(c => c.id === 'p815-c1-office').image, campaign.chapters[0].discoveries[0].image, 'finding evidence releases its picture');
+        // The courtyard, in world pixels: its small extra clue comes when a student walks there.
+        const yard = theme.zones.find(z => z.id === 'courtyard').rect, scale = theme.world / theme.art;
+        a.send({ t: 'move', x: Math.round((yard[0] + yard[2] / 2) * scale), y: Math.round((yard[1] + yard[3] / 2) * scale) });
+        const discovered = await a.next(m => m.t === 'quest' && m.quest?.clues.some(c => c.id === 'p815-c1-register'));
+        assert.deepEqual(discovered.quest.clues.find(c => c.id === 'p815-c1-register').image, campaign.chapters[0].discoveries[0].image, 'finding evidence releases its picture');
         await teacher('campaign', { op: 'next' });
         const second = await a.next(m => m.t === 'quest' && m.quest?.chapter.index === 1);
         assert.deepEqual(second.quest.clues.find(c => c.from === 'job').help, campaign.chapters[1].roleClueHelp[own.role.id]);
+        assert.deepEqual(second.quest.clues.find(c => c.from === 'job').image, campaign.chapters[1].roleClueImages[own.role.id], 'a new picture each chapter');
         assert.ok(!JSON.stringify(second.quest).includes(campaign.chapters[1].help.ending.ca));
         for (const socket of sockets) socket.ws.close();
         await plaza.stop();

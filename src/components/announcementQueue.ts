@@ -53,7 +53,7 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
                 ...(quest.cast?.length ? [{ label: '📖 Story characters', text: `${quest.cast.map(member => member.name).join(', ')}. They are people in the story, not your classmates. Who’s who in your Journal says who they are.` }] : []),
                 { label: `You are ${quest.role.name}`, text: quest.role.card, help: quest.role.help },
                 ...(quest.secret ? [{ label: quest.secret.title, text: quest.secret.text, help: quest.secret.help }] : []),
-                ...quest.clues.filter(c => c.from === 'job').map(c => ({ label: 'Your private clue', text: c.text, help: c.help })),
+                ...quest.clues.filter(c => c.from === 'job').map(c => ({ label: 'Your private clue', text: c.text, help: c.help, image: c.image })),
                 ...(team ? [{ label: `Your team: ${team.name}`, text: `${mates.length ? `You work with ${mates.join(', ')}. ` : ''}Each of you has a different clue. Share yours in the 🤝 Team chat and answer together: one answer counts for the whole team.` }] : []),
                 ...current.flatMap(taskInstructions),
             ], next: team ? 'Press OK, then tell your team your clue in the 🤝 Team chat. Your clues, tasks and answer boxes are in the Journal.'
