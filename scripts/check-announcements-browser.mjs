@@ -124,8 +124,9 @@ try {
     assert.ok(await evaluate(`(()=>{const b=document.querySelector('.activity-announcement-body');return b.scrollHeight>b.clientHeight})()`), 'long instructions scroll inside the dialog');
     await screenshot('mobile-long-instructions');
     await ok();
-    // Student Choice works in the real game page, even with no campaign or preselected quests.
-    await evaluate(`window.__socket.receive({t:'quest',quest:null});window.__socket.receive({t:'warmup',warmup:null});
+    // School-network HTTP pages lack randomUUID; browsing must work there too.
+    await evaluate(`Object.defineProperty(crypto,'randomUUID',{configurable:true,value:undefined});
+        window.__socket.receive({t:'quest',quest:null});window.__socket.receive({t:'warmup',warmup:null});
         const previousSend=window.__socket.send.bind(window.__socket);
         window.__socket.send=raw=>{previousSend(raw);if(raw==='ping')return;const m=JSON.parse(raw);
             if(m.t==='quest-browse')setTimeout(()=>window.__socket.receive({t:'quest-library',requestId:m.requestId,enabled:true,total:1,page:0,pages:1,

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { StudentChoicePage, StudentChoiceQuery } from '../../shared/studentChoice';
+import { messageId } from '../utils/messageId';
 import './StudentQuestBrowser.css';
 
 type Props = {
@@ -16,7 +17,7 @@ export default function StudentQuestBrowser({ result, active, refreshKey, onBrow
   const [query, setQuery] = useState<StudentChoiceQuery>({ search: '', format: '', level: '', page: 0 });
   const [request, setRequest] = useState<{ id: string; key: string } | null>(null);
   const [retry, setRetry] = useState(0);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<{ kind: 'browse' | 'pick'; text: string } | null>(null);
   const [wasActive, setWasActive] = useState(active);
   if (wasActive !== active) { setWasActive(active); setOpen(!active); }
   const browse = useRef(onBrowse);
@@ -25,18 +26,19 @@ export default function StudentQuestBrowser({ result, active, refreshKey, onBrow
   useEffect(() => {
     if (!open) return;
     const timer = window.setTimeout(() => {
-      const id = crypto.randomUUID();
-      setRequest({ id, key: queryKey }); setError('');
-      if (!browse.current({ ...query, requestId: id })) setError('Reconnecting. Try again in a moment.');
+      const id = messageId();
+      setRequest({ id, key: queryKey }); setError(null);
+      if (!browse.current({ ...query, requestId: id })) setError({ kind: 'browse', text: 'Reconnecting. Try again in a moment.' });
     }, 200);
     return () => window.clearTimeout(timer);
   }, [open, query, queryKey]);
   const page = request?.key === queryKey && result?.requestId === request?.id ? result : null;
   useEffect(() => {
     if (!open || !request || page) return;
-    const timer = window.setTimeout(() => setError('Could not load challenges. Try again.'), 8000);
+    const timer = window.setTimeout(() => setError({ kind: 'browse', text: 'Could not load challenges. Try again.' }), 8000);
     return () => window.clearTimeout(timer);
   }, [open, request, page]);
+  const problem = error?.kind === 'pick' || !page ? error?.text : null;
   const filters = (value: Partial<StudentChoiceQuery>) => setQuery(current => ({ ...current, ...value, page: 0 }));
   return <section className="student-choice" aria-label="Choose a challenge">
     <button type="button" className="journal-choice student-choice-toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}>
@@ -54,7 +56,7 @@ export default function StudentQuestBrowser({ result, active, refreshKey, onBrow
           <option value="">All levels</option>{['A1', 'A2', 'B1', 'B2'].map(level => <option key={level}>{level}</option>)}
         </select></label>
       </div>
-      <div className="student-choice-count"><span role="status">{error || page?.error || (page ? `${page.total} challenge${page.total === 1 ? '' : 's'}` : 'Loading…')}</span>
+      <div className="student-choice-count"><span role="status">{problem || page?.error || (page ? `${page.total} challenge${page.total === 1 ? '' : 's'}` : 'Loading…')}</span>
         <button type="button" className="journal-dismiss" onClick={() => setRetry(value => value + 1)}>Refresh</button></div>
       {page?.enabled && !page.error && <>
         {!page.items.length && <p>{query.search || query.format || query.level ? 'No matches. Try another search or filter.' : 'No challenges yet. Ask your teacher to add some to the library.'}</p>}
@@ -65,7 +67,7 @@ export default function StudentQuestBrowser({ result, active, refreshKey, onBrow
           {!!item.joining.length && <p className="student-choice-join">Waiting: {item.joining.join(', ')}</p>}
           {item.reason && <p className="student-choice-meta">{item.reason}</p>}
           <button type="button" className="journal-choice" disabled={active || item.state !== 'available'} onClick={() => {
-            if (!onPick(item.id)) setError('Reconnecting. Try again in a moment.');
+            setError(onPick(item.id) ? null : { kind: 'pick', text: 'Reconnecting. Try again in a moment.' });
           }}>{item.state === 'done' ? '✓ Completed' : item.state === 'active' ? 'Your current quest' : item.joining.length ? 'Join them' : 'Choose this'}</button>
         </article>)}
         {page.pages > 1 && <nav className="student-choice-pages" aria-label="Challenge pages">

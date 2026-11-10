@@ -29,3 +29,18 @@ test('student catalog search, pagination and waiting partners use only public da
     assert.equal(studentChoicePage([{ ...secret, state: 'available', reason: null, joining: [] }], studentChoiceQuery({ search: 'hidden-sentinel' })).total, 0);
     assert.deepEqual(studentChoiceQuery({ search: {}, format: 'class', level: 'secret', page: -10 }), { search: '', format: '', level: '', page: 0 });
 });
+
+test('ready pairs and groups come before solo tasks, while unavailable and completed tasks wait', () => {
+    const base = { ...studentChallenge(sideQuests.find(studentChoiceEligible)), state: 'available', reason: null, joining: [] };
+    const cards = [
+        { ...base, id: 'solo', title: 'A solo challenge', format: 'solo' },
+        { ...base, id: 'group', title: 'Z group challenge', format: 'group' },
+        { ...base, id: 'pair', title: 'Y pair challenge', format: 'pair' },
+        { ...base, id: 'waiting', title: 'A waiting group', format: 'group', state: 'waiting' },
+        { ...base, id: 'done', title: 'A finished pair', format: 'pair', state: 'done' },
+        { ...base, id: 'join', title: 'Z waiting partner', format: 'pair', joining: ['Sam'] },
+        { ...base, id: 'mingle', title: 'A mingle challenge', format: 'mingle' },
+    ];
+    assert.deepEqual(studentChoicePage(cards, studentChoiceQuery({})).items.map(item => item.id),
+        ['join', 'pair', 'group', 'mingle', 'solo', 'waiting', 'done']);
+});

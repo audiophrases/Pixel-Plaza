@@ -32,7 +32,7 @@ Every quest card shows its kind (**Story** in orange, **Generic** in blue), its 
 
 In **Teacher controls → Side quests**, turn on **Student Choice**. Students open **Choose a challenge** in the Journal, search or filter by players and level, and choose from the standalone library. No teacher preselection is needed. Story quests stay out of this browser because they need campaign clues.
 
-Students see three steps: **Pick one. Chat together. Answer.** Classmates waiting for a partner appear first. Students take one quest at a time, and the browser folds away when they pick one. There is no automatic selection timer in this mode.
+Students see three steps: **Pick one. Chat together. Answer.** Classmates waiting for a partner appear first, followed by available pair/group challenges, mingles and solo tasks. Completed quests and those waiting for more players come later. Students take one quest at a time, and the browser folds away when they pick one. There is no automatic selection timer in this mode.
 
 The switch starts off in each new game and is saved with that game. Turning it off stops new selections from the browser; students already doing a quest keep their work and can finish. Teacher-selected quests remain available. Changes to a library quest do not rewrite the copy already chosen in a game. Removing a quest from the library stops new students choosing it; current participants keep their copy. Answers, grading criteria and teacher notes stay private.
 

@@ -2,6 +2,7 @@ import type { Objective } from './campaign.ts';
 import type { QuestFormat, QuestLevel, SideQuest } from './sideQuests.ts';
 
 export const STUDENT_CHOICE_PAGE_SIZE = 12;
+const FORMAT_ORDER: Record<QuestFormat, number> = { pair: 0, group: 0, mingle: 1, solo: 2 };
 export type StudentChoiceQuery = { search: string; format: QuestFormat | ''; level: QuestLevel | ''; page: number };
 // A deliberate allowlist: accepted answers, criteria and teacher notes stay on the server.
 export type StudentChallenge = Pick<SideQuest, 'id' | 'title' | 'text' | 'category' | 'format' | 'level' | 'minutes'> & {
@@ -27,7 +28,9 @@ export function studentChoicePage(items: StudentChallenge[], query: StudentChoic
     const matching = items.filter(item => (!query.format || item.format === query.format) && (!query.level || item.level === query.level)
         && terms.every(term => `${item.title} ${item.text} ${item.category}`.toLowerCase().includes(term)));
     matching.sort((a, b) => Number(b.state === 'available' && b.joining.length > 0) - Number(a.state === 'available' && a.joining.length > 0)
-        || Number(a.state === 'done') - Number(b.state === 'done') || a.title.localeCompare(b.title));
+        || Number(a.state === 'done') - Number(b.state === 'done')
+        || Number(b.state === 'available') - Number(a.state === 'available')
+        || FORMAT_ORDER[a.format] - FORMAT_ORDER[b.format] || a.title.localeCompare(b.title));
     const pages = Math.ceil(matching.length / STUDENT_CHOICE_PAGE_SIZE), page = Math.min(query.page, Math.max(0, pages - 1));
     return { items: matching.slice(page * STUDENT_CHOICE_PAGE_SIZE, (page + 1) * STUDENT_CHOICE_PAGE_SIZE), total: matching.length, page, pages };
 }

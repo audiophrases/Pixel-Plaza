@@ -12,6 +12,15 @@ const { default: StudentQuestBrowser } = await import('../src/components/Student
 const { default: Journal } = await import('../src/components/Journal');
 const { activityAnnouncements } = await import('../src/components/announcementQueue');
 const root = createRoot(document.getElementById('root')!);
+// Students joining the teacher's laptop over HTTP do not have randomUUID.
+const uuidDescriptor = Object.getOwnPropertyDescriptor(crypto, 'randomUUID');
+Object.defineProperty(crypto, 'randomUUID', { configurable: true, value: undefined });
+const browserTimeout = window.setTimeout;
+let loadingTimeout: (() => void) | undefined;
+window.setTimeout = ((handler: TimerHandler, ms?: number, ...args: unknown[]) => {
+  if (ms === 8000 && typeof handler === 'function') loadingTimeout = () => handler(...args);
+  return browserTimeout.call(window, handler, ms, ...args);
+}) as typeof window.setTimeout;
 const requests: (StudentChoiceQuery & { requestId: string })[] = [], picks: string[] = [];
 let result: StudentChoicePage | null = null, active = false, online = true;
 const render = () => act(async () => root.render(<StudentQuestBrowser result={result} active={active} refreshKey="1"
@@ -27,8 +36,15 @@ const response = (title = 'Build a story') => ({ requestId: requests.at(-1)!.req
     minutes: 5, state: 'available' as const, reason: null, joining: ['Sam'] }] });
 await render(); await wait();
 assert.equal(requests.length, 1);
+assert.match(requests[0].requestId, /^[a-f0-9-]{36}$/, 'the school-network browser can request challenges without randomUUID');
+await act(async () => { assert.ok(loadingTimeout); loadingTimeout(); });
+assert.match(document.body.textContent!, /Could not load challenges/);
 result = response(); await render();
+assert.doesNotMatch(document.body.textContent!, /Could not load challenges/, 'a late successful response replaces its loading warning');
 assert.match(document.body.textContent!, /Waiting: Sam/);
+online = false; await click('Join them');
+assert.match(document.body.textContent!, /Reconnecting/, 'a failed selection is still reported when the catalog has loaded');
+online = true; picks.length = 0;
 await click('Join them'); assert.deepEqual(picks, ['story']);
 await click('Next');
 assert.equal(document.querySelector('.student-choice-card'), null, 'stale cards disappear while another page loads');
@@ -63,6 +79,8 @@ assert.ok(!timers.includes(60000), 'student browsing never schedules automatic s
 assert.match(activityAnnouncements(null, null, new Set(), board)[0].sections[0].text, /Chat with your classmates/);
 await act(async () => root.render(<Journal quest={null} board={{ ...board, studentChoice: false }} feedback={null} onAnswer={() => {}} />));
 assert.equal(document.querySelector('.student-choice'), null, 'turning the mode off removes browsing');
+if (uuidDescriptor) Object.defineProperty(crypto, 'randomUUID', uuidDescriptor);
+else delete (crypto as Partial<Crypto>).randomUUID;
 
 Object.assign(globalThis, { localStorage: dom.window.localStorage, sessionStorage: dom.window.sessionStorage });
 dom.window.HTMLElement.prototype.scrollIntoView = () => {};
