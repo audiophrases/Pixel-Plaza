@@ -66,7 +66,12 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
     if (board) {
         const items = board.board.filter(o => !o.ended);
         // Nothing else to do: choose a side quest. Asked again each time, after finishing one.
-        if (board.sideQuests.state === 'choose') {
+        if (board.studentChoice && !items.some(item => item.sideQuest && item.state === 'active')) {
+            add(key('student-choice', items.filter(item => item.sideQuest && item.state === 'done').length), {
+                kind: 'board', eyebrow: 'YOUR CHOICE', title: 'Choose a challenge',
+                sections: [{ label: 'Three steps', text: '1. Pick a challenge. 2. Chat with your classmates. 3. Answer together.' }],
+                next: 'Open Choose a challenge in your Journal. Join someone waiting, or pick your own.' });
+        } else if (board.sideQuests.state === 'choose') {
             const open = items.filter(o => o.sideQuest && o.state === 'available');
             add(key('choose', 'board', items.filter(o => o.sideQuest && o.state === 'done').length), { kind: 'board', eyebrow: 'TIME FOR A SIDE QUEST', title: 'Choose a side quest',
                 sections: open.slice(0, 5).map(o => ({ label: 'Side quest', text: o.text, help: o.help, answer: true })), next: `Press OK, then accept one in the Journal${open.length > 5 ? ` (${open.length} to choose from)` : ''}. You do one side quest at a time.` });

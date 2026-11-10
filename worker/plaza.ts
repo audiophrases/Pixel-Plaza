@@ -48,6 +48,7 @@ import { defaultWarmup, validateWarmup, warmupVocabulary, type SavedWarmup, type
 import { VOICE_SAMPLE } from './speech.ts';
 import { buildGuide, type TeacherGuide } from '../shared/teacherGuide.ts';
 import { clueZones, missionId } from '../shared/missionSchema.ts';
+import { studentChallenge, studentChoiceEligible, studentChoicePage, studentChoiceQuery, type StudentChallenge, type StudentChoicePage } from '../shared/studentChoice.ts';
 
 const TICKET_MS = 60_000;
 const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
@@ -106,6 +107,7 @@ export type TeacherAction =
     | { kind: 'auto'; news?: number; next?: number } // the open game's auto-advance, in minutes (0 is off)
     | { kind: 'questRelease'; objective: string }
     | { kind: 'questPlace'; objective: string; studentKey: string }
+    | { kind: 'studentChoice'; gameId: string; enabled: boolean }
     | { kind: 'reportAccept'; gameId: string; studentKey: string; objective: string; version: number }
     | { kind: 'remove'; id: string } // takes down a message that posted
     | { kind: 'mute'; studentKey: string; muted: boolean }
@@ -151,7 +153,7 @@ export type CampaignStatus = {
 // doing one, how many are still on a warm-up or mission, and how many side quests the board has. `groups`: pairs and
 // groups waiting for members or playing; `open`: the side quests a student can be placed in; `reports`: what students
 // wrote for them.
-export type SideQuestStatus = { free: { studentKey: string; name: string }[]; doing: { studentKey: string; name: string; quest: string }[]; busy: number; quests: number;
+export type SideQuestStatus = { studentChoice: boolean; free: { studentKey: string; name: string }[]; doing: { studentKey: string; name: string; quest: string }[]; busy: number; quests: number;
     groups: { id: string; quest: string; members: string[]; size: number; state: 'open' | 'playing' }[]; open: { id: string; title: string }[];
     reports: { studentKey: string; objective: string; quest: string; text: string; partner?: string; starred: boolean; version: number; check?: ReportCheck }[] };
 
@@ -315,7 +317,7 @@ export class PlazaRoom extends DurableObject<Env> {
             started INTEGER NOT NULL, ended INTEGER, chapter INTEGER NOT NULL, chapters INTEGER NOT NULL, early INTEGER NOT NULL DEFAULT 0, teams INTEGER NOT NULL DEFAULT 0,
             students INTEGER NOT NULL DEFAULT 0, reports INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL)`);
         this.sql.exec('CREATE INDEX IF NOT EXISTS campaign_history_game ON campaign_history (game_id, ended)');
-        for (const [column, minutes] of [['auto_news', 5], ['auto_next', 2]] as const) {
+        for (const [column, minutes] of [['auto_news', 5], ['auto_next', 2], ['student_choice', 0]] as const) {
             if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('games')").toArray().some(row => row.name === column)) this.sql.exec(`ALTER TABLE games ADD COLUMN ${column} INTEGER NOT NULL DEFAULT ${minutes}`);
         }
         // Games from before limited vision show everyone.
@@ -746,6 +748,12 @@ export class PlazaRoom extends DurableObject<Env> {
             const objective = row && this.gameCampaign(game)?.chapters[row.chapter]?.objectives.find(o => o.id === action.objective);
             if (!game || !row || row.status === 'campaign_complete' || !objective?.board?.teacherReleased) return { error: 'That quest cannot be released in this chapter.', status: 400 };
             this.questBoard.release(game, objective.id); this.sendQuestToAll(game);
+        }
+        if (action.kind === 'studentChoice') {
+            const game = this.activeGame();
+            if (!game || action.gameId !== game || typeof action.enabled !== 'boolean') return { error: 'The selected game changed. Refresh the controls.', status: 409 };
+            this.sql.exec('UPDATE games SET student_choice = ? WHERE id = ?', action.enabled ? 1 : 0, game);
+            this.sendQuestToAll(game);
         }
         if (action.kind === 'questPlace') {
             // The teacher puts a free student into a side quest (a group for it, when it has one), as if they chose it.
@@ -1189,6 +1197,8 @@ export class PlazaRoom extends DurableObject<Env> {
         // teacher's own version.
         const copy = result.quest && sync.questsKeptBoth?.find(item => item.id === result.quest!.id)?.copy;
         const quest = copy ? this.sideQuests.quests().find(item => item.id === copy) : result.quest;
+        const game = this.activeGame();
+        if (game && this.studentChoiceEnabled(game)) this.sendQuestToAll(game);
         return { ...this.sideQuests.execute('list', {}), ...(quest ? { quest } : {}), ...(result.imported ? { imported: result.imported } : {}), chapters: this.storyChapters(), sync };
     }
 
@@ -1501,6 +1511,10 @@ export class PlazaRoom extends DurableObject<Env> {
             await this.answer(ws, seat, data.objective, data.text, typeof data.attemptId === 'string' ? data.attemptId : undefined);
         } else if (data?.t === 'quest-accept' && typeof data.objective === 'string') {
             this.claimQuest(ws, seat, data.objective, data.changePartner === true);
+        } else if (data?.t === 'quest-browse') {
+            this.browseStudentChoices(ws, seat, data);
+        } else if (data?.t === 'quest-pick' && typeof data.objective === 'string') {
+            this.pickStudentChoice(ws, seat, data.objective);
         } else if (data?.t === 'quest-leave' && typeof data.objective === 'string') {
             this.leaveQuest(ws, seat, data.objective);
         } else if (data?.t === 'report-undo' && typeof data.objective === 'string' && typeof data.gameId === 'string' && Number.isSafeInteger(data.version)) {
@@ -1831,22 +1845,84 @@ export class PlazaRoom extends DurableObject<Env> {
         const given = this.gameSideQuests.objectives(game, chapter?.id ?? null).filter(o => !own.some(item => item.id === o.id));
         const me = players.find(p => p.student_key === studentKey) ?? player(studentKey);
         const kept = this.isRandom(game) ? new Set(this.sql.exec<{ student_key: string }>('SELECT student_key FROM aliases WHERE game_id = ? AND kept = 1', game).toArray().map(r => r.student_key)) : null;
+        const choiceIds = this.gameSideQuests.studentChoiceIds(game);
+        const eligible = this.studentChoiceEnabled(game) && choiceIds.length ? new Set(this.sideQuests.quests().filter(studentChoiceEligible).map(q => q.id)) : new Set<string>();
         return { game, chapterIndex: row && chapter ? row.chapter : GAME_CHAPTER, chapter, status: row && chapter ? row.status : null, quests: [...own, ...given], player: me, players,
             online: new Set(this.seats().filter(s => s.game === game && (!kept || kept.has(s.studentKey))).map(s => s.studentKey)), names,
             // Every quest on the board follows the side quest rules: the game's and the mission's own.
             sideQuests: new Set([...own, ...given].map(o => o.id)), gameQuests: new Set(given.map(o => o.id)),
-            closed: new Set([...this.liveMissions.closedIds(game), ...this.gameSideQuests.closedIds(game)]),
+            closed: new Set([...this.liveMissions.closedIds(game), ...this.gameSideQuests.closedIds(game), ...choiceIds.filter(id => !eligible.has(id))]),
             idle: nothingElseToDo(row?.status === 'campaign_complete' ? null : chapter, me.done, this.warmupLeft(game, studentKey)) };
     }
     // What the student's quest board shows, with or without a mission.
     private boardView(game: string, studentKey: string): BoardView | null {
         const ctx = this.boardContext(game, studentKey);
         if (!ctx) return null;
-        return { board: this.questBoard.view(ctx).map(item => {
+        const choiceIds = new Set(this.gameSideQuests.studentChoiceIds(game));
+        return { board: this.questBoard.view(ctx).filter(item => !choiceIds.has(item.id) || item.state === 'active' || item.state === 'done').map(item => {
             const objective = ctx.quests.find(o => o.id === item.id)!;
             return { ...item, ...(objective.kind === 'report' && (item.state === 'active' || item.state === 'done') ? { report: this.reportView(game, objective, studentKey) } : {}),
                 ...(objective.activity || objective.conversation ? { conversation: this.conversation(game, studentKey, objective) } : {}) };
-        }), sideQuests: this.questBoard.sideQuestsView(ctx) };
+        }), sideQuests: this.questBoard.sideQuestsView(ctx), studentChoice: this.studentChoiceEnabled(game) };
+    }
+    private studentChoiceEnabled(game: string): boolean {
+        return this.sql.exec<{ student_choice: number }>('SELECT student_choice FROM games WHERE id = ?', game).toArray()[0]?.student_choice === 1;
+    }
+    private browseStudentChoices(ws: WebSocket, seat: Seat, data: Record<string, unknown>): void {
+        const requestId = typeof data.requestId === 'string' ? data.requestId.slice(0, 100) : '';
+        const enabled = this.isOpen() && seat.game === this.activeGame() && this.studentChoiceEnabled(seat.game);
+        const ctx = enabled ? this.boardContext(seat.game, seat.studentKey) : null;
+        const result: StudentChoicePage = { requestId, enabled: !!ctx && ctx.online.has(seat.studentKey), items: [], total: 0, page: 0, pages: 0 };
+        if (!result.enabled || !ctx) {
+            result.error = 'Student Choice is not available right now.';
+        } else {
+            const active = this.questBoard.activeSideQuest(ctx);
+            const views = new Map(this.questBoard.view(ctx).map(item => [item.id, item]));
+            const added = new Map(this.gameSideQuests.added(seat.game).map(item => [item.id, item]));
+            const pinned = new Map(ctx.quests.map(item => [item.id, item]));
+            const campaignIds = new Set(this.gameCampaign(seat.game)?.chapters.flatMap(chapter => chapter.objectives.map(item => item.id)) ?? []);
+            const done = new Set(ctx.player.done);
+            const items: StudentChallenge[] = this.sideQuests.quests().filter(studentChoiceEligible).flatMap(quest => {
+                const existing = added.get(quest.id), objective = pinned.get(quest.id);
+                if (existing?.withdrawn || campaignIds.has(quest.id)) return [];
+                const card = studentChallenge(quest, objective), view = views.get(quest.id);
+                const players = card.format === 'pair' ? 2 : card.format === 'group' ? 3 : card.format === 'mingle' ? 4 : 1;
+                const state = done.has(quest.id) ? 'done' : active?.id === quest.id ? 'active' : null;
+                const reason = state ? null : existing?.closed ? 'Your teacher closed this challenge.'
+                    : active ? 'Finish your current challenge, or leave it first.'
+                    : ctx.online.size < players ? `Needs ${players} players online.` : objective ? this.questBoard.wait(ctx, objective) : null;
+                return [{ ...card, state: state ?? (reason ? 'waiting' : 'available'), reason, joining: view?.joining ?? [] }];
+            });
+            Object.assign(result, studentChoicePage(items, studentChoiceQuery(data)));
+        }
+        ws.send(JSON.stringify({ t: 'quest-library', ...result }));
+    }
+    private pickStudentChoice(ws: WebSocket, seat: Seat, id: string): void {
+        const warn = (text: string) => ws.send(JSON.stringify({ t: 'notice', level: 'warning', text }));
+        if (!this.isOpen() || seat.game !== this.activeGame() || !this.studentChoiceEnabled(seat.game)) return warn('Student Choice is not available right now.');
+        let selected: Objective | undefined;
+        try {
+            this.ctx.storage.transactionSync(() => {
+                const library = this.sideQuests.quests(), source = library.find(q => q.id === id && studentChoiceEligible(q));
+                if (!source) throw new Error('That challenge is no longer available. Refresh the list.');
+                if (this.gameCampaign(seat.game)?.chapters.some(chapter => chapter.objectives.some(item => item.id === id))) throw new Error('That challenge belongs to the campaign already.');
+                const ctx = this.boardContext(seat.game, seat.studentKey);
+                if (!ctx || !ctx.online.has(seat.studentKey)) throw new Error('Join the game and choose your name first.');
+                const existing = ctx.quests.find(q => q.id === id);
+                if ((existing && !ctx.gameQuests.has(id)) || (!existing && this.gameSideQuests.has(seat.game, id))) throw new Error('That challenge is not available in this game.');
+                if (ctx.player.done.includes(id)) throw new Error('You have already finished this challenge.');
+                const objective = existing ?? questObjective(source);
+                const candidate: BoardContext = existing ? ctx : { ...ctx, quests: [...ctx.quests, objective], sideQuests: new Set([...ctx.sideQuests, id]), gameQuests: new Set([...ctx.gameQuests, id]) };
+                const reason = this.questBoard.wait(candidate, objective);
+                if (reason && !this.questBoard.assignment(seat.game, id, seat.studentKey)) throw new Error(reason);
+                const pinError = this.gameSideQuests.pinStudentChoice(seat.game, objective, libraryVersion(library));
+                if (pinError) throw new Error(pinError);
+                const error = this.questBoard.claim(candidate, objective);
+                if (error) throw new Error(error);
+                selected = objective;
+            });
+        } catch (error) { return warn(error instanceof Error ? error.message : 'Could not start this challenge. Try again.'); }
+        if (selected) this.sendQuestToAll(seat.game);
     }
     // True while the student still has a warm-up task: side quests wait until it is done.
     private warmupLeft(game: string, studentKey: string): boolean {
@@ -1901,6 +1977,7 @@ export class PlazaRoom extends DurableObject<Env> {
             return this.sendQuestToAll(seat.game);
         }
         if (this.questBoard.sideQuestsView(ctx).state !== 'choose') return;
+        if (this.studentChoiceEnabled(seat.game)) return; // Browsing students choose at their own pace.
         const picked = this.questBoard.autoPick(ctx);
         if (typeof picked === 'string') return warn(picked);
         ws.send(JSON.stringify({ t: 'notice', level: 'info', text: 'The game chose a side quest for you. You can leave it in the Journal and choose another.' }));
@@ -2406,7 +2483,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const name = (key: string) => base.names.get(key) ?? 'Student';
         const chapters = base.chapterIndex === GAME_CHAPTER ? [GAME_CHAPTER] : [GAME_CHAPTER, base.chapterIndex];
         const given = new Set(this.gameSideQuests.added(game).map(quest => quest.id));
-        const status: SideQuestStatus = { free: [], doing: [], busy: 0, quests: sideQuests.length,
+        const status: SideQuestStatus = { studentChoice: this.studentChoiceEnabled(game), free: [], doing: [], busy: 0, quests: sideQuests.length,
             groups: chapters.flatMap(chapter => this.groups.current(game, chapter)).flatMap(group => sideQuests.some(o => o.id === group.objective) && group.state !== 'done'
                 ? [{ id: group.group_id, quest: title(group.objective), members: this.groups.members(group.group_id).map(name), size: group.size, state: group.state }] : []),
             open: sideQuests.filter(o => !base.closed.has(o.id)).map(o => ({ id: o.id, title: title(o.id) })),

@@ -5,6 +5,7 @@ import type { WarmupView } from '../shared/warmup';
 import type { AttemptSource, StudentSupport } from '../shared/support';
 import type { Style } from '../shared/levels';
 import type { Theme } from '../shared/theme';
+import type { StudentChoicePage } from '../shared/studentChoice';
 
 export type PlazaPlayer = AvatarConfig & { id: string; name: string; x: number; y: number; style?: Style; frozenUntil?: number; downUntil?: number };
 // A hint on one chat message, from the server. Never a refusal.
@@ -36,6 +37,7 @@ export type PlazaEvent =
   | { t: 'avatar'; id: string; avatar: AvatarConfig } // the teacher changed a student's character
   | { t: 'quest'; quest: QuestView | null }                                  // this student's view of the campaign
   | ({ t: 'board' } & BoardView)                                           // this student's quest board, with or without a campaign
+  | ({ t: 'quest-library' } & StudentChoicePage)
   | ({ t: 'answered' } & AnswerFeedback)
   | { t: 'support'; support: StudentSupport; history?: boolean }
   | { t: 'xp'; xp: number; gained?: number; reason?: string }            // this student's experience; gained and why when it grows

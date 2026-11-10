@@ -126,7 +126,7 @@ export type BoardQuestView = {
 // under way. "active": doing one. "empty": nothing to pick (`reason` says why).
 export type SideQuestsView = { state: 'choose' | 'open' | 'active' | 'empty'; reason: string | null; waiting: number };
 // A student's quest board, with or without a mission: the game's side quests and the mission's own board quests.
-export type BoardView = { board: BoardQuestView[]; sideQuests: SideQuestsView };
+export type BoardView = { board: BoardQuestView[]; sideQuests: SideQuestsView; studentChoice?: boolean };
 
 export type InterviewView = {
     id: string; objective: string; task: string; incoming: boolean; name: string;

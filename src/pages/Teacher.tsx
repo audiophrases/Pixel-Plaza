@@ -31,7 +31,7 @@ import type { AvatarConfig } from '../utils/AvatarRenderer';
 
 type Entry = { id: string; studentKey: string; sender: string; target: string | null; everyone?: boolean; flag: string | null; note: string | null; text: string; timestamp: number; status: string; starred?: boolean };
 // Where students stand with the open game's side quests, and what they wrote for them.
-type SideQuestPanel = { free: { studentKey: string; name: string }[]; doing: { studentKey: string; name: string; quest: string }[]; busy: number; quests: number;
+type SideQuestPanel = { free: { studentKey: string; name: string }[]; doing: { studentKey: string; name: string; quest: string }[]; busy: number; quests: number; studentChoice?: boolean;
   groups: { id: string; quest: string; members: string[]; size: number; state: 'open' | 'playing' }[]; open: { id: string; title: string }[];
   reports: { studentKey: string; objective: string; quest: string; text: string; partner?: string; starred: boolean; version: number; check?: ReportCheck }[] };
 type CampaignInfo = {
@@ -84,6 +84,7 @@ export default function Teacher() {
   const [unplayedWarmups, setUnplayedWarmups] = useState(false);
   const navigate = useNavigate();
   const [movingStudent, setMovingStudent] = useState(false);
+  const [savingStudentChoice, setSavingStudentChoice] = useState(false);
   const [password, setPassword] = useState('');
   // The student open in the drawer beside the class, and the one the map's spells work on.
   const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
@@ -654,8 +655,16 @@ export default function Teacher() {
         </>}
 
         {shown === 'side' && status.game && side && <>
+          <label className="teacher-student-choice"><input type="checkbox" role="switch" checked={!!side.studentChoice} disabled={savingStudentChoice}
+            onChange={async event => {
+              setSavingStudentChoice(true);
+              await action('student-choice', { gameId: status.game!.id, enabled: event.target.checked });
+              setSavingStudentChoice(false);
+            }} /> <strong>Student Choice</strong></label>
+          <p>Students browse the library and pick their own challenges. No preselection needed.</p>
+          <p className="teacher-muted">Standalone quests only. Turning this off keeps their current work.</p>
           <p>{side.free.length} free to choose · {side.doing.length} doing one · {side.busy} on the warm-up or campaign · {side.quests} side quest{side.quests === 1 ? '' : 's'} on the board</p>
-          {side.quests === 0 && (side.free.length > 0
+          {!side.studentChoice && side.quests === 0 && (side.free.length > 0
             ? <p className="teacher-error">{side.free.length === 1 ? '1 student has' : `${side.free.length} students have`} nothing else to do and no side quests to choose. <Link to="/quest-library">Add some from the library</Link>.</p>
             : <p className="teacher-muted">No side quests in this game yet. <Link to="/quest-library">Add some from the library</Link>: students can take them straight away, with or without a campaign.</p>)}
           {side.free.length > 0 && <ul>{side.free.map(item => <li key={item.studentKey}><span><strong>{who(item.studentKey, item.name)}</strong> · free</span>

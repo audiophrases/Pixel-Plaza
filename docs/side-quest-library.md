@@ -28,6 +28,14 @@ Every quest card shows its kind (**Story** in orange, **Generic** in blue), its 
 - Tick **Only quests that fit … now** to hide quests the running game cannot take (story quests for another chapter, or quests already added).
 - Click a tag inside a teacher note to search for it.
 
+## Student Choice
+
+In **Teacher controls → Side quests**, turn on **Student Choice**. Students open **Choose a challenge** in the Journal, search or filter by players and level, and choose from the standalone library. No teacher preselection is needed. Story quests stay out of this browser because they need campaign clues.
+
+Students see three steps: **Pick one. Chat together. Answer.** Classmates waiting for a partner appear first. Students take one quest at a time, and the browser folds away when they pick one. There is no automatic selection timer in this mode.
+
+The switch starts off in each new game and is saved with that game. Turning it off stops new selections from the browser; students already doing a quest keep their work and can finish. Teacher-selected quests remain available. Changes to a library quest do not rewrite the copy already chosen in a game. Removing a quest from the library stops new students choosing it; current participants keep their copy. Answers, grading criteria and teacher notes stay private.
+
 ## Adding quests to a game
 
 1. In Teacher controls, create or open the game. A campaign is not needed: a new class can have side quests straight away.
@@ -40,17 +48,17 @@ A **story quest** continues one campaign chapter: it can be added only while tha
 
 - These rules hold for every quest on the board: library quests, quests released from Mission Studio, and the partner quests written in a mission (such as the Castanyada interviews, which keep their assigned witness and the witness exchange).
 - **Open at once.** Side quests do not wait for a warm-up or for a campaign's main questions: a student can accept one whenever they like. Without a campaign the Journal shows only the quest board. A partner quest written in a mission keeps its own rule if its author set it to follow the main mystery.
-- **Choose one when there is nothing else to do.** A student with no warm-up part left and no main questions left sees a *Choose a side quest* message, and the Journal opens at the quest board. In a class with only side quests, that is everyone at once. A student still on the warm-up or the campaign is never asked or placed.
+- **Choose one when there is nothing else to do.** With Student Choice off, a student with no warm-up part left and no main questions left sees a *Choose a side quest* message, and the Journal opens at the quest board. In a class with only side quests, that is everyone at once. Student Choice opens the browser whenever a student is free of another side quest.
 - **One at a time.** While a student does a side quest, the others are out of sight. **Leave this quest and choose another** in the Journal gives it up and brings the choice back. After finishing one, they choose the next.
 - **Pairs and groups are real.** Accepting a pair or small-group quest puts the student in the pair or group for it that has waited longest, or opens a new one ("Join Ana" on the card shows who is waiting; those come first). The quest starts once the group is full. After three minutes, a group with at least two members can choose **Start with who's here**. Members find each other in the plaza; **one answer, or one report, counts for everyone in the group**, and each gets the XP. Under *What students wrote* a group report shows who else was in it.
 - **Accidental report submission.** A sent report stays visible in the Journal with **Undo submission**. The author can reopen individual writing; any group member can reopen their shared report for the whole original group, including members who are offline. The text comes back as a draft and leaves the teacher's submitted reports until it is sent again. A teammate can submit the revision, and completion XP is awarded only once. If somebody has already started another side quest, they must leave it before the group report can reopen. A mission report cannot reopen after the campaign ends or after a dependent task has started or finished.
 - **Mingles** (called "whole class" before) are done alone, by talking to several classmates; they need 4 students online.
-- **Nobody waits forever to choose.** A student asked to choose who has not chosen within a minute is placed by the game: in a pair or group that is waiting, or else in a solo quest or mingle.
+- **Automatic choice when Student Choice is off.** A student asked to choose who has not chosen within a minute is placed by the game: in a pair or group that is waiting, or else in a solo quest or mingle.
 - **Teacher controls** has a *Side quests* tab in every open game: who is free to choose, the pairs and groups (waiting or playing), who is doing which quest, how many are still on the warm-up or campaign, and what students wrote. It warns when students are free and the game has no side quests. **Place in a side quest…** next to a free student puts them in a quest (or its waiting group).
 - **Close** (in the library, under *Added to this game*) stops new students taking a quest; those doing it can finish. **Withdraw** takes off a quest nobody has started.
 - **Erase campaign** keeps the game's side quests, who did them and what they wrote: they belong to the game. Deleting the game removes them.
 
-The server builds each quest from its own copy of the library, checks that a story quest fits the running chapter, and adds a quest once per game; a game holds up to 100. Side quests added to a campaign chapter by an older version move to their game when the server starts, with who finished them and who was doing them.
+The server builds each quest from its own copy of the library, checks that a story quest fits the running chapter, and adds a quest once per game. A game holds up to 100 teacher-selected quests, plus up to 2,000 chosen through Student Choice. Side quests added to a campaign chapter by an older version move to their game when the server starts, with who finished them and who was doing them.
 
 **Download for Mission Studio** saves the selection as a campaign file. In Mission Studio, import it with "Extend the selected chapter" to make the quests part of your own campaign draft.
 

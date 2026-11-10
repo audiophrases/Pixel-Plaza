@@ -1,0 +1,19 @@
+.student-choice { margin: .6rem 0; padding: .6rem; border: 2px solid #389e8b; border-radius: 10px; background: #effaf6; overflow-wrap: anywhere; }
+.student-choice-toggle { display: flex; justify-content: space-between; gap: .5rem; width: 100%; color: #145447; }
+.student-choice p { margin: .5rem 0; line-height: 1.45; }
+.student-choice-steps { font-weight: 700; }
+.student-choice-search, .student-choice-filters label { display: grid; gap: .25rem; font-size: .8rem; font-weight: 700; min-width: 0; }
+.student-choice input, .student-choice select { width: 100%; min-width: 0; box-sizing: border-box; padding: .45rem; border: 1px solid #739d92; border-radius: 6px; font: inherit; color: #233c36; background: white; }
+.student-choice-filters { display: grid; grid-template-columns: 1.2fr 1fr; gap: .4rem; margin-top: .5rem; }
+.student-choice-count, .student-choice-pages { display: flex; align-items: center; justify-content: space-between; gap: .4rem; margin-top: .6rem; font-size: .8rem; }
+.student-choice-card { margin-top: .7rem; padding: .65rem; background: white; border: 1px solid #b0cfc6; border-radius: 8px; }
+.student-choice-card h4 { margin: 0; font-size: 1rem; }
+.student-choice-meta { color: #4a605b; font-size: .8rem; }
+.student-choice-join { color: #145447; font-weight: 700; }
+.student-choice-card > button { width: 100%; }
+.journal-student-choice { display: flex; flex-direction: column; }
+.journal-student-choice > .student-choice { order: -2; }
+.journal-student-choice > .journal-board { order: -1; }
+@media (max-width: 640px) {
+  .journal:has(.student-choice-toggle[aria-expanded="true"]) { z-index: 2; width: calc(100vw - 2rem); }
+}

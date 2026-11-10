@@ -8,6 +8,8 @@ import LanguageHelp from './LanguageHelp';
 import EvidencePicture from './EvidencePicture';
 import StoryText from './StoryText';
 import { CastContext } from './castContext';
+import StudentQuestBrowser from './StudentQuestBrowser';
+import type { StudentChoicePage, StudentChoiceQuery } from '../../shared/studentChoice';
 
 type Props = {
   quest: QuestView | null; // the mission, if one is running
@@ -21,6 +23,10 @@ type Props = {
   onStart?: (objective: string) => void; // a waiting group starts with who is there
   onAuto?: () => void; // the game chooses a side quest for a student who has not
   onTurn?: (turn: InvestigationTurn) => void;
+  library?: StudentChoicePage | null;
+  libraryRevision?: number;
+  onBrowse?: (query: StudentChoiceQuery & { requestId: string }) => boolean;
+  onPick?: (id: string) => boolean;
 };
 
 const SOURCE: Record<string, string> = { job: 'Your clue', reward: 'New clue', news: 'News' };
@@ -86,12 +92,14 @@ function Question({ objective, feedback, onAnswer, onUndoReport, shared = false,
 
 // The student's side of the campaign, in short labelled blocks: the task, who you are, what you know, the questions,
 // and the quest board. Without a campaign, only the quest board. It shows only what the server sent this student.
-export default function Journal({ quest, board: boardView, feedback, onAnswer, onUndoReport, onAccept, onLeave, onStart, onAuto, onTurn }: Props) {
-  const [open, setOpen] = useState(() => window.innerHeight >= 700); // shut at first on a short screen, where it would cover the map
+export default function Journal({ quest, board: boardView, feedback, onAnswer, onUndoReport, onAccept, onLeave, onStart, onAuto, onTurn, library, libraryRevision, onBrowse, onPick }: Props) {
+  const [open, setOpen] = useState(() => !!boardView?.studentChoice || window.innerHeight >= 700);
   const [fresh, setFresh] = useState(false); // something changed while the journal was shut
   const [recapSeen, setRecapSeen] = useState(false);
   const seen = useRef('');
-  const choosing = boardView?.sideQuests.state === 'choose';
+  const studentChoice = !!boardView?.studentChoice;
+  const active = !!boardView?.board.some(item => item.sideQuest && item.state === 'active');
+  const choosing = boardView?.sideQuests.state === 'choose' || (studentChoice && !active);
   // Free for a side quest: the journal opens at the choice.
   const [wasChoosing, setWasChoosing] = useState(choosing);
   if (choosing !== wasChoosing) { setWasChoosing(choosing); if (choosing) { setOpen(true); setFresh(false); } }
@@ -114,10 +122,10 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
 
   // A free student who has not chosen in a minute is placed by the game.
   useEffect(() => {
-    if (!choosing) return;
+    if (!choosing || studentChoice) return;
     const timer = window.setTimeout(() => onAuto?.(), AUTO_PICK_MS);
     return () => window.clearTimeout(timer);
-  }, [choosing, onAuto]);
+  }, [choosing, studentChoice, onAuto]);
   // A waiting group may start with who is there from `startAt`: show the button when that time comes.
   const [now, setNow] = useState(() => Date.now());
   const nextStart = items.map(item => item.group?.state === 'open' ? item.group.startAt : null).filter((at): at is number => at !== null && at > now).sort((a, b) => a - b)[0];
@@ -132,7 +140,9 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
       <span>{quest?.chapter.title ?? 'Side quests'}{fresh && <b className="journal-new">NEW</b>}</span>
       <span>{open ? '▲' : '▼'}</span>
     </button>
-    {open && <div className="journal-body">
+    {open && <div className={`journal-body${studentChoice ? ' journal-student-choice' : ''}`}>
+      {studentChoice && onBrowse && onPick && <StudentQuestBrowser result={library ?? null} active={active}
+        refreshKey={JSON.stringify([libraryRevision, boardView])} onBrowse={onBrowse} onPick={onPick} />}
       {quest && <>
       {quest.secret && <section className="journal-block journal-secret">
         <h3>Secret</h3>
@@ -220,11 +230,11 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
 
       {bonus.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} closed={ended} quest={quest} onTurn={onTurn} />)}
       </>}
-      {(!ended || !!items.length) && <section className={`journal-block journal-board${choosing ? ' journal-choosing' : ''}`}><h3>{quest ? 'Quest board' : 'Your side quests'}</h3>
+      {(!ended || !!items.length) && (!studentChoice || !!items.length) && <section className={`journal-block journal-board${choosing ? ' journal-choosing' : ''}`}><h3>{quest ? 'Quest board' : 'Your side quests'}</h3>
         <p>Do one side quest at a time; each is yours to do once.</p>
         {side?.state === 'open' && <p className="journal-board-card">You can take a side quest now, or when you finish your other work.</p>}
-        {choosing && <p className="journal-board-card journal-choose"><strong>Choose a side quest.</strong> Accept one quest below; classmates waiting for a partner come first. If you have not chosen in a minute, the game chooses for you.</p>}
-        {side?.state === 'empty' && !otherBoard && <p className="journal-board-card">{side.reason} You can help classmates while you wait.</p>}
+        {choosing && !studentChoice && <p className="journal-board-card journal-choose"><strong>Choose a side quest.</strong> Accept one quest below; classmates waiting for a partner come first. If you have not chosen in a minute, the game chooses for you.</p>}
+        {side?.state === 'empty' && !otherBoard && !studentChoice && <p className="journal-board-card">{side.reason} You can help classmates while you wait.</p>}
         {!items.length && !side && <p className="journal-board-card">No optional quests are available right now. Your teacher can add activities. You can continue any tasks above while you wait.</p>}
         {board.map(item => <article key={item.id} className="journal-board-card">
           {item.state === 'active' || item.state === 'done' ? <>
@@ -232,7 +242,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
               {!item.partner.online && item.state === 'active' && !item.ended && <button className="journal-choice" onClick={() => onAccept?.(item.id, true)}>Find another partner</button>}</p>}
             {item.activity && <p>Exchange evidence with your partner, then write what you learned. Your teacher will read the report.</p>}
             {item.group && <p className="journal-partner">Your {item.group.size === 2 ? 'pair' : 'group'}: <strong>{item.group.members.join(', ')}</strong>
-              {item.group.state === 'open' ? ` · waiting for ${item.group.size - item.group.members.length} more` : '. One answer counts for everyone; work it out together.'}
+              {item.group.state === 'open' ? ` · waiting for ${item.group.size - item.group.members.length} more` : '. Use chat to work it out together. One answer counts for everyone.'}
               {item.group.state === 'open' && item.group.startAt !== null && item.group.startAt <= now && <button className="journal-choice" onClick={() => onStart?.(item.id)}>Start with who&rsquo;s here</button>}</p>}
             {item.group?.state === 'open' && item.state === 'active' ? <><p className="journal-ask">{item.text}</p><LanguageHelp help={item.help} answer /></>
               : <Question objective={{ id: item.id, text: item.text, help: item.help, kind: item.kind, optional: true, done: item.state === 'done', conversation: item.conversation, report: item.report }} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} closed={!!item.ended} quest={quest} onTurn={onTurn} heading={item.sideQuest ? 'Side quest' : undefined} shared={!!item.group} />}

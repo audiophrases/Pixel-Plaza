@@ -1,11 +1,11 @@
 import type { Objective } from '../shared/campaign.ts';
-import { SIDE_QUEST_SOURCE } from '../shared/sideQuests.ts';
+import { QUEST_LIMIT, SIDE_QUEST_SOURCE } from '../shared/sideQuests.ts';
 
 // Assignments and groups of a game's side quests carry this instead of a mission chapter: chapters never move them.
 export const GAME_CHAPTER = -1;
-export const GAME_SIDE_QUESTS = 100; // side quests one game holds, withdrawn ones included
+export const GAME_SIDE_QUESTS = 100; // teacher-selected side quests, withdrawn ones included
 const PREVIEW_MS = 10 * 60_000;
-type Row = { quest_id: string; content: string; chapter_id: string | null; created: number; withdrawn: number; closed: number };
+type Row = { quest_id: string; content: string; chapter_id: string | null; created: number; withdrawn: number; closed: number; student_choice: number };
 export type GamePreview = { preview_id: string; game_id: string; content: string; source_version: number; base_version: number; expires: number };
 
 // The side quests a teacher adds to a game from the library. They are on the game's quest board until closed or
@@ -23,10 +23,13 @@ export class GameSideQuests {
             CREATE TABLE IF NOT EXISTS game_side_quest_previews (
             preview_id TEXT PRIMARY KEY, teacher_token TEXT NOT NULL, game_id TEXT NOT NULL, content TEXT NOT NULL,
             source_version INTEGER NOT NULL, base_version INTEGER NOT NULL, expires INTEGER NOT NULL);`);
+        if (!this.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('game_side_quests')").toArray().some(row => row.name === 'student_choice')) {
+            this.sql.exec('ALTER TABLE game_side_quests ADD COLUMN student_choice INTEGER NOT NULL DEFAULT 0');
+        }
     }
 
     private rows(game: string): Row[] {
-        return this.sql.exec<Row>('SELECT quest_id, content, chapter_id, created, withdrawn, closed FROM game_side_quests WHERE game_id = ? ORDER BY created, rowid', game).toArray();
+        return this.sql.exec<Row>('SELECT quest_id, content, chapter_id, created, withdrawn, closed, student_choice FROM game_side_quests WHERE game_id = ? ORDER BY created, rowid', game).toArray();
     }
     // Every quest the game was given, for the library page: withdrawn and closed ones too, and whether anyone started it.
     added(game: string): { id: string; text: string; chapter: string | null; closed: boolean; withdrawn: boolean; started: boolean }[] {
@@ -42,6 +45,15 @@ export class GameSideQuests {
         return this.rows(game).filter(row => !row.withdrawn && (!row.chapter_id || row.chapter_id === chapterId)).map(row => JSON.parse(row.content) as Objective);
     }
     has(game: string, quest: string): boolean { return this.sql.exec('SELECT 1 FROM game_side_quests WHERE game_id = ? AND quest_id = ?', game, quest).toArray().length > 0; }
+    studentChoiceIds(game: string): string[] { return this.rows(game).filter(row => row.student_choice).map(row => row.quest_id); }
+    // Called with claiming inside transactionSync: one immutable game copy shared by every student who picks it.
+    pinStudentChoice(game: string, objective: Objective, sourceVersion: number): string | null {
+        if (this.has(game, objective.id)) return null;
+        if (this.studentChoiceIds(game).length >= QUEST_LIMIT) return 'This game has reached its challenge limit. Ask your teacher to start a new game.';
+        this.sql.exec('INSERT INTO game_side_quests (game_id, quest_id, content, chapter_id, source_version, created, student_choice) VALUES (?, ?, ?, NULL, ?, ?, 1)',
+            game, objective.id, JSON.stringify(objective), sourceVersion, Date.now());
+        return null;
+    }
     closedIds(game: string): Set<string> { return new Set(this.rows(game).filter(row => row.closed && !row.withdrawn).map(row => row.quest_id)); }
     started(game: string, quest: string): boolean { return this.sql.exec('SELECT 1 FROM quest_assignments WHERE game_id = ? AND objective = ? LIMIT 1', game, quest).toArray().length > 0; }
 
@@ -55,7 +67,7 @@ export class GameSideQuests {
     // A teacher's selection from the library, held for review before it reaches the board.
     preview(token: string, game: string, quests: { objective: Objective; chapterId: string | null }[], sourceVersion: number): { id: string; expires: number } | { error: string; status: number } {
         if (quests.some(({ objective }) => this.has(game, objective.id))) return { error: 'A side quest joins a game once: that one is already in this game.', status: 400 };
-        if (this.rows(game).length + quests.length > GAME_SIDE_QUESTS) return { error: `A game holds at most ${GAME_SIDE_QUESTS} side quests.`, status: 400 };
+        if (this.rows(game).filter(row => !row.student_choice).length + quests.length > GAME_SIDE_QUESTS) return { error: `A game holds at most ${GAME_SIDE_QUESTS} teacher-selected side quests.`, status: 400 };
         this.sql.exec('DELETE FROM game_side_quest_previews WHERE expires <= ?', Date.now());
         if (this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM game_side_quest_previews WHERE game_id = ?', game).one().n >= 10) return { error: 'Too many reviews are open. Add or cancel one first.', status: 409 };
         const id = crypto.randomUUID(); const expires = Date.now() + PREVIEW_MS;

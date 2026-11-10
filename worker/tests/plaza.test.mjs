@@ -166,6 +166,100 @@ async function enter(base, token, avatar) {
     return { ...socket, welcome, me: welcome.players.find(player => player.id === welcome.id) };
 }
 
+test('Student Choice: private catalog, self-selected pairs and groups, toggle, persistence and game isolation', { timeout: 180000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-student-choice-'));
+    const authUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    let plaza = await startPlaza(authUrl, persistTo); const sockets = [];
+    try {
+        let base = plaza.base;
+        let session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        const teacher = (route, body) => api(base, `/api/teacher/${route}`, { session, body });
+        const game = (await teacher('game', { name: 'Student choices', randomNames: false })).body;
+        PIN = game.pin;
+        let alex = await enter(base, 'signed-a', null), sam = await enter(base, 'signed-b', null), chris = await enter(base, 'signed-c', null);
+        sockets.push(alex, sam, chris);
+        const browse = async (student, query = {}) => {
+            const requestId = crypto.randomUUID(); student.send({ t: 'quest-browse', requestId, ...query });
+            return student.next(m => m.t === 'quest-library' && m.requestId === requestId, 'student catalog');
+        };
+        const card = (student, id, check) => student.next(m => m.t === 'board' && m.board.some(q => q.id === id && check(q)), `${id} card`).then(m => m.board.find(q => q.id === id));
+        const pick = (student, id) => student.send({ t: 'quest-pick', objective: id });
+        const warn = student => student.next(m => m.t === 'notice' && m.level === 'warning', 'selection rejected');
+        const pair = sideQuests.find(q => !q.chapter && q.format === 'pair' && q.answer === 'text');
+        const group = sideQuests.find(q => !q.chapter && q.format === 'group' && q.answer === 'report');
+        const solo = sideQuests.find(q => !q.chapter && q.format === 'solo' && q.answer === 'text');
+        assert.equal(game.sideQuests.studentChoice, false);
+        assert.deepEqual((await browse(alex)).items, []);
+        pick(alex, pair.id); assert.match((await warn(alex)).text, /not available/);
+        assert.equal((await api(base, '/api/teacher/student-choice', { body: { gameId: game.game.id, enabled: true } })).status, 401);
+        assert.equal((await teacher('student-choice', { gameId: 'wrong', enabled: true })).status, 409);
+        assert.equal((await teacher('student-choice', { gameId: game.game.id, enabled: 'true' })).status, 400);
+        assert.equal((await teacher('student-choice', { gameId: game.game.id, enabled: true })).body.sideQuests.studentChoice, true);
+        assert.equal((await alex.next(m => m.t === 'board' && m.studentChoice)).board.length, 0, 'no teacher preselection');
+        const catalog = await browse(alex);
+        assert.equal(catalog.total, sideQuests.filter(q => q.chapter === null && q.theme !== 'story').length);
+        assert.equal(catalog.items.length, 12);
+        assert.ok(catalog.items.every(q => !('accept' in q) && !('teacherNote' in q) && !('successCriteria' in q)));
+        const filtered = await browse(alex, { format: 'pair', level: pair.level, search: pair.title });
+        assert.ok(filtered.items.some(q => q.id === pair.id));
+        pick(alex, sideQuests.find(q => q.chapter).id); assert.match((await warn(alex)).text, /no longer available/);
+        pick(alex, 'invented-id'); assert.match((await warn(alex)).text, /no longer available/);
+
+        pick(alex, pair.id);
+        assert.deepEqual((await card(alex, pair.id, q => q.state === 'active')).group.members, ['Alex']);
+        pick(alex, solo.id); assert.match((await warn(alex)).text, /side quest first/);
+        assert.equal((await teacher('side-quests/board')).body.target.quests.length, 1, 'a rejected selection does not add a snapshot');
+        assert.deepEqual((await browse(sam)).items[0].joining, ['Alex']);
+        sam.send({ t: 'quest-auto' });
+        assert.ok(!(await browse(sam)).items.some(q => q.state === 'active'), 'browsing never auto-assigns');
+        let listed = (await teacher('side-quests/list')).body;
+        assert.equal((await teacher('side-quests/save', { quest: { ...pair, title: 'Edited later', text: 'Different question', accept: ['different answer'] }, version: listed.versions[pair.id] })).status, 200);
+        assert.equal((await browse(sam, { search: pair.title })).items.find(q => q.id === pair.id).text, pair.text, 'the original instructions stay with the game');
+        pick(sam, pair.id);
+        assert.deepEqual((await card(alex, pair.id, q => q.group?.state === 'playing')).group.members, ['Alex', 'Sam']);
+        await teacher('student-choice', { gameId: game.game.id, enabled: false });
+        pick(chris, solo.id); assert.match((await warn(chris)).text, /not available/);
+        chris.send({ t: 'quest-accept', objective: pair.id }); assert.match((await warn(chris)).text, /closed/);
+        sam.send({ t: 'answer', objective: pair.id, text: pair.accept[0] });
+        assert.equal((await sam.next(m => m.t === 'answered' && m.objective === pair.id)).correct, true);
+        await card(alex, pair.id, q => q.state === 'done');
+        await teacher('student-choice', { gameId: game.game.id, enabled: true });
+        assert.equal((await browse(alex, { search: pair.title })).items.find(q => q.id === pair.id).state, 'done');
+        pick(alex, pair.id); assert.match((await warn(alex)).text, /already finished/);
+
+        pick(alex, group.id); await card(alex, group.id, q => q.state === 'active');
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); plaza = await startPlaza(authUrl, persistTo, {}, { content: false }); base = plaza.base;
+        session = (await api(base, '/api/teacher/login', { body: { password: PASSWORD } })).body.token;
+        assert.equal((await teacher('status')).body.sideQuests.studentChoice, true, 'mode survives a workerd restart');
+        alex = await enter(base, 'signed-a', null); sam = await enter(base, 'signed-b', null); chris = await enter(base, 'signed-c', null); sockets.push(alex, sam, chris);
+        await card(alex, group.id, q => q.state === 'active');
+        pick(sam, group.id); await card(sam, group.id, q => q.state === 'active');
+        pick(chris, group.id); await card(chris, group.id, q => q.group?.state === 'playing');
+        chris.send({ t: 'answer', objective: group.id, text: 'We chose the park because it is quiet and green.' });
+        assert.equal((await chris.next(m => m.t === 'answered' && m.objective === group.id)).correct, true);
+        await card(alex, group.id, q => q.state === 'done'); await card(sam, group.id, q => q.state === 'done');
+        assert.ok((await teacher('status')).body.sideQuests.reports.some(r => r.objective === group.id));
+
+        pick(alex, solo.id); await card(alex, solo.id, q => q.state === 'active');
+        await teacher('side-quests/board-close', { gameId: game.game.id, questId: solo.id });
+        pick(chris, solo.id); assert.match((await warn(chris)).text, /closed/);
+        listed = (await teacher('side-quests/list')).body;
+        const removed = listed.quests.find(q => !q.chapter && q.id !== solo.id && q.format === 'solo');
+        await teacher('side-quests/delete', { id: removed.id, version: listed.versions[removed.id] });
+        pick(chris, removed.id); assert.match((await warn(chris)).text, /no longer available/);
+        assert.equal((await browse(chris, { search: removed.title })).items.some(q => q.id === removed.id), false);
+        const other = (await teacher('game', { name: 'Another class', randomNames: false })).body;
+        assert.equal(other.sideQuests.studentChoice, false, 'new games default off');
+        await teacher('class', { open: true, game: game.game.id });
+        assert.equal((await teacher('status')).body.sideQuests.studentChoice, true, 'each game keeps its setting');
+    } finally {
+        for (const socket of sockets) socket.ws.close();
+        await plaza.stop(); await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
+    }
+});
+
 test('tab focus: teacher status, repeated events, validation, reconnect, persistence and game isolation', { timeout: 120000 }, async () => {
     const pinPlay = await startPinPlay();
     const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-tab-focus-'));

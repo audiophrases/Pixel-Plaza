@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
+import theme from '../shared/themes/plaza.json' with { type: 'json' };
 
 const root = path.join(import.meta.dirname, '..');
 const origin = process.argv[2] ?? 'http://127.0.0.1:5188';
@@ -73,7 +74,7 @@ try {
         window.__warmup={runId:'lesson:round1',kind:'facts',title:'Find someone who…',instructions:'Talk to your classmates. Ask questions in English to find the person described in your task. Type their name in the Warm-up panel.',fact:'You have a cat.',task:'Find someone who has a dog.',step:0,of:2,team:{done:0,total:4}};
         window.WebSocket=class {
             static OPEN=1; readyState=0;
-            constructor(){window.__socket=this;setTimeout(()=>{this.readyState=1;this.onopen?.();this.receive({t:'welcome',id:'a',gameId:'lesson',players:[{id:'a',name:'Alex',x:1500,y:1500}]});this.receive({t:'quest',quest:window.__quest});},30)}
+            constructor(){window.__socket=this;setTimeout(()=>{this.readyState=1;this.onopen?.();this.receive({t:'welcome',id:'a',gameId:'lesson',theme:${JSON.stringify(theme)},players:[{id:'a',name:'Alex',x:1500,y:1500}]});this.receive({t:'quest',quest:window.__quest});},30)}
             receive(value){this.onmessage?.({data:JSON.stringify(value)})}
             send(raw){if(raw==='ping'){this.onmessage?.({data:'pong'});return}window.__sent.push(JSON.parse(raw))}
             close(){this.readyState=3}
@@ -122,6 +123,34 @@ try {
     assert.ok(await fits(), 'long instructions keep OK visible');
     assert.ok(await evaluate(`(()=>{const b=document.querySelector('.activity-announcement-body');return b.scrollHeight>b.clientHeight})()`), 'long instructions scroll inside the dialog');
     await screenshot('mobile-long-instructions');
+    await ok();
+    // Student Choice works in the real game page, even with no campaign or preselected quests.
+    await evaluate(`window.__socket.receive({t:'quest',quest:null});window.__socket.receive({t:'warmup',warmup:null});
+        const previousSend=window.__socket.send.bind(window.__socket);
+        window.__socket.send=raw=>{previousSend(raw);if(raw==='ping')return;const m=JSON.parse(raw);
+            if(m.t==='quest-browse')setTimeout(()=>window.__socket.receive({t:'quest-library',requestId:m.requestId,enabled:true,total:1,page:0,pages:1,
+                items:[{id:'choice-pair',title:'One wild idea',text:'Chat with your partner. Invent one strange school rule. Agree on your favourite.',format:'pair',level:'A2',minutes:5,category:'Talk',state:'available',reason:null,joining:['Sam']}]}),20);
+        };
+        window.__socket.receive({t:'board',studentChoice:true,board:[],sideQuests:{state:'empty',reason:null,waiting:0}})`);
+    await waitFor(`document.querySelector('dialog:modal')?.textContent.includes('YOUR CHOICE')`);
+    await ok();
+    await waitFor(`document.querySelector('.student-choice-card')`);
+    assert.ok(await evaluate(`window.__sent.some(m=>m.t==='quest-browse')`), 'the game asks for the public catalog');
+    assert.ok(await evaluate(`(()=>{const card=document.querySelector('.student-choice-card').getBoundingClientRect();return card.left>=0&&card.right<=innerWidth})()`), 'challenge cards fit a mobile screen');
+    await evaluate(`document.querySelector('.student-choice-card button').scrollIntoView({block:'nearest'})`);
+    assert.ok(await evaluate(`(()=>{const button=document.querySelector('.student-choice-card button'),r=button.getBoundingClientRect();return button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()`), 'the chat panel cannot cover the mobile choice button');
+    await screenshot('mobile-student-choice');
+    await send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false });
+    await screenshot('desktop-student-choice');
+    await evaluate(`document.querySelector('.student-choice-card button').click()`);
+    assert.ok(await evaluate(`window.__sent.some(m=>m.t==='quest-pick'&&m.objective==='choice-pair')`), 'Choose joins the selected library quest');
+    await evaluate(`window.__socket.receive({t:'board',studentChoice:true,board:[{id:'choice-pair',text:'One wild idea: Chat with your partner.',kind:'report',state:'active',sideQuest:true,reason:null,partner:null,group:{members:['Alex'],size:2,state:'open',startAt:null}}],sideQuests:{state:'active',reason:null,waiting:0}})`);
+    await waitFor(`document.querySelector('dialog:modal')?.textContent.includes('SIDE QUEST ACCEPTED')`);
+    await ok();
+    assert.equal(await evaluate(`document.querySelector('.student-choice-toggle').getAttribute('aria-expanded')`), 'false', 'the browser folds away after choosing');
+    assert.ok(await evaluate(`document.querySelector('.journal-board').textContent.includes('waiting for 1 more')`), 'the active pair is shown');
+    await evaluate(`window.__socket.receive({t:'board',studentChoice:false,board:[],sideQuests:{state:'empty',reason:null,waiting:0}})`);
+    await waitFor(`!document.querySelector('.student-choice')`);
     assert.deepEqual(errors, [], 'no browser errors');
-    console.log(`Announcement browser checks passed: native modal, keyboard, Escape, backdrop, avatar movement, mobile sizing and long instructions. Screenshots: ${qa}`);
+    console.log(`Announcement and Student Choice browser checks passed: native modal, keyboard, avatar movement, mobile sizing, catalog, choosing and mode changes. Screenshots: ${qa}`);
 } finally { ws?.close(); child.kill(); }

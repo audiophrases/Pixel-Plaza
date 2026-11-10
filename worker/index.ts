@@ -113,6 +113,7 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     if (path === '/api/teacher/student' && typeof body?.studentKey === 'string' && typeof body?.gameId === 'string') return { kind: 'student', studentKey: body.studentKey, gameId: body.gameId, name: body.name, avatar: body.avatar };
     if (path === '/api/teacher/magic' && method === 'POST' && ['freeze', 'thaw', 'lightning', 'teleport', 'rain'].includes(body?.power)) return { kind: 'magic', power: body.power, studentKey: body.studentKey, x: body.x, y: body.y };
     if (path === '/api/teacher/vision' && typeof body?.radius === 'number') return { kind: 'vision', radius: body.radius };
+    if (path === '/api/teacher/student-choice' && typeof body?.gameId === 'string' && typeof body?.enabled === 'boolean') return { kind: 'studentChoice', gameId: body.gameId, enabled: body.enabled };
     if (path === '/api/teacher/warmup' && (body?.op === 'start' || body?.op === 'end')) {
         return { kind: 'warmup', op: body.op, ...(['facts', 'identity', 'pairs'].includes(body.type) ? { type: body.type } : {}) };
     }

@@ -39,6 +39,8 @@
 
 .teacher-mode { background: white; border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; }
 .teacher-mode label { display: block; margin: .5rem 0; }
+.teacher-student-choice { display: flex; align-items: center; gap: .5rem; width: fit-content; padding: .65rem .8rem; border: 1px solid #389e8b; border-radius: .6rem; background: #effaf6; cursor: pointer; }
+.teacher-student-choice input { width: 1.15rem; height: 1.15rem; accent-color: #237b69; }
 .teacher-mode p { color: #555; margin-top: .8rem; }
 .teacher-queue { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin: .5rem 0 1rem; }
 .teacher-queue small { color: #555; }
