@@ -895,6 +895,10 @@ export default function Game() {
             setAnswered(null);
             connection?.send({ t: 'report-undo', objective, version, gameId });
           }}
+          onSendAnyway={(objective, version) => {
+            setAnswered(null);
+            connection?.send({ t: 'report-send-anyway', objective, version, gameId });
+          }}
           onStart={objective => connection?.send({ t: 'quest-start', objective })}
           onAuto={autoPick}
           onAnswer={(objective, text) => {

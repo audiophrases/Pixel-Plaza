@@ -1,4 +1,4 @@
-import { isUnlocked, prerequisiteIds, type Campaign, type Chapter, type Objective, type Role, type TextHelp } from './campaign.ts';
+import { CONFIRM_SEND_MAX, isUnlocked, prerequisiteIds, type Campaign, type Chapter, type Objective, type Role, type TextHelp } from './campaign.ts';
 
 import { evidenceSource, EVIDENCE_MAX_CHARS, type EvidenceImage } from './evidence.ts';
 import { CAST_ABOUT_MAX, CAST_MAX, CAST_NAME_MAX } from './cast.ts';
@@ -90,7 +90,7 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
         const c = obj(value, path, ['id', 'title', 'intro', 'recap', 'ending', 'share', 'objectives', 'discoveries', 'reveals', 'roleClues', 'thieves', 'help', 'roleClueHelp', 'roleClueImages', 'introImage', 'endingImage']);
         const objectives: Objective[] = list(c.objectives, `${path}.objectives`, 100).map((value, j) => {
             const p = `${path}.objectives[${j}]`;
-            const o = obj(value, p, ['id', 'text', 'accept', 'answerThief', 'thiefKnows', 'answerRole', 'kind', 'after', 'optional', 'rewards', 'requires', 'board', 'activity', 'conversation', 'successCriteria', 'level', 'help', 'rewardHelp']);
+            const o = obj(value, p, ['id', 'text', 'accept', 'answerThief', 'thiefKnows', 'answerRole', 'kind', 'after', 'optional', 'rewards', 'requires', 'board', 'activity', 'conversation', 'successCriteria', 'confirmSend', 'level', 'help', 'rewardHelp']);
             const result: Objective = { id: id(o.id, `${p}.id`), text: str(o.text, `${p}.text`), accept: list(o.accept, `${p}.accept`, 30).map((v, k) => str(v, `${p}.accept[${k}]`, 120)) };
             if (o.help !== undefined) result.help = textHelp(o.help, `${p}.help`);
             if (o.rewardHelp !== undefined) result.rewardHelp = roleHelp(o.rewardHelp, `${p}.rewardHelp`);
@@ -98,6 +98,7 @@ export function validateMission(input: unknown, mode: 'draft' | 'publish' = 'pub
             for (const key of ['after', 'answerRole'] as const) if (o[key] !== undefined) result[key] = id(o[key], `${p}.${key}`);
             if (o.kind !== undefined) { if (o.kind !== 'report') fail(`${p}.kind`, 'Only report is supported; omit kind for typed or name answers.'); else result.kind = 'report'; }
             if (o.successCriteria !== undefined) result.successCriteria = str(o.successCriteria, `${p}.successCriteria`, 600);
+            if (o.confirmSend !== undefined) result.confirmSend = str(o.confirmSend, `${p}.confirmSend`, CONFIRM_SEND_MAX);
             if (o.level !== undefined) {
                 if (!['A1', 'A2', 'B1', 'B2'].includes(String(o.level))) fail(`${p}.level`, 'Choose A1, A2, B1 or B2.');
                 else result.level = o.level as Objective['level'];

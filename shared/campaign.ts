@@ -41,6 +41,7 @@ export type Objective = {
     kind?: 'report';                  // writing checked automatically on submission
     successCriteria?: string;        // private, concise requirements/reference facts for written answers
     level?: ReportLevel;
+    confirmSend?: string;             // the question a student answers before sending a report the checker asked to revise
     after?: string;                   // asked only once this question has been answered
     requires?: { mode: 'all' | 'any'; objectives: string[] };
     optional?: boolean;               // a bonus: it never holds the chapter up
@@ -78,7 +79,9 @@ export type Role = { id: string; name: string; card: string; clue: string; help?
 export type CastMember = { name: string; about: string };
 export type Campaign = { id: string; title: string; roles: Role[]; chapters: Chapter[]; finale: string; help?: { finale?: TextHelp }; vocabulary?: string[]; cast?: CastMember[] };
 export type AnswerFeedback = { objective: string; correct: boolean; wait: boolean; message?: string };
-export type ReportSubmission = { text: string; version: number; submitted: boolean; check?: ReportCheck };
+// `confirm`: the author's question before sending anyway, sent only while the checker asks for a revision.
+export type ReportSubmission = { text: string; version: number; submitted: boolean; check?: ReportCheck; confirm?: string };
+export const CONFIRM_SEND_MAX = 200;
 
 // What one student is allowed to see: only their own role and what they found.
 export type QuestView = {

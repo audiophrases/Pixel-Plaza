@@ -1268,6 +1268,7 @@ test('automatic report feedback: revision, shared checks, cache, undo, stale res
         draft.campaign.chapters = [{ ...draft.campaign.chapters[0], discoveries: [], reveals: [], objectives: [
             { ...report, id: 'write' }, { ...report, id: 'team-write', optional: true, board: { minPlayers: 2 } },
             ...['review', 'failure', 'late', 'reopen'].map(id => ({ ...report, id, optional: true })),
+            { ...report, id: 'insist', optional: true, confirmSend: 'Did you give two reasons for your choice?' },
             { ...report, id: 'evidence', optional: true, conversation: { witnesses: 1 } },
             { id: 'short', text: 'Which place?', accept: ['park'], optional: true },
         ] }];
@@ -1300,6 +1301,31 @@ test('automatic report feedback: revision, shared checks, cache, undo, stale res
         answer(alex, 'write', good); passed = await question(alex, 'write', o => o.done && o.report?.version > passed.report.version);
         assert.equal(requests.length, 3, 'undo and identical resubmission reuse the result');
 
+        // Sending anyway: only the writing the checker asked to revise, unchanged, after the quest's own question.
+        const sendAnyway = (socket, id, version) => socket.send({ t: 'report-send-anyway', objective: id, version, gameId });
+        const insisted = 'We choose the park with one reason and the follow-up answers.';
+        answer(alex, 'insist', insisted);
+        const insist = await question(alex, 'insist', o => o.report?.check?.status === 'revise');
+        assert.equal(insist.report.confirm, 'Did you give two reasons for your choice?', 'the quest question travels with a revision');
+        assert.equal(passed.report.confirm, undefined, 'and only with a revision');
+        const paid = requests.length;
+        sendAnyway(alex, 'insist', insist.report.version - 1);
+        assert.match((await alex.next(m => m.t === 'notice' && m.level === 'warning', 'stale send-anyway warning')).text, /changed/);
+        sendAnyway(alex, 'write', passed.report.version);
+        assert.match((await alex.next(m => m.t === 'notice' && m.level === 'warning', 'passed report warning')).text, /changed/);
+        sendAnyway(alex, 'insist', insist.report.version);
+        let sent = await question(alex, 'insist', o => o.done);
+        assert.equal(sent.report.check.status, 'sent'); assert.equal(sent.report.check.feedback, 'Add a second reason for your choice.');
+        assert.equal(sent.report.confirm, undefined); assert.equal(requests.length, paid, 'sending anyway asks the checker nothing more');
+        const flagged = (await teacher('status')).body.campaign.reports.find(r => r.objective === 'insist');
+        assert.deepEqual([flagged.text, flagged.check.status, flagged.check.feedback], [insisted, 'sent', 'Add a second reason for your choice.'], 'the teacher sees it was sent anyway, with the hint');
+        sendAnyway(alex, 'insist', sent.report.version); // a second click (or a teammate's) just shows the result
+        assert.equal((await question(alex, 'insist', o => o.done)).report.check.status, 'sent');
+        assert.equal(alex.inbox.filter(m => m.t === 'notice' && m.level === 'warning').length, 0);
+        undo(alex, 'insist', sent.report.version); await question(alex, 'insist', o => o.report?.submitted === false);
+        answer(alex, 'insist', insisted); sent = await question(alex, 'insist', o => o.done && o.report?.version > sent.report.version);
+        assert.equal(sent.report.check.status, 'sent', 'the same writing sent again keeps the decision'); assert.equal(requests.length, paid);
+
         alex.send({ t: 'quest-accept', objective: 'team-write' }); await card(alex, 'team-write', o => o.state === 'active');
         sam.send({ t: 'quest-accept', objective: 'team-write' }); await card(sam, 'team-write', o => o.group?.state === 'playing');
         const delayed = 'We choose the park for quiet and space with a delay.';
@@ -1307,7 +1333,7 @@ test('automatic report feedback: revision, shared checks, cache, undo, stale res
         let checking = await card(sam, 'team-write', o => o.report?.check?.status === 'checking');
         answer(sam, 'team-write', delayed);
         await card(sam, 'team-write', o => o.report?.version === checking.report.version);
-        assert.equal(requests.length, 4, 'one in-flight API request for the whole team');
+        assert.equal(requests.length, paid + 1, 'one in-flight API request for the whole team');
         await release(delayed);
         let teamDone = await card(alex, 'team-write', o => o.state === 'done');
         assert.deepEqual((await card(sam, 'team-write', o => o.state === 'done')).report, teamDone.report);

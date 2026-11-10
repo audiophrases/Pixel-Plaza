@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { AnswerFeedback, BoardView, QuestView } from '../../shared/campaign';
 import { REPORT_MAX_LENGTH } from '../../shared/campaign';
 import { AUTO_PICK_MS } from '../../shared/sideQuests';
@@ -18,6 +19,7 @@ type Props = {
   feedback: AnswerFeedback | null;
   onAnswer: (objective: string, text: string) => void;
   onUndoReport?: (objective: string, version: number) => void;
+  onSendAnyway?: (objective: string, version: number) => void; // send writing the checker asked to revise, after confirming
   onAccept?: (objective: string, changePartner?: boolean) => void;
   onLeave?: (objective: string) => void;
   onStart?: (objective: string) => void; // a waiting group starts with who is there
@@ -31,8 +33,32 @@ type Props = {
 
 const SOURCE: Record<string, string> = { job: 'Your clue', reward: 'New clue', news: 'News' };
 
+// The checker asked for a revision, but the student is sure the report already does the task. A dialog asks the quest's
+// own question first (or, without one, whether the report already does what the checker said); "No" is the default.
+function SendAnyway({ question, feedback, shared, onSend }: { question?: string; feedback: string; shared: boolean; onSend: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const id = useId();
+  const close = () => dialog.current?.close();
+  return <div className="journal-send-anyway">Sure your report already does this?{' '}
+    <button ref={trigger} type="button" className="journal-dismiss" onClick={() => dialog.current?.showModal()}>Send anyway</button>
+    {createPortal(<dialog ref={dialog} className="send-anyway-dialog" aria-labelledby={id} onClose={() => trigger.current?.focus()}
+      onCancel={event => { event.preventDefault(); event.stopPropagation(); close(); }}
+      onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); close(); } }}>
+      <h2 id={id}>Are you sure you want to send it?</h2>
+      <p>The checker said: “{feedback}”</p>
+      <p className="send-anyway-question">{question ?? 'Does your report already do this?'}</p>
+      <p className="send-anyway-note">{shared ? 'This finishes the quest for your whole group. ' : ''}Your teacher will see that you sent it anyway.</p>
+      <div className="send-anyway-actions">
+        <button type="button" autoFocus onClick={close}>No, I will check it</button>
+        <button type="button" className="send-anyway-yes" onClick={() => { close(); onSend(); }}>Yes, send it</button>
+      </div>
+    </dialog>, document.body)}
+  </div>;
+}
+
 // One question with its own answer box, so typing in one never lands in another.
-function Question({ objective, feedback, onAnswer, onUndoReport, shared = false, closed = false, quest, onTurn, heading }: { objective: QuestView['objectives'][number]; feedback: Props['feedback']; onAnswer: Props['onAnswer']; onUndoReport?: Props['onUndoReport']; shared?: boolean; closed?: boolean; quest: QuestView | null; onTurn: Props['onTurn']; heading?: string }) {
+function Question({ objective, feedback, onAnswer, onUndoReport, onSendAnyway, shared = false, closed = false, quest, onTurn, heading }: { objective: QuestView['objectives'][number]; feedback: Props['feedback']; onAnswer: Props['onAnswer']; onUndoReport?: Props['onUndoReport']; onSendAnyway?: Props['onSendAnyway']; shared?: boolean; closed?: boolean; quest: QuestView | null; onTurn: Props['onTurn']; heading?: string }) {
   const [typed, setTyped] = useState(objective.report?.text ?? '');
   const [hasDraft, setHasDraft] = useState(false);
   const [submitted, setSubmitted] = useState<string | null>(null);
@@ -47,6 +73,8 @@ function Question({ objective, feedback, onAnswer, onUndoReport, shared = false,
   const report = objective.kind === 'report';
   const check = objective.report?.check;
   const pending = report && !objective.done && !!objective.report?.submitted && !!check;
+  // Only the writing the checker read can be sent anyway; changed writing is checked again.
+  const mayInsist = !!onSendAnyway && check?.status === 'revise' && !!objective.report && !objective.report.submitted && typed.trim() === objective.report.text.trim();
   const rejected = feedback?.objective === objective.id && !feedback.correct && submitted === typed.trim();
   const feedbackId = `answer-feedback-${objective.id}`;
   return <section className={`journal-block journal-question${objective.optional ? ' journal-bonus' : ''}`}>
@@ -54,8 +82,8 @@ function Question({ objective, feedback, onAnswer, onUndoReport, shared = false,
     <p className="journal-ask"><StoryText text={objective.text} /></p>
     <LanguageHelp help={objective.help} answer />
     {objective.done ? <>
-      <p className="journal-right">{report ? check ? 'Quest complete.' : 'Sent to your teacher.' : 'Correct.'}</p>
-      {check && check.feedback !== 'Quest complete.' && <p className="journal-report-feedback" role="status">{check.feedback}</p>}
+      <p className="journal-right">{report ? check?.status === 'sent' ? 'Quest complete. You sent it anyway, so your teacher will read it.' : check ? 'Quest complete.' : 'Sent to your teacher.' : 'Correct.'}</p>
+      {check && check.status !== 'sent' && check.feedback !== 'Quest complete.' && <p className="journal-report-feedback" role="status">{check.feedback}</p>}
       {report && objective.report && <p className="journal-submitted-report">{objective.report.text}</p>}
       {report && objective.report?.submitted && onUndoReport && !closed && <>
         <button type="button" className="journal-dismiss" onClick={() => onUndoReport(objective.id, objective.report!.version)}>Undo submission</button>
@@ -82,6 +110,8 @@ function Question({ objective, feedback, onAnswer, onUndoReport, shared = false,
             aria-label="Your answer" onChange={event => { setTyped(event.target.value); setHasDraft(true); }} />}
         <button className="journal-choice" disabled={!typed.trim() || (!!objective.conversation && objective.conversation.completed < objective.conversation.required)}>{report ? 'Send report' : 'Answer'}</button>
       </form>}
+      {mayInsist && <SendAnyway question={objective.report!.confirm} feedback={check!.feedback} shared={shared}
+        onSend={() => onSendAnyway!(objective.id, objective.report!.version)} />}
       {rejected && !pending && <p id={feedbackId} className="journal-wrong" role="status">{feedback.message || (feedback.wait
         ? 'Please wait a few seconds before trying again.' : report ? 'Write at least 5 words, then send your report again.'
           : objective.kind === 'name' ? 'That name was not accepted. Check the name shown above their avatar and try again.'
@@ -92,7 +122,7 @@ function Question({ objective, feedback, onAnswer, onUndoReport, shared = false,
 
 // The student's side of the campaign, in short labelled blocks: the task, who you are, what you know, the questions,
 // and the quest board. Without a campaign, only the quest board. It shows only what the server sent this student.
-export default function Journal({ quest, board: boardView, feedback, onAnswer, onUndoReport, onAccept, onLeave, onStart, onAuto, onTurn, library, libraryRevision, onBrowse, onPick }: Props) {
+export default function Journal({ quest, board: boardView, feedback, onAnswer, onUndoReport, onSendAnyway, onAccept, onLeave, onStart, onAuto, onTurn, library, libraryRevision, onBrowse, onPick }: Props) {
   const [open, setOpen] = useState(() => !!boardView?.studentChoice || window.innerHeight >= 700);
   const [fresh, setFresh] = useState(false); // something changed while the journal was shut
   const [recapSeen, setRecapSeen] = useState(false);
@@ -213,7 +243,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
       </section>
 
       {quest.status !== 'campaign_complete' && <WitnessInbox interviews={quest.interviews ?? []} clues={quest.clues} onTurn={onTurn} />}
-      {main.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} quest={quest} onTurn={onTurn} />)}
+      {main.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} onSendAnyway={onSendAnyway} quest={quest} onTurn={onTurn} />)}
 
       {quest.thieves && quest.thieves.length > 0 && <section className="journal-block journal-ending">
         <h3>{quest.thieves.length === 1 ? 'The thief was' : 'The thieves were'}</h3>
@@ -228,7 +258,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
         <EvidencePicture image={quest.chapter.endingImage} text={quest.chapter.ending ?? ''} help={quest.chapter.help?.ending} />
       </section>}
 
-      {bonus.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} closed={ended} quest={quest} onTurn={onTurn} />)}
+      {bonus.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} onSendAnyway={onSendAnyway} closed={ended} quest={quest} onTurn={onTurn} />)}
       </>}
       {(!ended || !!items.length) && (!studentChoice || !!items.length) && <section className={`journal-block journal-board${choosing ? ' journal-choosing' : ''}`}><h3>{quest ? 'Quest board' : 'Your side quests'}</h3>
         <p>Do one side quest at a time; each is yours to do once.</p>
@@ -245,7 +275,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
               {item.group.state === 'open' ? ` · waiting for ${item.group.size - item.group.members.length} more` : '. Use chat to work it out together. One answer counts for everyone.'}
               {item.group.state === 'open' && item.group.startAt !== null && item.group.startAt <= now && <button className="journal-choice" onClick={() => onStart?.(item.id)}>Start with who&rsquo;s here</button>}</p>}
             {item.group?.state === 'open' && item.state === 'active' ? <><p className="journal-ask">{item.text}</p><LanguageHelp help={item.help} answer /></>
-              : <Question objective={{ id: item.id, text: item.text, help: item.help, kind: item.kind, optional: true, done: item.state === 'done', conversation: item.conversation, report: item.report }} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} closed={!!item.ended} quest={quest} onTurn={onTurn} heading={item.sideQuest ? 'Side quest' : undefined} shared={!!item.group} />}
+              : <Question objective={{ id: item.id, text: item.text, help: item.help, kind: item.kind, optional: true, done: item.state === 'done', conversation: item.conversation, report: item.report }} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} onSendAnyway={onSendAnyway} closed={!!item.ended} quest={quest} onTurn={onTurn} heading={item.sideQuest ? 'Side quest' : undefined} shared={!!item.group} />}
             {item.sideQuest && item.state === 'active' && !item.ended && <button type="button" className="journal-dismiss" onClick={() => onLeave?.(item.id)}>Leave this quest and choose another</button>}
           </> : <><p className="journal-ask">{item.text}</p><LanguageHelp help={item.help} answer />{item.activity && <p>{item.activity === 'interview' ? 'Interview a classmate' : 'Exchange information with a classmate'}</p>}
             {item.reason && <p>{item.reason}</p>}<button className="journal-choice" disabled={item.state !== 'available'} onClick={() => onAccept?.(item.id)}>{item.joining?.length ? `Join ${item.joining.join(', ')}` : 'Accept quest'}</button></>}

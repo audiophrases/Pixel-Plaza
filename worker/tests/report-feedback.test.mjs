@@ -69,6 +69,23 @@ test('private report criteria survive mission and library round trips, with boun
     assert.ok(checkQuest({ ...quest, successCriteria: 'a'.repeat(601) }).error);
 });
 
+test('the question before sending anyway survives mission and library round trips, reports only, with bounds', () => {
+    const campaign = structuredClone(castanyada);
+    const objective = campaign.chapters[0].objectives.find(o => o.kind === 'report');
+    objective.confirmSend = 'Did you give two reasons?';
+    const parsed = parseMission(missionJson(campaign));
+    assert.deepEqual(parsed.errors, []); assert.deepEqual(parsed.campaign, campaign);
+    objective.confirmSend = 'a'.repeat(201);
+    assert.ok(parseMission(missionJson(campaign)).errors.length);
+    const quest = { ...sideQuests.find(q => q.answer === 'report'), confirmSend: '  Did you answer each follow-up question?  ' };
+    assert.equal(checkQuest(quest).quest.confirmSend, 'Did you answer each follow-up question?');
+    assert.equal(questObjective(checkQuest(quest).quest).confirmSend, 'Did you answer each follow-up question?');
+    assert.ok(checkQuest({ ...quest, confirmSend: 'a'.repeat(201) }).error);
+    assert.equal(checkQuest({ ...quest, confirmSend: '   ' }).quest.confirmSend, undefined, 'an empty question is left out');
+    const typed = { ...sideQuests.find(q => q.answer === 'text'), confirmSend: 'Sure?' };
+    assert.equal(checkQuest(typed).quest.confirmSend, undefined, 'typed answers are never checked, so never sent anyway');
+});
+
 test('SQL reservations share one check per group, isolate owners, preserve results and expire interrupted checks', () => {
     const db = new DatabaseSync(':memory:');
     const sql = { exec(query, ...args) {
@@ -90,6 +107,13 @@ test('SQL reservations share one check per group, isolate owners, preserve resul
         sql.exec('UPDATE report_checks SET started = ? WHERE id = ?', Date.now() - REPORT_CHECK_TIMEOUT - 4000, interrupted.id);
         assert.equal(checks.get(interrupted.id).status, 'unavailable');
         assert.equal(checks.reserve('game', 'quest', 'student:1', 'other').fresh, false, 'interruption does not trigger another paid call');
+        // Only a revision can be sent anyway; the checker's hint stays for the teacher.
+        assert.equal(checks.sendAnyway(one.check.id), false, 'a pass is not changed');
+        assert.equal(checks.sendAnyway(interrupted.id), false, 'nor is an outage, which the teacher reviews');
+        const revised = checks.reserve('game', 'quest', 'student:2', 'thin').check;
+        checks.finish(revised.id, { status: 'revise', feedback: 'Add the follow-up answers.' });
+        assert.equal(checks.sendAnyway(revised.id), true);
+        assert.deepEqual({ ...checks.get(revised.id) }, { id: revised.id, status: 'sent', feedback: 'Add the follow-up answers.', started: revised.started });
         checks.clear('game'); assert.equal(checks.get(one.check.id), undefined);
     } finally { db.close(); }
 });

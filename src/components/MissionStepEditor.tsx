@@ -1,4 +1,4 @@
-import { prerequisiteIds, type Campaign, type Chapter, type Objective, type Role } from '../../shared/campaign';
+import { CONFIRM_SEND_MAX, prerequisiteIds, type Campaign, type Chapter, type Objective, type Role } from '../../shared/campaign';
 import MissionField from './MissionField';
 import { MissionIcon, RoleBadge } from './MissionVisuals';
 import { changeStepType, stepType, stepTypes, type StepType } from './missionEditing';
@@ -41,8 +41,9 @@ export default function MissionStepEditor({ objective, chapter, campaign, onChan
         {type === 'thief' && <p className="mission-tip">The game checks the name of the assigned thief. You do not need to enter an answer.</p>}
         {objective.kind === 'report' && <>
             <MissionField label="Success criteria (optional, private)" value={objective.successCriteria ?? ''} maxLength={600} multiline placeholder="Essential requirements and reference facts. Otherwise the task instructions are used." onChange={value => onChange({ successCriteria: value.trim() ? value : undefined })} />
+            <MissionField label="Question before “Send anyway” (optional)" value={objective.confirmSend ?? ''} maxLength={CONFIRM_SEND_MAX} placeholder="For example: Did you give two reasons from the evidence?" onChange={value => onChange({ confirmSend: value.trim() ? value : undefined })} />
             <label className="mission-field"><span>Feedback level</span><select value={objective.level ?? 'A2'} onChange={e => onChange({ level: e.target.value as Objective['level'] })}>{['A1', 'A2', 'B1', 'B2'].map(level => <option key={level}>{level}</option>)}</select></label>
-            <p className="mission-tip">Reports receive an automatic task check and one short hint. Required evidence exchanges still need to be completed first.</p>
+            <p className="mission-tip">Reports receive an automatic task check and one short hint. If the checker asks for a revision, the student can still send the same writing after answering your question (or, without one, after confirming the hint); you see it marked “Sent anyway”. Required evidence exchanges still need to be completed first.</p>
         </>}
         <div className="mission-form-section-title"><span>2</span><h3>When &amp; where it appears</h3></div>
         <label className="mission-field"><span>Where does this step appear?</span><select value={objective.board ? 'board' : objective.optional ? 'optional' : 'main'} onChange={e => {

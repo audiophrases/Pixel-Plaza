@@ -1519,6 +1519,8 @@ export class PlazaRoom extends DurableObject<Env> {
             this.leaveQuest(ws, seat, data.objective);
         } else if (data?.t === 'report-undo' && typeof data.objective === 'string' && typeof data.gameId === 'string' && Number.isSafeInteger(data.version)) {
             this.undoReport(ws, seat, data.objective, data.version, data.gameId);
+        } else if (data?.t === 'report-send-anyway' && typeof data.objective === 'string' && typeof data.gameId === 'string' && Number.isSafeInteger(data.version)) {
+            await this.sendReportAnyway(ws, seat, data.objective, data.version, data.gameId);
         } else if ((data?.t === 'quest-start' && typeof data.objective === 'string') || data?.t === 'quest-auto') {
             this.groupOrPick(ws, seat, data);
         } else if (data?.t === 'interview-ask' || data?.t === 'interview-reply') {
@@ -2106,7 +2108,8 @@ export class PlazaRoom extends DurableObject<Env> {
         const report = this.savedReport(game, objective, student);
         const check = report?.check_id ? this.reportChecks.get(report.check_id) : undefined;
         return report ? { text: report.text, version: report.ts, submitted: report.submitted === 1,
-            ...(check ? { check: { status: check.status, feedback: check.feedback } } : {}) } : undefined;
+            ...(check ? { check: { status: check.status, feedback: check.feedback } } : {}),
+            ...(check?.status === 'revise' && objective.confirmSend ? { confirm: objective.confirmSend } : {}) } : undefined;
     }
 
     private saveReport(game: string, objective: Objective, student: string, text: string, checkId: string | null = null): number {
@@ -2133,7 +2136,8 @@ export class PlazaRoom extends DurableObject<Env> {
     }
     private reportApproved(game: string, objective: Objective, student: string, version: number): boolean {
         const report = this.savedReport(game, objective, student);
-        return !!report && report.ts === version && report.submitted === 1 && !!report.check_id && this.reportChecks.get(report.check_id)?.status === 'pass';
+        const status = report?.check_id ? this.reportChecks.get(report.check_id)?.status : undefined;
+        return !!report && report.ts === version && report.submitted === 1 && (status === 'pass' || status === 'sent');
     }
     // A check may finish while its game is closed. Apply its saved pass when a member returns, without another call.
     private resumePassedReports(ws: WebSocket, game: string, student: string): void {
@@ -2142,7 +2146,7 @@ export class PlazaRoom extends DurableObject<Env> {
         const reports = this.sql.exec<{ student_key: string; objective: string; text: string; ts: number }>(
             `SELECT DISTINCT r.student_key, r.objective, r.text, r.ts FROM campaign_reports r JOIN report_checks c ON c.id = r.check_id
              LEFT JOIN side_quest_members m ON m.group_id = r.group_id AND m.student_key = ?
-             WHERE r.game_id = ? AND r.submitted = 1 AND c.status = 'pass'
+             WHERE r.game_id = ? AND r.submitted = 1 AND c.status IN ('pass', 'sent')
              AND ((r.group_id IS NULL AND r.student_key = ?) OR m.student_key IS NOT NULL)`, student, game, student).toArray();
         for (const report of reports) {
             if (done.includes(report.objective) || !this.reportObjective(game, report.student_key, report.objective)) continue;
@@ -2179,7 +2183,8 @@ export class PlazaRoom extends DurableObject<Env> {
         const author = { ...seat, studentKey: current.student_key, name: this.rosterNames(seat.game).get(current.student_key) ?? seat.name };
         const socket = this.ctx.getWebSockets(current.student_key).find(socket => (socket.deserializeAttachment() as Seat | null)?.game === seat.game) ?? ws;
         const active = this.isOpen() && this.activeGame() === seat.game;
-        if (result.status === 'pass') {
+        // "sent": this exact writing was sent anyway before (then undone); sending it again keeps that decision.
+        if (result.status === 'pass' || result.status === 'sent') {
             if (active) await this.answer(socket, author, objective.id, current.text, undefined, { version: current.ts, audit });
         }
         else {
@@ -2205,6 +2210,32 @@ export class PlazaRoom extends DurableObject<Env> {
         this.reportChecks.approve(check.id);
         await this.answer(socket, seat ?? fallback, objective.id, report.text, undefined, { version: report.ts, audit: this.beginAttempt(seat ?? fallback, report.text, 'answer', undefined, undefined, objective.id) });
         return null;
+    }
+
+    // The checker asked for a revision, but the student (after confirming in the Journal) is sure the writing already does
+    // the task. Only that checked writing, unchanged, can be sent: it completes like a pass, and the teacher's list shows it
+    // was sent anyway, with the checker's hint. Changed writing goes through the checker again as usual.
+    private async sendReportAnyway(ws: WebSocket, seat: Seat, objectiveId: string, version: number, gameId: string): Promise<void> {
+        if (!this.isOpen() || gameId !== seat.game || seat.game !== this.activeGame()) return;
+        const warn = (text: string) => ws.send(JSON.stringify({ t: 'notice', level: 'warning', text }));
+        const objective = this.reportObjective(seat.game, seat.studentKey, objectiveId);
+        if (objective?.kind !== 'report') return warn('That report cannot be sent.');
+        const row = this.campaignRow(seat.game);
+        if (!this.boardContext(seat.game, seat.studentKey)?.gameQuests.has(objective.id) && row?.status === 'campaign_complete') return warn('Your teacher ended this campaign.');
+        if (objective.board && !this.questBoard.assignment(seat.game, objective.id, seat.studentKey)) return warn('Accept this quest before sending a report.');
+        const report = this.savedReport(seat.game, objective, seat.studentKey);
+        const check = report?.check_id ? this.reportChecks.get(report.check_id) : undefined;
+        // A teammate already sent it: just show the result.
+        if (report?.ts === version && report.submitted === 1 && check?.status === 'sent') return this.sendQuest(ws, seat.game, seat.studentKey);
+        if (!report || !check || report.ts !== version || report.submitted !== 0 || check.status !== 'revise') {
+            this.sendQuest(ws, seat.game, seat.studentKey);
+            return warn('This report has changed. Check the latest version before sending it.');
+        }
+        this.ctx.storage.transactionSync(() => {
+            this.reportChecks.sendAnyway(check.id);
+            this.sql.exec('UPDATE campaign_reports SET submitted = 1 WHERE game_id = ? AND objective = ? AND student_key = ? AND check_id = ?', seat.game, objective.id, report.student_key, check.id);
+        });
+        await this.answer(ws, seat, objective.id, report.text, undefined, { version: report.ts, audit: this.beginAttempt(seat, report.text, 'answer', undefined, undefined, objective.id) });
     }
 
     // Undo reopens a shared report for its original group, or an individual report for its author. Writing and XP

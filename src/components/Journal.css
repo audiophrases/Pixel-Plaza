@@ -118,3 +118,14 @@
 .journal-cast summary h3 { display: inline; }
 .journal-cast-note { font-size: 0.85rem; color: #5c4a68; }
 .journal-cast ul { margin: 0.3rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.3rem; font-size: 0.9rem; }
+/* Sending a report the checker asked to revise: a quiet button under the hint, then a dialog that asks the quest's question. */
+.journal-send-anyway { margin-top: 0.4rem; font-size: 0.85rem; }
+.send-anyway-dialog { box-sizing: border-box; width: min(420px, 92vw); padding: 18px; border: 2px solid #faad14; border-radius: 12px; background: #fffdf5; color: #243c46; line-height: 1.45; }
+.send-anyway-dialog::backdrop { background: #142530a6; }
+.send-anyway-dialog h2 { margin: 0 0 0.6rem; font-size: 1.15rem; }
+.send-anyway-dialog p { margin: 0.4rem 0; }
+.send-anyway-question { font-size: 1.05rem; font-weight: 800; }
+.send-anyway-note { font-size: 0.85rem; color: #5f6b7a; }
+.send-anyway-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; margin-top: 0.9rem; }
+.send-anyway-actions button { padding: 9px 13px; border: 1px solid #8ba6ac; border-radius: 7px; background: white; color: inherit; cursor: pointer; font: inherit; font-weight: 700; }
+.send-anyway-actions .send-anyway-yes { border-color: #d48806; background: #fff1b8; }

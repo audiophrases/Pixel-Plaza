@@ -7,7 +7,7 @@
 // - story quests belong to one chapter of a story mission and use its people and clues;
 // - generic quests (social, plaza, puzzle, seasonal) work in any game, including a free-play mission.
 // Each quest becomes an optional quest-board objective with the library ID, so it can be added to a game once.
-import type { Campaign, Objective } from './campaign.ts';
+import { CONFIRM_SEND_MAX, type Campaign, type Objective } from './campaign.ts';
 import { missionId } from './missionSchema.ts';
 
 export type QuestLevel = 'A1' | 'A2' | 'B1' | 'B2';
@@ -25,6 +25,7 @@ export type SideQuest = {
     accept: string[];            // typed answers only
     teacherNote: string;
     successCriteria?: string;
+    confirmSend?: string;        // reports: what a student is asked before sending writing the checker wanted revised
     roles?: string[];            // story quests for some roles only (secret missions)
     after?: string;              // story quests that use what a main question reveals
     afterMain?: boolean;         // story quests about the chapter's solution
@@ -130,7 +131,8 @@ export function questObjective(quest: SideQuest): Objective {
         text: `${quest.title}: ${quest.text}`,
         accept: quest.answer === 'text' ? [...quest.accept] : [],
         ...(quest.answer === 'report' ? { kind: 'report' as const } : {}),
-        ...(quest.answer === 'report' ? { level: quest.level, ...(quest.successCriteria ? { successCriteria: quest.successCriteria } : {}) } : {}),
+        ...(quest.answer === 'report' ? { level: quest.level, ...(quest.successCriteria ? { successCriteria: quest.successCriteria } : {}),
+            ...(quest.confirmSend ? { confirmSend: quest.confirmSend } : {}) } : {}),
         optional: true,
         ...(quest.after ? { after: quest.after } : {}),
         board: {
@@ -251,6 +253,7 @@ export function checkQuest(value: unknown): { quest: SideQuest } | { error: stri
     if (!Number.isInteger(quest.minutes) || quest.minutes! < 1 || quest.minutes! > 60) return { error: `${where}: minutes must be a whole number from 1 to 60.` };
     if (!isTexts(quest.focus) || !isTexts(quest.tags) || !isTexts(quest.accept) || typeof quest.teacherNote !== 'string' || quest.teacherNote.length > 4000) return { error: `${where}: focus, tags, answers and teacher note are needed.` };
     if (quest.successCriteria !== undefined && (typeof quest.successCriteria !== 'string' || quest.successCriteria.length > 600)) return { error: `${where}: success criteria must be text of up to 600 characters.` };
+    if (quest.confirmSend !== undefined && (typeof quest.confirmSend !== 'string' || quest.confirmSend.length > CONFIRM_SEND_MAX)) return { error: `${where}: the question before sending anyway must be text of up to ${CONFIRM_SEND_MAX} characters.` };
     const accept = quest.answer === 'text' ? quest.accept!.map(answer => answer.trim()).filter(Boolean) : [];
     if (quest.answer === 'text' && !accept.length) return { error: `${where}: a typed answer needs accepted answers.` };
     if ((quest.roles !== undefined && !isTexts(quest.roles)) || (quest.after !== undefined && (typeof quest.after !== 'string' || !missionId(quest.after))) || (quest.afterMain !== undefined && typeof quest.afterMain !== 'boolean')) return { error: `${where}: roles, "after" and "after the main mystery" are not valid.` };
@@ -262,6 +265,7 @@ export function checkQuest(value: unknown): { quest: SideQuest } | { error: stri
         focus: quest.focus!.map(item => item.trim()).filter(Boolean), tags: quest.tags!.map(tag => tag.trim().toLowerCase()).filter(Boolean),
         text: quest.text!.trim(), accept, teacherNote: quest.teacherNote.trim(),
         ...(quest.successCriteria?.trim() ? { successCriteria: quest.successCriteria.trim() } : {}),
+        ...(quest.answer === 'report' && quest.confirmSend?.trim() ? { confirmSend: quest.confirmSend.trim() } : {}),
         ...(roles?.length ? { roles } : {}), ...(story && quest.after ? { after: quest.after } : {}), ...(story && quest.afterMain ? { afterMain: true } : {}),
     } };
 }

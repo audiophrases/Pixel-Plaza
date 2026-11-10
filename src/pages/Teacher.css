@@ -35,6 +35,7 @@
 .teacher-entry small { color: #555; }
 .teacher-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 .teacher-error { color: #9d171b; margin-top: 1rem; }
+.teacher-sent-anyway { color: #874d00; font-weight: 700; }
 .teacher-flag { color: #b3261e; font-size: .9rem; margin: .3rem 0; }
 
 .teacher-mode { background: white; border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; }

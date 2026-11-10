@@ -85,5 +85,10 @@ export class ReportChecks {
     approve(id: string): void {
         this.sql.exec("UPDATE report_checks SET status = 'pass', feedback = 'Reviewed by your teacher.' WHERE id = ? AND status IN ('uncertain', 'unavailable')", id);
     }
+    // The student is sure the checker missed something: the same writing counts, and keeps the checker's hint for the teacher.
+    sendAnyway(id: string): boolean {
+        this.sql.exec("UPDATE report_checks SET status = 'sent' WHERE id = ? AND status = 'revise'", id);
+        return this.get(id)?.status === 'sent';
+    }
     clear(game: string): void { this.sql.exec('DELETE FROM report_checks WHERE game_id = ?', game); }
 }

@@ -80,6 +80,14 @@ const PAGES: [string, string][] = [['/quest-library', 'Side quest library'], ['/
 // The chat log's views, as Ctrl+K offers them: what the class is saying, at a glance.
 const CHAT_VIEWS: [ChatFilter, string, string][] = [['everyone', '📢', 'Everyone chat'], ['nearby', '👥', 'Nearby chat'], ['private', '🔒', 'Private messages'], ['blocked', '⛔', 'Blocked messages'], ['all', '💬', 'All chat']];
 
+// The checker's hint under a student's report. A report the student sent anyway, after the checker asked for a revision,
+// stands out, so the teacher can read it with what the checker wanted.
+function ReportCheckNote({ check }: { check: ReportCheck }) {
+  return check.status === 'sent'
+    ? <small className="teacher-sent-anyway">⚠ Sent anyway. The checker had said: {check.feedback}</small>
+    : <small>{check.feedback}</small>;
+}
+
 export default function Teacher() {
   const [unplayedWarmups, setUnplayedWarmups] = useState(false);
   const navigate = useNavigate();
@@ -626,7 +634,7 @@ export default function Teacher() {
             <h3>What students wrote</h3>
             <ul>{campaign.reports.map(report => <li key={report.studentKey + report.objective}>
               <span><strong>{who(report.studentKey, campaign.players.find(player => player.studentKey === report.studentKey)?.name ?? 'Student')}</strong>{report.partner ? ` · partner: ${report.partner}` : ''}: {report.text}</span>
-              {report.check && <small>{report.check.feedback}</small>}
+              {report.check && <ReportCheckNote check={report.check} />}
               {report.check && ['uncertain', 'unavailable'].includes(report.check.status) && <button className="btn btn-secondary btn-sm" onClick={() => void action('report-accept', { gameId: status.game!.id, studentKey: report.studentKey, objective: report.objective, version: report.version })}>Accept report</button>}
               <StarButton starred={report.starred} onStar={() => void action('xp', { report: { studentKey: report.studentKey, objective: report.objective } })} />
             </li>)}</ul>
@@ -677,7 +685,7 @@ export default function Teacher() {
             <h3>What students wrote</h3>
             <ul>{side.reports.map(report => <li key={report.studentKey + report.objective}>
               <span><strong>{who(report.studentKey, status.realNames[report.studentKey] ?? 'Student')}</strong> · {report.quest}{report.partner ? ` · with ${report.partner}` : ''}: {report.text}</span>
-              {report.check && <small>{report.check.feedback}</small>}
+              {report.check && <ReportCheckNote check={report.check} />}
               {report.check && ['uncertain', 'unavailable'].includes(report.check.status) && <button className="btn btn-secondary btn-sm" onClick={() => void action('report-accept', { gameId: status.game!.id, studentKey: report.studentKey, objective: report.objective, version: report.version })}>Accept report</button>}
               <StarButton starred={report.starred} onStar={() => void action('xp', { report: { studentKey: report.studentKey, objective: report.objective } })} />
             </li>)}</ul>

@@ -1,24 +1,26 @@
 import { useState } from 'react';
+import { CONFIRM_SEND_MAX } from '../../shared/campaign';
 import { ANSWERS, FORMATS, LEVELS, THEMES, checkQuest, type QuestAnswer, type QuestFormat, type QuestLevel, type QuestTheme, type SideQuest, type StoryChapter } from '../../shared/sideQuests';
 import MissionField from './MissionField';
 
 // The form keeps lists as the teacher types them: commas for focus, tags and roles, one accepted answer a line.
 type Draft = {
     title: string; text: string; theme: QuestTheme; category: string; chapter: string; level: QuestLevel; format: QuestFormat; answer: QuestAnswer;
-    minutes: string; focus: string; tags: string; accept: string; teacherNote: string; successCriteria: string; roles: string; after: string; afterMain: boolean;
+    minutes: string; focus: string; tags: string; accept: string; teacherNote: string; successCriteria: string; confirmSend: string; roles: string; after: string; afterMain: boolean;
 };
 const list = (text: string, separator: RegExp) => text.split(separator).map(item => item.trim()).filter(Boolean);
 const draftOf = (quest: SideQuest): Draft => ({
     title: quest.title, text: quest.text, theme: quest.theme, category: quest.category, chapter: quest.chapter ?? '', level: quest.level, format: quest.format, answer: quest.answer,
     minutes: String(quest.minutes), focus: quest.focus.join(', '), tags: quest.tags.join(', '), accept: quest.accept.join('\n'), teacherNote: quest.teacherNote,
     roles: quest.roles?.join(', ') ?? '', after: quest.after ?? '', afterMain: !!quest.afterMain,
-    successCriteria: quest.successCriteria ?? '',
+    successCriteria: quest.successCriteria ?? '', confirmSend: quest.confirmSend ?? '',
 });
 const questOf = (draft: Draft, id: string) => ({
     id, title: draft.title, text: draft.text, theme: draft.theme, category: draft.category, chapter: draft.theme === 'story' ? draft.chapter : null,
     level: draft.level, format: draft.format, answer: draft.answer, minutes: Number(draft.minutes), focus: list(draft.focus, /,/), tags: list(draft.tags, /,/),
     accept: draft.answer === 'text' ? list(draft.accept, /\n/) : [], teacherNote: draft.teacherNote,
     ...(draft.answer === 'report' && draft.successCriteria.trim() ? { successCriteria: draft.successCriteria.trim() } : {}),
+    ...(draft.answer === 'report' && draft.confirmSend.trim() ? { confirmSend: draft.confirmSend.trim() } : {}),
     ...(draft.theme === 'story' && draft.roles.trim() ? { roles: list(draft.roles, /,/) } : {}),
     ...(draft.theme === 'story' && draft.after.trim() ? { after: draft.after.trim() } : {}),
     ...(draft.theme === 'story' && draft.afterMain ? { afterMain: true } : {}),
@@ -68,6 +70,7 @@ export default function SideQuestEditor({ quest, creating, chapters, categories,
         </div>
         <MissionField label="Teacher note" multiline value={draft.teacherNote} maxLength={4000} placeholder="What to look for, how to adapt it, the solution." onChange={value => set('teacherNote', value)} />
         {draft.answer === 'report' && <MissionField label="Success criteria (optional, private)" multiline value={draft.successCriteria} maxLength={600} placeholder="For example: Recommend one place and give two reasons. Otherwise the instructions are used." onChange={value => set('successCriteria', value)} />}
+        {draft.answer === 'report' && <MissionField label="Question before “Send anyway” (optional)" value={draft.confirmSend} maxLength={CONFIRM_SEND_MAX} placeholder="For example: Did you include the answers to your follow-up questions for each classmate?" onChange={value => set('confirmSend', value)} />}
 
         <div className="ql-board-preview" aria-label="On the quest board"><p className="mission-eyebrow">ON THE QUEST BOARD</p>
             <p>{draft.title.trim() || 'Title'}: {draft.text.trim() || 'What the student reads.'}</p>
