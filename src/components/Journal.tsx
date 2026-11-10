@@ -29,6 +29,8 @@ type Props = {
   libraryRevision?: number;
   onBrowse?: (query: StudentChoiceQuery & { requestId: string }) => boolean;
   onPick?: (id: string) => boolean;
+  choicePaused?: boolean; // the challenge window waits (choosing a name, reconnecting) before opening by itself
+  notice?: { text: string; at: number } | null; // the latest warning from the server, shown in the challenge window
 };
 
 const SOURCE: Record<string, string> = { job: 'Your clue', reward: 'New clue', news: 'News' };
@@ -122,7 +124,7 @@ function Question({ objective, feedback, onAnswer, onUndoReport, onSendAnyway, s
 
 // The student's side of the campaign, in short labelled blocks: the task, who you are, what you know, the questions,
 // and the quest board. Without a campaign, only the quest board. It shows only what the server sent this student.
-export default function Journal({ quest, board: boardView, feedback, onAnswer, onUndoReport, onSendAnyway, onAccept, onLeave, onStart, onAuto, onTurn, library, libraryRevision, onBrowse, onPick }: Props) {
+export default function Journal({ quest, board: boardView, feedback, onAnswer, onUndoReport, onSendAnyway, onAccept, onLeave, onStart, onAuto, onTurn, library, libraryRevision, onBrowse, onPick, choicePaused, notice }: Props) {
   const [open, setOpen] = useState(() => !!boardView?.studentChoice || window.innerHeight >= 700);
   const [fresh, setFresh] = useState(false); // something changed while the journal was shut
   const [recapSeen, setRecapSeen] = useState(false);
@@ -172,7 +174,8 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
     </button>
     {open && <div className={`journal-body${studentChoice ? ' journal-student-choice' : ''}`}>
       {studentChoice && onBrowse && onPick && <StudentQuestBrowser result={library ?? null} active={active}
-        refreshKey={JSON.stringify([libraryRevision, boardView])} onBrowse={onBrowse} onPick={onPick} />}
+        refreshKey={JSON.stringify([libraryRevision, boardView])} onBrowse={onBrowse} onPick={onPick}
+        paused={choicePaused} notice={notice} />}
       {quest && <>
       {quest.secret && <section className="journal-block journal-secret">
         <h3>Secret</h3>

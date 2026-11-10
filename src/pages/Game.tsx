@@ -123,6 +123,8 @@ export default function Game() {
   const [board, setBoard] = useState<BoardView | null>(null); // this student's side quests, with or without a campaign
   const [questLibrary, setQuestLibrary] = useState<StudentChoicePage | null>(null);
   const [boardRevision, setBoardRevision] = useState(0);
+  // The server's latest warning, for the challenge window: a refused pick would otherwise be hidden behind it in the chat.
+  const [choiceNotice, setChoiceNotice] = useState<{ text: string; at: number } | null>(null);
   const [gameId, setGameId] = useState('');
   const [answered, setAnswered] = useState<AnswerFeedback | null>(null);
   const [sendError, setSendError] = useState(''); // why the last message did not go, shown by the box
@@ -591,7 +593,10 @@ export default function Game() {
           return next;
         });
       }
-      else if (event.t === 'notice') say({ sender: event.level === 'warning' ? 'System Warning' : 'System', text: event.text, conv: activeRef.current });
+      else if (event.t === 'notice') {
+        say({ sender: event.level === 'warning' ? 'System Warning' : 'System', text: event.text, conv: activeRef.current });
+        if (event.level === 'warning') setChoiceNotice({ text: event.text, at: Date.now() });
+      }
       else if (event.t === 'tab-switches') {
         const current = !tabGameRef.current || tabGameRef.current === plaza.gameId ? tabSwitchesRef.current : 0;
         tabGameRef.current = plaza.gameId;
@@ -878,6 +883,8 @@ export default function Game() {
         {(quest || !!board?.board.length || board?.studentChoice) && <Journal quest={quest} board={board} feedback={answered}
           library={questLibrary}
           libraryRevision={boardRevision}
+          choicePaused={status.state !== 'online' || !!(alias && !alias.kept)}
+          notice={choiceNotice}
           onBrowse={query => connection?.send({ t: 'quest-browse', ...query }) ?? false}
           onPick={objective => connection?.send({ t: 'quest-pick', objective }) ?? false}
           onTurn={turn => {

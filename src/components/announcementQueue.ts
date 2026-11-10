@@ -65,12 +65,10 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
     // The quest board belongs to the game: its announcements do not depend on a mission.
     if (board) {
         const items = board.board.filter(o => !o.ended);
-        // Nothing else to do: choose a side quest. Asked again each time, after finishing one.
+        // Nothing else to do: choose a side quest. Asked again each time, after finishing one. In Student Choice the
+        // challenge window itself opens instead (StudentQuestBrowser), with the three steps: no announcement before it.
         if (board.studentChoice && !items.some(item => item.sideQuest && item.state === 'active')) {
-            add(key('student-choice', items.filter(item => item.sideQuest && item.state === 'done').length), {
-                kind: 'board', eyebrow: 'YOUR CHOICE', title: 'Choose a challenge',
-                sections: [{ label: 'Three steps', text: '1. Pick a challenge. 2. Chat with your classmates. 3. Answer together.' }],
-                next: 'Open Choose a challenge in your Journal. Join someone waiting, or pick your own.' });
+            // nothing to announce
         } else if (board.sideQuests.state === 'choose') {
             const open = items.filter(o => o.sideQuest && o.state === 'available');
             add(key('choose', 'board', items.filter(o => o.sideQuest && o.state === 'done').length), { kind: 'board', eyebrow: 'TIME FOR A SIDE QUEST', title: 'Choose a side quest',

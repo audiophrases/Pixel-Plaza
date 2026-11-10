@@ -22,63 +22,107 @@ window.setTimeout = ((handler: TimerHandler, ms?: number, ...args: unknown[]) =>
   return browserTimeout.call(window, handler, ms, ...args);
 }) as typeof window.setTimeout;
 const requests: (StudentChoiceQuery & { requestId: string })[] = [], picks: string[] = [];
-let result: StudentChoicePage | null = null, active = false, online = true;
-const render = () => act(async () => root.render(<StudentQuestBrowser result={result} active={active} refreshKey="1"
+let result: StudentChoicePage | null = null, active = false, online = true, refreshKey = '1';
+let notice: { text: string; at: number } | null = null;
+const render = () => act(async () => root.render(<StudentQuestBrowser result={result} active={active} refreshKey={refreshKey} notice={notice}
   onBrowse={query => { requests.push(query); return online; }} onPick={id => { picks.push(id); return online; }} />));
-const wait = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 230)); });
+const wait = (ms = 230) => act(async () => { await new Promise(resolve => setTimeout(resolve, ms)); });
+const picker = () => document.querySelector('dialog.challenge-picker');
+const isOpen = () => !!picker()?.hasAttribute('open');
 const button = (label: string) => {
   const found = [...document.querySelectorAll('button')].find(item => item.textContent?.trim() === label);
   assert.ok(found, `Button: ${label}`); return found;
 };
 const click = (label: string) => act(async () => button(label).click());
-const response = (title = 'Build a story') => ({ requestId: requests.at(-1)!.requestId, enabled: true, total: 25, page: requests.at(-1)!.page, pages: 3,
+const response = (title = 'Build a story', joining = ['Sam']) => ({ requestId: requests.at(-1)!.requestId, enabled: true, total: 25, page: requests.at(-1)!.page, pages: 3,
   items: [{ id: 'story', title, text: 'Chat with your partner. Take turns adding one sentence.', category: 'Talk', format: 'pair' as const, level: 'A2' as const,
-    minutes: 5, state: 'available' as const, reason: null, joining: ['Sam'] }] });
-await render(); await wait();
+    minutes: 5, state: 'available' as const, reason: null, joining }] });
+await render();
+assert.equal(isOpen(), false, 'the window waits a moment before opening by itself');
+await wait(450); await wait();
+assert.equal(isOpen(), true, 'a free student gets the challenge window by itself');
 assert.equal(requests.length, 1);
 assert.match(requests[0].requestId, /^[a-f0-9-]{36}$/, 'the school-network browser can request challenges without randomUUID');
 await act(async () => { assert.ok(loadingTimeout); loadingTimeout(); });
 assert.match(document.body.textContent!, /Could not load challenges/);
 result = response(); await render();
 assert.doesNotMatch(document.body.textContent!, /Could not load challenges/, 'a late successful response replaces its loading warning');
+assert.match(document.body.textContent!, /Classmates waiting for you/, 'classmates waiting come first, in their own group');
 assert.match(document.body.textContent!, /Waiting: Sam/);
-online = false; await click('Join them');
+
+// Board changes refresh the list without blanking it, at most once a second.
+refreshKey = '2'; await render(); refreshKey = '3'; await render(); refreshKey = '4'; await render();
+assert.ok(document.querySelector('.challenge-card'), 'the list stays while it refreshes');
+assert.equal(document.querySelector('.challenge-picker-stale'), null, 'a refresh of the same search is not dimmed');
+assert.doesNotMatch(document.body.textContent!, /Loading/);
+await wait(); assert.equal(requests.length, 1, 'board changes do not refresh at once');
+await wait(900); assert.equal(requests.length, 2, 'several board changes make one refresh');
+assert.ok(document.querySelector('.challenge-card'), 'still showing the list while the refresh is on its way');
+result = response('Build a story', ['Sam', 'Ana']); await render();
+assert.match(document.body.textContent!, /Waiting: Sam, Ana/, 'the refreshed list replaces the old one in place');
+
+online = false; await click('Join Sam, Ana');
 assert.match(document.body.textContent!, /Reconnecting/, 'a failed selection is still reported when the catalog has loaded');
 online = true; picks.length = 0;
-await click('Join them'); assert.deepEqual(picks, ['story']);
+await click('Join Sam, Ana'); assert.deepEqual(picks, ['story']);
+assert.equal(button('Joining…').disabled, true, 'one click: the button waits for the answer');
+notice = { text: 'That challenge is no longer available. Refresh the list.', at: Date.now() + 1 }; await render();
+assert.match(document.querySelector('.challenge-picker-footer')!.textContent!, /no longer available/, 'a refused pick is shown in the window');
+assert.equal(button('Join Sam, Ana').disabled, false);
+
 await click('Next');
-assert.equal(document.querySelector('.student-choice-card'), null, 'stale cards disappear while another page loads');
+assert.ok(document.querySelector('.challenge-picker-stale .challenge-card'), 'while another page loads, the old one stays dimmed');
+assert.equal(button('Join Sam, Ana').disabled, true, 'a dimmed card cannot be chosen');
 await wait(); assert.equal(requests.at(-1)!.page, 1);
 const stale = result;
 result = response('Second page'); await render();
 assert.match(document.body.textContent!, /Second page/);
+assert.equal(document.querySelector('.challenge-picker-stale'), null);
 await act(async () => { const select = document.querySelector('select')!; select.value = 'group'; select.dispatchEvent(new dom.window.Event('change', { bubbles: true })); });
 await wait(); assert.equal(requests.at(-1)!.format, 'group'); assert.equal(requests.at(-1)!.page, 0);
 result = stale; await render();
-assert.equal(document.querySelector('.student-choice-card'), null, 'a delayed response cannot replace a newer search');
+assert.match(document.body.textContent!, /Second page/, 'a delayed response cannot replace a newer search');
+assert.ok(document.querySelector('.challenge-picker-stale'));
 result = { ...response(), items: [], total: 0, pages: 0 }; await render();
 assert.match(document.body.textContent!, /No matches/);
-active = true; await render();
-assert.equal(document.querySelector('.student-choice-filters'), null, 'picking a quest folds the browser away');
-await act(async () => document.querySelector<HTMLButtonElement>('.student-choice-toggle')!.click()); await wait();
 result = response(); await render();
-assert.equal(button('Join them').disabled, true, 'one challenge at a time');
-active = false; online = false; await render(); await click('Refresh'); await wait();
+active = true; await render();
+assert.equal(isOpen(), false, 'choosing a challenge closes the window');
+assert.equal(document.querySelector('.student-choice-open')!.textContent!.trim(), '🎯 Browse challenges');
+await act(async () => document.querySelector<HTMLButtonElement>('.student-choice-open')!.click()); await wait();
+assert.equal(isOpen(), true);
+result = response(); await render();
+assert.equal(button('Join Sam').disabled, true, 'one challenge at a time');
+assert.match(document.body.textContent!, /Finish it, or leave it/);
+await click('✕ Close'); assert.equal(isOpen(), false);
+await wait(1200); const quiet = requests.length; refreshKey = '5'; await render(); await wait(1200);
+assert.equal(requests.length, quiet, 'a shut window asks for nothing');
+active = false; await render(); await wait(450); await wait();
+assert.equal(isOpen(), true, 'free again: the window opens again');
+online = false; await click('Refresh');
 assert.match(document.body.textContent!, /Reconnecting/);
-online = true; await click('Refresh'); await wait(); result = response(); await render();
+online = true; await click('Refresh'); result = response(); await render();
 assert.doesNotMatch(document.body.textContent!, /Reconnecting/);
+await act(async () => root.render(<></>));
 
 const timers: number[] = [], originalTimeout = window.setTimeout;
 window.setTimeout = ((handler: TimerHandler, ms?: number, ...args: unknown[]) => { timers.push(ms ?? 0); return originalTimeout.call(window, handler, ms, ...args); }) as typeof window.setTimeout;
 const board: BoardView = { board: [], studentChoice: true, sideQuests: { state: 'empty', reason: 'Your teacher can add side quests.', waiting: 0 } };
 Object.defineProperty(window, 'innerHeight', { value: 600 });
+await act(async () => root.render(<Journal quest={null} board={board} feedback={null} onAnswer={() => {}} onBrowse={() => true} onPick={() => true} choicePaused />));
+await wait(900);
+assert.ok(document.querySelector('.student-choice-open'), 'the Journal shows the way to the challenges, even on a short screen');
+assert.equal(isOpen(), false, 'the window waits while the student chooses a name or reconnects');
 await act(async () => root.render(<Journal quest={null} board={board} feedback={null} onAnswer={() => {}} onBrowse={() => true} onPick={() => true} />));
-assert.ok(document.querySelector('.student-choice-search'), 'the library opens even with no quest board on a short screen');
+await wait(450); await wait();
+assert.ok(isOpen() && document.querySelector('.challenge-picker-tools input[type="search"]'), 'then it opens with search and filters');
 assert.doesNotMatch(document.body.textContent!, /teacher can add|in a minute/);
 assert.ok(!timers.includes(60000), 'student browsing never schedules automatic selection');
-assert.match(activityAnnouncements(null, null, new Set(), board)[0].sections[0].text, /Chat with your classmates/);
+assert.equal(activityAnnouncements(null, null, new Set(), board).length, 0, 'no announcement before the window: the window explains the steps');
+assert.equal(activityAnnouncements(null, null, new Set(), { ...board, sideQuests: { state: 'choose', reason: null, waiting: 1 } }).length, 0, 'nor the old side quest prompt');
 await act(async () => root.render(<Journal quest={null} board={{ ...board, studentChoice: false }} feedback={null} onAnswer={() => {}} />));
 assert.equal(document.querySelector('.student-choice'), null, 'turning the mode off removes browsing');
+assert.equal(picker(), null, 'and its window');
 if (uuidDescriptor) Object.defineProperty(crypto, 'randomUUID', uuidDescriptor);
 else delete (crypto as Partial<Crypto>).randomUUID;
 
@@ -115,5 +159,5 @@ await act(async () => complete!(Response.json(status)));
 assert.equal(toggle().checked, true);
 assert.doesNotMatch(document.body.textContent!, /No side quests in this game yet/);
 await act(async () => root.unmount()); dom.window.close();
-console.log('Student Choice UI: pages, filters, stale replies, joining, active quests, reconnects, empty boards, no automatic selection and teacher toggle/retry pass.');
+console.log('Student Choice UI: the challenge window opens by itself (not while paused), keeps its list through throttled refreshes, dims stale pages, joins with one click, shows refused picks, closes on joining, and the teacher toggle/retry pass.');
 process.exit(0);

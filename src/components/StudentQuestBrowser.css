@@ -1,19 +1,67 @@
-.student-choice { margin: .6rem 0; padding: .6rem; border: 2px solid #389e8b; border-radius: 10px; background: #effaf6; overflow-wrap: anywhere; }
-.student-choice-toggle { display: flex; justify-content: space-between; gap: .5rem; width: 100%; color: #145447; }
-.student-choice p { margin: .5rem 0; line-height: 1.45; }
-.student-choice-steps { font-weight: 700; }
-.student-choice-search, .student-choice-filters label { display: grid; gap: .25rem; font-size: .8rem; font-weight: 700; min-width: 0; }
-.student-choice input, .student-choice select { width: 100%; min-width: 0; box-sizing: border-box; padding: .45rem; border: 1px solid #739d92; border-radius: 6px; font: inherit; color: #233c36; background: white; }
-.student-choice-filters { display: grid; grid-template-columns: 1.2fr 1fr; gap: .4rem; margin-top: .5rem; }
-.student-choice-count, .student-choice-pages { display: flex; align-items: center; justify-content: space-between; gap: .4rem; margin-top: .6rem; font-size: .8rem; }
-.student-choice-card { margin-top: .7rem; padding: .65rem; background: white; border: 1px solid #b0cfc6; border-radius: 8px; }
-.student-choice-card h4 { margin: 0; font-size: 1rem; }
-.student-choice-meta { color: #4a605b; font-size: .8rem; }
-.student-choice-join { color: #145447; font-weight: 700; }
-.student-choice-card > button { width: 100%; }
+/* Student Choice: a launcher in the Journal, and a large, steady window to browse and join challenges. */
+.student-choice { margin: .6rem 0; padding: .6rem; border: 2px solid #389e8b; border-radius: 10px; background: #effaf6; }
+.student-choice-open { width: 100%; padding: .6rem .7rem; border: 2px solid #389e8b; border-radius: 8px; background: white; color: #145447; font: inherit; font-weight: 800; cursor: pointer; }
+.student-choice-open:hover { background: #f4fffb; }
+.student-choice-open-free { background: #237b69; border-color: #237b69; color: white; box-shadow: 0 0 0 3px #faad14; }
+.student-choice-open-free:hover { background: #1d6a5a; }
+.student-choice-open:focus-visible { outline: 3px solid #dfa62b; outline-offset: 2px; }
+.student-choice-hint { margin: .45rem 0 0; font-size: .8rem; font-weight: 700; color: #145447; }
 .journal-student-choice { display: flex; flex-direction: column; }
 .journal-student-choice > .student-choice { order: -2; }
 .journal-student-choice > .journal-board { order: -1; }
+
+/* The window keeps one size while its list refreshes, so nothing jumps: header, tools and footer stay put, and only
+   the list scrolls. */
+.challenge-picker { --picker-color: #237b69; --picker-soft: #effaf6; box-sizing: border-box; width: min(1080px, calc(100vw - 2rem)); height: min(860px, calc(100dvh - 2rem));
+  max-width: none; max-height: none; margin: auto; padding: 0; border: 1px solid #b0cfc6; border-radius: 18px; background: #fbfdfc; color: #233c36;
+  box-shadow: 0 20px 80px #102a3940; font-family: var(--font-main, inherit); overflow: hidden; }
+.challenge-picker[open] { display: flex; flex-direction: column; }
+.challenge-picker::backdrop { background: #122c3eb3; backdrop-filter: blur(3px); }
+.challenge-picker-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1rem 1.25rem .8rem; background: var(--picker-soft); border-bottom: 1px solid #d3e6df; flex-shrink: 0; }
+.challenge-picker-header p { margin: 0 0 .25rem; font-size: .67rem; font-weight: 750; letter-spacing: .12em; color: var(--picker-color); }
+.challenge-picker-header h2 { margin: 0; font-size: clamp(1.2rem, 2.6vw, 1.55rem); line-height: 1.25; }
+.challenge-picker-header h2:focus { outline: none; }
+.challenge-picker-steps { display: block; margin-top: .3rem; font-size: .88rem; font-weight: 700; color: #145447; }
+.challenge-picker-close { flex-shrink: 0; min-height: 40px; padding: .45rem .8rem; border: 1px solid #8fb5a9; border-radius: 9px; background: white; color: inherit; font: inherit; font-weight: 700; cursor: pointer; }
+.challenge-picker-tools { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: .6rem; padding: .75rem 1.25rem; border-bottom: 1px solid #e1ece8; flex-shrink: 0; }
+.challenge-picker-tools label { display: grid; gap: .25rem; min-width: 0; font-size: .78rem; font-weight: 700; color: #3d5a53; }
+.challenge-picker-tools input, .challenge-picker-tools select { width: 100%; min-width: 0; box-sizing: border-box; min-height: 40px; padding: .45rem .55rem; border: 1px solid #739d92; border-radius: 8px; font: inherit; color: #233c36; background: white; }
+.challenge-picker-note { margin: 0; padding: .55rem 1.25rem; background: #fffbe6; border-bottom: 1px solid #ffe58f; font-size: .88rem; font-weight: 700; flex-shrink: 0; }
+.challenge-picker-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: .4rem 1.25rem 1.1rem; scrollbar-gutter: stable; transition: opacity .15s; }
+.challenge-picker-stale { opacity: .55; }
+.challenge-picker-empty { margin: 2rem 0; text-align: center; font-weight: 700; color: #4a605b; }
+.challenge-group h3 { margin: .9rem 0 .5rem; font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; color: #3d5a53; }
+.challenge-group-waiting h3 { color: #ad6800; }
+.challenge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: .75rem; }
+.challenge-card { display: flex; flex-direction: column; gap: .35rem; min-width: 0; padding: .8rem .85rem; background: white; border: 1px solid #b0cfc6; border-radius: 12px; overflow-wrap: anywhere; }
+.challenge-card-waiting { border: 2px solid #faad14; background: #fffdf3; }
+.challenge-card-done { background: #f3f6f5; }
+.challenge-card h4 { margin: 0; font-size: 1.02rem; line-height: 1.3; }
+.challenge-card p { margin: 0; line-height: 1.45; }
+.challenge-meta { color: #4a605b; font-size: .8rem; }
+.challenge-text { font-size: .92rem; }
+.challenge-text-folded { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.challenge-more { align-self: flex-start; padding: 0; border: 0; background: none; color: #1f6f5e; font: inherit; font-size: .82rem; font-weight: 700; text-decoration: underline; cursor: pointer; }
+.challenge-join { color: #ad6800; font-weight: 800; font-size: .88rem; }
+/* The button sits at the bottom of every card, so it is always in reach, however long the description. */
+.challenge-pick { margin-top: auto; min-height: 42px; padding: .5rem .7rem; border: 2px solid var(--picker-color); border-radius: 9px; background: var(--picker-color); color: white; font: inherit; font-weight: 800; cursor: pointer; }
+.challenge-card-waiting .challenge-pick { border-color: #d48806; background: #d48806; }
+.challenge-pick:hover:not(:disabled) { filter: brightness(1.08); }
+.challenge-pick:disabled { border-color: #c9d6d2; background: #edf2f0; color: #61736e; cursor: default; }
+.challenge-picker-footer { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .65rem 1.25rem; border-top: 1px solid #e1ece8; background: #f7faf9; flex-shrink: 0; font-size: .85rem; }
+.challenge-picker-footer > div { display: flex; align-items: center; gap: .5rem; }
+.challenge-picker-footer button { min-height: 38px; padding: .35rem .8rem; border: 1px solid #8fb5a9; border-radius: 8px; background: white; color: inherit; font: inherit; font-weight: 700; cursor: pointer; }
+.challenge-picker-footer button:disabled { opacity: .5; cursor: default; }
+.challenge-picker-pages { display: flex; align-items: center; gap: .45rem; }
+.challenge-picker-error { color: #a8071a; font-weight: 700; }
+.challenge-picker button:focus-visible, .challenge-picker input:focus-visible, .challenge-picker select:focus-visible { outline: 3px solid #dfa62b; outline-offset: 2px; }
 @media (max-width: 640px) {
-  .journal:has(.student-choice-toggle[aria-expanded="true"]) { z-index: 2; width: calc(100vw - 2rem); }
+  /* A phone gets the whole screen. */
+  .challenge-picker { width: 100vw; height: 100dvh; border: 0; border-radius: 0; }
+  .challenge-picker-header { padding: .75rem .9rem .6rem; }
+  .challenge-picker-steps { font-size: .8rem; }
+  .challenge-picker-tools { grid-template-columns: 1fr 1fr; padding: .6rem .9rem; gap: .45rem; }
+  .challenge-picker-search { grid-column: 1 / -1; }
+  .challenge-picker-body { padding: .2rem .9rem .9rem; }
+  .challenge-picker-footer { padding: .55rem .9rem; }
 }

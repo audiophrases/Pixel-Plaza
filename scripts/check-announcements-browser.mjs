@@ -129,29 +129,52 @@ try {
         window.__socket.receive({t:'quest',quest:null});window.__socket.receive({t:'warmup',warmup:null});
         const previousSend=window.__socket.send.bind(window.__socket);
         window.__socket.send=raw=>{previousSend(raw);if(raw==='ping')return;const m=JSON.parse(raw);
-            if(m.t==='quest-browse')setTimeout(()=>window.__socket.receive({t:'quest-library',requestId:m.requestId,enabled:true,total:1,page:0,pages:1,
-                items:[{id:'choice-pair',title:'One wild idea',text:'Chat with your partner. Invent one strange school rule. Agree on your favourite.',format:'pair',level:'A2',minutes:5,category:'Talk',state:'available',reason:null,joining:['Sam']}]}),20);
+            if(m.t==='quest-browse')setTimeout(()=>window.__socket.receive({t:'quest-library',requestId:m.requestId,enabled:true,total:2,page:0,pages:1,
+                items:[{id:'choice-pair',title:'One wild idea',text:'Chat with your partner. Invent one strange school rule. Agree on your favourite.',format:'pair',level:'A2',minutes:5,category:'Talk',state:'available',reason:null,joining:['Sam']},
+                    {id:'choice-long',title:'Find someone who',text:'Mingle and find a different classmate for each: someone who has seen snow, eaten snails, won a prize, and stayed up after midnight. Ask: "Have you ever ...?" When someone says yes, ask follow-up questions: when, where and how it was. Write one sentence about each person with their answers.',format:'mingle',level:'B1',minutes:10,category:'Talk',state:'available',reason:null,joining:[]}]}),20);
         };
         window.__socket.receive({t:'board',studentChoice:true,board:[],sideQuests:{state:'empty',reason:null,waiting:0}})`);
-    await waitFor(`document.querySelector('dialog:modal')?.textContent.includes('YOUR CHOICE')`);
-    await ok();
-    await waitFor(`document.querySelector('.student-choice-card')`);
+    // No announcement first: the challenge window itself opens, with the steps.
+    await waitFor(`document.querySelector('dialog.challenge-picker:modal .challenge-card')`);
     assert.ok(await evaluate(`window.__sent.some(m=>m.t==='quest-browse')`), 'the game asks for the public catalog');
-    assert.ok(await evaluate(`(()=>{const card=document.querySelector('.student-choice-card').getBoundingClientRect();return card.left>=0&&card.right<=innerWidth})()`), 'challenge cards fit a mobile screen');
-    await evaluate(`document.querySelector('.student-choice-card button').scrollIntoView({block:'nearest'})`);
-    assert.ok(await evaluate(`(()=>{const button=document.querySelector('.student-choice-card button'),r=button.getBoundingClientRect();return button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()`), 'the chat panel cannot cover the mobile choice button');
+    assert.ok(await evaluate(`document.querySelector('.challenge-picker').textContent.includes('Classmates waiting for you')`), 'classmates waiting come first');
+    assert.ok(await evaluate(`(()=>{const d=document.querySelector('.challenge-picker').getBoundingClientRect();return d.left>=0&&d.top>=0&&Math.round(d.right)>=innerWidth-1&&Math.round(d.bottom)>=innerHeight-1})()`), 'a phone gets the whole screen');
+    const reachable = title => evaluate(`(()=>{const button=[...document.querySelectorAll('.challenge-card')].find(c=>c.querySelector('h4').textContent===${JSON.stringify(title)}).querySelector('.challenge-pick');button.scrollIntoView({block:'nearest'});const r=button.getBoundingClientRect();return button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()`);
+    assert.ok(await reachable('One wild idea'), 'nothing covers the join button on a phone');
+    assert.ok(await reachable('Find someone who'), 'a long description never pushes its button out of reach');
+    assert.ok(await evaluate(`!!document.querySelector('.challenge-text-folded')`), 'a long description folds');
+    await evaluate(`document.querySelector('.challenge-picker-body').scrollTo(0,0)`);
     await screenshot('mobile-student-choice');
+    await evaluate(`document.querySelector('.challenge-more').click()`);
+    assert.ok(await evaluate(`!document.querySelector('.challenge-text-folded')&&document.querySelector('.challenge-more').textContent==='Show less'`), 'Read all unfolds it');
+    // The list stays on screen while board changes refresh it: no flashing, no jumping.
+    const browsed = await evaluate(`window.__sent.filter(m=>m.t==='quest-browse').length`);
+    await evaluate(`window.__seen=[];const o=new MutationObserver(()=>window.__seen.push(document.querySelectorAll('.challenge-picker .challenge-card').length));o.observe(document.querySelector('.challenge-picker'),{subtree:true,childList:true,characterData:true});window.__observer=o;
+        for(let i=0;i<5;i++)window.__socket.receive({t:'board',studentChoice:true,board:[],sideQuests:{state:'empty',reason:null,waiting:0}})`);
+    await pause(1500);
+    await evaluate(`window.__observer.disconnect()`);
+    assert.equal(await evaluate(`window.__sent.filter(m=>m.t==='quest-browse').length`), browsed + 1, 'five board changes, one refresh');
+    assert.ok(await evaluate(`window.__seen.every(n=>n===2)`), 'the cards never disappear while refreshing: ' + JSON.stringify(await evaluate('window.__seen')));
+    await evaluate('window.__sent=[]');
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'd', code: 'KeyD', windowsVirtualKeyCode: 68 });
+    await pause(300);
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'd', code: 'KeyD', windowsVirtualKeyCode: 68 });
+    assert.equal(await evaluate(`window.__sent.filter(m=>m.t==='move').length`), 0, 'choosing holds the avatar still');
     await send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false });
+    await pause(150);
+    assert.ok(await evaluate(`(()=>{const d=document.querySelector('.challenge-picker').getBoundingClientRect();return d.width<=1080&&d.width>=900&&d.height>=600})()`), 'a large window on a laptop');
     await screenshot('desktop-student-choice');
-    await evaluate(`document.querySelector('.student-choice-card button').click()`);
-    assert.ok(await evaluate(`window.__sent.some(m=>m.t==='quest-pick'&&m.objective==='choice-pair')`), 'Choose joins the selected library quest');
+    await evaluate(`document.querySelector('.challenge-card-waiting .challenge-pick').click()`);
+    assert.ok(await evaluate(`window.__sent.some(m=>m.t==='quest-pick'&&m.objective==='choice-pair')`), 'Join joins the selected library quest');
+    assert.equal(await evaluate(`document.querySelector('.challenge-card-waiting .challenge-pick').textContent`), 'Joining…');
     await evaluate(`window.__socket.receive({t:'board',studentChoice:true,board:[{id:'choice-pair',text:'One wild idea: Chat with your partner.',kind:'report',state:'active',sideQuest:true,reason:null,partner:null,group:{members:['Alex'],size:2,state:'open',startAt:null}}],sideQuests:{state:'active',reason:null,waiting:0}})`);
     await waitFor(`document.querySelector('dialog:modal')?.textContent.includes('SIDE QUEST ACCEPTED')`);
+    assert.equal(await evaluate(`!!document.querySelector('dialog.challenge-picker[open]')`), false, 'the window closes after joining');
     await ok();
-    assert.equal(await evaluate(`document.querySelector('.student-choice-toggle').getAttribute('aria-expanded')`), 'false', 'the browser folds away after choosing');
+    assert.ok(await evaluate(`document.querySelector('.student-choice-open').textContent.includes('Browse challenges')`), 'the Journal keeps a way back to the list');
     assert.ok(await evaluate(`document.querySelector('.journal-board').textContent.includes('waiting for 1 more')`), 'the active pair is shown');
     await evaluate(`window.__socket.receive({t:'board',studentChoice:false,board:[],sideQuests:{state:'empty',reason:null,waiting:0}})`);
     await waitFor(`!document.querySelector('.student-choice')`);
     assert.deepEqual(errors, [], 'no browser errors');
-    console.log(`Announcement and Student Choice browser checks passed: native modal, keyboard, avatar movement, mobile sizing, catalog, choosing and mode changes. Screenshots: ${qa}`);
+    console.log(`Announcement and Student Choice browser checks passed: native modal, keyboard, avatar movement, mobile sizing, the challenge window (full screen on phones, steady through refreshes, reachable buttons), choosing and mode changes. Screenshots: ${qa}`);
 } finally { ws?.close(); child.kill(); }
