@@ -1,8 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { HelpTopic, StudentSupport } from '../../shared/support';
 import './HelpRequest.css';
+import type { NextStep } from '../utils/nextStep';
 
-export default function HelpRequest({ support, online, chatDraft = '', onRequest, onOpenChat }: {
+export default function HelpRequest({ support, online, chatDraft = '', nextStep, onRequest, onOpenChat }: {
+  nextStep: NextStep;
   support: StudentSupport;
   online: boolean;
   chatDraft?: string;
@@ -10,6 +12,8 @@ export default function HelpRequest({ support, online, chatDraft = '', onRequest
   onOpenChat: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [showNextStep, setShowNextStep] = useState(false);
+  const nextStepId = useId();
   const [topic, setTopic] = useState<HelpTopic>('writing');
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -62,6 +66,11 @@ export default function HelpRequest({ support, online, chatDraft = '', onRequest
       request();
     }}>
       <h2>Get help</h2>
+      <button type="button" className="student-help-next" aria-expanded={showNextStep} aria-controls={nextStepId}
+        onClick={() => setShowNextStep(current => !current)}>What do I need to do now?<span lang="ca">Què he de fer ara?</span></button>
+      {showNextStep && <div id={nextStepId} className="student-ai-tip" role="status">
+        <p lang="en">{nextStep.en}</p><p lang="ca">{nextStep.ca}</p>
+      </div>}
       <p>Tell us where you’re stuck.</p>
       {support.ai?.tip && <div className="student-ai-tip" role="status"><strong>A hint for you</strong><p>{support.ai.tip}</p></div>}
       {aiPending && <p role="status">Getting your language hint…</p>}

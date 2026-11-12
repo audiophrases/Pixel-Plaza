@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+
+const built = await build({ entryPoints: ['src/utils/nextStep.ts'], bundle: true, platform: 'node', format: 'esm', write: false });
+const { nextStep } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text).toString('base64')}`);
+const base = { quest: null, board: null, warmup: null, online: true, choosingName: false, name: 'Ada' };
+const task = { id: 'task', state: 'active', kind: 'report', partner: null };
+const guide = (item, extra = {}) => nextStep({ ...base, board: { board: [item], sideQuests: { state: 'active' } }, ...extra });
+assert.match(nextStep({ ...base, choosingName: true }).en, /Choose your name/);
+assert.match(nextStep({ ...base, online: false }).ca, /reconnectant/);
+assert.match(nextStep({ ...base, board: { board: [], studentChoice: true } }).en, /Choose a quest/);
+assert.match(guide({ ...task, partner: { name: 'Ben' } }).en, /Talk to Ben/);
+assert.match(guide({ ...task, group: { state: 'playing', members: ['Ada', 'Ben'] } }).ca, /Parla amb Ben/);
+assert.match(guide({ ...task, group: { state: 'open' } }).en, /Wait for classmates/);
+assert.match(guide(task).ca, /Escriu i envia l’informe/);
+assert.match(guide({ ...task, report: { submitted: true, check: { status: 'pending' } } }).en, /being checked/);
+assert.match(guide({ ...task, report: { submitted: false, check: { status: 'revise' } } }).en, /Fix your report/);
+const conversation = { required: 1, completed: 0, witnesses: [{ id: 'ben', name: 'Ben' }] };
+assert.match(guide({ ...task, conversation }).en, /Ask Ben/);
+const quest = { status: 'active', objectives: [], interviews: [{ objective: 'task', name: 'Ben', questionStatus: 'approved' }] };
+assert.match(guide({ ...task, conversation }, { quest }).en, /Wait for a classmate/);
+assert.match(guide({ ...task, conversation: { ...conversation, completed: 1 } }).en, /send your report/);
+assert.match(guide({ ...task, ended: true }).en, /no task/);
+assert.match(nextStep({ ...base, warmup: { task: 'Find a classmate' } }).en, /warm-up/);
+assert.match(nextStep({ ...base, quest: { ...quest, interviews: [{ incoming: true, name: 'Ben', answerStatus: null }] } }).ca, /Respon a Ben/);
+console.log('Next-step guidance: selection, partners, evidence, reports, waiting, warm-up and Catalan passed.');

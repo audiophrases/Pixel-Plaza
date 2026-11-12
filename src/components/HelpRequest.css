@@ -21,6 +21,8 @@
 }
 
 .student-help-toggle:hover { background: #ffecad; }
+.student-help-next { width: 100%; padding: .65rem; border: 1px solid #327b54; border-radius: 6px; background: #ecf7ec; color: #21573b; font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
+.student-help-next span { display: block; margin-top: .25rem; font-weight: 400; }
 .student-help-status { padding: .2rem .45rem; border-radius: 6px; font-size: .75rem; font-weight: 700; background: #fff9e5; color: #573b12; }
 .student-help-acknowledged, .student-help-resolved { background: #eaf7e6; color: #285726; }
 

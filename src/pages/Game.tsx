@@ -7,6 +7,7 @@ import type { WarmupView } from '../../shared/warmup';
 import { IDENTITY_NAMES } from '../../shared/warmupKinds';
 import NamePicker from '../components/NamePicker';
 import HelpRequest from '../components/HelpRequest';
+import { nextStep } from '../utils/nextStep';
 import { LevelBar, Rewards } from '../components/LevelBar';
 import { DEFAULT_STYLE, REWARDS, emotesFor, levelOf, type Style } from '../../shared/levels';
 import { correctedSentence, readCorrection, wordDiff } from '../../shared/diff';
@@ -836,6 +837,7 @@ export default function Game() {
           onChoose={style => { setMyStyle(style); connection?.send({ t: 'style', ...style }); }} />}
 
         <HelpRequest support={support} online={status.state === 'online'} chatDraft={chatInput}
+          nextStep={nextStep({ quest, board, warmup, online: status.state === 'online', choosingName: !!(alias && !alias.kept), name: alias?.name })}
           onRequest={(topic, text, route) => {
             const plaza = plazaRef.current;
             if (!plaza) return false;
