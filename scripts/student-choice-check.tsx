@@ -123,6 +123,20 @@ assert.equal(activityAnnouncements(null, null, new Set(), { ...board, sideQuests
 await act(async () => root.render(<Journal quest={null} board={{ ...board, studentChoice: false }} feedback={null} onAnswer={() => {}} />));
 assert.equal(document.querySelector('.student-choice'), null, 'turning the mode off removes browsing');
 assert.equal(picker(), null, 'and its window');
+const currentTask: BoardView['board'][number] = { id: 'current', text: 'Current task', kind: 'report', activity: null, state: 'active', reason: null, partner: null, sideQuest: true };
+await act(async () => root.render(<Journal quest={null} board={{ ...board, board: [currentTask,
+  { ...currentTask, id: 'done', text: 'Finished task', state: 'done', report: { text: 'My saved report', version: 1, submitted: true } },
+  { ...currentTask, id: 'ended', text: 'Old task', ended: true }] }} feedback={null} onAnswer={() => {}} onUndoReport={() => {}} />));
+const history = document.querySelector<HTMLDetailsElement>('.journal-history')!;
+assert.ok(history);
+assert.equal(history.open, false, 'history starts collapsed');
+assert.match(history.textContent!, /Finished task/);
+assert.match(history.textContent!, /My saved report/);
+assert.match(history.textContent!, /Undo submission/);
+assert.match(history.textContent!, /Old task/);
+assert.equal(history.querySelector('form'), null, 'ended tasks cannot be answered');
+assert.match(document.querySelector('.journal-board')!.textContent!, /Current task/);
+assert.doesNotMatch(document.querySelector('.journal-board')!.textContent!, /Finished task|Old task/);
 if (uuidDescriptor) Object.defineProperty(crypto, 'randomUUID', uuidDescriptor);
 else delete (crypto as Partial<Crypto>).randomUUID;
 

@@ -116,6 +116,8 @@
 .journal-cast { border-left-color: #9b59c4; background: #fbf6fe; }
 .journal-cast summary { cursor: pointer; list-style-position: inside; }
 .journal-cast summary h3 { display: inline; }
+.journal-history { margin-top: 1rem; border-top: 1px solid #cbd5d9; padding-top: .75rem; }
+.journal-history > summary { cursor: pointer; color: #465e67; font-size: .85rem; font-weight: 700; padding: .4rem 0; }
 .journal-cast-note { font-size: 0.85rem; color: #5c4a68; }
 .journal-cast ul { margin: 0.3rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.3rem; font-size: 0.9rem; }
 /* Sending a report the checker asked to revise: a quiet button under the hint, then a dialog that asks the quest's question. */

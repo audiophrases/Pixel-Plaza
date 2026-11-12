@@ -130,7 +130,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
   const [recapSeen, setRecapSeen] = useState(false);
   const seen = useRef('');
   const studentChoice = !!boardView?.studentChoice;
-  const active = !!boardView?.board.some(item => item.sideQuest && item.state === 'active');
+  const active = !!boardView?.board.some(item => item.sideQuest && item.state === 'active' && !item.ended);
   const choosing = boardView?.sideQuests.state === 'choose' || (studentChoice && !active);
   // Free for a side quest: the journal opens at the choice.
   const [wasChoosing, setWasChoosing] = useState(choosing);
@@ -150,7 +150,9 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
   const ended = quest?.status === 'campaign_complete';
   // Classmates waiting for a partner come first.
   const joinable = (item: BoardView['board'][number]) => Number(item.state === 'available' && !!item.joining?.length);
-  const board = [...items].sort((a, b) => joinable(b) - joinable(a));
+  const pastBoard = items.filter(item => item.state === 'done' || item.ended);
+  const completed = quest?.objectives.filter(item => item.done) ?? [];
+  const board = items.filter(item => item.state !== 'done' && !item.ended).sort((a, b) => joinable(b) - joinable(a));
 
   // A free student who has not chosen in a minute is placed by the game.
   useEffect(() => {
@@ -167,16 +169,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
     return () => window.clearTimeout(timer);
   }, [nextStart]);
 
-  return <CastContext.Provider value={quest?.cast ?? []}><aside className="journal glass-panel">
-    <button type="button" className="journal-toggle" onClick={() => { setOpen(value => !value); setFresh(false); }}>
-      <span>{quest?.chapter.title ?? 'Side quests'}{fresh && <b className="journal-new">NEW</b>}</span>
-      <span>{open ? '▲' : '▼'}</span>
-    </button>
-    {open && <div className={`journal-body${studentChoice ? ' journal-student-choice' : ''}`}>
-      {studentChoice && onBrowse && onPick && <StudentQuestBrowser result={library ?? null} active={active}
-        refreshKey={JSON.stringify([libraryRevision, boardView])} onBrowse={onBrowse} onPick={onPick}
-        paused={choicePaused} notice={notice} />}
-      {quest && <>
+  const missionContent = quest && <>
       {quest.secret && <section className="journal-block journal-secret">
         <h3>Secret</h3>
         <p className="journal-role">{quest.secret.title}</p>
@@ -220,7 +213,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
         <EvidencePicture image={quest.chapter.introImage} text={quest.chapter.intro} help={quest.chapter.help?.intro} />
       </section>}
 
-      {!!quest.cast?.length && <details className="journal-block journal-cast" open>
+      {!!quest.cast?.length && <details className="journal-block journal-cast">
         <summary><h3>📖 Who’s who in the story</h3></summary>
         <p className="journal-cast-note">These are characters in the story, not your classmates.</p>
         <ul>{quest.cast.map(member => <li key={member.name}><span className="cast-name">📖 {member.name}</span> {member.about}</li>)}</ul>
@@ -246,7 +239,7 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
       </section>
 
       {quest.status !== 'campaign_complete' && <WitnessInbox interviews={quest.interviews ?? []} clues={quest.clues} onTurn={onTurn} />}
-      {main.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} onSendAnyway={onSendAnyway} quest={quest} onTurn={onTurn} />)}
+      {main.filter(objective => ended || !objective.done).map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} onSendAnyway={onSendAnyway} closed={ended} quest={quest} onTurn={onTurn} />)}
 
       {quest.thieves && quest.thieves.length > 0 && <section className="journal-block journal-ending">
         <h3>{quest.thieves.length === 1 ? 'The thief was' : 'The thieves were'}</h3>
@@ -261,9 +254,21 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
         <EvidencePicture image={quest.chapter.endingImage} text={quest.chapter.ending ?? ''} help={quest.chapter.help?.ending} />
       </section>}
 
-      {bonus.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} onSendAnyway={onSendAnyway} closed={ended} quest={quest} onTurn={onTurn} />)}
-      </>}
-      {(!ended || !!items.length) && (!studentChoice || !!items.length) && <section className={`journal-block journal-board${choosing ? ' journal-choosing' : ''}`}><h3>{quest ? 'Quest board' : 'Your side quests'}</h3>
+      {bonus.filter(objective => ended || !objective.done).map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} onSendAnyway={onSendAnyway} closed={ended} quest={quest} onTurn={onTurn} />)}
+      </>;
+
+  return <CastContext.Provider value={quest?.cast ?? []}><aside className="journal glass-panel">
+    <button type="button" className="journal-toggle" onClick={() => { setOpen(value => !value); setFresh(false); }}>
+      <span>{!ended && quest ? quest.chapter.title : 'Current tasks'}{fresh && <b className="journal-new">NEW</b>}</span>
+      <span>{open ? '▲' : '▼'}</span>
+    </button>
+    {open && <div className={`journal-body${studentChoice ? ' journal-student-choice' : ''}`}>
+      {studentChoice && onBrowse && onPick && <StudentQuestBrowser result={library ?? null} active={active}
+        refreshKey={JSON.stringify([libraryRevision, boardView])} onBrowse={onBrowse} onPick={onPick}
+        paused={choicePaused} notice={notice} />}
+      {!ended && missionContent}
+
+      {(!!board.length || (!studentChoice && !ended)) && <section className={`journal-block journal-board${choosing ? ' journal-choosing' : ''}`}><h3>{quest ? 'Quest board' : 'Your side quests'}</h3>
         <p>Do one side quest at a time; each is yours to do once.</p>
         {side?.state === 'open' && <p className="journal-board-card">You can take a side quest now, or when you finish your other work.</p>}
         {choosing && !studentChoice && <p className="journal-board-card journal-choose"><strong>Choose a side quest.</strong> Accept one quest below; classmates waiting for a partner come first. If you have not chosen in a minute, the game chooses for you.</p>}
@@ -286,7 +291,15 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
             {item.reason && <p>{item.reason}</p>}<button className="journal-choice" disabled={item.state !== 'available'} onClick={() => onAccept?.(item.id)}>{item.joining?.length ? `Join ${item.joining.join(', ')}` : 'Accept quest'}</button></>}
         </article>)}
       </section>}
+      {(ended || completed.length > 0 || pastBoard.length > 0) && <details className="journal-history">
+        <summary>Completed tasks &amp; past missions</summary>
+        {ended ? missionContent : completed.map(objective => <Question key={objective.id} objective={objective} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} quest={quest} onTurn={onTurn} />)}
+        {pastBoard.map(item => <article key={item.id} className="journal-board-card">
+          {item.ended && <p>Ended by your teacher</p>}
+          <Question objective={{ ...item, optional: true, done: item.state === 'done' }} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} closed={!!item.ended} quest={quest} onTurn={onTurn} heading="Side quest" shared={!!item.group} />
+        </article>)}
       {quest?.finale && <section className="journal-block journal-ending"><p><StoryText text={quest.finale} /></p><LanguageHelp help={quest.finaleHelp} /></section>}
+      </details>}
     </div>}
   </aside></CastContext.Provider>;
 }
