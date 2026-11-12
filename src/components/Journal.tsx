@@ -279,7 +279,9 @@ export default function Journal({ quest, board: boardView, feedback, onAnswer, o
               {item.group.state === 'open' && item.group.startAt !== null && item.group.startAt <= now && <button className="journal-choice" onClick={() => onStart?.(item.id)}>Start with who&rsquo;s here</button>}</p>}
             {item.group?.state === 'open' && item.state === 'active' ? <><p className="journal-ask">{item.text}</p><LanguageHelp help={item.help} answer /></>
               : <Question objective={{ id: item.id, text: item.text, help: item.help, kind: item.kind, optional: true, done: item.state === 'done', conversation: item.conversation, report: item.report }} feedback={feedback} onAnswer={onAnswer} onUndoReport={onUndoReport} onSendAnyway={onSendAnyway} closed={!!item.ended} quest={quest} onTurn={onTurn} heading={item.sideQuest ? 'Side quest' : undefined} shared={!!item.group} />}
-            {item.sideQuest && item.state === 'active' && !item.ended && <button type="button" className="journal-dismiss" onClick={() => onLeave?.(item.id)}>Leave this quest and choose another</button>}
+            {item.sideQuest && item.state === 'active' && !item.ended && <button type="button" className="journal-dismiss" onClick={() => {
+              if (window.confirm('Leave this quest and choose another?')) onLeave?.(item.id);
+            }}>Leave this quest and choose another</button>}
           </> : <><p className="journal-ask">{item.text}</p><LanguageHelp help={item.help} answer />{item.activity && <p>{item.activity === 'interview' ? 'Interview a classmate' : 'Exchange information with a classmate'}</p>}
             {item.reason && <p>{item.reason}</p>}<button className="journal-choice" disabled={item.state !== 'available'} onClick={() => onAccept?.(item.id)}>{item.joining?.length ? `Join ${item.joining.join(', ')}` : 'Accept quest'}</button></>}
         </article>)}
