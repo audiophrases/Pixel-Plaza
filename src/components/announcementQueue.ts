@@ -1,6 +1,7 @@
 import type { BoardView, QuestView, TextHelp } from '../../shared/campaign';
 import type { WarmupView } from '../../shared/warmup';
 import { IDENTITY_CHAT_REMINDER } from '../../shared/activityChat.ts';
+import { WARMUP_KINDS } from '../../shared/warmupKinds.ts';
 import type { EvidenceImage } from '../../shared/evidence';
 
 export type ActivityInstruction = { label: string; text: string; help?: TextHelp; image?: EvidenceImage; answer?: boolean };
@@ -26,10 +27,10 @@ export function activityAnnouncements(quest: QuestView | null, warmup: WarmupVie
     if (warmup) {
         const run = warmup.runId ?? `legacy:${warmup.kind}:${warmup.title ?? ''}`;
         const intro = key('warmup', run), step = key('warmup-task', run, warmup.step);
-        const title = warmup.title ?? (warmup.kind === 'identity' ? 'Who am I?' : warmup.kind === 'pairs' ? 'Find your pair' : 'Find someone who…');
+        const title = warmup.title ?? WARMUP_KINDS.find(kind => kind.id === warmup.kind)?.label ?? 'Find someone who…';
         const sections = [
             { label: 'How to play', text: warmup.instructions || 'Talk to your classmates to find the person described in your task.' },
-            { label: warmup.kind === 'pairs' ? 'Your word' : 'Your private information', text: warmup.fact },
+            { label: warmup.kind === 'pairs' || warmup.kind === 'groups' ? 'Your word' : warmup.kind === 'order' ? 'Your card' : 'Your private information', text: warmup.fact },
             ...(warmup.kind === 'identity' ? [{ label: 'Keep the secret', text: IDENTITY_CHAT_REMINDER }] : []),
             ...(warmup.task ? [{ label: `Your task · ${warmup.step + 1} of ${warmup.of}`, text: warmup.task }] : []),
         ];

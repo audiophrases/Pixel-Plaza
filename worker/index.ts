@@ -3,6 +3,7 @@ import { PinPlayAuthError, resolveStudent, studentConfig, studentLogin, testerMo
 import { laptopOrigin, sanitizeAvatar, secretsMatch, teacherPasswordMatches } from './rules.ts';
 import { MISSION_MAX_BYTES } from '../shared/missionSchema.ts';
 import { isEnglishVoice } from '../shared/voices.ts';
+import { isWarmupKind } from '../shared/warmupKinds.ts';
 import { synthesize, VOICE_SAMPLE } from './speech.ts';
 import { ASSET_MAX_BYTES } from './themeAssets.ts';
 
@@ -115,7 +116,7 @@ function teacherAction(path: string, method: string, body: any): TeacherAction |
     if (path === '/api/teacher/vision' && typeof body?.radius === 'number') return { kind: 'vision', radius: body.radius };
     if (path === '/api/teacher/student-choice' && typeof body?.gameId === 'string' && typeof body?.enabled === 'boolean') return { kind: 'studentChoice', gameId: body.gameId, enabled: body.enabled };
     if (path === '/api/teacher/warmup' && (body?.op === 'start' || body?.op === 'end')) {
-        return { kind: 'warmup', op: body.op, ...(['facts', 'identity', 'pairs'].includes(body.type) ? { type: body.type } : {}) };
+        return { kind: 'warmup', op: body.op, ...(isWarmupKind(body.type) ? { type: body.type } : {}) };
     }
     if (path === '/api/teacher/auto' && (Number.isInteger(body?.news) || Number.isInteger(body?.next))) {
         return { kind: 'auto', ...(Number.isInteger(body.news) ? { news: body.news } : {}), ...(Number.isInteger(body.next) ? { next: body.next } : {}) };

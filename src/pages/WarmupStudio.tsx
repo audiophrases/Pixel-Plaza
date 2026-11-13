@@ -7,7 +7,7 @@ import { readTeacherSession, storeTeacherSession } from '../teacherSession';
 import { downloadFile } from '../themeFiles';
 import { PlayBadge, PlayHistory } from '../components/ActivityHistory';
 import { useActivityHistory } from '../useActivityHistory';
-import { matchesPlayFilter, pairTaskId, playLabel, type PlayFilter } from '../../shared/activityHistory';
+import { matchesPlayFilter, orderTaskId, pairTaskId, playLabel, type PlayFilter } from '../../shared/activityHistory';
 import './MissionStudio.css';
 import './WarmupStudio.css';
 
@@ -62,7 +62,9 @@ export default function WarmupStudio() {
     const run = async (work: () => Promise<void>) => { setBusy(true); setError(''); try { await work(); } catch (cause) { failed(cause); } finally { setBusy(false); } };
     const input = (label: string, value: string, onChange: (value: string) => void, maxLength = 80) => <label className="mission-field"><span>{label}</span><input value={value} maxLength={maxLength} onChange={e => onChange(e.target.value)} /></label>;
     const taskVisible = (id: string) => playFilter === 'all' || (!!activity.history?.game && matchesPlayFilter(activity.history.tasks[kind]?.[id], playFilter));
-    const taskIds = draft?.kind === 'identity' ? draft.identities.map(row => row.id) : draft?.kind === 'facts' ? draft.facts.map(row => row.id) : draft?.pairs.map(pairTaskId) ?? [];
+    const taskIds = draft?.kind === 'identity' ? draft.identities.map(row => row.id) : draft?.kind === 'facts' ? draft.facts.map(row => row.id)
+        : draft?.kind === 'order' ? draft.items.map(orderTaskId) : draft?.kind === 'groups' ? draft.groups.map(row => row.id) : draft?.pairs.map(pairTaskId) ?? [];
+    const move = (items: string[], from: number, to: number) => { const next = [...items]; next.splice(to, 0, ...next.splice(from, 1)); return next; };
     return <main className="mission-page warmup-studio">
         <header className="mission-header"><div><p className="mission-eyebrow">PIXEL PLAZA · TEACHER WORKSPACE</p><h1>Warm-up editor</h1><p>Change the content while keeping each activity's assignments and rules.</p></div>
             <Link to="/teacher" onClick={event => { if (!mayLeave()) event.preventDefault(); }}>Teacher controls</Link></header>
@@ -120,16 +122,36 @@ export default function WarmupStudio() {
                             {activity.history?.game && <div className="warmup-task-history"><PlayBadge stats={activity.history.tasks.pairs?.[pairTaskId(pair)]} label={pair.join(' and ')} /></div>}
                         </div> : null)}<button className="mission-button" disabled={draft.pairs.length >= 40} onClick={() => { if (playFilter === 'played') setPlayFilter('all'); edit({ ...draft, pairs: [...draft.pairs, ['', '']] }); }}>Add pair</button>
                     </>}
+                    {draft.kind === 'order' && <><h2>Cards in order ({draft.items.length})</h2><p>Write the cards from first to last, for example the steps of a day or the months. Each student gets one card and finds the classmate holding the next one. A class smaller than the list gets cards that follow one another.</p>
+                        {draft.items.map((item, i) => taskVisible(orderTaskId(item)) || focusedPair === i ? <div className="warmup-editor-row" key={i}
+                            onFocusCapture={() => setFocusedPair(i)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocusedPair(null); }}>
+                            {input(`Card ${i + 1}`, item, value => edit({ ...draft, items: draft.items.map((row, n) => n === i ? value : row) }))}
+                            <button className="mission-button" aria-label={`Move card ${i + 1} earlier`} disabled={i === 0} onClick={() => { setFocusedPair(null); edit({ ...draft, items: move(draft.items, i, i - 1) }); }}>↑</button>
+                            <button className="mission-button" aria-label={`Move card ${i + 1} later`} disabled={i === draft.items.length - 1} onClick={() => { setFocusedPair(null); edit({ ...draft, items: move(draft.items, i, i + 1) }); }}>↓</button>
+                            <button className="mission-button danger" aria-label={`Remove card ${i + 1}`} onClick={() => { setFocusedPair(null); edit({ ...draft, items: draft.items.filter((_, n) => n !== i) }); }}>Remove</button>
+                            {activity.history?.game && <div className="warmup-task-history"><PlayBadge stats={activity.history.tasks.order?.[orderTaskId(item)]} label={item} /></div>}
+                        </div> : null)}<button className="mission-button" disabled={draft.items.length >= 60} onClick={() => { if (playFilter === 'played') setPlayFilter('all'); edit({ ...draft, items: [...draft.items, ''] }); }}>Add card</button>
+                    </>}
+                    {draft.kind === 'groups' && <><h2>Word groups ({draft.groups.length})</h2><p>Each group is one team: words of the same kind, for example apple, banana, orange. Students see only their own word and find a classmate from the same group. Write 2–12 words per group; three or four work well. The group name is for you.</p>
+                        {draft.groups.map((group, i) => taskVisible(group.id) ? <div className="warmup-editor-row" key={group.id}>
+                            {input(`Group ${i + 1} name`, group.name, value => edit({ ...draft, groups: draft.groups.map((row, n) => n === i ? { ...row, name: value } : row) }))}
+                            {input(`Words ${i + 1} (comma separated)`, group.words.join(','), value => edit({ ...draft, groups: draft.groups.map((row, n) => n === i ? { ...row, words: value ? value.split(',') : [] } : row) }), 1000)}
+                            <button className="mission-button danger" aria-label={`Remove group ${i + 1}`} onClick={() => edit({ ...draft, groups: draft.groups.filter((_, n) => n !== i) })}>Remove</button>
+                            {activity.history?.game && <div className="warmup-task-history"><PlayBadge stats={activity.history.tasks.groups?.[group.id]} label={group.name} /></div>}
+                        </div> : null)}<button className="mission-button" disabled={draft.groups.length >= 20} onClick={() => { if (playFilter === 'played') setPlayFilter('all'); edit({ ...draft, groups: [...draft.groups, { id: freshId(), name: '', words: [] }] }); }}>Add group</button>
+                    </>}
                     {problems.length > 0 && <ul className="mission-error" aria-label="Warm-up issues">{problems.map(problem => <li key={problem}>{problem}</li>)}</ul>}
                     {playFilter !== 'all' && <p role="status">{taskIds.filter(taskVisible).length} of {taskIds.length} tasks match this history filter.</p>}
                 </section>
                 <section className="mission-card"><h2>Preview</h2><strong>{draft.title} · {draft.level}</strong><p>{draft.instructions}</p>
                     <p>{draft.kind === 'identity' ? `Your secret: You are ${draft.identities[0]?.name || '…'}. Do not say your name! Answer yes or no.`
-                        : draft.kind === 'facts' ? `Your fact: ${draft.facts[0]?.mine || '…'}` : `Your word: ${draft.pairs[0]?.[0] || '…'}`}</p>
+                        : draft.kind === 'facts' ? `Your fact: ${draft.facts[0]?.mine || '…'}`
+                        : draft.kind === 'order' ? `Your card: ${draft.items[0] || '…'}`
+                        : draft.kind === 'groups' ? `Your word: ${draft.groups[0]?.words[0]?.trim() || '…'}` : `Your word: ${draft.pairs[0]?.[0] || '…'}`}</p>
                     <p className="mission-muted">Each student gets their own assignment when you start the activity.</p>
                 </section>
                 <section className="mission-card" aria-label="Backup and restore"><h2>Backup and restore</h2>
-                    <p id="warmup-import-limits">{draft.kind === 'identity' ? 'No identity-count limit.' : draft.kind === 'facts' ? 'Up to 80 facts.' : 'Up to 40 pairs.'} Files can be up to 64 KB (64,000 bytes). Choose a file to preview changes before applying them.</p>
+                    <p id="warmup-import-limits">{draft.kind === 'identity' ? 'No identity-count limit.' : draft.kind === 'facts' ? 'Up to 80 facts.' : draft.kind === 'order' ? 'Up to 60 cards.' : draft.kind === 'groups' ? 'Up to 20 groups.' : 'Up to 40 pairs.'} Files can be up to 64 KB (64,000 bytes). Choose a file to preview changes before applying them.</p>
                     <div className="mission-toolbar">
                     <button className="mission-button" onClick={() => downloadFile(`${kind}-warmup.json`, JSON.stringify({ format: 'pixel-plaza-warmup', schemaVersion: 1, definition: draft }, null, 2), 'application/json')}>Export JSON</button>
                     <label className="mission-file">Import JSON<input type="file" accept=".json,application/json" aria-describedby="warmup-import-limits" onChange={event => {

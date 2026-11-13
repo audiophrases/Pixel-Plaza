@@ -2,15 +2,17 @@
 
 Open **Warm-up editor** in Teacher controls, or use **Edit warm-up** next to the activity selector. The standalone address is `/warmup-studio`. Sign in with the normal teacher password.
 
-Choose one of the three activity types:
+Choose one of the five activity types:
 
 | Type | Editable content |
 | --- | --- |
 | Who am I? | Identity names and accepted aliases. Include at least one identity per student, plus spare identities for late joiners. |
 | Find someone who… | The private made-up fact, its matching “Find someone who…” phrase, and the maximum number of facts to find. |
 | Find your pair | Both words or phrases in each pair. Each word belongs to exactly one pair. |
+| What comes next? | The cards of one list, from first to last, such as the steps of a day, the months or the lines of a story. Use the arrows to reorder them. |
+| Find your team | Groups of 2–12 words of the same kind, each with a name that only you see. Each word belongs to exactly one group. |
 
-Every type also has a title, student instructions and language-level label. The label does not rewrite your text; write instructions appropriate for your class. A preview shows how the content reads. Identity collections need at least two entries and have no entry-count ceiling; the 64 KB size limit still applies. The editor supports up to 80 facts, 40 pairs and 1–10 facts to find. Actual fact tasks use only facts held by classmates, so small classes may get fewer tasks than the maximum.
+Every type also has a title, student instructions and language-level label. The label does not rewrite your text; write instructions appropriate for your class. A preview shows how the content reads. Identity collections need at least two entries and have no entry-count ceiling; the 64 KB size limit still applies. The editor supports up to 80 facts, 40 pairs, 60 cards, 20 groups and 1–10 facts to find. Actual fact tasks use only facts held by classmates, so small classes may get fewer tasks than the maximum.
 
 ## Save and start
 
@@ -27,6 +29,8 @@ An active round retains the exact content it started with. Editing its saved con
 - A helper's custom identity and aliases remain blocked in student chat. Guesses about another student, yes/no confirmations, private final answers and teacher help remain available.
 - New identity rounds need at least one distinct identity per present student. A late joiner gets an unused identity when available. If all are taken, they may share an identity but investigate someone with a different identity, so the guessing rule still works.
 - Late pair players receive a word with a partner who is currently present.
+- **What comes next?** deals cards that follow one another in your list, one per student. Each student finds the classmate with the next card and types their name; the student with the last card finds the first. A class larger than the list shares cards, and either holder is accepted. A late player gets a copy of a card whose next card is present.
+- **Find your team** makes teams of about three (pairs in a class of four or five), each from one of your groups, with different words while the group has enough. A student types the name of any team-mate. A late player joins a team that is playing. It needs at least four students to make two teams.
 
 ## Backup, restore and conflicts
 
@@ -46,4 +50,4 @@ Older rounds created before this editor continue using their original built-in c
 
 ## Verification
 
-`npm run check:warmups` tests the rendered editor, including aliases, all three modes, validation, version conflicts, backup and restore. The warm-up configuration unit tests cover validation and custom assignment mechanics. Worker integration tests cover authorization, request bounds, saving, pinned rounds, English vocabulary, answer checking, secret protection, late arrivals and restart persistence.
+`npm run check:warmups` tests the rendered editor, including aliases, all five modes, validation, version conflicts, backup and restore. The warm-up configuration unit tests cover validation and custom assignment mechanics. Worker integration tests cover authorization, request bounds, saving, pinned rounds, English vocabulary, answer checking, secret protection, late arrivals and restart persistence.

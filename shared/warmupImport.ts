@@ -3,7 +3,8 @@ import type { WarmupKind } from './warmupKinds.ts';
 
 export type WarmupImportMode = 'replace' | 'append';
 export const warmupEntryCount = (definition: WarmupDefinition) => definition.kind === 'identity' ? definition.identities.length
-    : definition.kind === 'facts' ? definition.facts.length : definition.pairs.length;
+    : definition.kind === 'facts' ? definition.facts.length : definition.kind === 'order' ? definition.items.length
+        : definition.kind === 'groups' ? definition.groups.length : definition.pairs.length;
 
 export function parseWarmupImport(text: string, kind: WarmupKind): WarmupDefinition {
     if (new TextEncoder().encode(text).length > WARMUP_MAX_BYTES) throw new Error('Warm-up files must be at most 64 KB (64,000 bytes).');

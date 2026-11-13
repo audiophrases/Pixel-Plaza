@@ -58,7 +58,7 @@ type Status = {
   campaign: CampaignInfo | null; campaigns: CampaignChoice[]; earlierCampaigns?: EarlierCampaign[];
   auto?: { news: number; next: number } | null; // the open game's auto-advance, in minutes (0 is off)
   sideQuests?: SideQuestPanel | null; // the open game's side quests, with or without a campaign
-  warmup: { active: boolean; kind: 'facts' | 'identity' | 'pairs'; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
+  warmup: { active: boolean; kind: WarmupKind; players: { studentKey: string; name: string; fact: string; found: number; of: number }[]; team: { done: number; total: number } } | null;
   incidents?: Incident[];
   blocked?: BlockedStatus;
   open: boolean; game: { id: string; name: string; randomNames: boolean; vision: number; themeId?: string } | null; realNames: Record<string, string>; themesVersion?: string; games: Game[]; pin: string | null; entries: Entry[]; moderation: boolean; muted: string[]; sound?: LiveSound; online: LiveStudent[];

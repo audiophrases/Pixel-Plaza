@@ -18,6 +18,8 @@ export const playLabel = (stats?: PlayStats): string => !stats?.plays ? 'Never p
     : `${stats.plays}${stats.recovered ? '+' : ''} ${stats.plays === 1 && !stats.recovered ? 'play' : 'plays'}`;
 // Pair order and superficial spacing do not make a previously played task new.
 export const pairTaskId = (pair: readonly string[]) => JSON.stringify(pair.map(word => word.trim().toLowerCase().replace(/\s+/g, ' ')).sort());
+// A card keeps its history when only its capitals or spacing change.
+export const orderTaskId = (item: string) => item.trim().toLowerCase().replace(/\s+/g, ' ');
 export function assignedWarmupTasks(definition: WarmupDefinition, players: { fact: string; targets: string[] }[]): { id: string; title: string }[] {
     const facts = new Set(players.map(player => player.fact));
     if (definition.kind === 'identity') return definition.identities.filter(identity => facts.has(identity.id)).map(identity => ({ id: identity.id, title: identity.name }));
@@ -25,5 +27,7 @@ export function assignedWarmupTasks(definition: WarmupDefinition, players: { fac
         for (const player of players) for (const target of player.targets) facts.add(target);
         return definition.facts.filter(fact => facts.has(fact.id)).map(fact => ({ id: fact.id, title: `Find someone who ${fact.find}` }));
     }
+    if (definition.kind === 'order') return definition.items.filter(item => facts.has(item)).map(item => ({ id: orderTaskId(item), title: item }));
+    if (definition.kind === 'groups') return definition.groups.filter(group => group.words.some(word => facts.has(word))).map(group => ({ id: group.id, title: group.name }));
     return definition.pairs.filter(pair => pair.some(word => facts.has(word))).map(pair => ({ id: pairTaskId(pair), title: pair.join(' ↔ ') }));
 }

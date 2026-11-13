@@ -99,7 +99,7 @@ The class can play on the teacher's laptop instead, over the school network. Stu
 2. In the teacher controls (`http://localhost:8787/teacher`, on the laptop itself), sign in. That tells the online site to send students to the laptop.
 3. **Games:** pick an existing game from the list and press Open, or make a **New game** (name it, choose Random names and how far students see). A game keeps its own PIN, chat, avatars' positions and story, and you can close and reopen it in any later lesson. One game is open at a time.
 4. Write the game's PIN on the board. Students open the online site, sign in with Google, are sent to the laptop, type the PIN, and (with random names) choose a name to keep.
-5. When most of the class is in: pick a warm-up (**Find someone who…**, **Who am I?** or **Find your pair**) and start it for the first few minutes, then **Start** the campaign (first time) or just let it resume; press **Start the next chapter** when the class is ready for the next one, so the thief is chosen from students who are there. Use **Reveal the next news** if the class is stuck, and **Vision** to widen or narrow how far students see.
+5. When most of the class is in: pick a warm-up (**Find someone who…**, **Who am I?**, **Find your pair**, **What comes next?** or **Find your team**) and start it for the first few minutes, then **Start** the campaign (first time) or just let it resume; press **Start the next chapter** when the class is ready for the next one, so the thief is chosen from students who are there. Use **Reveal the next news** if the class is stuck, and **Vision** to widen or narrow how far students see.
 
 ### One class, many campaigns
 
@@ -138,7 +138,7 @@ The laptop's address is plain HTTP, so student sessions cross the school network
 
 ## Warm-up editor
 
-Open **Warm-up editor** from Teacher controls, or **Edit warm-up** beside the activity selector, to customize the three built-in modes. Edit identities and accepted aliases, facts and the number to find, word pairs, titles, language levels and student instructions. Save to use the content on the next start/restart; an active round keeps its original definition. JSON import/export and **Use built-in content** provide backup and restore. See the [warm-up editor guide](docs/warmup-editor.md).
+Open **Warm-up editor** from Teacher controls, or **Edit warm-up** beside the activity selector, to customize the five built-in modes. Edit identities and accepted aliases, facts and the number to find, word pairs, cards in order, word groups, titles, language levels and student instructions. Save to use the content on the next start/restart; an active round keeps its original definition. JSON import/export and **Use built-in content** provide backup and restore. See the [warm-up editor guide](docs/warmup-editor.md).
 
 Students receive an instruction dialog when a chapter or warm-up starts, a new task or optional side quest becomes available, a side quest is accepted, teacher news is revealed, or an activity finishes. They press **OK** to dismiss each announcement; Escape and clicking outside do not dismiss it, and movement pauses while it is open. **OK** only acknowledges the instructions. Students still accept optional quests in **Journal → Quest board** and answer in the Journal or Warm-up panel. The **Instructions** button opens the current instructions again. Acknowledgements are saved per student and game in that browser, so progress updates and reconnects stay quiet; new chapters and restarted activities announce again. Name selection takes place first.
 

@@ -8,7 +8,7 @@ Different activities need different rules. Do not apply a global list of mission
 | Ten Questions, Undercover Object, Mystery Word | Reminds the clue-giver to keep the chosen object secret and answer yes/no. Guessers may name guesses and receive confirmation. Teacher review is needed because the app does not store the chosen object. |
 | Taboo Showdown | Reminds the describing player to avoid the answer and forbidden words during their turn. Guessers may name the answer. Student-chosen words need teacher review. |
 | Job Hot Seat, Postcard From Somewhere | Reminds the clue-giver to keep the job/place name out of clues until guessed. Guesses and the discussion after a correct guess remain allowed. |
-| Find your pair, Find someone who…, mystery investigations | Normal information and clue sharing remains allowed. |
+| Find your pair, Find someone who…, What comes next?, Find your team, mystery investigations | Normal information and clue sharing remains allowed. |
 | Operation Pizza and Word Smuggler | Saying a particular word is part of the task. Do not ban it for every participant. |
 
 ## Who am I?

@@ -11,7 +11,7 @@ const custom = () => ({ kind: 'identity', title: 'Scientists', level: 'B1', inst
 ] });
 
 test('all built-in warm-up definitions remain valid and are independent copies', () => {
-    for (const kind of ['identity', 'facts', 'pairs']) assert.deepEqual(validateWarmup(defaultWarmup(kind)).errors, []);
+    for (const kind of ['identity', 'facts', 'pairs', 'order', 'groups']) assert.deepEqual(validateWarmup(defaultWarmup(kind)).errors, []);
     const first = defaultWarmup('identity'); first.identities[0].name = 'Changed';
     assert.notEqual(defaultWarmup('identity').identities[0].name, 'Changed');
 });
@@ -41,6 +41,12 @@ test('ambiguous identities, reserved reply words and malformed or oversized data
         { ...custom(), unrelated: 'x'.repeat(65_000) }]) assert.equal(validateWarmup(value).definition, null);
     const pairs = { ...defaultWarmup('pairs'), pairs: [['cat', 'dog'], ['CAT', 'fish']] };
     assert.equal(validateWarmup(pairs).definition, null, 'each word has one unambiguous partner');
+    assert.equal(validateWarmup({ ...defaultWarmup('order'), items: ['Monday', 'monday'] }).definition, null, 'each card has one place');
+    assert.equal(validateWarmup({ ...defaultWarmup('order'), items: ['Monday'] }).definition, null);
+    const team = (id, words) => ({ id, name: id, words });
+    for (const groups of [[team('a', ['cat', 'dog'])], [team('a', ['cat', 'dog']), team('b', ['Cat', 'fish'])], [team('a', ['cat']), team('b', ['fish', 'eel'])], [team('a', ['cat', 'dog']), team('a', ['fish', 'eel'])]])
+        assert.equal(validateWarmup({ ...defaultWarmup('groups'), groups }).definition, null);
+    assert.deepEqual(validateWarmup({ ...defaultWarmup('groups'), groups: [team('a', [' cat', 'dog ']), team('b', ['fish', 'eel'])] }).definition.groups[0].words, ['cat', 'dog'], 'typed spaces are tidied');
 });
 
 test('custom facts and pairs stay solvable, including late arrivals and configured round counts', () => {

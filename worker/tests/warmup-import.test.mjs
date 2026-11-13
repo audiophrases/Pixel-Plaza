@@ -61,7 +61,7 @@ test('imports reject malformed JSON, the wrong format, version, type and invalid
     for (const identities of [[], collection(1).identities, null]) {
         assert.throws(() => parseWarmupImport(envelope({ ...collection(2), identities }), 'identity'), /at least 2 entries/);
     }
-    for (const kind of ['facts', 'pairs']) assert.equal(parseWarmupImport(envelope(defaultWarmup(kind)), kind).kind, kind);
+    for (const kind of ['facts', 'pairs', 'order', 'groups']) assert.equal(parseWarmupImport(envelope(defaultWarmup(kind)), kind).kind, kind);
 });
 
 test('the file byte limit counts whitespace and UTF-8 bytes; combined appends also respect it', () => {

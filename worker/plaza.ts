@@ -33,7 +33,7 @@ import { cleanName, shownNames } from '../shared/names.ts';
 import { isEnglishVoice, normalizeVoice, voiceFor } from '../shared/voices.ts';
 import { fillThiefClue, lookOf, thiefCount } from '../shared/thief.ts';
 import { assignLateJoiner, assignWarmup, factById, type WarmupView } from '../shared/warmup.ts';
-import { IDENTITY_NAMES, assignIdentities, assignLateIdentity, assignLatePair, assignPairs, identityById, isWarmupKind, type WarmupKind } from '../shared/warmupKinds.ts';
+import { IDENTITY_NAMES, assignGroups, assignIdentities, assignLateGroup, assignLateIdentity, assignLateOrder, assignLatePair, assignOrder, assignPairs, groupOf, identityById, isWarmupKind, wrapsAround, type WarmupKind } from '../shared/warmupKinds.ts';
 import { randomName } from '../shared/randomNames.ts';
 import { ThemeStore, copyPictures, type MapCopy, type MapPushResult, type StudioMap, type ThemeResult } from './themeStore.ts';
 import { ThemeAssets } from './themeAssets.ts';
@@ -2997,7 +2997,9 @@ export class PlazaRoom extends DurableObject<Env> {
             this.sql.exec('DELETE FROM warmup_players WHERE game_id = ?', game);
             this.sql.exec('INSERT INTO warmups (game_id, active, started, kind, definition) VALUES (?, 1, ?, ?, ?) ON CONFLICT (game_id) DO UPDATE SET active = 1, started = excluded.started, kind = excluded.kind, definition = excluded.definition', game, started, kind, JSON.stringify(definition));
             for (const [key, assignment] of (definition.kind === 'identity' ? assignIdentities(here, Math.random, definition.identities)
-                : definition.kind === 'pairs' ? assignPairs(here, Math.random, definition.pairs) : assignWarmup(here, Math.random, definition.facts, definition.rounds))) {
+                : definition.kind === 'pairs' ? assignPairs(here, Math.random, definition.pairs)
+                : definition.kind === 'order' ? assignOrder(here, Math.random, definition.items)
+                : definition.kind === 'groups' ? assignGroups(here, Math.random, definition.groups) : assignWarmup(here, Math.random, definition.facts, definition.rounds))) {
                 this.sql.exec('INSERT INTO warmup_players (game_id, student_key, fact, targets) VALUES (?, ?, ?, ?)', game, key, assignment.fact, JSON.stringify(assignment.targets));
             }
             this.activityHistory.warmup(game, started, definition, this.warmupPlayers(game));
@@ -3017,7 +3019,9 @@ export class PlazaRoom extends DurableObject<Env> {
         const here = players.filter(player => online.has(player.student_key));
         const definition = this.warmupDefinition(game);
         const late = definition.kind === 'identity' ? assignLateIdentity(players.map(player => player.fact), here.map(player => player.student_key), Math.random, definition.identities)
-            : definition.kind === 'pairs' ? assignLatePair(here.map(player => player.fact), Math.random, definition.pairs) : assignLateJoiner(here.map(player => player.fact), Math.random, definition.rounds);
+            : definition.kind === 'pairs' ? assignLatePair(here.map(player => player.fact), Math.random, definition.pairs)
+            : definition.kind === 'order' ? assignLateOrder(here)
+            : definition.kind === 'groups' ? assignLateGroup(here.map(player => player.fact), Math.random, definition.groups) : assignLateJoiner(here.map(player => player.fact), Math.random, definition.rounds);
         if (!late) return false;
         if (definition.kind === 'identity') {
             let different = here.filter(player => player.fact !== late.fact);
@@ -3047,6 +3051,10 @@ export class PlazaRoom extends DurableObject<Env> {
         const card = definition.kind === 'identity' ? { fact: `You are ${identityById(me.fact, definition.identities)?.name ?? '?'}. Do not say your name! Answer yes or no.`,
             task: `Find out who ${classmate} is. Ask yes or no questions. Then type their secret name.` }
             : kind === 'pairs' ? { fact: `Your word is ${me.fact}.`, task: `Find the person with the word that goes with ${me.fact}. Then type their name.` }
+            : definition.kind === 'order' ? { fact: me.fact, task: wrapsAround(me.fact, me.targets[0], definition.items)
+                ? 'Your card is the last one. Find the person whose card comes first. Then type their name.'
+                : 'Find the person whose card comes next after yours. Then type their name.' }
+            : definition.kind === 'groups' ? { fact: `Your word is ${me.fact}.`, task: `Find a classmate whose word is the same kind of thing as ${me.fact}. Then type their name.` }
             : { fact: factById(me.fact, definition.kind === 'facts' ? definition.facts : [])?.mine ?? '', task: `Find someone who ${factById(me.targets[me.step], definition.kind === 'facts' ? definition.facts : [])?.find ?? ''}.` };
         return {
             kind,
@@ -3097,7 +3105,10 @@ export class PlazaRoom extends DurableObject<Env> {
             right = !!identity && answerMatches({ id: 'warmup', text: '', accept: identity.accept }, typed);
         } else {
             // The name of a classmate who has the fact (or word) being looked for; never one's own.
-            const holders = players.filter(player => player.fact === me.targets[me.step] && player.student_key !== seat.studentKey)
+            // In Find your team the target is a group, and any team-mate holds one of its words.
+            const definition = this.warmupDefinition(seat.game);
+            const holds = (fact: string) => definition.kind === 'groups' ? groupOf(fact, definition.groups)?.id === me.targets[me.step] : fact === me.targets[me.step];
+            const holders = players.filter(player => holds(player.fact) && player.student_key !== seat.studentKey)
                 .map(player => names.get(player.student_key) ?? '').filter(Boolean);
             right = answerMatches({ id: 'warmup', text: '', accept: acceptedNames(holders, [...names.values()]) }, typed);
         }
@@ -3130,6 +3141,8 @@ export class PlazaRoom extends DurableObject<Env> {
             players: players.map(player => ({ studentKey: player.student_key, name: names.get(player.student_key) ?? 'Student',
                 fact: definition.kind === 'identity' ? `${identityById(player.fact, definition.identities)?.name ?? '?'} (finds out about ${names.get(player.targets[0]) ?? '?'})`
                     : this.warmupKind(game) === 'pairs' ? `word: ${player.fact} (looks for ${player.targets[0]})`
+                    : definition.kind === 'order' ? `card: ${player.fact} (looks for ${player.targets[0]})`
+                    : definition.kind === 'groups' ? `word: ${player.fact} (team: ${definition.groups.find(group => group.id === player.targets[0])?.name ?? '?'})`
                     : factById(player.fact, definition.kind === 'facts' ? definition.facts : [])?.mine ?? '', found: player.step, of: player.targets.length })),
             team: { done: players.reduce((sum, player) => sum + player.step, 0), total: players.reduce((sum, player) => sum + player.targets.length, 0) },
         };

@@ -1,5 +1,5 @@
 import { FACTS, WARMUP_ROUNDS, type Fact } from './warmup.ts';
-import { IDENTITIES, PAIRS, WARMUP_KINDS, isWarmupKind, type Identity, type WarmupKind } from './warmupKinds.ts';
+import { GROUPS, IDENTITIES, PAIRS, SEQUENCE, WARMUP_KINDS, isWarmupKind, type Identity, type WarmupKind, type WordGroup } from './warmupKinds.ts';
 
 export const WARMUP_MAX_BYTES = 64_000;
 export const WARMUP_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'] as const;
@@ -7,7 +7,9 @@ type Base = { title: string; instructions: string; level: typeof WARMUP_LEVELS[n
 export type WarmupDefinition = Base & (
     { kind: 'identity'; identities: Identity[] } |
     { kind: 'facts'; facts: Fact[]; rounds: number } |
-    { kind: 'pairs'; pairs: [string, string][] }
+    { kind: 'pairs'; pairs: [string, string][] } |
+    { kind: 'order'; items: string[] } |
+    { kind: 'groups'; groups: WordGroup[] }
 );
 export type SavedWarmup = { definition: WarmupDefinition; version: number };
 
@@ -15,9 +17,12 @@ export function defaultWarmup(kind: WarmupKind): WarmupDefinition {
     const base = { title: WARMUP_KINDS.find(k => k.id === kind)!.label, level: 'A2' as const,
         instructions: kind === 'identity' ? 'Ask yes or no questions to discover your classmate’s identity. Keep your own identity secret. You may name guesses; helpers confirm with yes or no.'
             : kind === 'facts' ? 'Ask classmates about their facts. Find someone who matches each task and type their name. Use the made-up fact on your card.'
-                : 'Ask classmates about their words. Find the word that goes with yours, then type that classmate’s name.' };
+                : kind === 'order' ? 'Ask classmates what is on their cards. Find the card that comes next after yours, then type that classmate’s name.'
+                    : kind === 'groups' ? 'Ask classmates about their words. Find a word that is the same kind of thing as yours, then type that classmate’s name.'
+                        : 'Ask classmates about their words. Find the word that goes with yours, then type that classmate’s name.' };
     return structuredClone(kind === 'identity' ? { ...base, kind, identities: IDENTITIES }
-        : kind === 'facts' ? { ...base, kind, facts: FACTS, rounds: WARMUP_ROUNDS } : { ...base, kind, pairs: PAIRS });
+        : kind === 'facts' ? { ...base, kind, facts: FACTS, rounds: WARMUP_ROUNDS }
+            : kind === 'order' ? { ...base, kind, items: SEQUENCE } : kind === 'groups' ? { ...base, kind, groups: GROUPS } : { ...base, kind, pairs: PAIRS });
 }
 
 const fold = (text: string) => text.normalize('NFKD').replace(/[\p{M}\p{Cf}]/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -41,7 +46,7 @@ export function validateWarmup(value: unknown): { definition: WarmupDefinition |
         if (typeof v !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(v) || ids.has(v)) { errors.push('Every entry needs a unique lowercase ID.'); return ''; }
         ids.add(v); return v;
     };
-    if (!isWarmupKind(value.kind)) return { definition: null, errors: ['Choose facts, identity or pairs.'] };
+    if (!isWarmupKind(value.kind)) return { definition: null, errors: ['Choose facts, identity, pairs, order or groups.'] };
     const base = { title: text(value.title, 'Title', 120), instructions: text(value.instructions, 'Instructions', 2000), level: value.level as Base['level'] };
     if (!WARMUP_LEVELS.includes(base.level)) errors.push('Choose a language level from A1 to C2.');
     let definition: WarmupDefinition;
@@ -67,6 +72,28 @@ export function validateWarmup(value: unknown): { definition: WarmupDefinition |
         });
         if (!Number.isInteger(value.rounds) || Number(value.rounds) < 1 || Number(value.rounds) > 10) errors.push('Choose 1–10 facts to find per student.');
         definition = { ...base, kind: 'facts', facts, rounds: Number(value.rounds) };
+    } else if (value.kind === 'order') {
+        const seen = new Set<string>();
+        const items = list(value.items, 'Cards', 2, 60).map((v, i) => {
+            const item = text(v, `Card ${i + 1}`, 80), key = fold(item);
+            if (!key || seen.has(key)) errors.push('Each card must be different from the others.');
+            seen.add(key);
+            return item;
+        });
+        definition = { ...base, kind: 'order', items };
+    } else if (value.kind === 'groups') {
+        const seen = new Set<string>();
+        const groups = list(value.groups, 'Groups', 2, 20).map((v, i): WordGroup => {
+            const row = object(v) ? v : {};
+            const words = list(row.words, `Words in group ${i + 1}`, 2, 12).map((word, n) => {
+                const item = text(word, `Group ${i + 1}: word ${n + 1}`, 80), key = fold(item);
+                if (!key || seen.has(key)) errors.push('Each word must belong to exactly one group.');
+                seen.add(key);
+                return item;
+            });
+            return { id: id(row.id), name: text(row.name, `Group ${i + 1}: name`, 80), words };
+        });
+        definition = { ...base, kind: 'groups', groups };
     } else {
         const seen = new Set<string>();
         const pairs = list(value.pairs, 'Word pairs', 1, 40).map((v, i): [string, string] => {

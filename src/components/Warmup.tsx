@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { WarmupView } from '../../shared/warmup';
+import { WARMUP_KINDS } from '../../shared/warmupKinds';
 import { IDENTITY_CHAT_REMINDER } from '../../shared/activityChat';
 import './Warmup.css';
 
@@ -15,13 +16,13 @@ export default function Warmup({ warmup, feedback, onAnswer }: Props) {
   if (task !== taskId) { setTask(taskId); setTyped(''); setSubmitted(null); }
   const rejected = feedback && !feedback.correct && submitted === typed.trim();
   const finished = warmup.task === null;
-  const title = warmup.kind === 'identity' ? 'Who am I?' : warmup.kind === 'pairs' ? 'Find your pair' : 'Find someone who…';
+  const title = WARMUP_KINDS.find(kind => kind.id === warmup.kind)?.label ?? 'Find someone who…';
   return <aside className="warmup glass-panel">
     <h2>Warm-up: {warmup.title ?? title}</h2>
     {warmup.instructions && <p>{warmup.instructions}</p>}
     {warmup.kind === 'identity' && <p className="warmup-rule">{IDENTITY_CHAT_REMINDER}</p>}
     <section className="warmup-block warmup-fact">
-      <h3>{warmup.kind === 'pairs' ? 'Your word' : 'Your secret'}</h3>
+      <h3>{warmup.kind === 'pairs' || warmup.kind === 'groups' ? 'Your word' : warmup.kind === 'order' ? 'Your card' : 'Your secret'}</h3>
       <p>{warmup.fact}</p>
     </section>
     {finished ? <section className="warmup-block warmup-done">

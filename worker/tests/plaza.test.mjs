@@ -4112,6 +4112,34 @@ test('warm-up editor saves private content, pins running rounds and keeps custom
         const c = await enter(plaza.base, 'signed-c', null); sockets.push(c); const cp = await view(c, pairs.title);
         c.send({ t: 'warmup-answer', text: cp.fact === ap.fact ? 'Sam' : 'Alex' });
         assert.equal((await c.next(m => m.t === 'warmup-answered')).correct, true, 'late pair always has a present partner');
+        const order = { ...defaultWarmup('order'), title: 'Boat order', items: ['untie the rope', 'raise the sail', 'leave the harbour'] };
+        assert.equal((await config('order', order, 0)).status, 200);
+        assert.equal((await teacher('warmup', { op: 'start', type: 'order' })).status, 200);
+        const cards = new Map([[alex, await view(alex, order.title)], [sam, await view(sam, order.title)], [c, await view(c, order.title)]]);
+        assert.deepEqual([...cards.values()].map(card => card.fact).sort(), [...order.items].sort(), 'three students hold the three cards');
+        let dealt = (await teacher('status')).body.warmup;
+        assert.equal(dealt.kind, 'order');
+        const holderOf = card => dealt.players.find(p => p.fact.startsWith(`card: ${card} (`)).name;
+        for (const [who, card] of cards) {
+            const index = order.items.indexOf(card.fact);
+            assert.match(card.task, index === 2 ? /last one.*comes first/ : /comes next after yours/);
+            who.send({ t: 'warmup-answer', text: holderOf(order.items[(index + 1) % 3]) });
+            assert.equal((await who.next(m => m.t === 'warmup-answered')).correct, true, 'the classmate with the next card is right');
+        }
+        assert.equal((await teacher('status')).body.warmup.team.done, 3);
+        const groups = { ...defaultWarmup('groups'), title: 'Boat teams', groups: [{ id: 'deck', name: 'On deck', words: ['mast', 'sail', 'rope'] }, { id: 'sea', name: 'In the sea', words: ['wave', 'shark', 'coral'] }] };
+        assert.equal((await config('groups', groups, 0)).status, 200);
+        assert.equal((await teacher('warmup', { op: 'start', type: 'groups' })).status, 200);
+        const words = [await view(alex, groups.title), await view(sam, groups.title), await view(c, groups.title)].map(card => card.fact.match(/^Your word is (.+)\.$/)[1]);
+        dealt = (await teacher('status')).body.warmup;
+        const team = groups.groups.find(group => group.words.includes(words[0]));
+        assert.equal(new Set(words).size, 3); assert.ok(words.every(word => team.words.includes(word)), 'a small class is one team with different words');
+        assert.ok(dealt.players.every(p => p.fact.endsWith(`(team: ${team.name})`)));
+        alex.send({ t: 'warmup-answer', text: dealt.players.find(p => p.studentKey !== "stu_a").name });
+        assert.equal((await alex.next(m => m.t === 'warmup-answered')).correct, true, 'any team-mate is right');
+        sam.send({ t: 'warmup-answer', text: dealt.players.find(p => p.studentKey === "stu_b").name });
+        assert.equal((await sam.next(m => m.t === 'warmup-answered')).correct, false, 'one’s own name is not');
+        assert.deepEqual(Object.keys((await teacher("activity-history")).body.tasks.groups), [team.id], "only the team in play counts as played");
     } finally {
         for (const socket of sockets) socket.ws.close(); await plaza.stop();
         await new Promise(resolve => pinPlay.close(resolve)); removeTemp(persistTo);
