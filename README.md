@@ -286,6 +286,8 @@ With an OpenAI API key, every message, nearby, to everyone or whisper, is checke
 
 Online: `npx wrangler secret put OPENAI_API_KEY`. On the teacher's laptop, add `OPENAI_API_KEY=...` to `.dev.vars`. Without a key, messages are checked only by the blocked words and the harm check. Messages are sent to OpenAI to be checked, so mention it in your school's data notice.
 
+What the OpenAI calls cost: [OPENAI-FREE-TOKENS.md](OPENAI-FREE-TOKENS.md) says which are free with this account's data-sharing tokens (`gpt-4o-mini`) and which are billed (`gpt-6-luna`).
+
 ## English only
 
 Before a message is sent, every word is checked against an English dictionary (Hunspell `en_US`, in the student's browser). A word that is not English, whether another language or a spelling mistake, stops the message and shows the word with up to three suggestions to tap, such as *recieve* → *receive*, or *u* → *you*. Names of the students in the Plaza, laughter (*haha*), and chat words (*lol*, *ok*) are allowed, and accents do not matter (*cafe* and *café*). Stretched letters are fine (*helloooo*, *nooo*, *yesss*), and so is a lower-case *i'm*, *i'll* or *i've*; stretching does not make another language English (*siiii*, *holaaaa* are still stopped).
